@@ -1088,6 +1088,11 @@ impl PciConfiguration {
             self.pending_bar_reprogram.push(param);
         }
 
+        self.drain_pending_bar_reprogram()
+    }
+
+    // Return the pending BAR moves once memory decoding (MSE) is enabled.
+    pub(crate) fn drain_pending_bar_reprogram(&mut self) -> Vec<BarReprogrammingParams> {
         if !self.pending_bar_reprogram.is_empty() {
             // Return bar reprogramming only if the MSE bit is enabled;
             if self.read_config_register(COMMAND_REG) & COMMAND_REG_MEMORY_SPACE_MASK
@@ -1252,14 +1257,6 @@ impl PciConfiguration {
             }
             None => value == BAR_SIZE_PROBE_ALL_ONES,
         }
-    }
-
-    pub(crate) fn pending_bar_reprogram(&self) -> Vec<BarReprogrammingParams> {
-        self.pending_bar_reprogram.clone()
-    }
-
-    pub(crate) fn clear_pending_bar_reprogram(&mut self) {
-        self.pending_bar_reprogram = Vec::new();
     }
 
     /// Restore BAR address after a failed move. This undoes the premature

@@ -55,9 +55,9 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottabl
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::configuration::{
-    COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK, PCI_EXP_FLAGS_TYPE_MASK, PCI_EXP_FLAGS_VERS_MASK,
-    PCI_EXP_FLAGS_VERS_SHIFT, PCI_EXP_LNKCTL, PCI_EXP_LNKCTL2, PCI_EXP_TYPE_RC_END,
-    PCI_EXT_CAP_ALIGN, PCI_EXT_CAP_NEXT_MASK, PCI_EXT_CAP_NEXT_SHIFT, PCIE_CONFIG_SPACE_SIZE,
+    COMMAND_REG, PCI_EXP_FLAGS_TYPE_MASK, PCI_EXP_FLAGS_VERS_MASK, PCI_EXP_FLAGS_VERS_SHIFT,
+    PCI_EXP_LNKCTL, PCI_EXP_LNKCTL2, PCI_EXP_TYPE_RC_END, PCI_EXT_CAP_ALIGN, PCI_EXT_CAP_NEXT_MASK,
+    PCI_EXT_CAP_NEXT_SHIFT, PCIE_CONFIG_SPACE_SIZE,
 };
 use crate::mmap::MmapRegion;
 use crate::msi::{MSI_CONFIG_ID, MsiConfigState};
@@ -1710,23 +1710,7 @@ impl VfioCommon {
                 .write_reg(reg_idx, LittleEndian::read_u32(data)),
             _ => {}
         }
-
-        // Return pending BAR repgrogramming if MSE bit is set
-        let mut ret_param = self.configuration.pending_bar_reprogram();
-        if !ret_param.is_empty() {
-            if self.read_config_register(COMMAND_REG) & COMMAND_REG_MEMORY_SPACE_MASK
-                == COMMAND_REG_MEMORY_SPACE_MASK
-            {
-                info!("BAR reprogramming parameter is returned: {ret_param:x?}");
-                self.configuration.clear_pending_bar_reprogram();
-            } else {
-                info!(
-                    "MSE bit is disabled. No BAR reprogramming parameter is returned: {ret_param:x?}"
-                );
-
-                ret_param = Vec::new();
-            }
-        }
+        let ret_param = self.configuration.drain_pending_bar_reprogram();
 
         (ret_param, None)
     }
