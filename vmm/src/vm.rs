@@ -190,6 +190,9 @@ pub enum Error {
     #[error("VM on-demand memory restore is still in progress")]
     VmRestoring,
 
+    #[error("Linked memory snapshots are not supported yet")]
+    SnapshotMemoryBaseLinkUnsupported,
+
     #[error("Cannot clone EventFd")]
     EventFdClone(#[source] io::Error),
 
