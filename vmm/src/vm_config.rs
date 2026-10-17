@@ -488,10 +488,17 @@ pub struct DiskConfig {
     pub guest_block_size: Option<u32>,
 }
 
+impl DiskConfig {
+    /// The Landlock access a disk needs: a read-only disk is opened read-only.
+    fn landlock_access(&self) -> &'static str {
+        if self.readonly { "r" } else { "rw" }
+    }
+}
+
 impl ApplyLandlock for DiskConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         if let Some(path) = &self.path {
-            landlock.add_rule_with_access(path, "rw")?;
+            landlock.add_rule_with_access(path, self.landlock_access())?;
         }
         Ok(())
     }
@@ -1402,5 +1409,18 @@ impl VmConfig {
         } else {
             self.cpus.max_vcpus
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_disk_landlock_access_follows_readonly() {
+        let disk = DiskConfig::parse("path=/disk.img").unwrap();
+        assert_eq!(disk.landlock_access(), "rw");
+        let disk = DiskConfig::parse("path=/disk.img,readonly=on").unwrap();
+        assert_eq!(disk.landlock_access(), "r");
     }
 }
