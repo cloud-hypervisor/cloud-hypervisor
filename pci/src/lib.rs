@@ -32,8 +32,8 @@ pub use self::configuration::{
     PciSerialBusSubClass, PciSubclass,
 };
 pub use self::device::{
-    BarRelocation, BarReprogrammingParams, DeviceRelocation, Error as PciDeviceError,
-    InstallParams, PciDevice, ReleaseParams,
+    BarRelocation, DeviceRelocation, Error as PciDeviceError, InstallParams, PciDevice,
+    ReleaseParams,
 };
 pub use self::msi::{MsiCap, MsiConfig, msi_num_enabled_vectors};
 pub use self::msix::{

@@ -8,13 +8,11 @@ use std::any::Any;
 use std::sync::{Arc, Barrier};
 use std::{io, result};
 
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::{BusDeviceSync, Resource};
 
-use crate::configuration::{self, PciBarRegionType};
-use crate::{PciBarConfiguration, PciBdf};
+use crate::{PciBarConfiguration, PciBdf, configuration};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -47,16 +45,6 @@ pub struct ReleaseParams {
 pub struct InstallParams {
     pub bar_idx: usize,
     pub new_base: u64,
-}
-
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-pub struct BarReprogrammingParams {
-    #[serde(default)]
-    pub bar_idx: Option<usize>,
-    pub old_base: u64,
-    pub new_base: u64,
-    pub len: u64,
-    pub region_type: PciBarRegionType,
 }
 
 #[derive(Clone, Debug, Default)]
