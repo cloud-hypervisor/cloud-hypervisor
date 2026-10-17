@@ -4781,13 +4781,13 @@ impl DeviceManager {
     ) -> DeviceManagerResult<()> {
         self.bus_devices.push(Arc::clone(&bus_device));
 
-        self.register_bar_mapping(bus_device, &bars)?;
+        self.register_bar_mapping(Arc::clone(&bus_device), &bars)?;
 
         self.pci_segments[segment_id as usize]
             .pci_bus
             .lock()
             .unwrap()
-            .add_device(bdf.device(), pci_device)
+            .add_device(bdf.device(), pci_device, Some(bus_device))
             .map_err(DeviceManagerError::AddPciDevice)?;
 
         Ok(())

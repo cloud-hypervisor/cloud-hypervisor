@@ -13,7 +13,7 @@ use std::sync::{Arc, Barrier, Mutex};
 use byteorder::{ByteOrder, LittleEndian};
 use log::warn;
 use thiserror::Error;
-use vm_device::BusDevice;
+use vm_device::{BusDevice, BusDeviceSync};
 
 use crate::PciBdf;
 use crate::configuration::{PciBridgeSubclass, PciClassCode, PciConfiguration, PciHeaderType};
@@ -112,20 +112,36 @@ enum DeviceIdState {
     Allocated,
 }
 
+struct PciBusDevice {
+    pci: Arc<Mutex<dyn PciDevice>>,
+    /// None only for the host bridge, which has no BARs to relocate.
+    #[expect(
+        dead_code,
+        reason = "read by the install phase, introduced in a later commit"
+    )]
+    bus: Option<Arc<dyn BusDeviceSync>>,
+}
+
 pub struct PciBus {
     /// Devices attached to this bus.
-    devices: HashMap<u8, Arc<Mutex<dyn PciDevice>>>,
+    devices: HashMap<u8, PciBusDevice>,
     device_reloc: Arc<dyn DeviceRelocation>,
     device_ids: [DeviceIdState; NUM_DEVICE_IDS as usize],
 }
 
 impl PciBus {
     pub fn new(pci_root: Option<PciRoot>, device_reloc: Arc<dyn DeviceRelocation>) -> Self {
-        let mut devices: HashMap<u8, Arc<Mutex<dyn PciDevice>>> = HashMap::new();
+        let mut devices: HashMap<u8, PciBusDevice> = HashMap::new();
         let mut device_ids = [DeviceIdState::Free; NUM_DEVICE_IDS as usize];
 
         if let Some(pci_root) = pci_root {
-            devices.insert(PCI_ROOT_DEVICE_ID, Arc::new(Mutex::new(pci_root)));
+            devices.insert(
+                PCI_ROOT_DEVICE_ID,
+                PciBusDevice {
+                    pci: Arc::new(Mutex::new(pci_root)),
+                    bus: None,
+                },
+            );
             device_ids[PCI_ROOT_DEVICE_ID as usize] = DeviceIdState::Allocated;
         }
 
@@ -136,13 +152,24 @@ impl PciBus {
         }
     }
 
-    pub fn add_device(&mut self, device_id: u8, device: Arc<Mutex<dyn PciDevice>>) -> Result<()> {
-        self.devices.insert(device_id, device);
+    pub fn add_device(
+        &mut self,
+        device_id: u8,
+        device: Arc<Mutex<dyn PciDevice>>,
+        bus_device: Option<Arc<dyn BusDeviceSync>>,
+    ) -> Result<()> {
+        self.devices.insert(
+            device_id,
+            PciBusDevice {
+                pci: device,
+                bus: bus_device,
+            },
+        );
         Ok(())
     }
 
     pub fn remove_by_device(&mut self, device: &Arc<Mutex<dyn PciDevice>>) -> Result<()> {
-        self.devices.retain(|_, dev| !Arc::ptr_eq(dev, device));
+        self.devices.retain(|_, dev| !Arc::ptr_eq(&dev.pci, device));
         Ok(())
     }
 
@@ -285,7 +312,7 @@ impl PciConfigIo {
             .devices
             .get(&(device as u8))
             .map_or(0xffff_ffff, |d| {
-                d.lock().unwrap().read_config_register(register)
+                d.pci.lock().unwrap().read_config_register(register)
             })
     }
 
@@ -309,7 +336,7 @@ impl PciConfigIo {
 
         let pci_bus = self.pci_bus.as_ref().lock().unwrap();
         if let Some(d) = pci_bus.devices.get(&(device as u8)) {
-            let mut device = d.lock().unwrap();
+            let mut device = d.pci.lock().unwrap();
 
             // Update the register value
             let (bar_reprogram, ret) = device.write_config_register(register, offset, data);
@@ -403,7 +430,7 @@ impl PciConfigMmio {
             .devices
             .get(&(device as u8))
             .map_or(0xffff_ffff, |d| {
-                d.lock().unwrap().read_config_register(register)
+                d.pci.lock().unwrap().read_config_register(register)
             })
     }
 
@@ -421,7 +448,7 @@ impl PciConfigMmio {
 
         let pci_bus = self.pci_bus.lock().unwrap();
         if let Some(d) = pci_bus.devices.get(&(device as u8)) {
-            let mut device = d.lock().unwrap();
+            let mut device = d.pci.lock().unwrap();
 
             // Update the register value
             let (bar_reprogram, _) = device.write_config_register(register, offset, data);
