@@ -5390,6 +5390,16 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
     }
 
     #[test]
+    fn test_vsock_socket_dir_landlock_access() {
+        // The rule on the socket's directory covers every file below it, so
+        // it must not grant writing or truncating those files.
+        let access = VsockConfig::socket_dir_landlock_access();
+        assert!(access.contains(landlock::AccessFs::MakeSock));
+        assert!(!access.contains(landlock::AccessFs::WriteFile));
+        assert!(!access.contains(landlock::AccessFs::Truncate));
+    }
+
+    #[test]
     fn test_numa_config_parsing() -> Result<()> {
         // Error when device_id and cpu/memory are present
         let invalid_input = "guest_numa_id=0,cpus=[0,1],distances=[0@25,1@20],\
