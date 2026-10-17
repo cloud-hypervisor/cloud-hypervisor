@@ -265,10 +265,23 @@ pub struct VmRemoveDeviceData {
     pub id: String,
 }
 
+/// Where a snapshot takes its guest memory from.
+#[derive(Clone, Copy, Deserialize, Serialize, Default, Debug, PartialEq, Eq)]
+pub enum SnapshotMemoryBase {
+    /// Write a self-contained memory file.
+    #[default]
+    Copy,
+    /// Link the copy-on-write restore source and write only the changed pages.
+    Link,
+}
+
 #[derive(Clone, Deserialize, Serialize, Default, Debug)]
 pub struct VmSnapshotConfig {
     /// The snapshot destination URL
     pub destination_url: String,
+    /// Where the snapshot takes its guest memory from
+    #[serde(default)]
+    pub memory_base: SnapshotMemoryBase,
 }
 
 #[derive(Clone, Deserialize, Serialize, Default, Debug)]
@@ -892,7 +905,7 @@ pub trait RequestHandler {
 
     fn vm_resume(&mut self) -> Result<(), VmError>;
 
-    fn vm_snapshot(&mut self, destination_url: &str) -> Result<(), VmError>;
+    fn vm_snapshot(&mut self, config: &VmSnapshotConfig) -> Result<(), VmError>;
 
     fn vm_restore(&mut self, restore_cfg: RestoreConfig) -> Result<(), VmError>;
 
@@ -2087,7 +2100,7 @@ impl ApiAction for VmSnapshot {
             info!("API request event: VmSnapshot {config:?}");
 
             let response = vmm
-                .vm_snapshot(&config.destination_url)
+                .vm_snapshot(&config)
                 .map_err(ApiError::VmSnapshot)
                 .map(|_| ApiResponsePayload::Empty);
 

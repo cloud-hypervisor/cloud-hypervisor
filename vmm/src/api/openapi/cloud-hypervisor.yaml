@@ -1678,6 +1678,13 @@ components:
       properties:
         destination_url:
           type: string
+        memory_base:
+          $ref: "#/components/schemas/SnapshotMemoryBase"
+
+    SnapshotMemoryBase:
+      type: string
+      enum: [Copy, Link]
+      default: Copy
 
     VmCoredumpData:
       type: object
