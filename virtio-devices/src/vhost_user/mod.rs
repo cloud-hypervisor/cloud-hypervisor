@@ -47,7 +47,7 @@ pub use self::blk::Blk;
 pub use self::fs::*;
 pub use self::generic_vhost_user::GenericVhostUser;
 pub use self::net::Net;
-pub use self::vu_common_ctrl::VhostUserConfig;
+pub use self::vu_common_ctrl::{PostcopyRegion, PostcopyRegistrar, VhostUserConfig};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -79,6 +79,10 @@ pub enum Error {
     UnsupportedProtocolFeatures(u64),
     #[error("Protocol features {0:#x} saved without PROTOCOL_FEATURES acknowledged")]
     InconsistentProtocolFeatures(u64),
+    #[error(
+        "The backend does not support PAGEFAULT, which postcopy migration and on-demand restore require"
+    )]
+    VhostUserPageFaultUnsupported,
     #[error("Get vring base failed")]
     VhostUserGetVringBase(#[source] VhostError),
     #[error("Set owner failed")]
@@ -87,6 +91,22 @@ pub enum Error {
     VhostUserSetFeatures(#[source] VhostError),
     #[error("Set protocol features failed")]
     VhostUserSetProtocolFeatures(#[source] VhostError),
+    #[error("Postcopy advise failed")]
+    VhostUserPostcopyAdvise(#[source] VhostError),
+    #[error("Postcopy listen failed")]
+    VhostUserPostcopyListen(#[source] VhostError),
+    #[error("Postcopy end failed")]
+    VhostUserPostcopyEnd(#[source] VhostError),
+    #[error("No registrar for the backend's userfaultfd")]
+    PostcopyRegistrarMissing,
+    #[error("The memory table was not sent in postcopy mode")]
+    PostcopyMemTableBasesMissing,
+    #[error("Failed to register the backend's userfaultfd")]
+    PostcopyRegister(#[source] io::Error),
+    #[error("Adding memory regions during postcopy is not supported")]
+    PostcopyAddMemReg,
+    #[error("Reconnecting during postcopy is not supported")]
+    PostcopyReconnect,
     #[error("Set mem table failed")]
     VhostUserSetMemTable(#[source] VhostError),
     #[error("Set vring num failed")]
@@ -211,6 +231,9 @@ impl Error {
             | Error::VhostUserSetOwner(e)
             | Error::VhostUserSetFeatures(e)
             | Error::VhostUserSetProtocolFeatures(e)
+            | Error::VhostUserPostcopyAdvise(e)
+            | Error::VhostUserPostcopyListen(e)
+            | Error::VhostUserPostcopyEnd(e)
             | Error::VhostUserSetMemTable(e)
             | Error::VhostUserSetVringNum(e)
             | Error::VhostUserSetVringAddr(e)
@@ -245,6 +268,7 @@ pub const DEFAULT_VIRTIO_FEATURES: u64 = (1 << VIRTIO_F_RING_INDIRECT_DESC)
 const HUP_CONNECTION_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 const BACKEND_REQ_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 const RESUME_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
+const POSTCOPY_DONE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
 
 #[derive(Default)]
 pub struct Inflight {
@@ -268,6 +292,8 @@ pub struct VhostUserEpollHandler<S: VhostUserFrontendReqHandler> {
     /// Flag set by the worker when the vhost-user backend is no longer reachable.
     pub disconnected: Arc<AtomicBool>,
     pub resume_evt: EventFd,
+    /// Readable once the backend can end postcopy.
+    pub postcopy_done: Option<Arc<EventFd>>,
 }
 
 impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
@@ -289,6 +315,16 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
 
         helper.add_event(self.resume_evt.as_raw_fd(), RESUME_EVENT)?;
 
+        if let Some(postcopy_done) = &self.postcopy_done {
+            // Shared with the other backends, so it's never read and only
+            // fires once.
+            helper.add_event_custom(
+                postcopy_done.as_raw_fd(),
+                POSTCOPY_DONE_EVENT,
+                epoll::Events::EPOLLIN | epoll::Events::EPOLLONESHOT,
+            )?;
+        }
+
         helper.run(paused, paused_sync, self)?;
 
         Ok(())
@@ -307,6 +343,12 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
         &mut self,
         helper: &mut EpollHelper,
     ) -> result::Result<(), EpollHelperError> {
+        if self.vu.lock().unwrap().postcopy_listening() {
+            return Err(EpollHelperError::IoError(io::Error::other(
+                Error::PostcopyReconnect,
+            )));
+        }
+
         helper.del_event_custom(
             self.vu.lock().unwrap().socket_handle().as_raw_fd(),
             HUP_CONNECTION_EVENT,
@@ -418,6 +460,12 @@ impl<S: VhostUserFrontendReqHandler> EpollHelperHandler for VhostUserEpollHandle
                         ))
                     })
             }
+            POSTCOPY_DONE_EVENT => self.vu.lock().unwrap().postcopy_end().map_err(|e| {
+                EpollHelperError::HandleEvent(anyhow!(
+                    "failed to end postcopy on vhost-user backend for socket {}: {e:?}",
+                    self.socket_path
+                ))
+            }),
             _ => Err(EpollHelperError::HandleEvent(anyhow!(
                 "Unknown event for vhost-user thread"
             ))),
@@ -551,6 +599,7 @@ impl VhostUserCommon {
             inflight,
             disconnected: Arc::clone(&self.disconnected),
             resume_evt,
+            postcopy_done: vu.lock().unwrap().postcopy_done(),
         })
     }
 
@@ -645,6 +694,10 @@ impl VhostUserCommon {
 
     fn add_memory_region_internal(&self, region: &Arc<GuestRegionMmap>) -> Result<()> {
         if let Some(vu) = &self.vu {
+            // Only the regions registered when postcopy started are served.
+            if vu.lock().unwrap().postcopy_listening() {
+                return Err(Error::PostcopyAddMemReg);
+            }
             if self.acked_protocol_features & VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits()
                 != 0
             {
@@ -973,6 +1026,7 @@ mod tests {
                     SeccompAction::Allow,
                     EventFd::new(libc::EFD_NONBLOCK).unwrap(),
                     enabled,
+                    None,
                     None,
                 )
                 .unwrap();

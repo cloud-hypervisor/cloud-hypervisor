@@ -171,3 +171,7 @@ unnecessary_semicolon = "deny"
 # `level = warn` is irrelevant here but mandatory for rustc/cargo
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(devcli_testenv)'] }
 unreachable_pub = "deny"
+
+[patch.crates-io]
+vhost = { git = "https://github.com/lucido-simon/vhost", branch = "postcopy-backend-mem-bases" }
+vhost-user-backend = { git = "https://github.com/lucido-simon/vhost", branch = "postcopy-backend-mem-bases" }

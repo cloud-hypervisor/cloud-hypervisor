@@ -13,8 +13,8 @@ use std::{ffi, fs, io, slice};
 use log::{error, info};
 use vhost::vhost_kern::vhost_binding::VHOST_VRING_F_LOG;
 use vhost::vhost_user::message::{
-    VhostTransferStateDirection, VhostTransferStatePhase, VhostUserHeaderFlag, VhostUserInflight,
-    VhostUserProtocolFeatures, VhostUserVirtioFeatures,
+    FrontendReq, VhostTransferStateDirection, VhostTransferStatePhase, VhostUserHeaderFlag,
+    VhostUserInflight, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
 };
 use vhost::vhost_user::{
     Error as VhostUserError, Frontend, FrontendReqHandler, VhostUserFrontend,
@@ -56,6 +56,20 @@ struct VringInfo {
     used_guest_addr: u64,
 }
 
+/// A guest memory region mapped by a vhost-user backend.
+pub struct PostcopyRegion {
+    pub guest_phys_addr: u64,
+    pub memory_size: u64,
+    pub backend_addr: u64,
+}
+
+/// Registers a vhost-user backend's userfaultfd so that the faults the
+/// backend raises on it during postcopy are served. Returns an eventfd that
+/// becomes readable once all of guest memory is present, when postcopy can
+/// end. It's shared with the other backends, so it must not be read.
+pub type PostcopyRegistrar =
+    Arc<dyn Fn(OwnedFd, &[PostcopyRegion]) -> io::Result<EventFd> + Send + Sync>;
+
 #[derive(Clone)]
 pub struct VhostUserHandle {
     vu: Frontend,
@@ -68,6 +82,9 @@ pub struct VhostUserHandle {
     vrings_info: Option<Vec<VringInfo>>,
     queue_indexes: Vec<u16>,
     vring_bases: Option<Vec<u64>>,
+    postcopy_uffd: Option<Arc<File>>,
+    postcopy_done: Option<Arc<EventFd>>,
+    postcopy_registrar: Option<PostcopyRegistrar>,
 }
 
 impl VhostUserHandle {
@@ -94,11 +111,58 @@ impl VhostUserHandle {
             regions.push(vhost_user_net_reg);
         }
 
+        if let Some(uffd) = &self.postcopy_uffd {
+            let registrar = self
+                .postcopy_registrar
+                .clone()
+                .ok_or(Error::PostcopyRegistrarMissing)?;
+            let uffd = uffd.try_clone().map_err(Error::PostcopyRegister)?;
+
+            // The backend doesn't access the regions before the ack, by
+            // which time its faults are served.
+            let bases = self
+                .vu
+                .set_mem_table(&regions)
+                .map_err(Error::VhostUserSetMemTable)?
+                .ok_or(Error::PostcopyMemTableBasesMissing)?;
+            let postcopy_regions = regions
+                .iter()
+                .zip(bases)
+                .map(|(region, backend_addr)| PostcopyRegion {
+                    guest_phys_addr: region.guest_phys_addr,
+                    memory_size: region.memory_size,
+                    backend_addr,
+                })
+                .collect::<Vec<_>>();
+            let done =
+                registrar(uffd.into(), &postcopy_regions).map_err(Error::PostcopyRegister)?;
+            self.postcopy_done = Some(Arc::new(done));
+            self.vu
+                .postcopy_ack_mem_regions(FrontendReq::SET_MEM_TABLE)
+                .map_err(Error::VhostUserSetMemTable)?;
+
+            return Ok(());
+        }
+
         self.vu
             .set_mem_table(regions.as_slice())
             .map_err(Error::VhostUserSetMemTable)?;
 
         Ok(())
+    }
+
+    pub fn postcopy_end(&mut self) -> Result<()> {
+        self.postcopy_done = None;
+        if self.postcopy_uffd.take().is_some() {
+            self.vu
+                .postcopy_end()
+                .map_err(Error::VhostUserPostcopyEnd)?;
+        }
+        Ok(())
+    }
+
+    pub fn postcopy_done(&self) -> Option<Arc<EventFd>> {
+        self.postcopy_done.clone()
     }
 
     pub fn add_memory_region(&mut self, region: &Arc<GuestRegionMmap>) -> Result<()> {
@@ -117,7 +181,60 @@ impl VhostUserHandle {
 
         self.vu
             .add_mem_region(&region)
-            .map_err(Error::VhostUserAddMemReg)
+            .map_err(Error::VhostUserAddMemReg)?;
+
+        Ok(())
+    }
+
+    pub fn postcopy_listening(&self) -> bool {
+        self.postcopy_uffd.is_some()
+    }
+
+    fn postcopy_protocol_features(&self) -> VhostUserProtocolFeatures {
+        if self.postcopy_uffd.is_some() {
+            VhostUserProtocolFeatures::PAGEFAULT
+        } else {
+            VhostUserProtocolFeatures::empty()
+        }
+    }
+
+    pub fn check_postcopy_feature(&mut self) -> Result<()> {
+        if self.backend_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
+            let backend_protocol_features = self
+                .vu
+                .get_protocol_features()
+                .map_err(Error::VhostUserGetProtocolFeatures)?;
+            if backend_protocol_features.contains(VhostUserProtocolFeatures::PAGEFAULT) {
+                return Ok(());
+            }
+        }
+        Err(Error::VhostUserPageFaultUnsupported)
+    }
+
+    /// Enable PAGEFAULT, get the userfaultfd the backend registers its guest
+    /// memory mappings on, and send POSTCOPY_LISTEN so that it does.
+    /// PAGEFAULT stays enabled across later protocol feature updates until
+    /// postcopy ends.
+    ///
+    /// This replaces the enabled protocol features, so it must be called
+    /// before they are negotiated or restored.
+    pub fn start_postcopy(&mut self) -> Result<()> {
+        self.vu
+            .set_protocol_features(VhostUserProtocolFeatures::PAGEFAULT)
+            .map_err(Error::VhostUserSetProtocolFeatures)?;
+        let uffd = self
+            .vu
+            .postcopy_advise()
+            .map_err(Error::VhostUserPostcopyAdvise)?;
+        self.vu
+            .postcopy_listen()
+            .map_err(Error::VhostUserPostcopyListen)?;
+        self.postcopy_uffd = Some(Arc::new(uffd));
+        Ok(())
+    }
+
+    pub fn set_postcopy_registrar(&mut self, registrar: PostcopyRegistrar) {
+        self.postcopy_registrar = Some(registrar);
     }
 
     pub fn negotiate_features_vhost_user(
@@ -135,9 +252,11 @@ impl VhostUserHandle {
                     .map_err(Error::VhostUserGetProtocolFeatures)?;
 
                 let acked_protocol_features = avail_protocol_features & backend_protocol_features;
+                let enabled_protocol_features =
+                    acked_protocol_features | self.postcopy_protocol_features();
 
                 self.vu
-                    .set_protocol_features(acked_protocol_features)
+                    .set_protocol_features(enabled_protocol_features)
                     .map_err(Error::VhostUserSetProtocolFeatures)?;
 
                 acked_protocol_features
@@ -347,7 +466,7 @@ impl VhostUserHandle {
             let acked_protocol_features =
                 VhostUserProtocolFeatures::from_bits_truncate(acked_protocol_features);
             self.vu
-                .set_protocol_features(acked_protocol_features)
+                .set_protocol_features(acked_protocol_features | self.postcopy_protocol_features())
                 .map_err(Error::VhostUserSetProtocolFeatures)?;
 
             if acked_protocol_features.contains(VhostUserProtocolFeatures::REPLY_ACK) {
@@ -439,6 +558,9 @@ impl VhostUserHandle {
                 vrings_info: None,
                 queue_indexes: Vec::new(),
                 vring_bases: None,
+                postcopy_uffd: None,
+                postcopy_done: None,
+                postcopy_registrar: None,
             };
             vhost_user
                 .vu
@@ -498,6 +620,9 @@ impl VhostUserHandle {
                         vrings_info: None,
                         queue_indexes: Vec::new(),
                         vring_bases: None,
+                        postcopy_uffd: None,
+                        postcopy_done: None,
+                        postcopy_registrar: None,
                     })
                     .map_err(Error::VhostUserConnect);
 

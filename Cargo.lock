@@ -2649,8 +2649,7 @@ dependencies = [
 [[package]]
 name = "vhost"
 version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c63c14485260662b4257bd929d5fd4aaf96bbecbe61d2224bad8807849f5f8f"
+source = "git+https://github.com/lucido-simon/vhost?branch=postcopy-backend-mem-bases#4364ff67995b4957413a41df0a548e38283e5176"
 dependencies = [
  "bitflags 2.13.2",
  "libc",
@@ -2662,8 +2661,7 @@ dependencies = [
 [[package]]
 name = "vhost-user-backend"
 version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "555753b65bc33837bd011f981e2c6d52d8ddc330d92c2deb9aa3f0b378a58bcc"
+source = "git+https://github.com/lucido-simon/vhost?branch=postcopy-backend-mem-bases#4364ff67995b4957413a41df0a548e38283e5176"
 dependencies = [
  "libc",
  "log",

@@ -30,7 +30,7 @@ use vmm_sys_util::timerfd::TimerFd;
 use crate::device::ActivationContext;
 use crate::net::{AnnounceOps, AnnouncementState, Announcer, VirtioNetGuestAnnounceOps};
 use crate::seccomp_filters::Thread;
-use crate::vhost_user::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
+use crate::vhost_user::vu_common_ctrl::{PostcopyRegistrar, VhostUserConfig, VhostUserHandle};
 use crate::vhost_user::{DEFAULT_VIRTIO_FEATURES, Error, Result, VhostUserCommon, VhostUserState};
 use crate::{
     ActivateError, ActivateResult, GuestRegionMmap, NetCtrlEpollHandler, VIRTIO_F_ACCESS_PLATFORM,
@@ -85,6 +85,7 @@ impl Net {
         exit_evt: EventFd,
         access_platform_enabled: bool,
         state: Option<State>,
+        postcopy_registrar: Option<PostcopyRegistrar>,
         offload_tso: bool,
         offload_ufo: bool,
         offload_csum: bool,
@@ -99,6 +100,11 @@ impl Net {
             &exit_evt,
             |_| Ok(()),
         )?;
+        if let Some(registrar) = postcopy_registrar {
+            vu.check_postcopy_feature()?;
+            vu.start_postcopy()?;
+            vu.set_postcopy_registrar(registrar);
+        }
 
         let (
             avail_features,
