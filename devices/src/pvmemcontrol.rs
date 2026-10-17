@@ -477,8 +477,15 @@ impl PvmemcontrolBusDevice {
             let region = memory.find_region(range_base).ok_or(Error::GuestMemory(
                 GuestMemoryError::InvalidGuestAddress(range_base),
             ))?;
+            // `find_region` guarantees range_base lies in the region.
+            let offset = range_base.0 - region.start_addr().0;
+            // Keep the hole inside this region's part of the backing file.
+            if length > region.len() - offset {
+                return Err(Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(
+                    range_base,
+                )));
+            }
             if let Some(f_off) = region.file_offset() {
-                let offset = range_base.0 - region.start_addr().0;
                 // SAFETY: FFI call with valid arguments
                 let res = unsafe {
                     libc::fallocate64(
@@ -895,5 +902,46 @@ impl BusDeviceSync for PvmemcontrolBusDevice {
     fn write(&self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         self.handle_guest_write(offset, data);
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::fs::FileExt;
+
+    use vm_memory::FileOffset;
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::*;
+
+    #[test]
+    fn dontneed_does_not_punch_past_region() {
+        const REGION_SIZE: usize = 1 << 20;
+
+        // The backing file is larger than the guest RAM region mapping it, the
+        // tail holds data that is not guest memory.
+        let file = TempFile::new().unwrap().into_file();
+        file.set_len(2 * REGION_SIZE as u64).unwrap();
+        file.write_all_at(&vec![0xaa; REGION_SIZE], REGION_SIZE as u64)
+            .unwrap();
+
+        let mem = GuestMemoryMmap::from_ranges_with_files([(
+            GuestAddress(0),
+            REGION_SIZE,
+            Some(FileOffset::new(file.try_clone().unwrap(), 0)),
+        )])
+        .unwrap();
+        let dev = PvmemcontrolBusDevice {
+            mem: GuestMemoryAtomic::new(mem),
+            dev: RwLock::new(PvmemcontrolDevice::error()),
+        };
+
+        // A range starting in guest RAM but running past the region end.
+        dev.process_request(FunctionCode::Dontneed, 0, 2 * REGION_SIZE as u64, 0)
+            .unwrap_err();
+
+        let mut buf = vec![0_u8; REGION_SIZE];
+        file.read_exact_at(&mut buf, REGION_SIZE as u64).unwrap();
+        assert!(buf.iter().all(|&b| b == 0xaa));
     }
 }
