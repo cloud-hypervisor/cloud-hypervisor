@@ -832,7 +832,7 @@ impl vm::Vm for KvmVm {
             xsave_size,
             #[cfg(target_arch = "x86_64")]
             has_xcrs: self.check_extension(Cap::Xcrs),
-            #[cfg(feature = "sev_snp")]
+            #[cfg(any(target_arch = "x86_64", feature = "sev_snp"))]
             vm_fd: Arc::clone(&self.fd),
             #[cfg(feature = "sev_snp")]
             memory_slots: self.memory_slots.clone(),
@@ -1672,7 +1672,7 @@ pub struct KvmVcpu {
     xsave_size: i32,
     #[cfg(target_arch = "x86_64")]
     has_xcrs: bool,
-    #[cfg(feature = "sev_snp")]
+    #[cfg(any(target_arch = "x86_64", feature = "sev_snp"))]
     vm_fd: Arc<VmFd>,
     #[cfg(feature = "sev_snp")]
     memory_slots: Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
@@ -3718,6 +3718,10 @@ impl KvmVcpu {
     /// if there is any.
     #[cfg(target_arch = "x86_64")]
     fn nested_state(&self) -> cpu::Result<Option<KvmNestedStateBuffer>> {
+        if !self.vm_fd.check_extension(Cap::NestedState) {
+            return Ok(None);
+        }
+
         let mut buffer = KvmNestedStateBuffer::empty();
 
         self.fd
