@@ -351,19 +351,26 @@ impl PciDevice for IvshmemDevice {
         None
     }
 
-    fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> io::Result<()> {
+    fn move_bar_prepare(&mut self, bar_idx: usize) -> io::Result<()> {
+        if bar_idx == IVSHMEM_DATA_BAR_IDX
+            && let Some(old_mapping) = self.userspace_mapping.take()
+        {
+            self.ivshmem_ops
+                .lock()
+                .unwrap()
+                .unmap_ram_region(old_mapping)
+                .map_err(io::Error::other)?;
+        }
+
+        Ok(())
+    }
+
+    fn move_bar_commit(&mut self, bar_idx: usize, new_base: u64) -> io::Result<()> {
         if bar_idx == IVSHMEM_DATA_BAR_IDX {
             let region = self
                 .region
                 .clone()
                 .ok_or_else(|| io::Error::other(IvshmemError::MissingMemoryRegion))?;
-            if let Some(old_mapping) = self.userspace_mapping.take() {
-                self.ivshmem_ops
-                    .lock()
-                    .unwrap()
-                    .unmap_ram_region(old_mapping)
-                    .map_err(io::Error::other)?;
-            }
             let new_mapping = self
                 .ivshmem_ops
                 .lock()

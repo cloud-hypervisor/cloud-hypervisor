@@ -903,7 +903,8 @@ impl DeviceRelocation for AddressManager {
             }
         }
 
-        pci_dev.move_bar(bar_idx, new_base)?;
+        pci_dev.move_bar_prepare(bar_idx)?;
+        pci_dev.move_bar_commit(bar_idx, new_base)?;
 
         // Update the device_tree resources associated with the device
         self.update_bar_base(pci_dev, bar_idx, new_base)
@@ -5684,9 +5685,9 @@ impl DeviceManager {
 
                 // Remove this device's MMIO regions from the DeviceManager's
                 // mmio_regions list. We match on UserMemoryRegion slot numbers
-                // rather than MmioRegion start addresses because move_bar()
-                // updates the device's region addresses but not the
-                // DeviceManager's cloned copies.
+                // rather than MmioRegion start addresses because
+                // move_bar_commit() updates the device's region addresses
+                // but not the DeviceManager's cloned copies.
                 let device_regions = vfio_pci_device.lock().unwrap().mmio_regions();
                 let mut mmio_regions = self.mmio_regions.lock().unwrap();
                 for device_region in &device_regions {

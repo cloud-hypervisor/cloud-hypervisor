@@ -452,13 +452,10 @@ impl PciDevice for VfioUserPciDevice {
         self.common.write_bar(base, offset, data)
     }
 
-    fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> Result<(), io::Error> {
-        info!("Moving BAR {bar_idx} -> 0x{new_base:x}");
+    fn move_bar_prepare(&mut self, bar_idx: usize) -> Result<(), io::Error> {
+        info!("Unmapping BAR {bar_idx}");
         for mmio_region in self.common.mmio_regions.iter_mut() {
             if mmio_region.index as usize == bar_idx {
-                let old_base = mmio_region.start.raw_value();
-                mmio_region.start = GuestAddress(new_base);
-
                 for user_memory_region in mmio_region.user_memory_regions.iter_mut() {
                     // Remove old region
                     // SAFETY: only valid regions are in user_memory_regions
@@ -472,7 +469,21 @@ impl PciDevice for VfioUserPciDevice {
                         )
                     }
                     .map_err(io::Error::other)?;
+                }
+            }
+        }
 
+        Ok(())
+    }
+
+    fn move_bar_commit(&mut self, bar_idx: usize, new_base: u64) -> Result<(), io::Error> {
+        info!("Mapping BAR {bar_idx} -> 0x{new_base:x}");
+        for mmio_region in self.common.mmio_regions.iter_mut() {
+            if mmio_region.index as usize == bar_idx {
+                let old_base = mmio_region.start.raw_value();
+                mmio_region.start = GuestAddress(new_base);
+
+                for user_memory_region in mmio_region.user_memory_regions.iter_mut() {
                     // Update the user memory region with the correct start address.
                     if new_base > old_base {
                         user_memory_region.start += new_base - old_base;

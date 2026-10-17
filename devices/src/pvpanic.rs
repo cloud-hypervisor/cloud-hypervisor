@@ -221,7 +221,7 @@ impl PciDevice for PvPanicDevice {
         Ok(())
     }
 
-    fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> io::Result<()> {
+    fn move_bar_commit(&mut self, bar_idx: usize, new_base: u64) -> io::Result<()> {
         for bar in self.bar_regions.iter_mut() {
             if bar.idx() == bar_idx {
                 *bar = bar.set_address(new_base);
