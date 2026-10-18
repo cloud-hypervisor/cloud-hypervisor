@@ -2148,6 +2148,106 @@ pub(crate) fn _test_virtio_block_dynamic_vhdx_expand(guest: &Guest) {
     disk_check_consistency(vhdx_path, None);
 }
 
+pub(crate) fn _test_virtio_block_nbd(guest: &Guest, num_queues: usize) {
+    const DISK_SIZE: u64 = 64 << 20;
+    const PATTERN: &str = "cloud-hypervisor-nbd-test";
+    const PATTERN_SECTOR: usize = 2048;
+
+    let img_path = guest.tmp_dir.as_path().join("nbd.img");
+    let sock_path = guest.tmp_dir.as_path().join("nbd.sock");
+    let img = img_path.to_str().unwrap();
+    let sock = sock_path.to_str().unwrap();
+
+    let res = Command::new("qemu-img")
+        .args(["create", "-f", "raw", img, &DISK_SIZE.to_string()])
+        .output()
+        .expect("Expect creating raw image");
+    assert!(res.status.success(), "qemu-img create failed: {res:?}");
+
+    // --persistent keeps the server alive when the guest reboots and the
+    // device reconnects. Allowing more than one client makes qemu-nbd
+    // advertise NBD_FLAG_CAN_MULTI_CONN, which multiple queues require.
+    let mut nbd_cmd = Command::new("qemu-nbd");
+    nbd_cmd.args(["--persistent", "-f", "raw", "-k", sock, img]);
+    if num_queues > 1 {
+        nbd_cmd.arg(format!("--shared={}", 2 * num_queues));
+    }
+    let mut nbd_server = nbd_cmd.spawn().expect("Expect starting qemu-nbd");
+    assert!(wait_until(Duration::from_secs(10), || sock_path.exists()));
+
+    let mut cloud_child = GuestCommand::new(guest)
+        .default_cpus()
+        .default_memory()
+        .default_kernel_cmdline()
+        .default_disks()
+        .args([
+            "--disk",
+            format!("nbd=nbd+unix:///?socket={sock},num_queues={num_queues}").as_str(),
+        ])
+        .default_net()
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    let r = panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+
+        // Check both if /dev/vdc exists and if the block size is 64 MiB.
+        assert_eq!(
+            guest
+                .ssh_command("lsblk | grep vdc | grep -c 64M")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            1
+        );
+
+        let queue_count = || {
+            guest
+                .ssh_command("ls -ll /sys/block/vdc/mq | grep ^d | wc -l")
+                .unwrap()
+                .trim()
+                .parse::<usize>()
+                .unwrap_or_default()
+        };
+        assert_eq!(queue_count(), num_queues);
+
+        guest
+            .ssh_command(&format!(
+                "printf {PATTERN} | sudo dd of=/dev/vdc bs=512 seek={PATTERN_SECTOR} conv=fsync"
+            ))
+            .unwrap();
+
+        // Rebooting resets the device, which opens new connections.
+        guest.reboot_linux(0);
+
+        assert_eq!(queue_count(), num_queues);
+
+        assert_eq!(
+            guest
+                .ssh_command(&format!(
+                    "sudo dd if=/dev/vdc bs=512 skip={PATTERN_SECTOR} count=1 status=none | head -c {}",
+                    PATTERN.len()
+                ))
+                .unwrap(),
+            PATTERN
+        );
+    });
+
+    kill_child(&mut cloud_child);
+    let output = cloud_child.wait_with_output().unwrap();
+    let _ = nbd_server.kill();
+    let _ = nbd_server.wait();
+
+    handle_child_output(r, &output);
+
+    // The data written by the guest landed in the image served over NBD.
+    let data = fs::read(&img_path).unwrap();
+    let start = PATTERN_SECTOR * 512;
+    assert_eq!(&data[start..start + PATTERN.len()], PATTERN.as_bytes());
+}
+
 pub(crate) fn _test_virtio_block_vmdk(guest: &Guest, subformat: &str) {
     let raw_os_disk = guest.disk_config.disk(DiskType::OperatingSystem).unwrap();
     let vmdk_path = guest.tmp_dir.as_path().join("osdisk.vmdk");

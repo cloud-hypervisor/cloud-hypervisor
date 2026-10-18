@@ -2170,6 +2170,18 @@ mod common_parallel {
     }
 
     #[test]
+    fn test_virtio_block_nbd() {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        _test_virtio_block_nbd(&guest, 1);
+    }
+
+    #[test]
+    fn test_virtio_block_nbd_multiple_queues() {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(2);
+        _test_virtio_block_nbd(&guest, 2);
+    }
+
+    #[test]
     fn test_virtio_block_dynamic_vhdx_expand() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_virtio_block_dynamic_vhdx_expand(&guest);
