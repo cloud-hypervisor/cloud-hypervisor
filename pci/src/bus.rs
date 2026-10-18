@@ -91,6 +91,14 @@ impl PciDevice for PciRoot {
         self.config.read_reg(reg_idx)
     }
 
+    fn is_bar_released(&self, bar_idx: usize) -> bool {
+        self.config.is_bar_released(bar_idx)
+    }
+
+    fn on_bar_installed(&mut self, bar_idx: usize) {
+        self.config.on_bar_installed(bar_idx);
+    }
+
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
@@ -263,6 +271,7 @@ impl PciBus {
                     "Failed releasing BAR {}: {}; BAR kept at its old address",
                     r.bar_idx, e
                 );
+                device.on_bar_installed(r.bar_idx);
                 failed.push(r.bar_idx);
             }
         }
@@ -281,7 +290,9 @@ impl PciBus {
             };
 
             match self.device_reloc.move_bar_commit(device, bus_device, a) {
-                Ok(()) => {}
+                Ok(()) => {
+                    device.on_bar_installed(a.bar_idx);
+                }
                 Err(e) => {
                     error!(
                         "Failed installing BAR {}: {}: at 0x{:x}; BAR left unmapped \
