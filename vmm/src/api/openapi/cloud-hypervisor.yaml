@@ -1255,6 +1255,9 @@ components:
       properties:
         path:
           type: string
+        nbd:
+          type: string
+          description: NBD URI of a remote export used instead of path, e.g. nbd://host:10809/export or nbd+unix:///export?socket=/path
         readonly:
           type: boolean
           default: false
