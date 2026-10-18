@@ -22,7 +22,7 @@ use crate::disk_file::AsyncFullDiskFile;
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 #[cfg(feature = "io_uring")]
 use crate::formats::nbd::io_uring_supported as nbd_io_uring_supported;
-use crate::formats::nbd::{NbdDisk, NbdOpenOptions};
+use crate::formats::nbd::{NbdDisk, NbdOpenOptions, NbdSocketOptions};
 use crate::formats::qcow::QcowDisk;
 use crate::formats::raw::{RawBackend, RawDisk};
 use crate::formats::vhd::VhdDisk;
@@ -49,6 +49,7 @@ pub struct NbdDiskOpenOptions<'a> {
     pub uri: &'a str,
     pub readonly: bool,
     pub disable_io_uring: bool,
+    pub socket: NbdSocketOptions,
     /// Number of virtio queues, each using its own connection.
     pub num_queues: usize,
 }
@@ -118,7 +119,7 @@ pub fn open_disk(
 pub fn open_nbd_disk(options: &NbdDiskOpenOptions<'_>) -> BlockResult<Box<dyn AsyncFullDiskFile>> {
     #[cfg(feature = "io_uring")]
     let use_io_uring = !options.disable_io_uring && {
-        let supported = io_uring_supported() && nbd_io_uring_supported();
+        let supported = io_uring_supported() && nbd_io_uring_supported(&options.socket);
         if !supported {
             warn!("io_uring runtime probe failed for NBD, using synchronous backend");
         }
@@ -131,6 +132,7 @@ pub fn open_nbd_disk(options: &NbdDiskOpenOptions<'_>) -> BlockResult<Box<dyn As
         uri: options.uri,
         readonly: options.readonly,
         use_io_uring,
+        socket: options.socket,
         num_queues: options.num_queues,
     })?;
     if use_io_uring {

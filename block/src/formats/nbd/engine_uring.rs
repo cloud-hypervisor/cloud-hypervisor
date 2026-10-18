@@ -16,6 +16,10 @@
 //!   in flight, so an idle engine has no kernel operation on the socket.
 //!
 //! Replies are matched to requests by cookie and may arrive in any order.
+//!
+//! With a socket timeout, every SENDMSG and RECVMSG is linked to an
+//! `IORING_OP_LINK_TIMEOUT`, which cancels it when it makes no progress in
+//! time. The connection is then failed like any other socket error.
 
 use std::collections::{HashMap, VecDeque};
 use std::os::fd::AsRawFd;
@@ -34,12 +38,15 @@ use crate::async_io::{
 
 const SEND_TAG: u64 = 1;
 const RECV_TAG: u64 = 2;
-// One SENDMSG and one RECVMSG at most, with headroom.
-const RING_ENTRIES: u32 = 4;
+const TIMEOUT_TAG: u64 = 3;
+// At most one SENDMSG and one RECVMSG, each optionally followed by a
+// linked timeout, with headroom.
+const RING_ENTRIES: u32 = 8;
 
 /// Returns true when the running kernel supports the io_uring socket
-/// operations used by this engine.
-pub(crate) fn supported() -> bool {
+/// operations used by this engine, including linked timeouts when
+/// `socket_timeout` is set.
+pub(crate) fn supported(socket_timeout: bool) -> bool {
     let Ok(ring) = IoUring::new(1) else {
         return false;
     };
@@ -47,6 +54,7 @@ pub(crate) fn supported() -> bool {
     ring.submitter().register_probe(&mut probe).is_ok()
         && probe.is_supported(opcode::SendMsg::CODE)
         && probe.is_supported(opcode::RecvMsg::CODE)
+        && (!socket_timeout || probe.is_supported(opcode::LinkTimeout::CODE))
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -122,6 +130,9 @@ pub(crate) struct NbdUring {
     deferred: Vec<(u64, i32)>,
     /// Results of internal requests (blocking flushes).
     internal: HashMap<u64, i32>,
+    /// Socket timeout; the kernel copies it when a linked timeout is
+    /// submitted.
+    timeout: Option<types::Timespec>,
 }
 
 impl NbdUring {
@@ -132,6 +143,7 @@ impl NbdUring {
             .register_eventfd(completions.notifier().as_raw_fd())?;
         Ok(Self {
             tracker: Tracker::new(conn.info()),
+            timeout: conn.socket_timeout().map(types::Timespec::from),
             conn,
             ring,
             completions,
@@ -148,11 +160,25 @@ impl NbdUring {
         self.send.is_none() && self.recv.is_none() && self.chunks.is_empty()
     }
 
-    fn push(&mut self, entry: &squeue::Entry) -> io::Result<()> {
-        // SAFETY: the entry references a boxed Transfer that stays alive
-        // until its completion is reaped.
-        unsafe { self.ring.submission().push(entry) }
-            .map_err(|_| io::Error::other("io_uring submission queue is full"))
+    /// Queues `entry`, followed by a linked timeout when a socket timeout
+    /// is configured.
+    fn push(&mut self, entry: squeue::Entry) -> io::Result<()> {
+        let result = match &self.timeout {
+            // SAFETY: the entry references a boxed Transfer that stays alive
+            // until its completion is reaped, and the kernel copies the
+            // timespec when the linked timeout is submitted.
+            Some(timeout) => unsafe {
+                self.ring.submission().push_multiple(&[
+                    entry.flags(squeue::Flags::IO_LINK),
+                    opcode::LinkTimeout::new(timeout)
+                        .build()
+                        .user_data(TIMEOUT_TAG),
+                ])
+            },
+            // SAFETY: as above.
+            None => unsafe { self.ring.submission().push(&entry) },
+        };
+        result.map_err(|_| io::Error::other("io_uring submission queue is full"))
     }
 
     fn submit_send(&mut self) -> io::Result<()> {
@@ -161,7 +187,7 @@ impl NbdUring {
             .flags(libc::MSG_NOSIGNAL as u32)
             .build()
             .user_data(SEND_TAG);
-        self.push(&entry).inspect_err(|_| self.send = None)
+        self.push(entry).inspect_err(|_| self.send = None)
     }
 
     fn submit_recv(&mut self) -> io::Result<()> {
@@ -170,7 +196,17 @@ impl NbdUring {
             .flags(libc::MSG_WAITALL as u32)
             .build()
             .user_data(RECV_TAG);
-        self.push(&entry).inspect_err(|_| self.recv = None)
+        self.push(entry).inspect_err(|_| self.recv = None)
+    }
+
+    /// Converts a failed SENDMSG or RECVMSG result into an error.
+    fn socket_error(&self, res: i32) -> io::Error {
+        // Only a linked timeout cancels socket operations.
+        if res == -libc::ECANCELED && self.timeout.is_some() {
+            self.conn.timeout_error()
+        } else {
+            io::Error::from_raw_os_error(-res)
+        }
     }
 
     fn deliver(&mut self, finished: Finished) {
@@ -254,7 +290,7 @@ impl NbdUring {
             return Err(if res == 0 {
                 io::Error::new(io::ErrorKind::WriteZero, "NBD socket accepted no data")
             } else {
-                io::Error::from_raw_os_error(-res)
+                self.socket_error(res)
             });
         }
         if self.send.as_mut().unwrap().advance(res as usize) {
@@ -272,7 +308,7 @@ impl NbdUring {
             return self.submit_recv();
         }
         if res < 0 {
-            return Err(io::Error::from_raw_os_error(-res));
+            return Err(self.socket_error(res));
         }
         if res == 0 {
             return Err(io::Error::new(
@@ -340,6 +376,8 @@ impl NbdUring {
             let result = match tag {
                 SEND_TAG => self.on_send(res),
                 RECV_TAG => self.on_recv(res),
+                // The outcome is reported by the linked operation.
+                TIMEOUT_TAG => Ok(()),
                 tag => unreachable!("unknown NBD io_uring tag {tag}"),
             };
             if let Err(e) = result {

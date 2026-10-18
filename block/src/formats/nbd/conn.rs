@@ -20,8 +20,76 @@ use super::handshake::{NbdExportInfo, NbdHandshakeError, negotiate};
 use super::proto::*;
 use super::uri::{NbdAddress, NbdUri};
 
-/// Timeout applied to connect and to every handshake read/write.
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+/// Default timeout applied to connect and to every handshake read/write.
+const DEFAULT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+/// Default TCP keep-alive idle time in seconds.
+const DEFAULT_KEEPALIVE_IDLE: u32 = 30;
+/// Default TCP keep-alive probe interval in seconds.
+const DEFAULT_KEEPALIVE_INTERVAL: u32 = 10;
+/// Default number of unanswered TCP keep-alive probes.
+const DEFAULT_KEEPALIVE_COUNT: u32 = 3;
+
+/// Largest TCP keep-alive idle time or interval accepted by Linux, in
+/// seconds.
+pub const MAX_TCP_KEEPALIVE_SECS: u32 = 32767;
+/// Largest number of TCP keep-alive probes accepted by Linux.
+pub const MAX_TCP_KEEPALIVE_COUNT: u32 = 127;
+
+/// TCP keep-alive settings of an NBD connection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TcpKeepalive {
+    /// Idle time before the first probe (`TCP_KEEPIDLE`), in seconds.
+    pub idle: u32,
+    /// Time between probes (`TCP_KEEPINTVL`), in seconds.
+    pub interval: u32,
+    /// Unanswered probes before the connection is dropped (`TCP_KEEPCNT`).
+    pub count: u32,
+}
+
+impl TcpKeepalive {
+    /// Uses the default for every value that is `None`.
+    pub fn new(idle: Option<u32>, interval: Option<u32>, count: Option<u32>) -> Self {
+        Self {
+            idle: idle.unwrap_or(DEFAULT_KEEPALIVE_IDLE),
+            interval: interval.unwrap_or(DEFAULT_KEEPALIVE_INTERVAL),
+            count: count.unwrap_or(DEFAULT_KEEPALIVE_COUNT),
+        }
+    }
+}
+
+/// Socket settings of an NBD connection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NbdSocketOptions {
+    /// Bounds the TCP connect and every handshake read/write.
+    pub handshake_timeout: Duration,
+    /// Bounds every socket operation after the handshake; `None` waits
+    /// forever.
+    pub socket_timeout: Option<Duration>,
+    /// TCP keep-alive settings; `None` disables keep-alive.
+    pub tcp_keepalive: Option<TcpKeepalive>,
+}
+
+impl NbdSocketOptions {
+    /// Uses the default handshake timeout when `handshake_timeout` is
+    /// `None`.
+    pub fn new(
+        handshake_timeout: Option<Duration>,
+        socket_timeout: Option<Duration>,
+        tcp_keepalive: Option<TcpKeepalive>,
+    ) -> Self {
+        Self {
+            handshake_timeout: handshake_timeout.unwrap_or(DEFAULT_HANDSHAKE_TIMEOUT),
+            socket_timeout,
+            tcp_keepalive,
+        }
+    }
+}
+
+impl Default for NbdSocketOptions {
+    fn default() -> Self {
+        Self::new(None, None, None)
+    }
+}
 
 #[derive(Error, Debug)]
 pub enum NbdConnectError {
@@ -96,25 +164,66 @@ impl AsRawFd for NbdStream {
     }
 }
 
-/// Connects to `address` with `timeout` applied to TCP connect and to
-/// every subsequent socket read/write.
-fn connect_stream(address: &NbdAddress, timeout: Duration) -> io::Result<NbdStream> {
+fn set_int_option(fd: RawFd, level: i32, name: i32, value: u32) -> io::Result<()> {
+    let value = value as libc::c_int;
+    // SAFETY: value is a valid c_int for the duration of the call and its
+    // size is passed along.
+    let ret = unsafe {
+        libc::setsockopt(
+            fd,
+            level,
+            name,
+            (&value as *const libc::c_int).cast(),
+            mem::size_of::<libc::c_int>() as libc::socklen_t,
+        )
+    };
+    if ret < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+fn set_keepalive(s: &TcpStream, keepalive: &TcpKeepalive) -> io::Result<()> {
+    let fd = s.as_raw_fd();
+    set_int_option(fd, libc::SOL_SOCKET, libc::SO_KEEPALIVE, 1)?;
+    set_int_option(fd, libc::IPPROTO_TCP, libc::TCP_KEEPIDLE, keepalive.idle)?;
+    set_int_option(
+        fd,
+        libc::IPPROTO_TCP,
+        libc::TCP_KEEPINTVL,
+        keepalive.interval,
+    )?;
+    set_int_option(fd, libc::IPPROTO_TCP, libc::TCP_KEEPCNT, keepalive.count)
+}
+
+/// Connects to `address` with the handshake timeout applied to TCP
+/// connect and to every subsequent socket read/write.
+///
+/// TCP keep-alive settings are ignored for Unix sockets.
+fn connect_stream(address: &NbdAddress, options: &NbdSocketOptions) -> io::Result<NbdStream> {
+    let timeout = options.handshake_timeout;
     let stream = match address {
         NbdAddress::Tcp { host, port } => {
             let mut last_error = io::Error::new(io::ErrorKind::NotFound, "no address resolved");
+            let mut stream = None;
             for addr in (host.as_str(), *port).to_socket_addrs()? {
                 match TcpStream::connect_timeout(&addr, timeout) {
                     Ok(s) => {
-                        s.set_nodelay(true)?;
-                        return Ok(NbdStream::Tcp(s));
+                        stream = Some(s);
+                        break;
                     }
                     Err(e) => last_error = e,
                 }
             }
-            Err(last_error)
+            let s = stream.ok_or(last_error)?;
+            s.set_nodelay(true)?;
+            if let Some(keepalive) = &options.tcp_keepalive {
+                set_keepalive(&s, keepalive)?;
+            }
+            NbdStream::Tcp(s)
         }
-        NbdAddress::Unix { path } => UnixStream::connect(path).map(NbdStream::Unix),
-    }?;
+        NbdAddress::Unix { path } => NbdStream::Unix(UnixStream::connect(path)?),
+    };
     stream.set_timeouts(Some(timeout))?;
     Ok(stream)
 }
@@ -172,30 +281,38 @@ pub(crate) fn msghdr_for(iovs: &mut [libc::iovec]) -> libc::msghdr {
 pub(crate) struct NbdConn {
     stream: NbdStream,
     info: NbdExportInfo,
+    socket_timeout: Option<Duration>,
     next_cookie: u64,
     dead: bool,
 }
 
 impl NbdConn {
     /// Connects to the server described by `uri` and completes the handshake.
-    pub(crate) fn connect(uri: &NbdUri) -> Result<Self, NbdConnectError> {
-        let mut stream = connect_stream(&uri.address, HANDSHAKE_TIMEOUT)
+    pub(crate) fn connect(
+        uri: &NbdUri,
+        options: &NbdSocketOptions,
+    ) -> Result<Self, NbdConnectError> {
+        let mut stream = connect_stream(&uri.address, options)
             .map_err(|e| NbdConnectError::Connect(uri.to_string(), e))?;
         let info = negotiate(&mut stream, &uri.export)
             .map_err(|e| NbdConnectError::Handshake(uri.to_string(), e))?;
-        stream
-            .set_timeouts(None)
-            .map_err(NbdConnectError::Configure)?;
-        Ok(Self::from_parts(stream, info))
+        Self::from_parts(stream, info, options.socket_timeout).map_err(NbdConnectError::Configure)
     }
 
-    pub(crate) fn from_parts(stream: NbdStream, info: NbdExportInfo) -> Self {
-        Self {
+    /// Wraps a negotiated stream, applying `socket_timeout` to it.
+    pub(crate) fn from_parts(
+        stream: NbdStream,
+        info: NbdExportInfo,
+        socket_timeout: Option<Duration>,
+    ) -> io::Result<Self> {
+        stream.set_timeouts(socket_timeout)?;
+        Ok(Self {
             stream,
             info,
+            socket_timeout,
             next_cookie: 1,
             dead: false,
-        }
+        })
     }
 
     pub(crate) fn info(&self) -> &NbdExportInfo {
@@ -204,6 +321,22 @@ impl NbdConn {
 
     pub(crate) fn fd(&self) -> RawFd {
         self.stream.as_raw_fd()
+    }
+
+    #[cfg_attr(not(feature = "io_uring"), allow(dead_code))]
+    pub(crate) fn socket_timeout(&self) -> Option<Duration> {
+        self.socket_timeout
+    }
+
+    /// Error reported when a socket operation exceeds the socket timeout.
+    pub(crate) fn timeout_error(&self) -> io::Error {
+        io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!(
+                "NBD socket operation timed out after {:?}",
+                self.socket_timeout.unwrap_or_default()
+            ),
+        )
     }
 
     #[cfg_attr(not(feature = "io_uring"), allow(dead_code))]
@@ -241,11 +374,12 @@ impl NbdConn {
             // for reads for the duration of this call.
             let n = unsafe { libc::sendmsg(self.fd(), &msg, libc::MSG_NOSIGNAL) };
             if n < 0 {
-                let e = io::Error::last_os_error();
-                if e.kind() == io::ErrorKind::Interrupted {
-                    continue;
+                match io::Error::last_os_error() {
+                    e if e.kind() == io::ErrorKind::Interrupted => continue,
+                    // The socket is blocking, so only SO_SNDTIMEO yields this.
+                    e if e.kind() == io::ErrorKind::WouldBlock => return Err(self.timeout_error()),
+                    e => return Err(e),
                 }
-                return Err(e);
             }
             advance_iovecs(&mut iovs, n as usize);
         }
@@ -265,11 +399,12 @@ impl NbdConn {
             // for writes for the duration of this call.
             let n = unsafe { libc::recvmsg(self.fd(), &mut msg, libc::MSG_WAITALL) };
             if n < 0 {
-                let e = io::Error::last_os_error();
-                if e.kind() == io::ErrorKind::Interrupted {
-                    continue;
+                match io::Error::last_os_error() {
+                    e if e.kind() == io::ErrorKind::Interrupted => continue,
+                    // The socket is blocking, so only SO_RCVTIMEO yields this.
+                    e if e.kind() == io::ErrorKind::WouldBlock => return Err(self.timeout_error()),
+                    e => return Err(e),
                 }
-                return Err(e);
             }
             if n == 0 {
                 return Err(io::ErrorKind::UnexpectedEof.into());
@@ -392,10 +527,17 @@ impl NbdConn {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::net::TcpListener;
+    use std::time::Instant;
+
     use super::*;
 
-    pub(crate) fn conn_from_unix(stream: UnixStream, info: NbdExportInfo) -> NbdConn {
-        NbdConn::from_parts(NbdStream::Unix(stream), info)
+    pub(crate) fn conn_from_unix(
+        stream: UnixStream,
+        info: NbdExportInfo,
+        socket_timeout: Option<Duration>,
+    ) -> NbdConn {
+        NbdConn::from_parts(NbdStream::Unix(stream), info, socket_timeout).unwrap()
     }
 
     #[test]
@@ -427,5 +569,75 @@ pub(crate) mod tests {
         advance_iovecs(&mut v, 5);
         assert_eq!(iovecs_len(&v), 5);
         assert_eq!(v[0].iov_base as usize, b.as_ptr() as usize + 1);
+    }
+
+    fn int_option(fd: RawFd, level: i32, name: i32) -> i32 {
+        let mut value: libc::c_int = 0;
+        let mut len = mem::size_of::<libc::c_int>() as libc::socklen_t;
+        // SAFETY: value and len are valid for writes for the duration of
+        // the call.
+        let ret = unsafe {
+            libc::getsockopt(
+                fd,
+                level,
+                name,
+                (&mut value as *mut libc::c_int).cast(),
+                &mut len,
+            )
+        };
+        assert_eq!(ret, 0, "{}", io::Error::last_os_error());
+        value
+    }
+
+    fn keepalive_of(options: &NbdSocketOptions) -> (i32, i32, i32, i32) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = NbdAddress::Tcp {
+            host: "127.0.0.1".to_string(),
+            port: listener.local_addr().unwrap().port(),
+        };
+        let stream = connect_stream(&address, options).unwrap();
+        let fd = stream.as_raw_fd();
+        (
+            int_option(fd, libc::SOL_SOCKET, libc::SO_KEEPALIVE),
+            int_option(fd, libc::IPPROTO_TCP, libc::TCP_KEEPIDLE),
+            int_option(fd, libc::IPPROTO_TCP, libc::TCP_KEEPINTVL),
+            int_option(fd, libc::IPPROTO_TCP, libc::TCP_KEEPCNT),
+        )
+    }
+
+    #[test]
+    fn tcp_keepalive_options() {
+        let disabled = keepalive_of(&NbdSocketOptions::default());
+        assert_eq!(disabled.0, 0);
+
+        let defaults = NbdSocketOptions::new(None, None, Some(TcpKeepalive::new(None, None, None)));
+        assert_eq!(keepalive_of(&defaults), (1, 30, 10, 3));
+
+        let explicit = NbdSocketOptions::new(
+            None,
+            None,
+            Some(TcpKeepalive::new(Some(60), Some(5), Some(7))),
+        );
+        assert_eq!(keepalive_of(&explicit), (1, 60, 5, 7));
+    }
+
+    #[test]
+    fn handshake_timeout() {
+        // The listener accepts connections but never sends the greeting.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let uri: NbdUri = format!("nbd://127.0.0.1:{port}/x").parse().unwrap();
+        let timeout = Duration::from_millis(200);
+        let options = NbdSocketOptions::new(Some(timeout), None, None);
+
+        let start = Instant::now();
+        let result = NbdConn::connect(&uri, &options);
+        let elapsed = start.elapsed();
+        assert!(
+            matches!(result, Err(NbdConnectError::Handshake(..))),
+            "{result:?}"
+        );
+        assert!(elapsed >= timeout, "{elapsed:?}");
+        assert!(elapsed < Duration::from_secs(2), "{elapsed:?}");
     }
 }
