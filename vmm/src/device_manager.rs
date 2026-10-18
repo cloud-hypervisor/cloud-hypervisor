@@ -4875,9 +4875,10 @@ impl DeviceManager {
         segment_id: u16,
         resources: Option<Vec<Resource>>,
     ) -> DeviceManagerResult<(Vec<PciBarConfiguration>, Vec<Resource>)> {
-        // On restore, a BAR whose space is not decoded is left unmapped: the
-        // device marks it released here, before anything is allocated or
-        // mapped, so that allocate_bars() leaves its saved range alone, which
+        // On restore, a BAR whose space is not decoded, or whose register no
+        // longer names its saved address, is left unmapped: the device marks
+        // it released here, before anything is allocated or mapped, so that
+        // allocate_bars() leaves its saved range alone, which
         // another device may hold by now, and the creation path skips the
         // rest. The configuration reads as mapped until this point, so a
         // device that writes its own COMMAND register at creation (pvpanic)

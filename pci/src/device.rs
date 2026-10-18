@@ -116,10 +116,10 @@ pub trait PciDevice: Send {
     ) -> result::Result<(), io::Error> {
         Ok(())
     }
-    /// On restore, release BAR `bar_idx` unless its space is decoded; it is
-    /// about to be mapped at `mapped_at`, its saved address. Return whether
-    /// it was released, so that the VMM leaves it unmapped until the guest
-    /// enables the space.
+    /// On restore, release BAR `bar_idx` unless its space is decoded and its
+    /// register names `mapped_at`, the saved address it is about to be
+    /// mapped at. Return whether it was released, so that the VMM leaves it
+    /// unmapped; a decoded BAR is then installed at its register.
     fn release_stale_bar(&mut self, bar_idx: usize, mapped_at: u64) -> bool;
     /// Whether BAR `bar_idx` is released, i.e. not mapped.
     fn is_bar_released(&self, bar_idx: usize) -> bool;

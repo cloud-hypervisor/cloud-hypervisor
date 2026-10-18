@@ -1128,15 +1128,16 @@ impl PciConfiguration {
         self.bar_region_type(bar_idx).is_some() && !self.bar_installed[bar_idx]
     }
 
-    /// On restore, release BAR `slot` unless its space is decoded; it is
-    /// about to be mapped at `mapped_at`, its saved address. Returns whether
-    /// it was released, in which case the caller leaves it unmapped until
-    /// the guest enables the space.
-    pub fn release_stale_bar(&mut self, slot: usize, _mapped_at: u64) -> bool {
+    /// On restore, release BAR `slot` unless its space is decoded and its
+    /// register names `mapped_at`, the saved address it is about to be
+    /// mapped at. Returns whether it was released, in which case the caller
+    /// leaves it unmapped; a decoded BAR is then owed an install at its
+    /// register.
+    pub fn release_stale_bar(&mut self, slot: usize, mapped_at: u64) -> bool {
         let Some(region_type) = self.bar_region_type(slot) else {
             return false;
         };
-        let keep = self.decode_enabled(region_type);
+        let keep = self.decode_enabled(region_type) && self.bar_target(slot) == mapped_at;
         self.bar_installed[slot] = keep;
         !keep
     }
