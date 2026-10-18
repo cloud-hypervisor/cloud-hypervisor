@@ -700,6 +700,42 @@ pub(crate) struct AddressManager {
     pci_mmio64_allocators: Box<[Arc<Mutex<AddressAllocator>>]>,
 }
 
+impl AddressManager {
+    fn update_bar_base(
+        &self,
+        pci_dev: &dyn PciDevice,
+        bar_idx: usize,
+        new_base: u64,
+    ) -> result::Result<(), io::Error> {
+        if let Some(id) = pci_dev.id() {
+            if let Some(node) = self.device_tree.lock().unwrap().get_mut(&id) {
+                let mut resource_updated = false;
+                for resource in node.resources.iter_mut() {
+                    if let Resource::PciBar { index, base, .. } = resource
+                        && *index == bar_idx
+                    {
+                        *base = new_base;
+                        resource_updated = true;
+                        break;
+                    }
+                }
+
+                if !resource_updated {
+                    return Err(io::Error::other(format!(
+                        "Couldn't find a resource for BAR {bar_idx} of device {id}"
+                    )));
+                }
+            } else {
+                return Err(io::Error::other(format!(
+                    "Couldn't find device {id} from device tree"
+                )));
+            }
+        }
+
+        Ok(())
+    }
+}
+
 impl DeviceRelocation for AddressManager {
     fn move_bar(
         &self,
@@ -765,30 +801,7 @@ impl DeviceRelocation for AddressManager {
         }
 
         // Update the device_tree resources associated with the device
-        if let Some(id) = pci_dev.id() {
-            if let Some(node) = self.device_tree.lock().unwrap().get_mut(&id) {
-                let mut resource_updated = false;
-                for resource in node.resources.iter_mut() {
-                    if let Resource::PciBar { index, base, .. } = resource
-                        && *index == bar_idx
-                    {
-                        *base = new_base;
-                        resource_updated = true;
-                        break;
-                    }
-                }
-
-                if !resource_updated {
-                    return Err(io::Error::other(format!(
-                        "Couldn't find a resource for BAR {bar_idx} of device {id}"
-                    )));
-                }
-            } else {
-                return Err(io::Error::other(format!(
-                    "Couldn't find device {id} from device tree"
-                )));
-            }
-        }
+        self.update_bar_base(pci_dev, bar_idx, new_base)?;
 
         let any_dev = pci_dev.as_any_mut();
         if let Some(virtio_pci_dev) = any_dev.downcast_ref::<VirtioPciDevice>() {
