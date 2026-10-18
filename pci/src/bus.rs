@@ -7,8 +7,8 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::ops::DerefMut;
-use std::result;
 use std::sync::{Arc, Barrier, Mutex};
+use std::{io, result};
 
 use byteorder::{ByteOrder, LittleEndian};
 use log::error;
@@ -164,6 +164,18 @@ impl PciBus {
         Ok(())
     }
 
+    /// After a restore, release the BARs whose address space is not decoded.
+    pub fn release_undecoded_bars(&self) -> result::Result<(), io::Error> {
+        for (id, dev) in &self.devices {
+            if *id == PCI_ROOT_DEVICE_ID {
+                continue;
+            }
+            self.device_reloc
+                .release_undecoded_bars(dev.pci.lock().unwrap().deref_mut())?;
+        }
+        Ok(())
+    }
+
     pub fn remove_by_device(&mut self, device: &Arc<Mutex<dyn PciDevice>>) -> Result<()> {
         self.devices.retain(|_, dev| !Arc::ptr_eq(&dev.pci, device));
         Ok(())
@@ -277,9 +289,8 @@ impl PciBus {
                 }
                 Err(e) => {
                     error!(
-                        "Failed installing BAR {}: {}: at 0x{:x}; BAR left unmapped \
-until the guest's next decode-enable edge",
-                        a.bar_idx, e, a.new_base
+                        "Failed installing BAR {} at {:#x}: {}; retried on the next BAR or COMMAND write",
+                        a.bar_idx, a.new_base, e
                     );
                 }
             }

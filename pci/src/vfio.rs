@@ -1693,28 +1693,29 @@ impl VfioCommon {
         // to the device region to update the MSI Enable bit.
         self.vfio_wrapper.write_config((reg + offset) as u32, data);
 
-        // The non BAR write path goes directly to the VFIO device and not the shadow,
-        // so the PciConfiguration shadow can get stale. Mirror the write into the
-        // shadow here since snapshot() serializes it. Without this the shadow keeps its
-        // device init values and a snapshot encodes PCI_COMMAND as zero.
-        //
-        // Use the raw write_* helpers rather than the PciConfiguration method
-        // self.configuration.write_config_register(), which would otherwise drain
-        // pending_bar_reprogram, owned by the BAR block below, and rerun MSI-X
-        // set_msg_ctl, already done by update_msix_capabilities above.
-        let byte_offset = reg_idx * PCI_CONFIG_REGISTER_SIZE + offset as usize;
-        match data.len() {
-            1 => self.configuration.write_byte(byte_offset, data[0]),
-            2 => self
-                .configuration
-                .write_word(byte_offset, u16::from(data[0]) | (u16::from(data[1]) << 8)),
-            4 => self
-                .configuration
-                .write_reg(reg_idx, LittleEndian::read_u32(data)),
-            _ => {}
-        }
+        // Mirror the write into the shadow, which snapshot() serializes and
+        // which installs released BARs on COMMAND writes. MSI-X was handled
+        // above and BAR writes returned early, so write the raw bytes.
         let mut reloc = BarRelocation::default();
-        self.configuration.drain_pending_relocation(&mut reloc);
+        if offset as usize + data.len() <= 4 {
+            match data.len() {
+                1 => self
+                    .configuration
+                    .write_byte(reg_idx * 4 + offset as usize, data[0]),
+                2 => self.configuration.write_word(
+                    reg_idx * 4 + offset as usize,
+                    u16::from(data[0]) | (u16::from(data[1]) << 8),
+                ),
+                4 => self
+                    .configuration
+                    .write_reg(reg_idx, LittleEndian::read_u32(data)),
+                _ => (),
+            }
+
+            if reg_idx == COMMAND_REG {
+                self.configuration.drain_pending_installs(&mut reloc);
+            }
+        }
 
         (reloc, None)
     }
