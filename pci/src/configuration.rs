@@ -555,6 +555,7 @@ pub struct PciConfiguration {
     msix_cap_reg_idx: Option<usize>,
     msix_config: Option<Arc<Mutex<MsixConfig>>>,
     pending_bar_reprogram: Vec<BarReprogrammingParams>,
+    bar_installed: [bool; NUM_BAR_REGS + 1],
 }
 
 /// See pci_regs.h in kernel
@@ -671,6 +672,7 @@ impl PciConfiguration {
             last_capability,
             msix_cap_reg_idx,
             pending_bar_reprogram,
+            restoring,
         ) = if let Some(state) = state {
             let registers: Vec<u32> = state.registers.into();
             let writable_bits: Vec<u32> = state.writable_bits.into();
@@ -684,6 +686,7 @@ impl PciConfiguration {
                 state.last_capability,
                 state.msix_cap_reg_idx,
                 state.pending_bar_reprogram,
+                true,
             )
         } else {
             let mut registers = [0u32; NUM_CONFIGURATION_REGISTERS];
@@ -724,10 +727,11 @@ impl PciConfiguration {
                 None,
                 None,
                 Vec::new(),
+                false,
             )
         };
 
-        let config = PciConfiguration {
+        let mut config = PciConfiguration {
             registers,
             writable_bits,
             bars,
@@ -738,7 +742,18 @@ impl PciConfiguration {
             msix_cap_reg_idx,
             msix_config,
             pending_bar_reprogram,
+            bar_installed: [false; NUM_BAR_REGS + 1],
         };
+
+        // Restored devices are mapped at creation, like booted ones.
+        if restoring {
+            for slot in (0..NUM_BAR_REGS).chain([ROM_BAR_IDX]) {
+                if config.bar_region_type(slot).is_some() {
+                    config.bar_installed[slot] = true;
+                }
+            }
+        }
+
         config.fixup_pending_bar_reprogram()
     }
 
@@ -944,6 +959,8 @@ impl PciConfiguration {
         self.bars[bar_idx].used = true;
         self.bars[bar_idx].r#type = Some(config.region_type);
 
+        self.bar_installed[bar_idx] = true;
+
         Ok(())
     }
 
@@ -979,6 +996,8 @@ impl PciConfiguration {
         self.rom_bar_size =
             encode_32_bits_bar_size(config.size as u32).ok_or(Error::Encode32BarSize)?;
         self.rom_bar_used = true;
+
+        self.bar_installed[ROM_BAR_IDX] = true;
 
         Ok(())
     }
@@ -1118,6 +1137,27 @@ impl PciConfiguration {
                 );
             }
         }
+    }
+
+    // A failed install is not reported, so the slot stays released and is
+    // retried later.
+    pub fn on_bar_installed(&mut self, bar_idx: usize) {
+        self.bar_installed[bar_idx] = true;
+    }
+
+    pub fn is_bar_released(&self, bar_idx: usize) -> bool {
+        self.bar_region_type(bar_idx).is_some() && !self.bar_installed[bar_idx]
+    }
+
+    fn bar_region_type(&self, slot: usize) -> Option<PciBarRegionType> {
+        if slot == ROM_BAR_IDX {
+            // The expansion ROM is a 32-bit memory region.
+            return self
+                .rom_bar_used
+                .then_some(PciBarRegionType::Memory32BitRegion);
+        }
+
+        self.bars.get(slot)?.r#type
     }
 
     pub fn read_config_register(&self, reg_idx: usize) -> u32 {

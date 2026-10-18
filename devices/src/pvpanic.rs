@@ -214,6 +214,9 @@ impl PciDevice for PvPanicDevice {
         _mmio64_allocator: &mut AddressAllocator,
     ) -> result::Result<(), PciDeviceError> {
         for bar in self.bar_regions.drain(..) {
+            if self.configuration.is_bar_released(bar.idx()) {
+                continue;
+            }
             mmio32_allocator.free(GuestAddress(bar.addr()), bar.size());
         }
 
@@ -228,6 +231,14 @@ impl PciDevice for PvPanicDevice {
         }
 
         Ok(())
+    }
+
+    fn is_bar_released(&self, bar_idx: usize) -> bool {
+        self.configuration.is_bar_released(bar_idx)
+    }
+
+    fn on_bar_installed(&mut self, bar_idx: usize) {
+        self.configuration.on_bar_installed(bar_idx);
     }
 
     fn read_bar(&mut self, _base: u64, _offset: u64, data: &mut [u8]) {

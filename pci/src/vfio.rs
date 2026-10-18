@@ -1067,6 +1067,9 @@ impl VfioCommon {
         mmio64_allocator: &mut AddressAllocator,
     ) -> Result<(), PciDeviceError> {
         for region in self.mmio_regions.iter() {
+            if self.configuration.is_bar_released(region.index as usize) {
+                continue;
+            }
             match region.type_ {
                 PciBarRegionType::IoRegion => {
                     allocator.free_io_addresses(region.start, region.length);
@@ -2384,7 +2387,17 @@ impl VfioPciDevice {
 
     pub fn unmap_mmio_regions(&mut self) {
         for region in self.common.mmio_regions.iter_mut() {
+            // A released BAR is already unmapped; only free its memory slots.
+            let released = self
+                .common
+                .configuration
+                .is_bar_released(region.index as usize);
             for user_memory_region in region.user_memory_regions.drain(..) {
+                if released {
+                    self.memory_slot_allocator
+                        .free_memory_slot(user_memory_region.slot);
+                    continue;
+                }
                 let len = user_memory_region.mapping.len();
                 let host_addr = user_memory_region.mapping.addr();
                 // Unmap MMIO region from the host IOMMU address space via VfioOps
@@ -2653,6 +2666,14 @@ iova 0x{:x}, size 0x{:x}: {}, ",
         }
 
         Ok(())
+    }
+
+    fn is_bar_released(&self, bar_idx: usize) -> bool {
+        self.common.configuration.is_bar_released(bar_idx)
+    }
+
+    fn on_bar_installed(&mut self, bar_idx: usize) {
+        self.common.configuration.on_bar_installed(bar_idx);
     }
 
     fn as_any_mut(&mut self) -> &mut dyn Any {

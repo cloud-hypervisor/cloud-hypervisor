@@ -235,7 +235,17 @@ impl VfioUserPciDevice {
 
     fn unmap_mmio_regions(&mut self) {
         for mmio_region in self.common.mmio_regions.iter_mut() {
+            // A released BAR is already unmapped; only free its memory slots.
+            let released = self
+                .common
+                .configuration
+                .is_bar_released(mmio_region.index as usize);
             for user_memory_region in mmio_region.user_memory_regions.drain(..) {
+                if released {
+                    self.memory_slot_allocator
+                        .free_memory_slot(user_memory_region.slot);
+                    continue;
+                }
                 // Remove region
                 // SAFETY: guaranteed by hypervisor::mmap::MmapRegion invariants
                 if let Err(e) = unsafe {
@@ -507,6 +517,14 @@ impl PciDevice for VfioUserPciDevice {
         }
 
         Ok(())
+    }
+
+    fn is_bar_released(&self, bar_idx: usize) -> bool {
+        self.common.configuration.is_bar_released(bar_idx)
+    }
+
+    fn on_bar_installed(&mut self, bar_idx: usize) {
+        self.common.configuration.on_bar_installed(bar_idx);
     }
 
     fn id(&self) -> Option<String> {

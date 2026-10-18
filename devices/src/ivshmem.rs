@@ -387,6 +387,14 @@ impl PciDevice for IvshmemDevice {
         Ok(())
     }
 
+    fn is_bar_released(&self, bar_idx: usize) -> bool {
+        self.configuration.is_bar_released(bar_idx)
+    }
+
+    fn on_bar_installed(&mut self, bar_idx: usize) {
+        self.configuration.on_bar_installed(bar_idx);
+    }
+
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }

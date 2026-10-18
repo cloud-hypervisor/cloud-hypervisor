@@ -1162,6 +1162,9 @@ impl PciDevice for VirtioPciDevice {
         mmio64_allocator: &mut AddressAllocator,
     ) -> result::Result<(), PciDeviceError> {
         for bar in self.bar_regions.drain(..) {
+            if self.configuration.is_bar_released(bar.idx()) {
+                continue;
+            }
             match bar.region_type() {
                 PciBarRegionType::Memory32BitRegion => {
                     mmio32_allocator.free(GuestAddress(bar.addr()), bar.size());
@@ -1185,6 +1188,14 @@ impl PciDevice for VirtioPciDevice {
         }
 
         Ok(())
+    }
+
+    fn is_bar_released(&self, bar_idx: usize) -> bool {
+        self.configuration.is_bar_released(bar_idx)
+    }
+
+    fn on_bar_installed(&mut self, bar_idx: usize) {
+        self.configuration.on_bar_installed(bar_idx);
     }
 
     fn read_bar(&mut self, _base: u64, offset: u64, data: &mut [u8]) {

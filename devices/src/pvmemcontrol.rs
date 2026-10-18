@@ -787,6 +787,14 @@ impl PciDevice for PvmemcontrolPciDevice {
         self.configuration.read_config_register(reg_idx)
     }
 
+    fn is_bar_released(&self, bar_idx: usize) -> bool {
+        self.configuration.is_bar_released(bar_idx)
+    }
+
+    fn on_bar_installed(&mut self, bar_idx: usize) {
+        self.configuration.on_bar_installed(bar_idx);
+    }
+
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
@@ -840,6 +848,9 @@ impl PciDevice for PvmemcontrolPciDevice {
         _mmio64_allocator: &mut AddressAllocator,
     ) -> Result<(), PciDeviceError> {
         for bar in self.bar_regions.drain(..) {
+            if self.configuration.is_bar_released(bar.idx()) {
+                continue;
+            }
             mmio32_allocator.free(GuestAddress(bar.addr()), bar.size());
         }
         Ok(())
