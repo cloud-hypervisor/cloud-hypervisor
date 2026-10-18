@@ -164,4 +164,13 @@ pub trait DeviceRelocation: Send + Sync {
         bus_device: &Arc<dyn BusDeviceSync>,
         params: &InstallParams,
     ) -> result::Result<(), io::Error>;
+
+    /// Release every BAR of `pci_dev` whose address space is not decoded.
+    /// Called after a restore.
+    fn release_undecoded_bars(
+        &self,
+        _pci_dev: &mut dyn PciDevice,
+    ) -> result::Result<(), io::Error> {
+        Ok(())
+    }
 }
