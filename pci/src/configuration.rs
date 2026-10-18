@@ -1258,64 +1258,6 @@ impl PciConfiguration {
             None => value == BAR_SIZE_PROBE_ALL_ONES,
         }
     }
-
-    /// Restore BAR address after a failed move. This undoes the premature
-    /// address update in detect_bar_reprogramming() so that config space
-    /// stays consistent with the actual MMIO mapping.
-    pub fn restore_bar_addr(&mut self, params: &BarReprogrammingParams) {
-        let i = params
-            .bar_idx
-            .expect("bar_idx is set on detection and on restore");
-
-        if i < NUM_BAR_REGS {
-            match params.region_type {
-                PciBarRegionType::Memory64BitRegion => {
-                    // 64-bit BAR spans two slots: bars[i] (low, type Memory64BitRegion)
-                    // and bars[i+1] (high, type None). Mirror detect_bar_reprogramming
-                    // by matching the combined address and restoring both halves.
-                    if i + 1 >= NUM_BAR_REGS
-                        || self.bars[i].r#type != Some(PciBarRegionType::Memory64BitRegion)
-                    {
-                        return;
-                    }
-                    let low_mask = self.writable_bits[BAR0_REG + i];
-                    let high_mask = self.writable_bits[BAR0_REG + i + 1];
-                    let current = (u64::from(self.bars[i + 1].addr & high_mask) << 32)
-                        | u64::from(self.bars[i].addr & low_mask);
-                    if current == params.new_base {
-                        let old_low = params.old_base as u32;
-                        let old_high = (params.old_base >> 32) as u32;
-                        self.bars[i].addr = old_low;
-                        self.bars[i + 1].addr = old_high;
-                        self.registers[BAR0_REG + i] =
-                            (self.registers[BAR0_REG + i] & !low_mask) | (old_low & low_mask);
-                        self.registers[BAR0_REG + i + 1] = (self.registers[BAR0_REG + i + 1]
-                            & !high_mask)
-                            | (old_high & high_mask);
-                    }
-                }
-                _ => {
-                    // 32-bit Memory or IO BAR
-                    let mask = self.writable_bits[BAR0_REG + i];
-                    if self.bars[i].r#type == Some(params.region_type)
-                        && u64::from(self.bars[i].addr & mask) == params.new_base
-                    {
-                        let old = params.old_base as u32;
-                        self.bars[i].addr = old;
-                        self.registers[BAR0_REG + i] =
-                            (self.registers[BAR0_REG + i] & !mask) | (old & mask);
-                    }
-                }
-            }
-        } else if i == ROM_BAR_IDX && self.rom_bar_used {
-            let mask = self.writable_bits[ROM_BAR_REG];
-            if u64::from(self.rom_bar_addr & mask) == params.new_base {
-                let old = params.old_base as u32;
-                self.registers[ROM_BAR_REG] = (self.registers[ROM_BAR_REG] & !mask) | (old & mask);
-                self.rom_bar_addr = self.registers[ROM_BAR_REG];
-            }
-        }
-    }
 }
 
 impl Pausable for PciConfiguration {}
@@ -1712,24 +1654,6 @@ mod tests {
     }
 
     #[test]
-    fn failed_bar_move_restores_the_indexed_bar() {
-        let mut cfg = reloc_config(None);
-        add_reloc_bar(&mut cfg, 0, 0xc000_0000);
-        add_reloc_bar(&mut cfg, 1, 0xd000_0000);
-
-        let reprogram = cfg.write_config_register(BAR0_REG + 1, 0, &0xc000_0000u32.to_le_bytes());
-        assert_eq!(reprogram.len(), 1);
-        assert_eq!(reprogram[0].bar_idx, Some(1));
-
-        cfg.restore_bar_addr(&reprogram[0]);
-
-        assert_eq!(cfg.get_bar_addr(0), 0xc000_0000);
-        assert_eq!(cfg.read_reg(BAR0_REG), 0xc000_0000);
-        assert_eq!(cfg.get_bar_addr(1), 0xd000_0000);
-        assert_eq!(cfg.read_reg(BAR0_REG + 1), 0xd000_0000);
-    }
-
-    #[test]
     fn bar_reprogramming_of_64bit_bar_reports_the_low_slot() {
         let mut cfg = reloc_config(None);
         let bar = PciBarConfiguration::new(
@@ -1755,9 +1679,6 @@ mod tests {
         assert_eq!(reprogram[0].bar_idx, Some(0));
         assert_eq!(reprogram[0].old_base, 0x4_0000_0000);
         assert_eq!(reprogram[0].new_base, 0x8_0000_0000);
-        cfg.restore_bar_addr(&reprogram[0]);
-        assert_eq!(cfg.get_bar_addr(0), 0x4_0000_0000);
-        assert_eq!(cfg.read_reg(BAR0_REG + 1), 4);
     }
 
     #[test]
@@ -1779,9 +1700,6 @@ mod tests {
         assert_eq!(reprogram[0].bar_idx, Some(ROM_BAR_IDX));
         assert_eq!(reprogram[0].old_base, 0xf000_0000);
         assert_eq!(reprogram[0].new_base, 0xf100_0000);
-        cfg.restore_bar_addr(&reprogram[0]);
-        assert_eq!(cfg.rom_bar_addr, 0xf000_0001);
-        assert_eq!(cfg.read_reg(ROM_BAR_REG), 0xf000_0001);
     }
 
     fn restore_legacy(cfg: &PciConfiguration) -> Vec<BarReprogrammingParams> {

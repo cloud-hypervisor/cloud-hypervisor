@@ -280,10 +280,9 @@ impl PciBus {
             };
             if let Err(e) = result {
                 warn!(
-                    "Failed moving device BAR: {}: 0x{:x}->0x{:x}(0x{:x}); BAR left unmapped, config rolled back to old",
+                    "Failed moving device BAR: {}: 0x{:x}->0x{:x}(0x{:x}); BAR left unmapped",
                     e, bar.old_base, bar.new_base, bar.len
                 );
-                device.restore_bar_addr(bar);
             }
         }
     }
