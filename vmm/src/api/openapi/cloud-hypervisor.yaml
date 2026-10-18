@@ -1258,6 +1258,34 @@ components:
         nbd:
           type: string
           description: NBD URI of a remote export used instead of path, e.g. nbd://host:10809/export or nbd+unix:///export?socket=/path
+        handshake_timeout:
+          type: integer
+          format: int64
+          description: NBD connect and handshake timeout in seconds
+          default: 10
+        socket_timeout:
+          type: integer
+          format: int64
+          description: NBD socket operation timeout in seconds, none if unset
+        tcp_keepalive:
+          type: boolean
+          description: Enable TCP keep-alive on NBD connections
+          default: false
+        tcp_keepalive_idle:
+          type: integer
+          format: int32
+          description: Idle time before the first TCP keep-alive probe in seconds
+          default: 30
+        tcp_keepalive_interval:
+          type: integer
+          format: int32
+          description: Time between TCP keep-alive probes in seconds
+          default: 10
+        tcp_keepalive_count:
+          type: integer
+          format: int32
+          description: Unanswered TCP keep-alive probes before the connection is dropped
+          default: 3
         readonly:
           type: boolean
           default: false

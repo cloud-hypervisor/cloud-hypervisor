@@ -15,7 +15,7 @@ use arch::CpuProfileConfig;
 #[cfg(target_arch = "x86_64")]
 use arch::CpuidOverride;
 use block::ImageType;
-use block::formats::nbd::{NbdUri, NbdUriError};
+use block::formats::nbd::{MAX_TCP_KEEPALIVE_COUNT, MAX_TCP_KEEPALIVE_SECS, NbdUri, NbdUriError};
 use clap::ArgMatches;
 use log::{debug, warn};
 #[cfg(target_arch = "x86_64")]
@@ -398,6 +398,21 @@ pub enum ValidationError {
     /// O_DIRECT has no meaning for NBD disks
     #[error("direct=on is not supported for NBD disks")]
     NbdDirectNotSupported,
+    /// NBD socket options are only meaningful for NBD disks
+    #[error("Disk option {0} requires nbd")]
+    NbdOptionWithoutNbd(&'static str),
+    /// Keep-alive is a TCP feature
+    #[error("Disk option {0} requires a TCP NBD URI")]
+    NbdTcpKeepaliveWithoutTcp(&'static str),
+    /// Keep-alive parameters need keep-alive to be enabled
+    #[error("Disk option {0} requires tcp_keepalive=on")]
+    NbdTcpKeepaliveDisabled(&'static str),
+    /// Zero is not a valid NBD timeout or keep-alive value
+    #[error("Disk option {0} must not be 0")]
+    NbdOptionZero(&'static str),
+    /// The value exceeds what Linux accepts
+    #[error("Disk option {0}={1} exceeds the maximum of {2}")]
+    NbdOptionTooLarge(&'static str, u32, u32),
     /// The specified I/O port was invalid. It should be provided in hex, such as `0xe9`.
     #[cfg(target_arch = "x86_64")]
     #[error("The IO port was not properly provided in hex or a `0x` prefix is missing: {0}")]
@@ -1587,6 +1602,9 @@ impl PciDeviceCommonConfig {
 impl DiskConfig {
     pub const SYNTAX: &'static str = "Disk parameters \
          \"path=<disk_image_path>,nbd=<nbd_uri>,readonly=on|off,direct=on|off,iommu=off|virtio,\
+         handshake_timeout=<seconds>,socket_timeout=<seconds>,tcp_keepalive=on|off,\
+         tcp_keepalive_idle=<seconds>,tcp_keepalive_interval=<seconds>,\
+         tcp_keepalive_count=<probes>,\
          num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,\
          vhost_user=on|off,socket=<vhost_user_socket_path>,\
          bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
@@ -1603,6 +1621,12 @@ impl DiskConfig {
         parser
             .add("path")
             .add("nbd")
+            .add("handshake_timeout")
+            .add("socket_timeout")
+            .add("tcp_keepalive")
+            .add("tcp_keepalive_idle")
+            .add("tcp_keepalive_interval")
+            .add("tcp_keepalive_count")
             .add("readonly")
             .add("direct")
             .add("queue_size")
@@ -1631,6 +1655,24 @@ impl DiskConfig {
 
         let path = parser.get("path").map(PathBuf::from);
         let nbd = parser.get("nbd");
+        let handshake_timeout = parser
+            .convert("handshake_timeout")
+            .map_err(Error::ParseDisk)?;
+        let socket_timeout = parser.convert("socket_timeout").map_err(Error::ParseDisk)?;
+        let tcp_keepalive = parser
+            .convert::<Toggle>("tcp_keepalive")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let tcp_keepalive_idle = parser
+            .convert("tcp_keepalive_idle")
+            .map_err(Error::ParseDisk)?;
+        let tcp_keepalive_interval = parser
+            .convert("tcp_keepalive_interval")
+            .map_err(Error::ParseDisk)?;
+        let tcp_keepalive_count = parser
+            .convert("tcp_keepalive_count")
+            .map_err(Error::ParseDisk)?;
         let readonly = parser
             .convert::<Toggle>("readonly")
             .map_err(Error::ParseDisk)?
@@ -1770,6 +1812,12 @@ impl DiskConfig {
             pci_common,
             path,
             nbd,
+            handshake_timeout,
+            socket_timeout,
+            tcp_keepalive,
+            tcp_keepalive_idle,
+            tcp_keepalive_interval,
+            tcp_keepalive_count,
             readonly,
             direct,
             num_queues,
@@ -1788,6 +1836,69 @@ impl DiskConfig {
             lock_granularity,
             guest_block_size,
         })
+    }
+
+    /// Returns the NBD socket options that are set, with their values.
+    ///
+    /// `tcp_keepalive` is reported with the value 1.
+    fn nbd_socket_options(&self) -> Vec<(&'static str, u64)> {
+        [
+            ("handshake_timeout", self.handshake_timeout),
+            ("socket_timeout", self.socket_timeout),
+            ("tcp_keepalive", self.tcp_keepalive.then_some(1)),
+            ("tcp_keepalive_idle", self.tcp_keepalive_idle.map(u64::from)),
+            (
+                "tcp_keepalive_interval",
+                self.tcp_keepalive_interval.map(u64::from),
+            ),
+            (
+                "tcp_keepalive_count",
+                self.tcp_keepalive_count.map(u64::from),
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(name, value)| Some((name, value?)))
+        .collect()
+    }
+
+    fn validate_nbd_socket_options(&self, uri: &NbdUri) -> ValidationResult<()> {
+        for (name, value) in self.nbd_socket_options() {
+            if value == 0 {
+                return Err(ValidationError::NbdOptionZero(name));
+            }
+            if name.starts_with("tcp_") {
+                if uri.socket_path().is_some() {
+                    return Err(ValidationError::NbdTcpKeepaliveWithoutTcp(name));
+                }
+                if !self.tcp_keepalive {
+                    return Err(ValidationError::NbdTcpKeepaliveDisabled(name));
+                }
+            }
+        }
+        for (name, value, max) in [
+            (
+                "tcp_keepalive_idle",
+                self.tcp_keepalive_idle,
+                MAX_TCP_KEEPALIVE_SECS,
+            ),
+            (
+                "tcp_keepalive_interval",
+                self.tcp_keepalive_interval,
+                MAX_TCP_KEEPALIVE_SECS,
+            ),
+            (
+                "tcp_keepalive_count",
+                self.tcp_keepalive_count,
+                MAX_TCP_KEEPALIVE_COUNT,
+            ),
+        ] {
+            if let Some(value) = value
+                && value > max
+            {
+                return Err(ValidationError::NbdOptionTooLarge(name, value, max));
+            }
+        }
+        Ok(())
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
@@ -1849,16 +1960,23 @@ impl DiskConfig {
             if self.path.is_some() || self.vhost_user || self.vhost_socket.is_some() {
                 return Err(ValidationError::NbdWithPathOrVhostUser);
             }
-            nbd.parse::<NbdUri>()
+            let uri = nbd
+                .parse::<NbdUri>()
                 .map_err(|e| ValidationError::InvalidNbdUri(nbd.clone(), e))?;
+            self.validate_nbd_socket_options(&uri)?;
             if !matches!(self.image_type, ImageType::Raw | ImageType::Unknown) {
                 return Err(ValidationError::NbdImageTypeNotRaw(self.image_type));
             }
             if self.direct {
                 return Err(ValidationError::NbdDirectNotSupported);
             }
-        } else if !self.vhost_user && self.image_type == ImageType::Unknown {
-            return Err(ValidationError::ImageTypeRequired);
+        } else {
+            if let Some(&(name, _)) = self.nbd_socket_options().first() {
+                return Err(ValidationError::NbdOptionWithoutNbd(name));
+            }
+            if !self.vhost_user && self.image_type == ImageType::Unknown {
+                return Err(ValidationError::ImageTypeRequired);
+            }
         }
 
         if let Some(guest_block_size) = self.guest_block_size
@@ -4882,6 +5000,12 @@ mod tests {
             pci_common: PciDeviceCommonConfig::default(),
             path: Some(PathBuf::from("/path/to_file")),
             nbd: None,
+            handshake_timeout: None,
+            socket_timeout: None,
+            tcp_keepalive: false,
+            tcp_keepalive_idle: None,
+            tcp_keepalive_interval: None,
+            tcp_keepalive_count: None,
             readonly: false,
             direct: false,
             num_queues: 1,
@@ -4920,6 +5044,25 @@ mod tests {
             DiskConfig {
                 path: None,
                 nbd: Some("nbd://10.0.0.1:10809/vol0".to_owned()),
+                image_type: ImageType::Raw,
+                ..disk_fixture()
+            }
+        );
+        assert_eq!(
+            DiskConfig::parse(
+                "nbd=nbd://10.0.0.1:10809/vol0,handshake_timeout=5,socket_timeout=30,\
+                 tcp_keepalive=on,tcp_keepalive_idle=60,tcp_keepalive_interval=5,\
+                 tcp_keepalive_count=4"
+            )?,
+            DiskConfig {
+                path: None,
+                nbd: Some("nbd://10.0.0.1:10809/vol0".to_owned()),
+                handshake_timeout: Some(5),
+                socket_timeout: Some(30),
+                tcp_keepalive: true,
+                tcp_keepalive_idle: Some(60),
+                tcp_keepalive_interval: Some(5),
+                tcp_keepalive_count: Some(4),
                 image_type: ImageType::Raw,
                 ..disk_fixture()
             }
@@ -6900,9 +7043,146 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         still_valid_config.cpus.max_vcpus = 2;
         still_valid_config.disks = Some(vec![DiskConfig {
             num_queues: 2,
-            ..nbd_disk
+            ..nbd_disk.clone()
         }]);
         still_valid_config.validate().unwrap();
+
+        // NBD socket options.
+        let nbd_tcp_disk = DiskConfig {
+            path: None,
+            nbd: Some("nbd://host/vol0".to_owned()),
+            handshake_timeout: Some(5),
+            socket_timeout: Some(30),
+            tcp_keepalive: true,
+            tcp_keepalive_idle: Some(MAX_TCP_KEEPALIVE_SECS),
+            tcp_keepalive_interval: Some(1),
+            tcp_keepalive_count: Some(MAX_TCP_KEEPALIVE_COUNT),
+            ..disk_fixture()
+        };
+        let mut still_valid_config = valid_config.clone();
+        still_valid_config.disks = Some(vec![nbd_tcp_disk.clone()]);
+        still_valid_config.validate().unwrap();
+
+        // The socket timeouts apply to Unix sockets too.
+        still_valid_config.disks = Some(vec![DiskConfig {
+            nbd: Some("nbd+unix:///vol0?socket=/run/nbd.sock".to_owned()),
+            tcp_keepalive: false,
+            tcp_keepalive_idle: None,
+            tcp_keepalive_interval: None,
+            tcp_keepalive_count: None,
+            ..nbd_tcp_disk.clone()
+        }]);
+        still_valid_config.validate().unwrap();
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.disks = Some(vec![DiskConfig {
+            socket_timeout: Some(30),
+            ..raw_disk_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::NbdOptionWithoutNbd("socket_timeout"))
+        );
+
+        invalid_config.disks = Some(vec![DiskConfig {
+            nbd: Some("nbd+unix:///vol0?socket=/run/nbd.sock".to_owned()),
+            ..nbd_tcp_disk.clone()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::NbdTcpKeepaliveWithoutTcp("tcp_keepalive"))
+        );
+
+        invalid_config.disks = Some(vec![DiskConfig {
+            tcp_keepalive: false,
+            ..nbd_tcp_disk.clone()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::NbdTcpKeepaliveDisabled(
+                "tcp_keepalive_idle"
+            ))
+        );
+
+        for (disk, name) in [
+            (
+                DiskConfig {
+                    handshake_timeout: Some(0),
+                    ..nbd_tcp_disk.clone()
+                },
+                "handshake_timeout",
+            ),
+            (
+                DiskConfig {
+                    socket_timeout: Some(0),
+                    ..nbd_tcp_disk.clone()
+                },
+                "socket_timeout",
+            ),
+            (
+                DiskConfig {
+                    tcp_keepalive_idle: Some(0),
+                    ..nbd_tcp_disk.clone()
+                },
+                "tcp_keepalive_idle",
+            ),
+            (
+                DiskConfig {
+                    tcp_keepalive_interval: Some(0),
+                    ..nbd_tcp_disk.clone()
+                },
+                "tcp_keepalive_interval",
+            ),
+            (
+                DiskConfig {
+                    tcp_keepalive_count: Some(0),
+                    ..nbd_tcp_disk.clone()
+                },
+                "tcp_keepalive_count",
+            ),
+        ] {
+            invalid_config.disks = Some(vec![disk]);
+            assert_eq!(
+                invalid_config.validate(),
+                Err(ValidationError::NbdOptionZero(name))
+            );
+        }
+
+        for (disk, name, value, max) in [
+            (
+                DiskConfig {
+                    tcp_keepalive_idle: Some(MAX_TCP_KEEPALIVE_SECS + 1),
+                    ..nbd_tcp_disk.clone()
+                },
+                "tcp_keepalive_idle",
+                MAX_TCP_KEEPALIVE_SECS + 1,
+                MAX_TCP_KEEPALIVE_SECS,
+            ),
+            (
+                DiskConfig {
+                    tcp_keepalive_interval: Some(MAX_TCP_KEEPALIVE_SECS + 1),
+                    ..nbd_tcp_disk.clone()
+                },
+                "tcp_keepalive_interval",
+                MAX_TCP_KEEPALIVE_SECS + 1,
+                MAX_TCP_KEEPALIVE_SECS,
+            ),
+            (
+                DiskConfig {
+                    tcp_keepalive_count: Some(MAX_TCP_KEEPALIVE_COUNT + 1),
+                    ..nbd_tcp_disk
+                },
+                "tcp_keepalive_count",
+                MAX_TCP_KEEPALIVE_COUNT + 1,
+                MAX_TCP_KEEPALIVE_COUNT,
+            ),
+        ] {
+            invalid_config.disks = Some(vec![disk]);
+            assert_eq!(
+                invalid_config.validate(),
+                Err(ValidationError::NbdOptionTooLarge(name, value, max))
+            );
+        }
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.disks = Some(vec![DiskConfig {

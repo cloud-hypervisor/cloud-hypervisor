@@ -28,7 +28,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 #[cfg(not(target_arch = "riscv64"))]
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use std::{iter, path, result, sync};
 
 use acpi_tables::sdt::GenericAddress;
@@ -43,7 +43,7 @@ use arch::{NumaNodes, layout};
 use block::ImageType;
 use block::error::BlockError;
 use block::factory::{DiskOpenOptions, NbdDiskOpenOptions, open_disk, open_nbd_disk};
-use block::formats::nbd::NbdSocketOptions;
+use block::formats::nbd::{NbdSocketOptions, TcpKeepalive};
 #[cfg(target_arch = "aarch64")]
 use devices::acpi_tad;
 #[cfg(target_arch = "riscv64")]
@@ -2882,7 +2882,17 @@ impl DeviceManager {
                     uri,
                     readonly: disk_cfg.readonly,
                     disable_io_uring: disk_cfg.disable_io_uring,
-                    socket: NbdSocketOptions::default(),
+                    socket: NbdSocketOptions::new(
+                        disk_cfg.handshake_timeout.map(Duration::from_secs),
+                        disk_cfg.socket_timeout.map(Duration::from_secs),
+                        disk_cfg.tcp_keepalive.then(|| {
+                            TcpKeepalive::new(
+                                disk_cfg.tcp_keepalive_idle,
+                                disk_cfg.tcp_keepalive_interval,
+                                disk_cfg.tcp_keepalive_count,
+                            )
+                        }),
+                    ),
                     num_queues: disk_cfg.num_queues,
                 })
                 .map_err(DeviceManagerError::Disk)?;

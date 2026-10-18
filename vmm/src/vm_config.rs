@@ -462,6 +462,20 @@ pub struct DiskConfig {
     pub path: Option<PathBuf>,
     #[serde(default)]
     pub nbd: Option<String>,
+    /// NBD connect and handshake timeout in seconds.
+    #[serde(default)]
+    pub handshake_timeout: Option<u64>,
+    /// NBD socket operation timeout in seconds.
+    #[serde(default)]
+    pub socket_timeout: Option<u64>,
+    #[serde(default)]
+    pub tcp_keepalive: bool,
+    #[serde(default)]
+    pub tcp_keepalive_idle: Option<u32>,
+    #[serde(default)]
+    pub tcp_keepalive_interval: Option<u32>,
+    #[serde(default)]
+    pub tcp_keepalive_count: Option<u32>,
     #[serde(default)]
     pub readonly: bool,
     #[serde(default)]
