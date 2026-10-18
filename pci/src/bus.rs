@@ -7,8 +7,8 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::ops::DerefMut;
-use std::result;
 use std::sync::{Arc, Barrier, Mutex};
+use std::{io, result};
 
 use byteorder::{ByteOrder, LittleEndian};
 use log::warn;
@@ -17,7 +17,9 @@ use vm_device::{BusDevice, BusDeviceSync};
 
 use crate::PciBdf;
 use crate::configuration::{PciBridgeSubclass, PciClassCode, PciConfiguration, PciHeaderType};
-use crate::device::{BarReprogrammingParams, DeviceRelocation, PciDevice};
+use crate::device::{
+    BarReprogrammingParams, DeviceRelocation, InstallParams, PciDevice, ReleaseParams,
+};
 
 /// Denotes the PCI device ID of a bus' root bridge device.
 pub const PCI_ROOT_DEVICE_ID: u8 = 0;
@@ -115,10 +117,6 @@ enum DeviceIdState {
 struct PciBusDevice {
     pci: Arc<Mutex<dyn PciDevice>>,
     /// None only for the host bridge, which has no BARs to relocate.
-    #[expect(
-        dead_code,
-        reason = "read by the install phase, introduced in a later commit"
-    )]
     bus: Option<Arc<dyn BusDeviceSync>>,
 }
 
@@ -253,17 +251,36 @@ impl PciBus {
         }
     }
 
-    fn apply_bar_reprogramming(&self, device: &mut dyn PciDevice, bars: &[BarReprogrammingParams]) {
+    fn apply_bar_reprogramming(
+        &self,
+        device: &mut dyn PciDevice,
+        d_bus: Option<&Arc<dyn BusDeviceSync>>,
+        bars: &[BarReprogrammingParams],
+    ) {
         for bar in bars {
-            if let Err(e) = self.device_reloc.move_bar(
-                bar.bar_idx
-                    .expect("bar_idx is set on detection and on restore"),
-                bar.new_base,
-                device,
-            ) {
-                // Rollback the changes from detect_bar_reprogramming().
+            let bar_idx = bar
+                .bar_idx
+                .expect("bar_idx is set on detection and on restore");
+            let release = ReleaseParams { bar_idx };
+            let install = InstallParams {
+                bar_idx,
+                new_base: bar.new_base,
+            };
+            let result = match d_bus {
+                Some(bus_device) => self
+                    .device_reloc
+                    .move_bar_prepare(device, &release)
+                    .and_then(|()| {
+                        self.device_reloc
+                            .move_bar_commit(device, bus_device, &install)
+                    }),
+                None => Err(io::Error::other(format!(
+                    "no bus handle for BAR {bar_idx} install"
+                ))),
+            };
+            if let Err(e) = result {
                 warn!(
-                    "Failed moving device BAR: {}: 0x{:x}->0x{:x}(0x{:x}), keeping old BAR",
+                    "Failed moving device BAR: {}: 0x{:x}->0x{:x}(0x{:x}); BAR left unmapped, config rolled back to old",
                     e, bar.old_base, bar.new_base, bar.len
                 );
                 device.restore_bar_addr(bar);
@@ -342,7 +359,7 @@ impl PciConfigIo {
             let (bar_reprogram, ret) = device.write_config_register(register, offset, data);
 
             // Move the device's BAR if needed
-            pci_bus.apply_bar_reprogramming(device.deref_mut(), &bar_reprogram);
+            pci_bus.apply_bar_reprogramming(device.deref_mut(), d.bus.as_ref(), &bar_reprogram);
 
             ret
         } else {
@@ -454,7 +471,7 @@ impl PciConfigMmio {
             let (bar_reprogram, _) = device.write_config_register(register, offset, data);
 
             // Move the device's BAR if needed
-            pci_bus.apply_bar_reprogramming(device.deref_mut(), &bar_reprogram);
+            pci_bus.apply_bar_reprogramming(device.deref_mut(), d.bus.as_ref(), &bar_reprogram);
         }
     }
 }
@@ -544,11 +561,19 @@ mod tests {
     struct MockDeviceRelocation;
 
     impl DeviceRelocation for MockDeviceRelocation {
-        fn move_bar(
+        fn move_bar_prepare(
             &self,
-            _bar_idx: usize,
-            _new_base: u64,
             _pci_dev: &mut dyn PciDevice,
+            _params: &crate::ReleaseParams,
+        ) -> Result<(), io::Error> {
+            Ok(())
+        }
+
+        fn move_bar_commit(
+            &self,
+            _pci_dev: &mut dyn PciDevice,
+            _bus_device: &Arc<dyn BusDeviceSync>,
+            _params: &crate::InstallParams,
         ) -> Result<(), io::Error> {
             Ok(())
         }

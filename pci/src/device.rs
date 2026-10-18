@@ -11,7 +11,7 @@ use std::{io, result};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_allocator::{AddressAllocator, SystemAllocator};
-use vm_device::Resource;
+use vm_device::{BusDeviceSync, Resource};
 
 use crate::configuration::{self, PciBarRegionType};
 use crate::{PciBarConfiguration, PciBdf};
@@ -35,6 +35,19 @@ pub enum Error {
     InvalidResource(Resource),
 }
 pub(crate) type Result<T> = result::Result<T, Error>;
+
+/// A BAR whose current location is to be released.
+#[derive(Clone, Copy, Debug)]
+pub struct ReleaseParams {
+    pub bar_idx: usize,
+}
+
+/// A BAR to install at new_base.
+#[derive(Clone, Copy, Debug)]
+pub struct InstallParams {
+    pub bar_idx: usize,
+    pub new_base: u64,
+}
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct BarReprogrammingParams {
@@ -121,13 +134,20 @@ pub trait PciDevice: Send {
 /// This trait defines a set of functions which can be triggered whenever a
 /// PCI device is modified in any way.
 pub trait DeviceRelocation: Send + Sync {
-    /// The BAR needs to be moved to a different location in the guest address
-    /// space. This follows a decision from the software running in the guest.
-    /// The implementation looks up the BAR's address, length and type.
-    fn move_bar(
+    /// Release a BAR's current location: its allocator and bus ranges and
+    /// the device's mappings.
+    fn move_bar_prepare(
         &self,
-        bar_idx: usize,
-        new_base: u64,
         pci_dev: &mut dyn PciDevice,
+        params: &ReleaseParams,
+    ) -> result::Result<(), io::Error>;
+
+    /// Install a released BAR at params.new_base, inserting bus_device on
+    /// the bus.
+    fn move_bar_commit(
+        &self,
+        pci_dev: &mut dyn PciDevice,
+        bus_device: &Arc<dyn BusDeviceSync>,
+        params: &InstallParams,
     ) -> result::Result<(), io::Error>;
 }

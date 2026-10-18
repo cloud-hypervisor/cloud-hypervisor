@@ -97,9 +97,9 @@ use libc::{
 use log::{debug, error, info, warn};
 use net_util::MacAddr;
 use pci::{
-    DeviceRelocation, MmioRegion, PasidCap, PciBarConfiguration, PciBarRegionType, PciBdf,
-    PciDevice, PciExpressCapability, VfioDmaMapping, VfioPciDevice, VfioUserDmaMapping,
-    VfioUserPciDevice, VfioUserPciDeviceError,
+    DeviceRelocation, InstallParams, MmioRegion, PasidCap, PciBarConfiguration, PciBarRegionType,
+    PciBdf, PciDevice, PciExpressCapability, ReleaseParams, VfioDmaMapping, VfioPciDevice,
+    VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError,
 };
 use rate_limiter::group;
 use rate_limiter::group::RateLimiterGroup;
@@ -841,25 +841,19 @@ impl AddressManager {
 }
 
 impl DeviceRelocation for AddressManager {
-    fn move_bar(
+    fn move_bar_prepare(
         &self,
-        bar_idx: usize,
-        new_base: u64,
         pci_dev: &mut dyn PciDevice,
+        params: &ReleaseParams,
     ) -> result::Result<(), io::Error> {
+        let bar_idx = params.bar_idx;
         let BarResource {
-            base: old_base,
+            base,
             len,
             region_type,
         } = self.bar_resource(pci_dev, bar_idx)?;
-
         let segment = usize::from(pci_dev.bdf().segment());
-        self.allocator_free(segment, old_base, len, region_type)?;
-        if let Err(e) = self.allocator_allocate(segment, new_base, len, region_type) {
-            // Keep the BAR at its old address.
-            self.allocator_allocate(segment, old_base, len, region_type)?;
-            return Err(e);
-        }
+        self.allocator_free(segment, base, len, region_type)?;
 
         let bus = match region_type {
             PciBarRegionType::IoRegion => &self.io_bus,
@@ -867,11 +861,42 @@ impl DeviceRelocation for AddressManager {
                 &self.mmio_bus
             }
         };
-        bus.update_range(old_base, len, new_base, len)
-            .map_err(io::Error::other)?;
+        bus.remove(base, len).map_err(io::Error::other)?;
 
-        self.move_bar_prepare_device(pci_dev, bar_idx, old_base)?;
-        self.move_bar_commit_device(pci_dev, bar_idx, new_base)?;
+        self.move_bar_prepare_device(pci_dev, bar_idx, base)
+    }
+
+    fn move_bar_commit(
+        &self,
+        pci_dev: &mut dyn PciDevice,
+        bus_device: &Arc<dyn BusDeviceSync>,
+        params: &InstallParams,
+    ) -> result::Result<(), io::Error> {
+        let InstallParams { bar_idx, new_base } = *params;
+        let BarResource {
+            len, region_type, ..
+        } = self.bar_resource(pci_dev, bar_idx)?;
+        let segment = usize::from(pci_dev.bdf().segment());
+        self.allocator_allocate(segment, new_base, len, region_type)?;
+
+        let bus = match region_type {
+            PciBarRegionType::IoRegion => &self.io_bus,
+            PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
+                &self.mmio_bus
+            }
+        };
+        if let Err(e) = bus.insert(Arc::clone(bus_device), new_base, len) {
+            self.allocator_free(segment, new_base, len, region_type)?;
+            return Err(io::Error::other(e));
+        }
+
+        if let Err(e) = self.move_bar_commit_device(pci_dev, params) {
+            if let Err(remove_err) = bus.remove(new_base, len) {
+                error!("Failed unwinding bus range for BAR {bar_idx}: {remove_err}");
+            }
+            self.allocator_free(segment, new_base, len, region_type)?;
+            return Err(e);
+        }
 
         // Record the new base only once the move has succeeded.
         self.update_bar_base(pci_dev, bar_idx, new_base)
@@ -925,9 +950,10 @@ impl AddressManager {
     fn move_bar_commit_device(
         &self,
         pci_dev: &mut dyn PciDevice,
-        bar_idx: usize,
-        new_base: u64,
+        params: &InstallParams,
     ) -> result::Result<(), io::Error> {
+        let &InstallParams { bar_idx, new_base } = params;
+
         pci_dev.move_bar_commit(bar_idx, new_base)?;
 
         let any_dev = pci_dev.as_any_mut();
