@@ -95,7 +95,16 @@ struct PvmemcontrolTransportRegisterResponse {
 union PvmemcontrolTransportUnion {
     register: PvmemcontrolTransportRegister,
     register_response: PvmemcontrolTransportRegisterResponse,
-    unit: (),
+}
+
+impl Default for PvmemcontrolTransportUnion {
+    fn default() -> Self {
+        PvmemcontrolTransportUnion {
+            register: PvmemcontrolTransportRegister {
+                buf_phys_addr: 0.into(),
+            },
+        }
+    }
 }
 
 #[repr(C)]
@@ -103,6 +112,7 @@ union PvmemcontrolTransportUnion {
 struct PvmemcontrolTransport {
     payload: PvmemcontrolTransportUnion,
     command: PvmemcontrolTransportCommand,
+    _padding: u32,
 }
 
 const PVMEMCONTROL_DEVICE_MMIO_SIZE: u64 = size_of::<PvmemcontrolTransport>() as u64;
@@ -111,15 +121,17 @@ const PVMEMCONTROL_DEVICE_MMIO_ALIGN: u64 = align_of::<PvmemcontrolTransport>() 
 impl PvmemcontrolTransport {
     fn ack() -> Self {
         PvmemcontrolTransport {
-            payload: PvmemcontrolTransportUnion { unit: () },
+            payload: PvmemcontrolTransportUnion::default(),
             command: PvmemcontrolTransportCommand::Ack,
+            _padding: 0,
         }
     }
 
     fn error() -> Self {
         PvmemcontrolTransport {
-            payload: PvmemcontrolTransportUnion { unit: () },
+            payload: PvmemcontrolTransportUnion::default(),
             command: PvmemcontrolTransportCommand::Error,
+            _padding: 0,
         }
     }
 
@@ -132,6 +144,7 @@ impl PvmemcontrolTransport {
                 },
             },
             command: PvmemcontrolTransportCommand::Ack,
+            _padding: 0,
         }
     }
 
@@ -943,5 +956,22 @@ mod tests {
         let mut buf = vec![0_u8; REGION_SIZE];
         file.read_exact_at(&mut buf, REGION_SIZE as u64).unwrap();
         assert!(buf.iter().all(|&b| b == 0xaa));
+    }
+
+    // The guest can read every byte of the transport, so a transport that
+    // carries no payload must read back as zeros around the command word.
+    #[test]
+    fn empty_transport_reads_back_zeroed() {
+        for dev in [PvmemcontrolDevice::reset(), PvmemcontrolDevice::error()] {
+            let mut data = [0xffu8; PVMEMCONTROL_DEVICE_MMIO_SIZE as usize];
+            dev.read_transport(0, &mut data);
+
+            assert_eq!(
+                u32::from_ne_bytes(data[8..12].try_into().unwrap()),
+                dev.transport.command as u32
+            );
+            assert!(data[..8].iter().all(|&b| b == 0), "payload: {data:02x?}");
+            assert!(data[12..].iter().all(|&b| b == 0), "padding: {data:02x?}");
+        }
     }
 }
