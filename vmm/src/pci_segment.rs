@@ -575,11 +575,8 @@ mod tests {
         fn move_bar(
             &self,
             _bar_idx: usize,
-            _old_base: u64,
             _new_base: u64,
-            _len: u64,
             _pci_dev: &mut dyn pci::PciDevice,
-            _region_type: pci::PciBarRegionType,
         ) -> Result<(), io::Error> {
             Ok(())
         }
