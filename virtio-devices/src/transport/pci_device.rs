@@ -17,7 +17,7 @@ use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
 use log::{debug, error, info, warn};
 use pci::{
-    BarReprogrammingParams, MaybeMutInterruptSourceGroup, MsixCap, MsixConfig, PciBarConfiguration,
+    BarRelocation, MaybeMutInterruptSourceGroup, MsixCap, MsixConfig, PciBarConfiguration,
     PciBarRegionType, PciBdf, PciCapability, PciCapabilityId, PciClassCode, PciConfiguration,
     PciDevice, PciDeviceError, PciHeaderType, PciMassStorageSubclass, PciNetworkControllerSubclass,
     PciSubclass,
@@ -992,7 +992,7 @@ impl PciDevice for VirtioPciDevice {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>) {
+    ) -> (BarRelocation, Option<Arc<Barrier>>) {
         // Handle the special case where the capability VIRTIO_PCI_CAP_PCI_CFG
         // is accessed. This capability has a special meaning as it allows the
         // guest to access other capabilities without mapping the PCI BAR.
@@ -1002,7 +1002,10 @@ impl PciDevice for VirtioPciDevice {
                 <= self.cap_pci_cfg_info.offset + self.cap_pci_cfg_info.cap.bytes().len()
         {
             let offset = base + offset as usize - self.cap_pci_cfg_info.offset;
-            (Vec::new(), self.write_cap_pci_cfg(offset, data))
+            (
+                BarRelocation::default(),
+                self.write_cap_pci_cfg(offset, data),
+            )
         } else {
             (
                 self.configuration

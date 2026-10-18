@@ -4,8 +4,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use std::result;
 use std::sync::{Arc, Mutex};
-use std::{mem, result};
 
 use byteorder::{ByteOrder, LittleEndian};
 use log::{debug, info, warn};
@@ -15,7 +15,7 @@ use vm_device::PciBarType;
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
 
 use crate::MsixConfig;
-use crate::device::BarReprogrammingParams;
+use crate::device::{BarRelocation, BarReprogrammingParams, InstallParams, ReleaseParams};
 
 // The number of 32bit registers in the config space, 4096 bytes.
 const NUM_CONFIGURATION_REGISTERS: usize = 1024;
@@ -1052,9 +1052,9 @@ impl PciConfiguration {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> Vec<BarReprogrammingParams> {
+    ) -> BarRelocation {
         if offset as usize + data.len() > 4 {
-            return Vec::new();
+            return BarRelocation::default();
         }
 
         // Handle potential write to MSI-X message control register
@@ -1088,29 +1088,36 @@ impl PciConfiguration {
             self.pending_bar_reprogram.push(param);
         }
 
-        self.drain_pending_bar_reprogram()
+        let mut reloc = BarRelocation::default();
+        self.drain_pending_relocation(&mut reloc);
+        reloc
     }
 
-    // Return the pending BAR moves once memory decoding (MSE) is enabled.
-    pub(crate) fn drain_pending_bar_reprogram(&mut self) -> Vec<BarReprogrammingParams> {
+    /// Add the pending BAR moves to `reloc` once memory decoding (MSE) is
+    /// enabled.
+    pub(crate) fn drain_pending_relocation(&mut self, reloc: &mut BarRelocation) {
         if !self.pending_bar_reprogram.is_empty() {
-            // Return bar reprogramming only if the MSE bit is enabled;
             if self.read_config_register(COMMAND_REG) & COMMAND_REG_MEMORY_SPACE_MASK
                 == COMMAND_REG_MEMORY_SPACE_MASK
             {
+                for params in self.pending_bar_reprogram.drain(..) {
+                    let bar_idx = params
+                        .bar_idx
+                        .expect("bar_idx is set on detection and on restore");
+                    reloc.release.push(ReleaseParams { bar_idx });
+                    reloc.install.push(InstallParams {
+                        bar_idx,
+                        new_base: params.new_base,
+                    });
+                }
+                info!("BAR relocation plan: {reloc:x?}");
+            } else {
                 info!(
-                    "BAR reprogramming parameter is returned: {:x?}",
+                    "MSE bit is disabled. No BAR relocation plan is returned: {:x?}",
                     self.pending_bar_reprogram
                 );
-                return mem::take(&mut self.pending_bar_reprogram);
             }
-            info!(
-                "MSE bit is disabled. No BAR reprogramming parameter is returned: {:x?}",
-                self.pending_bar_reprogram
-            );
         }
-
-        Vec::new()
     }
 
     pub fn read_config_register(&self, reg_idx: usize) -> u32 {
@@ -1626,11 +1633,10 @@ mod tests {
 
         let reprogram = cfg.write_config_register(BAR0_REG + 1, 0, &0xe000_0000u32.to_le_bytes());
 
-        assert_eq!(reprogram.len(), 1);
-        assert_eq!(reprogram[0].bar_idx, Some(1));
-        assert_eq!(reprogram[0].old_base, 0xd000_0000);
-        assert_eq!(reprogram[0].new_base, 0xe000_0000);
-        assert_eq!(reprogram[0].len, RELOC_BAR_SIZE);
+        assert_eq!(reprogram.install.len(), 1);
+        assert_eq!(reprogram.install[0].bar_idx, 1);
+        assert_eq!(reprogram.release[0].bar_idx, 1);
+        assert_eq!(reprogram.install[0].new_base, 0xe000_0000);
     }
 
     #[test]
@@ -1640,16 +1646,16 @@ mod tests {
         add_reloc_bar(&mut cfg, 1, 0xd000_0000);
 
         let aliased = cfg.write_config_register(BAR0_REG, 0, &0xd000_0000u32.to_le_bytes());
-        assert_eq!(aliased.len(), 1);
-        assert_eq!(aliased[0].bar_idx, Some(0));
+        assert_eq!(aliased.install.len(), 1);
+        assert_eq!(aliased.install[0].bar_idx, 0);
         assert_eq!(cfg.get_bar_addr(0), cfg.get_bar_addr(1));
 
         let reprogram = cfg.write_config_register(BAR0_REG + 1, 0, &0xe000_0000u32.to_le_bytes());
 
-        assert_eq!(reprogram.len(), 1);
-        assert_eq!(reprogram[0].bar_idx, Some(1));
-        assert_eq!(reprogram[0].old_base, 0xd000_0000);
-        assert_eq!(reprogram[0].new_base, 0xe000_0000);
+        assert_eq!(reprogram.install.len(), 1);
+        assert_eq!(reprogram.install[0].bar_idx, 1);
+        assert_eq!(reprogram.release[0].bar_idx, 1);
+        assert_eq!(reprogram.install[0].new_base, 0xe000_0000);
         assert_eq!(cfg.get_bar_addr(0), 0xd000_0000);
     }
 
@@ -1675,10 +1681,10 @@ mod tests {
         // The high bar address triggers 64-bit bar move.
         let reprogram = cfg.write_config_register(BAR0_REG + 1, 0, &8u32.to_le_bytes());
 
-        assert_eq!(reprogram.len(), 1);
-        assert_eq!(reprogram[0].bar_idx, Some(0));
-        assert_eq!(reprogram[0].old_base, 0x4_0000_0000);
-        assert_eq!(reprogram[0].new_base, 0x8_0000_0000);
+        assert_eq!(reprogram.install.len(), 1);
+        assert_eq!(reprogram.install[0].bar_idx, 0);
+        assert_eq!(reprogram.release[0].bar_idx, 0);
+        assert_eq!(reprogram.install[0].new_base, 0x8_0000_0000);
     }
 
     #[test]
@@ -1696,10 +1702,10 @@ mod tests {
 
         let reprogram = cfg.write_config_register(ROM_BAR_REG, 0, &0xf100_0000u32.to_le_bytes());
 
-        assert_eq!(reprogram.len(), 1);
-        assert_eq!(reprogram[0].bar_idx, Some(ROM_BAR_IDX));
-        assert_eq!(reprogram[0].old_base, 0xf000_0000);
-        assert_eq!(reprogram[0].new_base, 0xf100_0000);
+        assert_eq!(reprogram.install.len(), 1);
+        assert_eq!(reprogram.install[0].bar_idx, ROM_BAR_IDX);
+        assert_eq!(reprogram.release[0].bar_idx, ROM_BAR_IDX);
+        assert_eq!(reprogram.install[0].new_base, 0xf100_0000);
     }
 
     fn restore_legacy(cfg: &PciConfiguration) -> Vec<BarReprogrammingParams> {

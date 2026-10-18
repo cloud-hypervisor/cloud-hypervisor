@@ -11,9 +11,8 @@ use anyhow::anyhow;
 use event_monitor::event;
 use log::{debug, info};
 use pci::{
-    BarReprogrammingParams, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable,
-    PciBarRegionType, PciBdf, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
-    PciHeaderType, PciSubclass,
+    BarRelocation, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType,
+    PciBdf, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciSubclass,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -160,7 +159,7 @@ impl PciDevice for PvPanicDevice {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>) {
+    ) -> (BarRelocation, Option<Arc<Barrier>>) {
         (
             self.configuration
                 .write_config_register(reg_idx, offset, data),

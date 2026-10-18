@@ -59,6 +59,18 @@ pub struct BarReprogrammingParams {
     pub region_type: PciBarRegionType,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct BarRelocation {
+    pub release: Vec<ReleaseParams>,
+    pub install: Vec<InstallParams>,
+}
+
+impl BarRelocation {
+    pub fn is_empty(&self) -> bool {
+        self.release.is_empty() && self.install.is_empty()
+    }
+}
+
 pub trait PciDevice: Send {
     /// Allocates the needed PCI BARs space using the `allocate` function which takes a size and
     /// returns an address. Returns a Vec of (GuestAddress, GuestUsize) tuples.
@@ -90,7 +102,7 @@ pub trait PciDevice: Send {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>);
+    ) -> (BarRelocation, Option<Arc<Barrier>>);
     /// Gets a register from the configuration space.
     /// * `reg_idx` - The index of the config register to read.
     fn read_config_register(&mut self, reg_idx: usize) -> u32;

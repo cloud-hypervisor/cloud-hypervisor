@@ -63,9 +63,9 @@ use crate::mmap::MmapRegion;
 use crate::msi::{MSI_CONFIG_ID, MsiConfigState};
 use crate::msix::{MaybeMutInterruptSourceGroup, MsixConfigState};
 use crate::{
-    BarReprogrammingParams, MSIX_CONFIG_ID, MSIX_TABLE_ENTRY_SIZE, MsiCap, MsiConfig, MsixCap,
-    MsixConfig, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType,
-    PciBdf, PciCapabilityId, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
+    BarRelocation, MSIX_CONFIG_ID, MSIX_TABLE_ENTRY_SIZE, MsiCap, MsiConfig, MsixCap, MsixConfig,
+    PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciBdf,
+    PciCapabilityId, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
     PciExpressCapability, PciExpressCapabilityId, PciHeaderType, PciSubclass,
     msi_num_enabled_vectors,
 };
@@ -1632,7 +1632,7 @@ impl VfioCommon {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>) {
+    ) -> (BarRelocation, Option<Arc<Barrier>>) {
         // When the guest wants to write to a BAR, we trap it into
         // our local configuration space. We're not reprogramming
         // VFIO device.
@@ -1653,7 +1653,7 @@ impl VfioCommon {
             patch.write(offset, data);
 
             if patch.mask == 0xffff_ffff {
-                return (Vec::new(), None);
+                return (BarRelocation::default(), None);
             }
         }
 
@@ -1710,9 +1710,10 @@ impl VfioCommon {
                 .write_reg(reg_idx, LittleEndian::read_u32(data)),
             _ => {}
         }
-        let ret_param = self.configuration.drain_pending_bar_reprogram();
+        let mut reloc = BarRelocation::default();
+        self.configuration.drain_pending_relocation(&mut reloc);
 
-        (ret_param, None)
+        (reloc, None)
     }
 
     pub(crate) fn read_config_register(&mut self, reg_idx: usize) -> u32 {
@@ -2534,7 +2535,7 @@ impl PciDevice for VfioPciDevice {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>) {
+    ) -> (BarRelocation, Option<Arc<Barrier>>) {
         self.common.write_config_register(reg_idx, offset, data)
     }
 

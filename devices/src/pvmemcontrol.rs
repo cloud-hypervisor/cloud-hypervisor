@@ -13,8 +13,8 @@ use std::{fmt, io, mem, ptr, result};
 use log::{debug, warn};
 use num_enum::TryFromPrimitive;
 use pci::{
-    BarReprogrammingParams, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciBdf,
-    PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciSubclass,
+    BarRelocation, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciBdf, PciClassCode,
+    PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciSubclass,
 };
 use thiserror::Error;
 use vm_allocator::page_size::get_page_size;
@@ -775,7 +775,7 @@ impl PciDevice for PvmemcontrolPciDevice {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>) {
+    ) -> (BarRelocation, Option<Arc<Barrier>>) {
         (
             self.configuration
                 .write_config_register(reg_idx, offset, data),
