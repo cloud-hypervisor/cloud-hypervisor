@@ -51,8 +51,8 @@ impl disk_file::PhysicalSize for VmdkDisk {
 
 // Expose the descriptor file's fd for advisory image locking.
 impl disk_file::DiskFd for VmdkDisk {
-    fn fd(&self) -> BorrowedDiskFd<'_> {
-        BorrowedDiskFd::new(self.inner.as_raw_fd())
+    fn fd(&self) -> Result<BorrowedDiskFd<'_>, disk_file::DiskFdError> {
+        Ok(BorrowedDiskFd::new(self.inner.as_raw_fd()))
     }
 }
 
@@ -258,7 +258,7 @@ mod tests {
 
         let disk = VmdkDisk::new(file, &path, false, false).unwrap();
 
-        assert_eq!(disk.fd().as_raw_fd(), expected);
+        assert_eq!(disk.fd().unwrap().as_raw_fd(), expected);
     }
 
     // An out-of-range request must be rejected, not abort while formatting

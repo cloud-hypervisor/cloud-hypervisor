@@ -962,7 +962,7 @@ impl Block {
     }
 
     /// Returns the granularity for the advisory lock for this disk.
-    fn lock_granularity(&mut self) -> LockGranularity {
+    fn lock_granularity(&self) -> LockGranularity {
         match self.lock_granularity_choice {
             LockGranularityChoice::Full => LockGranularity::WholeFile,
             LockGranularityChoice::ByteRange => {
@@ -992,6 +992,14 @@ impl Block {
 
     /// Tries to set an advisory lock for the corresponding disk image.
     pub fn try_lock_image(&mut self) -> Result<()> {
+        let Ok(fd) = self.disk_image.fd() else {
+            info!(
+                "Disk image id={},path={} has no host file descriptor, skipping advisory lock",
+                self.id,
+                self.disk_path.display()
+            );
+            return Ok(());
+        };
         let lock_type = match self.read_only() {
             true => LockType::Read,
             false => LockType::Write,
@@ -1002,7 +1010,6 @@ impl Block {
             self.id,
             self.disk_path.display()
         );
-        let fd = self.disk_image.fd();
         fcntl::try_acquire_lock(&fd, lock_type, granularity).map_err(|error| {
             let current_lock = get_lock_state(&fd, granularity);
             // Don't propagate the error to the outside, as it is not useful at all. Instead,
@@ -1028,12 +1035,14 @@ impl Block {
 
     /// Releases the advisory lock held for the corresponding disk image.
     pub fn unlock_image(&mut self) -> Result<()> {
+        let Ok(fd) = self.disk_image.fd() else {
+            return Ok(());
+        };
         let granularity = self.lock_granularity();
 
         // It is very unlikely that this fails;
         // Should we remove the Result to simplify the error propagation on
         // higher levels?
-        let fd = self.disk_image.fd();
         fcntl::clear_lock(&fd, granularity).map_err(|error| Error::LockDiskImage {
             path: self.disk_path.clone(),
             error,

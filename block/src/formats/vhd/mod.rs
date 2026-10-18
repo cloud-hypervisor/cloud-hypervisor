@@ -78,8 +78,8 @@ impl disk_file::PhysicalSize for VhdDisk {
 }
 
 impl disk_file::DiskFd for VhdDisk {
-    fn fd(&self) -> BorrowedDiskFd<'_> {
-        BorrowedDiskFd::new(self.inner.as_raw_fd())
+    fn fd(&self) -> Result<BorrowedDiskFd<'_>, disk_file::DiskFdError> {
+        Ok(BorrowedDiskFd::new(self.inner.as_raw_fd()))
     }
 }
 

@@ -289,8 +289,8 @@ impl disk_file::PhysicalSize for QcowDisk {
 }
 
 impl disk_file::DiskFd for QcowDisk {
-    fn fd(&self) -> BorrowedDiskFd<'_> {
-        BorrowedDiskFd::new(self.data_raw_file.as_raw_fd())
+    fn fd(&self) -> Result<BorrowedDiskFd<'_>, disk_file::DiskFdError> {
+        Ok(BorrowedDiskFd::new(self.data_raw_file.as_raw_fd()))
     }
 }
 

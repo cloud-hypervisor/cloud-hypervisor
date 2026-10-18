@@ -36,6 +36,8 @@
 
 use std::fmt::Debug;
 
+use thiserror::Error;
+
 use crate::async_io::{AsyncIo, BorrowedDiskFd};
 use crate::{BlockResult, DiskTopology};
 
@@ -52,9 +54,19 @@ pub trait PhysicalSize: Send + Debug {
 }
 
 /// Backing file descriptor access for disk images backed by a file.
+/// Error returned by [`DiskFd::fd`].
+#[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiskFdError {
+    /// The disk is not backed by a host file, e.g. a network block device.
+    #[error("Disk has no host file descriptor")]
+    Unsupported,
+}
+
 pub trait DiskFd: Send + Debug {
-    /// Borrows the underlying file descriptor.
-    fn fd(&self) -> BorrowedDiskFd<'_>;
+    /// Borrows the host file descriptor backing the disk.
+    ///
+    /// Returns [`DiskFdError::Unsupported`] for disks without one.
+    fn fd(&self) -> Result<BorrowedDiskFd<'_>, DiskFdError>;
 }
 
 /// Sector and cluster geometry of a disk image.

@@ -81,8 +81,8 @@ impl disk_file::PhysicalSize for RawDisk {
 }
 
 impl disk_file::DiskFd for RawDisk {
-    fn fd(&self) -> BorrowedDiskFd<'_> {
-        BorrowedDiskFd::new(self.file.as_raw_fd())
+    fn fd(&self) -> Result<BorrowedDiskFd<'_>, disk_file::DiskFdError> {
+        Ok(BorrowedDiskFd::new(self.file.as_raw_fd()))
     }
 }
 
