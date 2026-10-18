@@ -17,10 +17,10 @@ use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
 use log::{debug, error, info, warn};
 use pci::{
-    BarRelocation, MaybeMutInterruptSourceGroup, MsixCap, MsixConfig, PciBarConfiguration,
-    PciBarRegionType, PciBdf, PciCapability, PciCapabilityId, PciClassCode, PciConfiguration,
-    PciDevice, PciDeviceError, PciHeaderType, PciMassStorageSubclass, PciNetworkControllerSubclass,
-    PciSubclass,
+    BarRelocation, InstallParams, MaybeMutInterruptSourceGroup, MsixCap, MsixConfig,
+    PciBarConfiguration, PciBarRegionType, PciBdf, PciCapability, PciCapabilityId, PciClassCode,
+    PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciMassStorageSubclass,
+    PciNetworkControllerSubclass, PciSubclass,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -1196,6 +1196,10 @@ impl PciDevice for VirtioPciDevice {
 
     fn on_bar_installed(&mut self, bar_idx: usize) {
         self.configuration.on_bar_installed(bar_idx);
+    }
+
+    fn pending_bar_installs(&self) -> Vec<InstallParams> {
+        self.configuration.pending_bar_installs()
     }
 
     fn read_bar(&mut self, _base: u64, offset: u64, data: &mut [u8]) {

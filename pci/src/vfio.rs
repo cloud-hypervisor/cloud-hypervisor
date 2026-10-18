@@ -63,10 +63,10 @@ use crate::mmap::MmapRegion;
 use crate::msi::{MSI_CONFIG_ID, MsiConfigState};
 use crate::msix::{MaybeMutInterruptSourceGroup, MsixConfigState};
 use crate::{
-    BarRelocation, MSIX_CONFIG_ID, MSIX_TABLE_ENTRY_SIZE, MsiCap, MsiConfig, MsixCap, MsixConfig,
-    PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciBdf,
-    PciCapabilityId, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
-    PciExpressCapability, PciExpressCapabilityId, PciHeaderType, PciSubclass,
+    BarRelocation, InstallParams, MSIX_CONFIG_ID, MSIX_TABLE_ENTRY_SIZE, MsiCap, MsiConfig,
+    MsixCap, MsixConfig, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable,
+    PciBarRegionType, PciBdf, PciCapabilityId, PciClassCode, PciConfiguration, PciDevice,
+    PciDeviceError, PciExpressCapability, PciExpressCapabilityId, PciHeaderType, PciSubclass,
     msi_num_enabled_vectors,
 };
 
@@ -2675,6 +2675,10 @@ iova 0x{:x}, size 0x{:x}: {}, ",
 
     fn on_bar_installed(&mut self, bar_idx: usize) {
         self.common.configuration.on_bar_installed(bar_idx);
+    }
+
+    fn pending_bar_installs(&self) -> Vec<InstallParams> {
+        self.common.configuration.pending_bar_installs()
     }
 
     fn as_any_mut(&mut self) -> &mut dyn Any {

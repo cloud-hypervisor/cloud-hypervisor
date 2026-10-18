@@ -13,8 +13,8 @@ use std::{fmt, io, mem, ptr, result};
 use log::{debug, warn};
 use num_enum::TryFromPrimitive;
 use pci::{
-    BarRelocation, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciBdf, PciClassCode,
-    PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciSubclass,
+    BarRelocation, InstallParams, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType,
+    PciBdf, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciSubclass,
 };
 use thiserror::Error;
 use vm_allocator::page_size::get_page_size;
@@ -793,6 +793,10 @@ impl PciDevice for PvmemcontrolPciDevice {
 
     fn on_bar_installed(&mut self, bar_idx: usize) {
         self.configuration.on_bar_installed(bar_idx);
+    }
+
+    fn pending_bar_installs(&self) -> Vec<InstallParams> {
+        self.configuration.pending_bar_installs()
     }
 
     fn as_any_mut(&mut self) -> &mut dyn Any {

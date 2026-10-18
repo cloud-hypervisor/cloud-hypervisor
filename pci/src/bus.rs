@@ -176,6 +176,23 @@ impl PciBus {
         Ok(())
     }
 
+    fn retry_pending_installs(&self, writer_device_id: u8) {
+        let mut ids: Vec<u8> = self.devices.keys().copied().collect();
+        ids.sort_unstable();
+        for id in ids {
+            if id == writer_device_id {
+                continue;
+            }
+            let d = &self.devices[&id];
+            let mut device = d.pci.lock().unwrap();
+            let reloc = BarRelocation {
+                release: Vec::new(),
+                install: device.pending_bar_installs(),
+            };
+            self.apply_bar_relocation(device.deref_mut(), d.bus.as_ref(), &reloc);
+        }
+    }
+
     pub fn remove_by_device(&mut self, device: &Arc<Mutex<dyn PciDevice>>) -> Result<()> {
         self.devices.retain(|_, dev| !Arc::ptr_eq(&dev.pci, device));
         Ok(())
@@ -360,14 +377,20 @@ impl PciConfigIo {
             return None;
         }
 
+        let device_id = device as u8;
         let pci_bus = self.pci_bus.as_ref().lock().unwrap();
-        if let Some(d) = pci_bus.devices.get(&(device as u8)) {
+        if let Some(d) = pci_bus.devices.get(&device_id) {
             let mut device = d.pci.lock().unwrap();
 
             // Update the register value
             let (reloc, ret) = device.write_config_register(register, offset, data);
 
             pci_bus.apply_bar_relocation(device.deref_mut(), d.bus.as_ref(), &reloc);
+            // Never hold two device locks at once.
+            drop(device);
+            if !reloc.release.is_empty() {
+                pci_bus.retry_pending_installs(device_id);
+            }
 
             ret
         } else {
@@ -471,14 +494,20 @@ impl PciConfigMmio {
             return;
         }
 
+        let device_id = device as u8;
         let pci_bus = self.pci_bus.lock().unwrap();
-        if let Some(d) = pci_bus.devices.get(&(device as u8)) {
+        if let Some(d) = pci_bus.devices.get(&device_id) {
             let mut device = d.pci.lock().unwrap();
 
             // Update the register value
             let (reloc, _) = device.write_config_register(register, offset, data);
 
             pci_bus.apply_bar_relocation(device.deref_mut(), d.bus.as_ref(), &reloc);
+            // Never hold two device locks at once.
+            drop(device);
+            if !reloc.release.is_empty() {
+                pci_bus.retry_pending_installs(device_id);
+            }
         }
     }
 }

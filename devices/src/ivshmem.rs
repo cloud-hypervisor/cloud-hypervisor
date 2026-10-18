@@ -12,8 +12,9 @@ use std::{io, result};
 use anyhow::anyhow;
 use log::{debug, error};
 use pci::{
-    BarRelocation, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType,
-    PciBdf, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciSubclass,
+    BarRelocation, InstallParams, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable,
+    PciBarRegionType, PciBdf, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
+    PciHeaderType, PciSubclass,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -393,6 +394,10 @@ impl PciDevice for IvshmemDevice {
 
     fn on_bar_installed(&mut self, bar_idx: usize) {
         self.configuration.on_bar_installed(bar_idx);
+    }
+
+    fn pending_bar_installs(&self) -> Vec<InstallParams> {
+        self.configuration.pending_bar_installs()
     }
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
