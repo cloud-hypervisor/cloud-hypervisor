@@ -850,10 +850,6 @@ impl PciDevice for PvmemcontrolPciDevice {
         self.configuration.read_config_register(reg_idx)
     }
 
-    fn restore_bar_addr(&mut self, params: &BarReprogrammingParams) {
-        self.configuration.restore_bar_addr(params);
-    }
-
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
