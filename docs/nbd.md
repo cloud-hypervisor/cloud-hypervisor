@@ -79,6 +79,43 @@ are split into several NBD commands.
 Discard and write zeroes are offered to the guest when the server supports
 both `NBD_CMD_TRIM` and `NBD_CMD_WRITE_ZEROES`.
 
+## Timeouts and keep-alive
+
+By default a connection waits for the server indefinitely once the
+handshake is done. The following `--disk` options bound how long a disk
+waits for an unresponsive server. They are also available in the
+`DiskConfig` of the HTTP API.
+
+| Option                             | Default | Meaning                                                             |
+| ---------------------------------- | ------- | ------------------------------------------------------------------- |
+| `handshake_timeout=<seconds>`      | 10      | Bounds each TCP connect attempt and every handshake read or write.  |
+| `socket_timeout=<seconds>`         | none    | Bounds every send and receive after the handshake.                  |
+| `tcp_keepalive=on\|off`            | off     | Enables TCP keep-alive (`SO_KEEPALIVE`).                            |
+| `tcp_keepalive_idle=<seconds>`     | 30      | Idle time before the first probe (`TCP_KEEPIDLE`).                  |
+| `tcp_keepalive_interval=<seconds>` | 10      | Time between probes (`TCP_KEEPINTVL`).                              |
+| `tcp_keepalive_count=<probes>`     | 3       | Unanswered probes before the connection is dropped (`TCP_KEEPCNT`). |
+
+```shell
+--disk nbd=nbd://192.168.0.10/vol0,socket_timeout=60,tcp_keepalive=on
+```
+
+- `socket_timeout` applies to a single socket operation, and only while
+  requests are in flight, so an idle disk never times out. A server that
+  makes no progress for that long, for example on a slow flush, fails the
+  connection, so the value should be generous.
+- TCP keep-alive detects a server that disappeared without closing the
+  connection, for example after a host crash or a network partition.
+  With the defaults this takes about a minute. Linux only sends probes
+  while no data is unacknowledged, so a server that disappears while a
+  write is in transit is detected by TCP retransmission instead, which
+  takes about 15 minutes by default; `socket_timeout` covers that case.
+- When a timeout expires or keep-alive gives up, the connection is
+  treated as lost (see [Limitations](#limitations)).
+- The options require `nbd`, and are rejected when set to 0. The
+  `tcp_keepalive_*` options require `tcp_keepalive=on`, and all keep-alive
+  options require a TCP URI. Linux limits `tcp_keepalive_idle` and
+  `tcp_keepalive_interval` to 32767 and `tcp_keepalive_count` to 127.
+
 ## Snapshot, restore and live migration
 
 The disk contents live on the server and are not part of a snapshot or of
