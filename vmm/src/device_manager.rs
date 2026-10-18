@@ -43,6 +43,7 @@ use arch::{NumaNodes, layout};
 use block::ImageType;
 use block::error::BlockError;
 use block::factory::{DiskOpenOptions, NbdDiskOpenOptions, open_disk, open_nbd_disk};
+use block::formats::nbd::NbdSocketOptions;
 #[cfg(target_arch = "aarch64")]
 use devices::acpi_tad;
 #[cfg(target_arch = "riscv64")]
@@ -2881,6 +2882,7 @@ impl DeviceManager {
                     uri,
                     readonly: disk_cfg.readonly,
                     disable_io_uring: disk_cfg.disable_io_uring,
+                    socket: NbdSocketOptions::default(),
                     num_queues: disk_cfg.num_queues,
                 })
                 .map_err(DeviceManagerError::Disk)?;

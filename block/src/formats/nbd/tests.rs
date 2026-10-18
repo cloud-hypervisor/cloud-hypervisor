@@ -10,11 +10,12 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::slice;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 use vmm_sys_util::tempdir::TempDir;
 
-use super::conn::NbdConn;
 use super::conn::tests::conn_from_unix;
+use super::conn::{NbdConn, NbdSocketOptions};
 use super::engine_sync::NbdSync;
 use super::handshake::NbdExportInfo;
 use super::handshake::tests::ServerHandshake;
@@ -36,6 +37,13 @@ struct ServerConfig {
     fail_offset: Option<(u64, u32)>,
     /// Close the connection after this many requests.
     close_after: Option<usize>,
+    /// Stop replying, keeping the connection open, after this many
+    /// requests.
+    stall_after: Option<usize>,
+    /// Wait this long before sending each batch of replies.
+    reply_delay: Option<Duration>,
+    /// Socket timeout of the client connection.
+    socket_timeout: Option<Duration>,
 }
 
 #[derive(Default)]
@@ -54,6 +62,7 @@ impl FakeServer {
         let (client, server) = UnixStream::pair().unwrap();
         let data = Arc::new(Mutex::new((0..SIZE).map(|i| i as u8).collect::<Vec<_>>()));
         let log = Arc::new(Mutex::new(ServerLog::default()));
+        let socket_timeout = config.socket_timeout;
         let handle = {
             let data = Arc::clone(&data);
             let log = Arc::clone(&log);
@@ -65,7 +74,7 @@ impl FakeServer {
                 log,
                 handle: Some(handle),
             },
-            conn_from_unix(client, info),
+            conn_from_unix(client, info, socket_timeout),
         )
     }
 
@@ -124,6 +133,10 @@ fn serve(mut s: UnixStream, config: &ServerConfig, data: &Mutex<Vec<u8>>, log: &
         if config.close_after.is_some_and(|n| handled > n) {
             return;
         }
+        if config.stall_after.is_some_and(|n| handled > n) {
+            // Keep reading so that the server exits once the client closes.
+            continue;
+        }
 
         let range = req.offset as usize..(req.offset + req.length as u64) as usize;
         let error = match config.fail_offset {
@@ -155,6 +168,9 @@ fn serve(mut s: UnixStream, config: &ServerConfig, data: &Mutex<Vec<u8>>, log: &
 
         pending.push(reply);
         if pending.len() >= config.batch.max(1) {
+            if let Some(delay) = config.reply_delay {
+                thread::sleep(delay);
+            }
             for reply in pending.drain(..).rev() {
                 if send_reply(&mut s, &reply, config.byte_by_byte).is_err() {
                     return;
@@ -188,7 +204,7 @@ fn engines() -> Vec<Engine> {
     #[allow(unused_mut)]
     let mut v = vec![Engine::Sync];
     #[cfg(feature = "io_uring")]
-    if super::engine_uring::supported() {
+    if super::engine_uring::supported(true) {
         v.push(Engine::Uring);
     }
     v
@@ -367,7 +383,7 @@ fn short_transfers() {
 #[cfg(feature = "io_uring")]
 #[test]
 fn out_of_order_replies() {
-    if !super::engine_uring::supported() {
+    if !super::engine_uring::supported(false) {
         return;
     }
     let config = ServerConfig {
@@ -420,6 +436,55 @@ fn out_of_bounds_rejected() {
     }
 }
 
+#[test]
+fn socket_timeout_fails_connection() {
+    let timeout = Duration::from_millis(200);
+    for engine in engines() {
+        let config = ServerConfig {
+            stall_after: Some(1),
+            socket_timeout: Some(timeout),
+            ..Default::default()
+        };
+        let (_server, conn) = FakeServer::start(config, export_info(1 << 20));
+        let mut io = make_engine(engine, conn);
+        read(io.as_mut(), 0, 512, 1);
+        assert_eq!(wait_completions(io.as_mut(), 1)[0].result, 512);
+
+        let start = Instant::now();
+        read(io.as_mut(), 0, 512, 2);
+        assert_eq!(
+            wait_completions(io.as_mut(), 1)[0].result,
+            -libc::EIO,
+            "{engine:?}"
+        );
+        let elapsed = start.elapsed();
+        assert!(elapsed >= timeout, "{engine:?}: {elapsed:?}");
+        assert!(elapsed < Duration::from_secs(2), "{engine:?}: {elapsed:?}");
+
+        // The connection is dead.
+        read(io.as_mut(), 0, 512, 3);
+        assert_eq!(wait_completions(io.as_mut(), 1)[0].result, -libc::EIO);
+    }
+}
+
+#[test]
+fn no_socket_timeout_by_default() {
+    for engine in engines() {
+        let config = ServerConfig {
+            reply_delay: Some(Duration::from_millis(300)),
+            ..Default::default()
+        };
+        let (_server, conn) = FakeServer::start(config, export_info(1 << 20));
+        let mut io = make_engine(engine, conn);
+        read(io.as_mut(), 0, 512, 1);
+        assert_eq!(
+            wait_completions(io.as_mut(), 1)[0].result,
+            512,
+            "{engine:?}"
+        );
+    }
+}
+
 /// Opens an NBD disk with `num_queues` against a server advertising
 /// `flags`, which accepts a single connection.
 fn open_disk(flags: u16, num_queues: usize) -> BlockResult<NbdDisk> {
@@ -442,6 +507,7 @@ fn open_disk(flags: u16, num_queues: usize) -> BlockResult<NbdDisk> {
         uri: &uri,
         readonly: false,
         use_io_uring: false,
+        socket: NbdSocketOptions::default(),
         num_queues,
     });
     handle.join().unwrap();

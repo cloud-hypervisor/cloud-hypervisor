@@ -35,7 +35,10 @@ use log::info;
 use thiserror::Error;
 
 use self::conn::NbdConn;
-pub use self::conn::NbdConnectError;
+pub use self::conn::{
+    MAX_TCP_KEEPALIVE_COUNT, MAX_TCP_KEEPALIVE_SECS, NbdConnectError, NbdSocketOptions,
+    TcpKeepalive,
+};
 use self::engine_sync::NbdSync;
 use self::handshake::NbdExportInfo;
 pub use self::handshake::NbdHandshakeError;
@@ -81,6 +84,7 @@ pub struct NbdOpenOptions<'a> {
     pub uri: &'a str,
     pub readonly: bool,
     pub use_io_uring: bool,
+    pub socket: NbdSocketOptions,
     /// Number of virtio queues, each using its own connection.
     pub num_queues: usize,
 }
@@ -89,6 +93,7 @@ pub struct NbdOpenOptions<'a> {
 #[derive(Debug)]
 pub struct NbdDisk {
     uri: NbdUri,
+    socket: NbdSocketOptions,
     info: NbdExportInfo,
     use_io_uring: bool,
     /// Connection opened at open time, consumed by the first engine.
@@ -100,7 +105,7 @@ impl NbdDisk {
     /// the requested access mode and number of queues.
     pub fn open(options: &NbdOpenOptions<'_>) -> BlockResult<Self> {
         let uri: NbdUri = options.uri.parse().map_err(NbdError::Uri)?;
-        let conn = NbdConn::connect(&uri).map_err(NbdError::Connect)?;
+        let conn = NbdConn::connect(&uri, &options.socket).map_err(NbdError::Connect)?;
         let info = *conn.info();
         info!("Connected to NBD export {uri}: {info:?}");
 
@@ -114,6 +119,7 @@ impl NbdDisk {
 
         Ok(Self {
             uri,
+            socket: options.socket,
             info,
             use_io_uring: options.use_io_uring,
             probe: Mutex::new(Some(conn)),
@@ -126,7 +132,7 @@ impl NbdDisk {
         if let Some(conn) = self.probe.lock().unwrap().take() {
             return Ok(conn);
         }
-        let conn = NbdConn::connect(&self.uri).map_err(NbdError::Connect)?;
+        let conn = NbdConn::connect(&self.uri, &self.socket).map_err(NbdError::Connect)?;
         let info = conn.info();
         if info.size != self.info.size || info.flags != self.info.flags {
             return Err(NbdError::ExportChanged(self.uri.to_string()).into());
@@ -188,6 +194,7 @@ impl disk_file::AsyncDiskFile for NbdDisk {
     fn try_clone(&self) -> BlockResult<Box<dyn disk_file::AsyncDiskFile>> {
         Ok(Box::new(NbdDisk {
             uri: self.uri.clone(),
+            socket: self.socket,
             info: self.info,
             use_io_uring: self.use_io_uring,
             probe: Mutex::new(None),
@@ -208,10 +215,10 @@ impl disk_file::AsyncDiskFile for NbdDisk {
     }
 }
 
-/// Returns true when the io_uring NBD engine can be used.
+/// Returns true when the io_uring NBD engine can be used with `socket`.
 #[cfg(feature = "io_uring")]
-pub(crate) fn io_uring_supported() -> bool {
-    engine_uring::supported()
+pub(crate) fn io_uring_supported(socket: &NbdSocketOptions) -> bool {
+    engine_uring::supported(socket.socket_timeout.is_some())
 }
 
 #[cfg(test)]
