@@ -800,9 +800,6 @@ impl DeviceRelocation for AddressManager {
             }
         }
 
-        // Update the device_tree resources associated with the device
-        self.update_bar_base(pci_dev, bar_idx, new_base)?;
-
         let any_dev = pci_dev.as_any_mut();
         if let Some(virtio_pci_dev) = any_dev.downcast_ref::<VirtioPciDevice>() {
             if bar_idx == VIRTIO_CONFIG_BAR_INDEX {
@@ -868,7 +865,10 @@ impl DeviceRelocation for AddressManager {
             }
         }
 
-        pci_dev.move_bar(bar_idx, new_base)
+        pci_dev.move_bar(bar_idx, new_base)?;
+
+        // Update the device_tree resources associated with the device
+        self.update_bar_base(pci_dev, bar_idx, new_base)
     }
 }
 
