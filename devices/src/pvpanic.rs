@@ -242,10 +242,6 @@ impl PciDevice for PvPanicDevice {
         Ok(())
     }
 
-    fn restore_bar_addr(&mut self, params: &BarReprogrammingParams) {
-        self.configuration.restore_bar_addr(params);
-    }
-
     fn read_bar(&mut self, _base: u64, _offset: u64, data: &mut [u8]) {
         if data.len() != 1 {
             debug!("Invalid sized read of pvpanic register: {}", data.len());
