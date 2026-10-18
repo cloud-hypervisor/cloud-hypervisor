@@ -20,6 +20,9 @@ use log::{info, warn};
 use crate::block_io_uring_is_supported;
 use crate::disk_file::AsyncFullDiskFile;
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
+#[cfg(feature = "io_uring")]
+use crate::formats::nbd::io_uring_supported as nbd_io_uring_supported;
+use crate::formats::nbd::{NbdDisk, NbdOpenOptions};
 use crate::formats::qcow::QcowDisk;
 use crate::formats::raw::{RawBackend, RawDisk};
 use crate::formats::vhd::VhdDisk;
@@ -38,6 +41,16 @@ pub struct DiskOpenOptions<'a> {
     pub backing_files: bool,
     pub disable_io_uring: bool,
     pub disable_aio: bool,
+}
+
+/// Options for opening an NBD export via [`open_nbd_disk`].
+pub struct NbdDiskOpenOptions<'a> {
+    /// NBD URI, e.g. `nbd://host:10809/export`.
+    pub uri: &'a str,
+    pub readonly: bool,
+    pub disable_io_uring: bool,
+    /// Number of virtio queues, each using its own connection.
+    pub num_queues: usize,
 }
 
 /// Returns true when io_uring is supported on the running kernel.
@@ -93,6 +106,39 @@ pub fn open_disk(
     };
 
     Ok(disk)
+}
+
+/// Connect to an NBD export and construct the appropriate async backend.
+///
+/// - Connects and negotiates the export to learn its size and flags.
+/// - Rejects read-only exports for writable disks.
+/// - Rejects more than one queue unless the server allows multiple
+///   connections.
+/// - Prefers the io_uring engine over the synchronous fallback.
+pub fn open_nbd_disk(options: &NbdDiskOpenOptions<'_>) -> BlockResult<Box<dyn AsyncFullDiskFile>> {
+    #[cfg(feature = "io_uring")]
+    let use_io_uring = !options.disable_io_uring && {
+        let supported = io_uring_supported() && nbd_io_uring_supported();
+        if !supported {
+            warn!("io_uring runtime probe failed for NBD, using synchronous backend");
+        }
+        supported
+    };
+    #[cfg(not(feature = "io_uring"))]
+    let use_io_uring = false;
+
+    let disk = NbdDisk::open(&NbdOpenOptions {
+        uri: options.uri,
+        readonly: options.readonly,
+        use_io_uring,
+        num_queues: options.num_queues,
+    })?;
+    if use_io_uring {
+        info!("Opening NBD disk with io_uring backend");
+    } else {
+        info!("Opening NBD disk with synchronous backend");
+    }
+    Ok(Box::new(disk))
 }
 
 fn open_vhdx(
