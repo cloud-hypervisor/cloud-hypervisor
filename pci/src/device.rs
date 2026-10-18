@@ -128,6 +128,12 @@ pub trait PciDevice: Send {
     ) -> result::Result<(), io::Error> {
         Ok(())
     }
+    /// Whether BAR `bar_idx` is released, i.e. not mapped.
+    fn is_bar_released(&self, _bar_idx: usize) -> bool {
+        false
+    }
+    /// BAR `bar_idx` is now mapped at its config-space address.
+    fn on_bar_installed(&mut self, _bar_idx: usize) {}
     /// Provides a mutable reference to the Any trait. This is useful to let
     /// the caller have access to the underlying type behind the trait.
     fn as_any_mut(&mut self) -> &mut dyn Any;
