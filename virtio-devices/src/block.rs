@@ -897,7 +897,12 @@ impl Block {
                 (disk_nsectors, avail_features, 0, config, false)
             };
 
-        let serial = build_serial(serial, &disk_path).into_boxed_slice();
+        let serial = match serial {
+            // The default serial is derived from the host file's metadata.
+            None if disk_image.fd().is_err() => vec![0; VIRTIO_BLK_ID_BYTES as usize],
+            serial => build_serial(serial, &disk_path),
+        }
+        .into_boxed_slice();
 
         Ok(Block {
             common: VirtioCommon {
