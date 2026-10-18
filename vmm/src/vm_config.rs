@@ -14,6 +14,7 @@ use arch::CpuProfileConfig;
 use arch::CpuidOverride;
 use block::ImageType;
 pub use block::fcntl::LockGranularityChoice;
+use block::formats::nbd::NbdUri;
 #[cfg(target_arch = "x86_64")]
 use devices::debug_console;
 use log::{debug, warn};
@@ -460,6 +461,8 @@ pub struct DiskConfig {
     pub pci_common: PciDeviceCommonConfig,
     pub path: Option<PathBuf>,
     #[serde(default)]
+    pub nbd: Option<String>,
+    #[serde(default)]
     pub readonly: bool,
     #[serde(default)]
     pub direct: bool,
@@ -500,6 +503,14 @@ impl ApplyLandlock for DiskConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         if let Some(path) = &self.path {
             landlock.add_rule_with_access(path, "rw")?;
+        }
+        if let Some(socket) = self
+            .nbd
+            .as_ref()
+            .and_then(|uri| uri.parse::<NbdUri>().ok())
+            .and_then(|uri| uri.socket_path().cloned())
+        {
+            landlock.add_rule_with_access(&socket, "rw")?;
         }
         Ok(())
     }

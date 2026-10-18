@@ -15,6 +15,7 @@ use arch::CpuProfileConfig;
 #[cfg(target_arch = "x86_64")]
 use arch::CpuidOverride;
 use block::ImageType;
+use block::formats::nbd::{NbdUri, NbdUriError};
 use clap::ArgMatches;
 use log::{debug, warn};
 #[cfg(target_arch = "x86_64")]
@@ -385,6 +386,18 @@ pub enum ValidationError {
     /// The vhost-user backend provides the virtio config space
     #[error("guest_block_size is not supported with vhost-user")]
     VhostUserGuestBlockSizeNotSupported,
+    /// NBD disks have neither a local path nor a vhost-user backend
+    #[error("Disk nbd option cannot be combined with path or vhost-user")]
+    NbdWithPathOrVhostUser,
+    /// The NBD URI could not be parsed
+    #[error("Invalid NBD URI \"{0}\"")]
+    InvalidNbdUri(String, #[source] NbdUriError),
+    /// NBD exports are always raw
+    #[error("Image type {0} is not supported for NBD disks, only raw is")]
+    NbdImageTypeNotRaw(ImageType),
+    /// O_DIRECT has no meaning for NBD disks
+    #[error("direct=on is not supported for NBD disks")]
+    NbdDirectNotSupported,
     /// The specified I/O port was invalid. It should be provided in hex, such as `0xe9`.
     #[cfg(target_arch = "x86_64")]
     #[error("The IO port was not properly provided in hex or a `0x` prefix is missing: {0}")]
@@ -1573,7 +1586,7 @@ impl PciDeviceCommonConfig {
 
 impl DiskConfig {
     pub const SYNTAX: &'static str = "Disk parameters \
-         \"path=<disk_image_path>,readonly=on|off,direct=on|off,iommu=off|virtio,\
+         \"path=<disk_image_path>,nbd=<nbd_uri>,readonly=on|off,direct=on|off,iommu=off|virtio,\
          num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,\
          vhost_user=on|off,socket=<vhost_user_socket_path>,\
          bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
@@ -1589,6 +1602,7 @@ impl DiskConfig {
         let mut parser = OptionParser::new();
         parser
             .add("path")
+            .add("nbd")
             .add("readonly")
             .add("direct")
             .add("queue_size")
@@ -1616,6 +1630,7 @@ impl DiskConfig {
         parser.parse(disk).map_err(Error::ParseDisk)?;
 
         let path = parser.get("path").map(PathBuf::from);
+        let nbd = parser.get("nbd");
         let readonly = parser
             .convert::<Toggle>("readonly")
             .map_err(Error::ParseDisk)?
@@ -1698,7 +1713,12 @@ impl DiskConfig {
             parser
                 .convert::<ImageType>("image_type")
                 .map_err(Error::ParseDisk)?
-                .unwrap_or(ImageType::Unknown)
+                .unwrap_or(if nbd.is_some() {
+                    // NBD exports are always exposed as raw data.
+                    ImageType::Raw
+                } else {
+                    ImageType::Unknown
+                })
         } else {
             ImageType::Unknown
         };
@@ -1749,6 +1769,7 @@ impl DiskConfig {
         Ok(DiskConfig {
             pci_common,
             path,
+            nbd,
             readonly,
             direct,
             num_queues,
@@ -1824,7 +1845,19 @@ impl DiskConfig {
             ));
         }
 
-        if !self.vhost_user && self.image_type == ImageType::Unknown {
+        if let Some(nbd) = &self.nbd {
+            if self.path.is_some() || self.vhost_user || self.vhost_socket.is_some() {
+                return Err(ValidationError::NbdWithPathOrVhostUser);
+            }
+            nbd.parse::<NbdUri>()
+                .map_err(|e| ValidationError::InvalidNbdUri(nbd.clone(), e))?;
+            if !matches!(self.image_type, ImageType::Raw | ImageType::Unknown) {
+                return Err(ValidationError::NbdImageTypeNotRaw(self.image_type));
+            }
+            if self.direct {
+                return Err(ValidationError::NbdDirectNotSupported);
+            }
+        } else if !self.vhost_user && self.image_type == ImageType::Unknown {
             return Err(ValidationError::ImageTypeRequired);
         }
 
@@ -4848,6 +4881,7 @@ mod tests {
         DiskConfig {
             pci_common: PciDeviceCommonConfig::default(),
             path: Some(PathBuf::from("/path/to_file")),
+            nbd: None,
             readonly: false,
             direct: false,
             num_queues: 1,
@@ -4880,6 +4914,15 @@ mod tests {
         assert_eq!(
             DiskConfig::parse("path=/path/to_file")?,
             DiskConfig { ..disk_fixture() }
+        );
+        assert_eq!(
+            DiskConfig::parse("nbd=nbd://10.0.0.1:10809/vol0")?,
+            DiskConfig {
+                path: None,
+                nbd: Some("nbd://10.0.0.1:10809/vol0".to_owned()),
+                image_type: ImageType::Raw,
+                ..disk_fixture()
+            }
         );
         assert_eq!(
             DiskConfig::parse("path=/path/to_file,id=mydisk0")?,
@@ -6800,6 +6843,66 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             invalid_config.validate(),
             Err(ValidationError::InvalidGuestBlockSize(131072))
         );
+
+        // NBD disks need neither a path nor an explicit image type.
+        let nbd_disk = DiskConfig {
+            path: None,
+            nbd: Some("nbd+unix:///vol0?socket=/run/nbd.sock".to_owned()),
+            ..disk_fixture()
+        };
+        let mut still_valid_config = valid_config.clone();
+        still_valid_config.disks = Some(vec![nbd_disk.clone()]);
+        still_valid_config.validate().unwrap();
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.disks = Some(vec![DiskConfig {
+            path: Some(PathBuf::from("/path/to_file")),
+            ..nbd_disk.clone()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::NbdWithPathOrVhostUser)
+        );
+
+        invalid_config.disks = Some(vec![DiskConfig {
+            nbd: Some("nbds://host/vol0".to_owned()),
+            ..nbd_disk.clone()
+        }]);
+        assert!(matches!(
+            invalid_config.validate(),
+            Err(ValidationError::InvalidNbdUri(
+                _,
+                NbdUriError::TlsNotSupported(_)
+            ))
+        ));
+
+        invalid_config.disks = Some(vec![DiskConfig {
+            image_type: ImageType::Qcow2,
+            ..nbd_disk.clone()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::NbdImageTypeNotRaw(ImageType::Qcow2))
+        );
+
+        invalid_config.disks = Some(vec![DiskConfig {
+            direct: true,
+            ..nbd_disk.clone()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::NbdDirectNotSupported)
+        );
+
+        // Multiple queues are checked against the server when the disk
+        // is opened.
+        still_valid_config.cpus.boot_vcpus = 2;
+        still_valid_config.cpus.max_vcpus = 2;
+        still_valid_config.disks = Some(vec![DiskConfig {
+            num_queues: 2,
+            ..nbd_disk
+        }]);
+        still_valid_config.validate().unwrap();
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.disks = Some(vec![DiskConfig {

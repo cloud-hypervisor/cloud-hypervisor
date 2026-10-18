@@ -42,7 +42,7 @@ use arch::{DeviceType, MmioDeviceInfo};
 use arch::{NumaNodes, layout};
 use block::ImageType;
 use block::error::BlockError;
-use block::factory::{DiskOpenOptions, open_disk};
+use block::factory::{DiskOpenOptions, NbdDiskOpenOptions, open_disk, open_nbd_disk};
 #[cfg(target_arch = "aarch64")]
 use devices::acpi_tad;
 #[cfg(target_arch = "riscv64")]
@@ -2876,24 +2876,37 @@ impl DeviceManager {
                 vhost_user_block as Arc<Mutex<dyn Migratable>>,
             )
         } else {
-            let disk_path = disk_cfg
-                .path
-                .as_ref()
-                .ok_or(DeviceManagerError::NoDiskPath)?;
-
-            let disk = open_disk(
-                &DiskOpenOptions {
-                    path: disk_path,
+            let (disk, disk_path) = if let Some(uri) = disk_cfg.nbd.as_ref() {
+                let disk = open_nbd_disk(&NbdDiskOpenOptions {
+                    uri,
                     readonly: disk_cfg.readonly,
-                    direct: disk_cfg.direct,
-                    sparse: disk_cfg.sparse,
-                    backing_files: disk_cfg.backing_files,
                     disable_io_uring: disk_cfg.disable_io_uring,
-                    disable_aio: disk_cfg.disable_aio,
-                },
-                disk_cfg.image_type,
-            )
-            .map_err(DeviceManagerError::Disk)?;
+                    num_queues: disk_cfg.num_queues,
+                })
+                .map_err(DeviceManagerError::Disk)?;
+                // The URI identifies the disk in logs, snapshots and the serial.
+                (disk, PathBuf::from(uri))
+            } else {
+                let disk_path = disk_cfg
+                    .path
+                    .as_ref()
+                    .ok_or(DeviceManagerError::NoDiskPath)?;
+
+                let disk = open_disk(
+                    &DiskOpenOptions {
+                        path: disk_path,
+                        readonly: disk_cfg.readonly,
+                        direct: disk_cfg.direct,
+                        sparse: disk_cfg.sparse,
+                        backing_files: disk_cfg.backing_files,
+                        disable_io_uring: disk_cfg.disable_io_uring,
+                        disable_aio: disk_cfg.disable_aio,
+                    },
+                    disk_cfg.image_type,
+                )
+                .map_err(DeviceManagerError::Disk)?;
+                (disk, disk_path.clone())
+            };
 
             if let Some(guest_block_size) = disk_cfg.guest_block_size
                 && disk_cfg.direct
@@ -2954,11 +2967,7 @@ impl DeviceManager {
             let mut virtio_block = virtio_devices::Block::new(
                 id.clone(),
                 disk,
-                disk_cfg
-                    .path
-                    .as_ref()
-                    .ok_or(DeviceManagerError::NoDiskPath)?
-                    .clone(),
+                disk_path,
                 disk_cfg.readonly,
                 self.force_access_platform | disk_cfg.pci_common.iommu.attached(),
                 disk_cfg.num_queues,

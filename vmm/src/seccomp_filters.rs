@@ -779,6 +779,7 @@ fn vmm_thread_rules(
         (libc::SYS_getpgrp, vec![]),
         (libc::SYS_getrandom, vec![]),
         (libc::SYS_getsockname, vec![]),
+        (libc::SYS_getsockopt, vec![]),
         (libc::SYS_gettimeofday, vec![]),
         (libc::SYS_getuid, vec![]),
         (
