@@ -122,6 +122,11 @@ pub trait PciDevice: Send {
     }
     /// BAR `bar_idx` is now mapped at its config-space address.
     fn on_bar_installed(&mut self, _bar_idx: usize) {}
+    /// The installs owed to the guest, retried when another device releases
+    /// a BAR.
+    fn pending_bar_installs(&self) -> Vec<InstallParams> {
+        Vec::new()
+    }
     /// Provides a mutable reference to the Any trait. This is useful to let
     /// the caller have access to the underlying type behind the trait.
     fn as_any_mut(&mut self) -> &mut dyn Any;
