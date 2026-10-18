@@ -254,9 +254,23 @@ impl PciBus {
         bus_device: Option<&Arc<dyn BusDeviceSync>>,
         reloc: &BarRelocation,
     ) {
-        // A config write queues one release and one install per moved BAR,
-        // in order. Each BAR is released and installed in turn, as before.
-        for (r, a) in reloc.release.iter().zip(&reloc.install) {
+        let mut failed = Vec::new();
+        for r in &reloc.release {
+            if let Err(e) = self.device_reloc.move_bar_prepare(device, r) {
+                // The BAR stays mapped at its old address, which its register
+                // no longer names, until the guest moves it again.
+                error!(
+                    "Failed releasing BAR {}: {}; BAR kept at its old address",
+                    r.bar_idx, e
+                );
+                failed.push(r.bar_idx);
+            }
+        }
+
+        for a in &reloc.install {
+            if failed.contains(&a.bar_idx) {
+                continue;
+            }
             let Some(bus_device) = bus_device else {
                 // Only the host bridge, which has no BARs, lacks a bus handle.
                 error!(
@@ -266,16 +280,15 @@ impl PciBus {
                 continue;
             };
 
-            if let Err(e) = self.device_reloc.move_bar_prepare(device, r) {
-                error!("Failed releasing BAR {}: {}", r.bar_idx, e);
-                continue;
-            }
-            if let Err(e) = self.device_reloc.move_bar_commit(device, bus_device, a) {
-                error!(
-                    "Failed installing BAR {}: {}: at 0x{:x}; BAR left unmapped \
+            match self.device_reloc.move_bar_commit(device, bus_device, a) {
+                Ok(()) => {}
+                Err(e) => {
+                    error!(
+                        "Failed installing BAR {}: {}: at 0x{:x}; BAR left unmapped \
 until the guest's next decode-enable edge",
-                    a.bar_idx, e, a.new_base
-                );
+                        a.bar_idx, e, a.new_base
+                    );
+                }
             }
         }
     }
