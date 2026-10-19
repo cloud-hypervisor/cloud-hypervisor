@@ -42,7 +42,9 @@ const VIRTIO_MAX_QUEUE_SIZE: u16 = 32768;
 
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 const MAX_SUPPORTED_CPUS: u32 = 8192;
-#[cfg(not(all(feature = "kvm", target_arch = "x86_64")))]
+#[cfg(all(feature = "kvm", target_arch = "aarch64"))]
+const MAX_SUPPORTED_CPUS: u32 = 4096;
+#[cfg(not(all(feature = "kvm", any(target_arch = "x86_64", target_arch = "aarch64"))))]
 const MAX_SUPPORTED_CPUS: u32 = 255;
 
 /// Errors associated with VM configuration parameters.
@@ -3608,7 +3610,8 @@ impl VmConfig {
             // vCPUs: self.cpus.max_vcpus was of type u8, so 255 was the maximum;
             // on x86_64, the legacy mptable/apic was limited to 254 CPUs.
             //
-            // Now the limit is lifted on x86_64 targets. Other targests/archs: TBD.
+            // Now the limit is lifted on x86_64 and aarch64 with KVM. Other
+            // targets/archs: TBD.
             return Err(ValidationError::TooManyCpus(self.cpus.max_vcpus));
         }
 
@@ -6566,6 +6569,15 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             packages: 1,
         });
         still_valid_config.validate().unwrap();
+
+        // Don't test MAX_SUPPORTED_CPUS because it's not guaranteed
+        // as other limitation might come in earlier.
+        let mut invalid_config = valid_config.clone();
+        invalid_config.cpus.max_vcpus = MAX_SUPPORTED_CPUS + 1;
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::TooManyCpus(MAX_SUPPORTED_CPUS + 1))
+        );
 
         #[cfg(target_arch = "x86_64")]
         {
