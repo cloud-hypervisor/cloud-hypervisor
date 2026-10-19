@@ -3158,6 +3158,7 @@ mod tests {
 
     use super::*;
     use crate::PasidCap;
+    use crate::configuration::COMMAND_REG_MEMORY_SPACE_MASK;
 
     fn sparse_mmio_regions() -> Vec<MmioRegion> {
         let page_size = get_page_size();
@@ -3953,5 +3954,45 @@ mod tests {
         restored.set_state(&state, None, None, None).unwrap();
 
         assert_eq!(restored.read_config_register(0x40 / 4), 0x0000_1234);
+    }
+
+    /// A COMMAND write mirrored into the shadow releases the BARs of the
+    /// spaces it disables and installs them again when it enables them, as
+    /// the generic config-space path does.
+    #[test]
+    fn test_command_write_releases_and_installs_bars() {
+        const BAR_ADDR: u64 = 0x1000_0000;
+        let mse = COMMAND_REG_MEMORY_SPACE_MASK as u16;
+
+        let mut common = test_vfio_common(MockVfio::for_load(), None);
+        common
+            .configuration
+            .add_pci_bar(
+                &PciBarConfiguration::default()
+                    .set_index(0)
+                    .set_address(BAR_ADDR)
+                    .set_size(0x1000)
+                    .set_region_type(PciBarRegionType::Memory32BitRegion)
+                    .set_prefetchable(PciBarPrefetchable::NotPrefetchable),
+            )
+            .unwrap();
+
+        // The BAR is mapped from creation: enabling the space installs nothing.
+        let (reloc, _) = common.write_config_register(COMMAND_REG, 0, &mse.to_le_bytes());
+        assert!(reloc.is_empty());
+
+        // Disabling the space releases it.
+        let (reloc, _) = common.write_config_register(COMMAND_REG, 0, &0u16.to_le_bytes());
+        assert_eq!(reloc.release.len(), 1);
+        assert_eq!(reloc.release[0].bar_idx, 0);
+        assert!(reloc.install.is_empty());
+        assert!(common.configuration.is_bar_released(0));
+
+        // Enabling it again installs at the register.
+        let (reloc, _) = common.write_config_register(COMMAND_REG, 0, &mse.to_le_bytes());
+        assert!(reloc.release.is_empty());
+        assert_eq!(reloc.install.len(), 1);
+        assert_eq!(reloc.install[0].bar_idx, 0);
+        assert_eq!(reloc.install[0].new_base, BAR_ADDR);
     }
 }
