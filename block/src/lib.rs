@@ -324,8 +324,9 @@ pub(crate) fn is_block_device(fd: RawFd) -> bool {
 /// this specific fd. Unlike `fstatvfs().f_bsize`, which only returns the
 /// filesystem's preferred I/O block size, `STATX_DIOALIGN` reports the true per
 /// fd direct I/O constraint accounting for the filesystem, underlying block
-/// device, and any stacking such as loop or device mapper. Falls back to
-/// [`SECTOR_SIZE`] when the kernel does not report a value.
+/// device, and any stacking such as loop or device mapper. When the kernel
+/// does not report a value, falls back to `BLKSSZGET` for block devices and
+/// [`SECTOR_SIZE`] otherwise.
 pub(crate) fn probe_direct_alignment(fd: RawFd) -> Option<u64> {
     // SAFETY: fcntl(F_GETFL) is always safe on a valid fd.
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
@@ -366,6 +367,16 @@ pub(crate) fn probe_direct_alignment(fd: RawFd) -> Option<u64> {
         let stx = unsafe { stx.assume_init() };
         if stx.stx_mask & STATX_DIOALIGN != 0 && stx.stx_dio_mem_align > 0 {
             return Some(cmp::max(stx.stx_dio_mem_align, stx.stx_dio_offset_align) as u64);
+        }
+    }
+
+    if is_block_device(fd) {
+        let mut sector_size: libc::c_int = 0;
+        // SAFETY: BLKSSZGET writes an int through a valid pointer.
+        let ret = unsafe { ioctl(fd, BLKSSZGET() as _, &mut sector_size) };
+        if ret == 0 && sector_size > 0 {
+            debug!("statx did not report DIOALIGN, using logical sector size {sector_size}");
+            return Some(sector_size as u64);
         }
     }
 
