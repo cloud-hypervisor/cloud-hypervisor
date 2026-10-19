@@ -27,9 +27,9 @@ pub use self::bus::{
 pub use self::configuration::{
     COMMAND_REG, COMMAND_REG_IO_SPACE_MASK, COMMAND_REG_MEMORY_SPACE_MASK, PCI_CONFIGURATION_ID,
     PasidCap, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciCapability,
-    PciCapabilityId, PciClassCode, PciConfiguration, PciExpressCapability, PciExpressCapabilityId,
-    PciHeaderType, PciMassStorageSubclass, PciNetworkControllerSubclass, PciProgrammingInterface,
-    PciSerialBusSubClass, PciSubclass,
+    PciCapabilityId, PciClassCode, PciConfiguration, PciConfigurationState, PciExpressCapability,
+    PciExpressCapabilityId, PciHeaderType, PciMassStorageSubclass, PciNetworkControllerSubclass,
+    PciProgrammingInterface, PciSerialBusSubClass, PciSubclass,
 };
 pub use self::device::{
     BarRelocation, DeviceRelocation, Error as PciDeviceError, InstallParams, PciDevice,
