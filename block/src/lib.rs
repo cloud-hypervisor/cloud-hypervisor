@@ -259,7 +259,7 @@ pub fn block_io_uring_is_supported() -> bool {
 
         // Check we can create an io_uring instance, which effectively verifies
         // that io_uring_setup() syscall is supported.
-        let io_uring = match IoUring::new(1) {
+        let io_uring: IoUring = match IoUring::builder().setup_r_disabled().build(1) {
             Ok(io_uring) => io_uring,
             Err(e) => {
                 info!("{error_msg} failed to create io_uring instance: {e}");

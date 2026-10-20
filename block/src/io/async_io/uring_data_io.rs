@@ -8,12 +8,16 @@ use std::collections::HashMap;
 use std::os::fd::{AsRawFd, RawFd};
 use std::{io, mem};
 
+use io_uring::register::Restriction;
 use io_uring::{IoUring, opcode, squeue, types};
 use log::{error, warn};
 use vmm_sys_util::eventfd::EventFd;
 
 use super::common::{duplicate_user_data_error, validate_batch};
 use super::{AsyncIoCompletion, AsyncIoOperation, CompletionCommon};
+
+// Linux UAPI constant for enabling a ring created with IORING_SETUP_R_DISABLED
+const IORING_REGISTER_ENABLE_RINGS: u8 = 12;
 
 /// `io_uring` wrapper for async I/O.
 ///
@@ -33,11 +37,21 @@ pub struct UringDataIo {
 impl UringDataIo {
     /// Creates an io_uring queue and registers its completion eventfd.
     pub fn new(ring_depth: u32) -> io::Result<Self> {
-        let io_uring = IoUring::new(ring_depth)?;
+        let io_uring = IoUring::builder().setup_r_disabled().build(ring_depth)?;
         let completions = CompletionCommon::new();
         io_uring
             .submitter()
             .register_eventfd(completions.notifier().as_raw_fd())?;
+
+        io_uring.submitter().register_restrictions(&mut [
+            Restriction::register_op(IORING_REGISTER_ENABLE_RINGS),
+            Restriction::sqe_op(opcode::Nop::CODE),
+            Restriction::sqe_op(opcode::Readv::CODE),
+            Restriction::sqe_op(opcode::Writev::CODE),
+            Restriction::sqe_op(opcode::Fsync::CODE),
+            Restriction::sqe_flags_allowed(0),
+        ])?;
+        io_uring.submitter().register_enable_rings()?;
 
         Ok(Self {
             io_uring,
@@ -293,11 +307,12 @@ impl Drop for UringDataIo {
 
 #[cfg(test)]
 mod tests {
-    use std::io;
-    use std::os::fd::AsRawFd;
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
     use std::thread::sleep;
     use std::time::Duration;
+    use std::{io, ptr};
 
+    use io_uring::{opcode, squeue, types};
     use vmm_sys_util::tempfile::TempFile;
 
     use super::UringDataIo;
@@ -312,6 +327,55 @@ mod tests {
         }
 
         panic!("timed out waiting for io_uring completion");
+    }
+
+    #[test]
+    fn uring_rejects_socket_operations() {
+        let mut data_io = UringDataIo::new(8).unwrap();
+        let socket = opcode::Socket::new(libc::AF_UNIX, libc::SOCK_STREAM, 0)
+            .build()
+            .user_data(1);
+        data_io.submit_kernel_entry(1, &socket).unwrap();
+        let completion = wait_for_completion(&mut data_io);
+        if completion.result >= 0 {
+            // SAFETY: IORING_OP_SOCKET returned a new owned descriptor.
+            drop(unsafe { OwnedFd::from_raw_fd(completion.result) });
+        }
+        assert_eq!(completion.result, -libc::EACCES);
+
+        let connect = opcode::Connect::new(types::Fd(-1), ptr::null(), 0)
+            .build()
+            .user_data(2);
+        data_io.submit_kernel_entry(2, &connect).unwrap();
+        assert_eq!(wait_for_completion(&mut data_io).result, -libc::EACCES);
+    }
+
+    #[test]
+    fn uring_rejects_sqe_flags() {
+        let mut data_io = UringDataIo::new(8).unwrap();
+        let nop = opcode::Nop::new()
+            .build()
+            .flags(squeue::Flags::ASYNC)
+            .user_data(1);
+        data_io.submit_kernel_entry(1, &nop).unwrap();
+        assert_eq!(wait_for_completion(&mut data_io).result, -libc::EACCES);
+
+        data_io.submit_nop(2).unwrap();
+        assert_eq!(wait_for_completion(&mut data_io).result, 0);
+    }
+
+    #[test]
+    fn uring_rejects_registration_changes() {
+        let data_io = UringDataIo::new(8).unwrap();
+        assert_eq!(
+            data_io
+                .io_uring
+                .submitter()
+                .register_eventfd(data_io.notifier().as_raw_fd())
+                .unwrap_err()
+                .raw_os_error(),
+            Some(libc::EACCES)
+        );
     }
 
     #[test]
