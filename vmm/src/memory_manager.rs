@@ -1935,9 +1935,11 @@ impl MemoryManager {
 
         for (zone_id, regions, zone_mergeable) in list {
             for (region, virtio_mem) in regions {
+                let slot = self.allocate_memory_slot();
                 // SAFETY: guaranteed by GuestRegionMmap invariants
-                let slot = unsafe {
+                unsafe {
                     self.create_userspace_mapping(
+                        slot,
                         region.start_addr().raw_value(),
                         region.len().try_into().unwrap(),
                         region.as_ptr(),
@@ -2698,9 +2700,11 @@ impl MemoryManager {
         }
 
         // Map it into the guest
+        let slot = self.allocate_memory_slot();
         // SAFETY: guaranteed by GuestMmapRegion invariants
-        let slot = unsafe {
+        unsafe {
             self.create_userspace_mapping(
+                slot,
                 region.start_addr().0,
                 region.len().try_into().unwrap(),
                 region.as_ptr(),
@@ -2834,9 +2838,11 @@ impl MemoryManager {
     ///
     /// `userspace_addr` and `memory_size` must be and remain valid
     /// until `remove_userspace_mapping` is called.
+    /// `slot` must be allocated and unused.
     #[expect(clippy::too_many_arguments)]
     pub unsafe fn create_userspace_mapping(
         &mut self,
+        slot: u32,
         guest_phys_addr: u64,
         memory_size: usize,
         userspace_addr: *mut u8,
@@ -2844,9 +2850,7 @@ impl MemoryManager {
         readonly: bool,
         log_dirty: bool,
         visibility: hypervisor::MemoryVisibility,
-    ) -> Result<u32, Error> {
-        let slot = self.allocate_memory_slot();
-
+    ) -> Result<(), Error> {
         info!(
             "Creating userspace mapping: {guest_phys_addr:x} -> {userspace_addr_:x} {memory_size:x}, slot {slot}",
             userspace_addr_ = userspace_addr as u64
@@ -2911,7 +2915,7 @@ impl MemoryManager {
             userspace_addr_ = userspace_addr as u64
         );
 
-        Ok(slot)
+        Ok(())
     }
 
     /// # Safety

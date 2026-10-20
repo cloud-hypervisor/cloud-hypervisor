@@ -1996,21 +1996,25 @@ impl DeviceManager {
             .map_err(DeviceManagerError::MemoryManager)?,
         );
 
-        // SAFETY: the region outlives the mapping, which Drop removes.
-        let mem_slot = unsafe {
-            self.memory_manager
-                .lock()
-                .unwrap()
-                .create_userspace_mapping(
-                    address.0,
-                    region.len(),
-                    region.as_ptr(),
-                    false,
-                    false,
-                    false,
-                    hypervisor::MemoryVisibility::Shared,
-                )
-                .map_err(DeviceManagerError::MemoryManager)?
+        let mem_slot = {
+            let mut manager = self.memory_manager.lock().unwrap();
+            let mem_slot = manager.allocate_memory_slot();
+            // SAFETY: the region outlives the mapping, which Drop removes.
+            unsafe {
+                manager
+                    .create_userspace_mapping(
+                        mem_slot,
+                        address.0,
+                        region.len(),
+                        region.as_ptr(),
+                        false,
+                        false,
+                        false,
+                        hypervisor::MemoryVisibility::Shared,
+                    )
+                    .map_err(DeviceManagerError::MemoryManager)?;
+            }
+            mem_slot
         };
         self.vmgenid_mapping = Some(UserspaceMapping {
             mem_slot,
@@ -3551,23 +3555,26 @@ impl DeviceManager {
         .map_err(DeviceManagerError::NewMmapRegion)?;
         let host_addr = mmap_region.as_ptr();
 
-        // SAFETY: host_addr points to region_size bytes of mmap-allocated memory.
-        let mem_slot = unsafe {
-            let region_size = region_size.try_into().unwrap();
-            self.memory_manager
-                .lock()
-                .unwrap()
-                .create_userspace_mapping(
-                    region_base,
-                    region_size,
-                    host_addr,
-                    false,
-                    false,
-                    false,
-                    hypervisor::MemoryVisibility::Shared,
-                )
-                .map_err(DeviceManagerError::MemoryManager)
-        }?;
+        let mem_slot = {
+            let mut manager = self.memory_manager.lock().unwrap();
+            let slot = manager.allocate_memory_slot();
+            // SAFETY: host_addr points to region_size bytes of mmap-allocated memory.
+            unsafe {
+                manager
+                    .create_userspace_mapping(
+                        slot,
+                        region_base,
+                        region_size.try_into().unwrap(),
+                        host_addr,
+                        false,
+                        false,
+                        false,
+                        hypervisor::MemoryVisibility::Shared,
+                    )
+                    .map_err(DeviceManagerError::MemoryManager)?;
+            }
+            slot
+        };
 
         let mapping = UserspaceMapping {
             mem_slot,
@@ -6221,20 +6228,24 @@ impl IvshmemOps for IvshmemHandler {
     ) -> Result<UserspaceMapping, IvshmemError> {
         let mem_slot = {
             let mut manager = self.memory_manager.lock().unwrap();
+            let mem_slot = manager.allocate_memory_slot();
             // SAFETY: guaranteed by MmapRegion invariants
             unsafe {
-                manager.create_userspace_mapping(
-                    start_addr,
-                    region.len(),
-                    region.as_ptr(),
-                    false,
-                    false,
-                    false,
-                    hypervisor::MemoryVisibility::Shared,
-                )
+                manager
+                    .create_userspace_mapping(
+                        mem_slot,
+                        start_addr,
+                        region.len(),
+                        region.as_ptr(),
+                        false,
+                        false,
+                        false,
+                        hypervisor::MemoryVisibility::Shared,
+                    )
+                    .map_err(|e| IvshmemError::CreateUserspaceMapping(e.into()))?;
             }
-        }
-        .map_err(|e| IvshmemError::CreateUserspaceMapping(e.into()))?;
+            mem_slot
+        };
         Ok(UserspaceMapping {
             mapping: region,
             mem_slot,
