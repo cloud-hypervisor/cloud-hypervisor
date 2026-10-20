@@ -12,7 +12,7 @@ use std::{io, result};
 use anyhow::anyhow;
 use log::{debug, error};
 use pci::{
-    BarReprogrammingParams, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable,
+    BarRelocation, InstallParams, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable,
     PciBarRegionType, PciBdf, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
     PciHeaderType, PciSubclass,
 };
@@ -310,7 +310,7 @@ impl PciDevice for IvshmemDevice {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>) {
+    ) -> (BarRelocation, Option<Arc<Barrier>>) {
         (
             self.configuration
                 .write_config_register(reg_idx, offset, data),
@@ -351,19 +351,26 @@ impl PciDevice for IvshmemDevice {
         None
     }
 
-    fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> io::Result<()> {
+    fn move_bar_prepare(&mut self, bar_idx: usize) -> io::Result<()> {
+        if bar_idx == IVSHMEM_DATA_BAR_IDX
+            && let Some(old_mapping) = self.userspace_mapping.take()
+        {
+            self.ivshmem_ops
+                .lock()
+                .unwrap()
+                .unmap_ram_region(old_mapping)
+                .map_err(io::Error::other)?;
+        }
+
+        Ok(())
+    }
+
+    fn move_bar_commit(&mut self, bar_idx: usize, new_base: u64) -> io::Result<()> {
         if bar_idx == IVSHMEM_DATA_BAR_IDX {
             let region = self
                 .region
                 .clone()
                 .ok_or_else(|| io::Error::other(IvshmemError::MissingMemoryRegion))?;
-            if let Some(old_mapping) = self.userspace_mapping.take() {
-                self.ivshmem_ops
-                    .lock()
-                    .unwrap()
-                    .unmap_ram_region(old_mapping)
-                    .map_err(io::Error::other)?;
-            }
             let new_mapping = self
                 .ivshmem_ops
                 .lock()
@@ -381,8 +388,16 @@ impl PciDevice for IvshmemDevice {
         Ok(())
     }
 
-    fn restore_bar_addr(&mut self, params: &BarReprogrammingParams) {
-        self.configuration.restore_bar_addr(params);
+    fn is_bar_released(&self, bar_idx: usize) -> bool {
+        self.configuration.is_bar_released(bar_idx)
+    }
+
+    fn on_bar_installed(&mut self, bar_idx: usize) {
+        self.configuration.on_bar_installed(bar_idx);
+    }
+
+    fn pending_bar_installs(&self) -> Vec<InstallParams> {
+        self.configuration.pending_bar_installs()
     }
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
