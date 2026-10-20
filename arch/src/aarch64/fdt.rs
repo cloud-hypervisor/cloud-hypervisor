@@ -88,6 +88,9 @@ pub enum Error {
     /// Failure in writing FDT in memory.
     #[error("Failure in writing FDT in memory")]
     WriteFdtToMemory(#[source] GuestMemoryError),
+    /// The FDT does not fit the space reserved for it.
+    #[error("The FDT is {0} bytes, larger than the {1} bytes reserved for it")]
+    FdtTooLarge(usize /* FDT size */, u64 /* limit */),
 }
 type Result<T> = result::Result<T, Error>;
 
@@ -149,6 +152,12 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
 }
 
 pub fn write_fdt_to_memory(fdt_final: &[u8], guest_mem: &GuestMemoryMmap) -> Result<()> {
+    if fdt_final.len() as u64 > super::layout::FDT_MAX_SIZE {
+        return Err(Error::FdtTooLarge(
+            fdt_final.len(),
+            super::layout::FDT_MAX_SIZE,
+        ));
+    }
     // Write FDT to memory.
     guest_mem
         .write_slice(fdt_final, super::layout::FDT_START)
@@ -1076,8 +1085,21 @@ fn print_node(node: FdtNode<'_, '_>, n_spaces: usize) {
 mod tests {
     use std::collections::BTreeMap;
 
+    use super::super::layout;
     use super::*;
     use crate::NumaNode;
+
+    #[test]
+    fn test_write_fdt_to_memory_size() {
+        let max = usize::try_from(layout::FDT_MAX_SIZE).unwrap();
+        let mem = GuestMemoryMmap::from_ranges(&[(layout::RAM_START, 2 * max)]).unwrap();
+
+        write_fdt_to_memory(&vec![0; max], &mem).unwrap();
+        assert!(matches!(
+            write_fdt_to_memory(&vec![0; max + 1], &mem),
+            Err(Error::FdtTooLarge(n, m)) if n == max + 1 && m == layout::FDT_MAX_SIZE
+        ));
+    }
 
     // Helper function to create a simple NumaNode for testing
     fn create_test_numa_node(cpus: Vec<u32>, device_id: Option<String>) -> NumaNode {
