@@ -222,6 +222,10 @@ pub enum ValidationError {
     /// Too many CPUs.
     #[error("Too many CPUs: specified {0} but {MAX_SUPPORTED_CPUS} is the limit")]
     TooManyCpus(u32 /* specified CPUs */),
+    #[cfg(target_arch = "aarch64")]
+    /// The GICv3 layout does not fit this many CPUs.
+    #[error("Too many CPUs for the GICv3 layout: specified {0} but {1} is the limit")]
+    TooManyCpusForGic(u32 /* specified CPUs */, u64 /* limit */),
     /// Requested CPU affinity matches or exceeds the size the libc accepts.
     #[error("Requested CPU affinity {0} must be below {1}")]
     CpuAffinityExceedsMax(
@@ -480,6 +484,17 @@ pub enum ValidationError {
 }
 
 type ValidationResult<T> = result::Result<T, ValidationError>;
+
+#[cfg(target_arch = "aarch64")]
+fn validate_gic_layout(max_vcpus: u32) -> ValidationResult<()> {
+    if u64::from(max_vcpus) > arch::layout::GIC_V3_LAYOUT_MAX_VCPUS {
+        return Err(ValidationError::TooManyCpusForGic(
+            max_vcpus,
+            arch::layout::GIC_V3_LAYOUT_MAX_VCPUS,
+        ));
+    }
+    Ok(())
+}
 
 pub fn add_to_config<T>(items: &mut Option<Vec<T>>, item: T) {
     if let Some(items) = items {
@@ -3597,6 +3612,9 @@ impl VmConfig {
             return Err(ValidationError::TooManyCpus(self.cpus.max_vcpus));
         }
 
+        #[cfg(target_arch = "aarch64")]
+        validate_gic_layout(self.cpus.max_vcpus)?;
+
         if let Some(affinity) = &self.cpus.affinity {
             for affinity in affinity.iter().flat_map(|affinity| &affinity.host_cpus) {
                 let max_affinity = 8 * size_of::<libc::cpu_set_t>();
@@ -4313,6 +4331,28 @@ mod tests {
     use net_util::MacAddr;
 
     use super::*;
+
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn test_validate_gic_layout() {
+        let floor = arch::layout::UEFI_START.0 + arch::layout::UEFI_SIZE;
+        let its_base = |n: u64| {
+            arch::layout::GIC_V3_DIST_START.0
+                - n * arch::layout::GIC_V3_REDIST_SIZE
+                - arch::layout::GIC_V3_ITS_SIZE
+        };
+        let mut last = 0;
+        while its_base(last + 1) >= floor {
+            last += 1;
+        }
+        let last = u32::try_from(last).unwrap();
+
+        validate_gic_layout(last).unwrap();
+        assert_eq!(
+            validate_gic_layout(last + 1),
+            Err(ValidationError::TooManyCpusForGic(last + 1, last.into()))
+        );
+    }
 
     #[cfg(target_arch = "x86_64")]
     #[test]
