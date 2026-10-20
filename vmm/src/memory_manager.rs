@@ -36,7 +36,7 @@ use virtio_devices::mem::Error as VirtioMemError;
 use vm_allocator::GsiApic;
 use vm_allocator::page_size::get_page_size;
 use vm_allocator::{AddressAllocator, MemorySlotAllocator, SystemAllocator};
-use vm_device::BusDevice;
+use vm_device::{BusDevice, UserspaceMapping};
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::guest_memory::{Error as MmapError, FileOffset};
 use vm_memory::mmap::MmapRegionError;
@@ -244,9 +244,33 @@ struct CowSource {
     pagemap: PageMap,
 }
 
+#[derive(Default)]
+pub(crate) struct OwnedMemoryRegions {
+    mappings: Mutex<HashMap<u32, UserspaceMapping>>,
+}
+
+impl OwnedMemoryRegions {
+    fn add(&self, mapping: UserspaceMapping) {
+        let mut mappings = self.mappings.lock().unwrap();
+        assert!(!mappings.contains_key(&mapping.mem_slot));
+        mappings.insert(mapping.mem_slot, mapping);
+    }
+
+    fn remove(
+        &self,
+        slot: u32,
+        unregister: impl FnOnce() -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        unregister()?;
+        self.mappings.lock().unwrap().remove(&slot);
+        Ok(())
+    }
+}
+
 pub struct MemoryManager {
     boot_guest_memory: GuestMemoryMmap,
     guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
+    owned_memory_regions: Arc<OwnedMemoryRegions>,
     next_memory_slot: Arc<AtomicU32>,
     memory_slot_free_list: Arc<Mutex<Vec<u32>>>,
     start_of_device_area: GuestAddress,
@@ -1947,6 +1971,7 @@ impl MemoryManager {
                         false,
                         self.log_dirty,
                         hypervisor::MemoryVisibility::Private,
+                        None,
                     )
                 }?;
 
@@ -2260,6 +2285,7 @@ impl MemoryManager {
         let mut memory_manager = MemoryManager {
             boot_guest_memory,
             guest_memory,
+            owned_memory_regions: Arc::new(OwnedMemoryRegions::default()),
             next_memory_slot: Arc::new(AtomicU32::new(next_memory_slot)),
             memory_slot_free_list: Arc::new(Mutex::new(Vec::new())),
             start_of_device_area,
@@ -2714,6 +2740,7 @@ impl MemoryManager {
                 false,
                 self.log_dirty,
                 hypervisor::MemoryVisibility::Private,
+                None,
             )
         }?;
         self.guest_ram_mappings.push(GuestRamMapping {
@@ -2804,6 +2831,10 @@ impl MemoryManager {
         self.guest_memory.clone()
     }
 
+    pub(crate) fn owned_memory_regions(&self) -> Arc<OwnedMemoryRegions> {
+        Arc::clone(&self.owned_memory_regions)
+    }
+
     pub fn boot_guest_memory(&self) -> GuestMemoryMmap {
         self.boot_guest_memory.clone()
     }
@@ -2850,7 +2881,19 @@ impl MemoryManager {
         readonly: bool,
         log_dirty: bool,
         visibility: hypervisor::MemoryVisibility,
+        user_mapping: Option<Arc<MmapRegion<AtomicBitmap>>>,
     ) -> Result<(), Error> {
+        if let Some(backing) = user_mapping {
+            assert_eq!(backing.as_ptr(), userspace_addr);
+            assert_eq!(backing.size(), memory_size);
+            self.owned_memory_regions.add(UserspaceMapping {
+                mem_slot: slot,
+                addr: GuestAddress(guest_phys_addr),
+                mapping: backing,
+                mergeable,
+            });
+        }
+
         info!(
             "Creating userspace mapping: {guest_phys_addr:x} -> {userspace_addr_:x} {memory_size:x}, slot {slot}",
             userspace_addr_ = userspace_addr as u64
@@ -2920,13 +2963,14 @@ impl MemoryManager {
 
     /// # Safety
     ///
-    /// `userspace_addr` and `memory_size` must have previously been passed
-    /// to `create_userspace_mapping`.
+    /// The parameters must describe a currently registered mapping created by
+    /// `create_userspace_mapping`.
     ///
     /// # Errors
     ///
-    /// If this function fails there is no way to clean up resources and you
-    /// should probably crash the process.
+    /// On failure, supplied extra backing remains in the shared registry.
+    /// Otherwise, the caller must retain the backing or abort the process if
+    /// its lifetime cannot be guaranteed.
     pub unsafe fn remove_userspace_mapping(
         &mut self,
         guest_phys_addr: u64,
@@ -2935,44 +2979,48 @@ impl MemoryManager {
         mergeable: bool,
         slot: u32,
     ) -> Result<(), Error> {
-        // SAFETY: Caller promises parameters are correct.
-        unsafe {
-            self.vm
-                .remove_user_memory_region(
-                    slot,
-                    guest_phys_addr,
-                    memory_size,
-                    userspace_addr,
-                    false, /* readonly -- don't care */
-                )
-                .map_err(Error::RemoveUserMemoryRegion)?;
-        }
-
-        // Mark the pages as unmergeable if there were previously marked as
-        // mergeable.
-        if mergeable {
-            // SAFETY: the address and size are valid as the region was
-            // previously advised.
-            let ret = unsafe {
-                libc::madvise(
-                    userspace_addr.cast(),
-                    memory_size as libc::size_t,
-                    libc::MADV_UNMERGEABLE,
-                )
-            };
-            if ret != 0 {
-                let err = io::Error::last_os_error();
-                // Safe to unwrap because the error is constructed with
-                // last_os_error(), which ensures the output will be Some().
-                let errno = err.raw_os_error().unwrap();
-                if errno == libc::EINVAL {
-                    warn!("kernel not configured with CONFIG_KSM");
-                } else {
-                    warn!("madvise error: {err}");
-                }
-                warn!("failed to mark pages as unmergeable");
+        self.owned_memory_regions.remove(slot, || {
+            // SAFETY: the caller promises the parameters describe a valid mapping.
+            unsafe {
+                self.vm
+                    .remove_user_memory_region(
+                        slot,
+                        guest_phys_addr,
+                        memory_size,
+                        userspace_addr,
+                        false, /* readonly -- don't care */
+                    )
+                    .map_err(Error::RemoveUserMemoryRegion)?;
             }
-        }
+
+            // Mark the pages as unmergeable if there were previously marked as
+            // mergeable.
+            if mergeable {
+                // SAFETY: the address and size are valid as the region was
+                // previously advised.
+                let ret = unsafe {
+                    libc::madvise(
+                        userspace_addr.cast(),
+                        memory_size as libc::size_t,
+                        libc::MADV_UNMERGEABLE,
+                    )
+                };
+                if ret != 0 {
+                    let err = io::Error::last_os_error();
+                    // Safe to unwrap because the error is constructed with
+                    // last_os_error(), which ensures the output will be Some().
+                    let errno = err.raw_os_error().unwrap();
+                    if errno == libc::EINVAL {
+                        warn!("kernel not configured with CONFIG_KSM");
+                    } else {
+                        warn!("madvise error: {err}");
+                    }
+                    warn!("failed to mark pages as unmergeable");
+                }
+            }
+
+            Ok(())
+        })?;
 
         info!(
             "Removed userspace mapping: {guest_phys_addr:x} -> {userspace_addr_:x} {memory_size:x}",

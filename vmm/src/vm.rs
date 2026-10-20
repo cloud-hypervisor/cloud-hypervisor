@@ -96,6 +96,7 @@ use crate::igvm::{igvm_loader, parse_igvm};
 use crate::landlock::LandlockError;
 use crate::memory_manager::{
     Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData, MemoryRangePolicy,
+    OwnedMemoryRegions,
 };
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::migration::url_to_file;
@@ -372,6 +373,7 @@ impl VmState {
 
 struct VmOpsHandler {
     memory: GuestMemoryAtomic<GuestMemoryMmap>,
+    _owned_memory_regions: Arc<OwnedMemoryRegions>,
     #[cfg(target_arch = "x86_64")]
     io_bus: Arc<Bus>,
     mmio_bus: Arc<Bus>,
@@ -568,6 +570,7 @@ impl Vm {
 
         let vm_ops: Arc<dyn VmOps> = Arc::new(VmOpsHandler {
             memory,
+            _owned_memory_regions: memory_manager.lock().unwrap().owned_memory_regions(),
             #[cfg(target_arch = "x86_64")]
             io_bus: Arc::clone(&io_bus),
             mmio_bus: Arc::clone(&mmio_bus),

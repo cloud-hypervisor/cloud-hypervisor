@@ -2011,6 +2011,7 @@ impl DeviceManager {
                         false,
                         false,
                         hypervisor::MemoryVisibility::Shared,
+                        None,
                     )
                     .map_err(DeviceManagerError::MemoryManager)?;
             }
@@ -3553,33 +3554,32 @@ impl DeviceManager {
                 },
         )
         .map_err(DeviceManagerError::NewMmapRegion)?;
-        let host_addr = mmap_region.as_ptr();
-
+        let region = Arc::new(mmap_region);
         let mem_slot = {
             let mut manager = self.memory_manager.lock().unwrap();
             let slot = manager.allocate_memory_slot();
-            // SAFETY: host_addr points to region_size bytes of mmap-allocated memory.
+            // SAFETY: region provides valid backing, retained before registration.
             unsafe {
                 manager
                     .create_userspace_mapping(
                         slot,
                         region_base,
-                        region_size.try_into().unwrap(),
-                        host_addr,
+                        region.size(),
+                        region.as_ptr(),
                         false,
                         false,
                         false,
                         hypervisor::MemoryVisibility::Shared,
+                        Some(Arc::clone(&region)),
                     )
                     .map_err(DeviceManagerError::MemoryManager)?;
             }
             slot
         };
-
         let mapping = UserspaceMapping {
             mem_slot,
             addr: GuestAddress(region_base),
-            mapping: Arc::new(mmap_region),
+            mapping: region,
             mergeable: false,
         };
 
@@ -6241,6 +6241,7 @@ impl IvshmemOps for IvshmemHandler {
                         false,
                         false,
                         hypervisor::MemoryVisibility::Shared,
+                        None,
                     )
                     .map_err(|e| IvshmemError::CreateUserspaceMapping(e.into()))?;
             }
