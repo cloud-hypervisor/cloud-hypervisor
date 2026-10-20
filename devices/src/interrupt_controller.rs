@@ -35,6 +35,12 @@ pub enum Error {
     #[error("Failed creating GIC device")]
     CreateGic(#[source] hypervisor::HypervisorVmError),
     #[cfg(target_arch = "aarch64")]
+    /// The GIC layout does not fit this many vCPUs.
+    #[error(
+        "The GICv3 Redistributors for {0} vCPUs do not fit above the UEFI flash: the limit is {1}"
+    )]
+    GicTooManyVcpus(u64 /* vCPUs */, u64 /* limit */),
+    #[cfg(target_arch = "aarch64")]
     /// Failed restoring GIC device.
     #[error("Failed restoring GIC device")]
     RestoreGic(#[source] gic::Error),

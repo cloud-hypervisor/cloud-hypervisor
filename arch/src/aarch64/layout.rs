@@ -82,6 +82,9 @@ pub const GIC_V3_DIST_START: GuestAddress = GuestAddress(MAPPED_IO_START.0 - GIC
 pub const GIC_V3_REDIST_SIZE: u64 = 0x02_0000;
 /// Below Redistributor area is GICv3 ITS
 pub const GIC_V3_ITS_SIZE: u64 = 0x02_0000;
+/// The most vCPUs whose Redistributors + ITS stay above the UEFI flash.
+pub const GIC_V3_LAYOUT_MAX_VCPUS: u64 =
+    (GIC_V3_DIST_START.0 - (UEFI_START.0 + UEFI_SIZE) - GIC_V3_ITS_SIZE) / GIC_V3_REDIST_SIZE;
 
 /// Space 0x0900_0000 ~ 0x0905_0000 is reserved for legacy devices.
 pub const LEGACY_SERIAL_MAPPED_IO_START: GuestAddress = MAPPED_IO_START;

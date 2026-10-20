@@ -1648,14 +1648,18 @@ impl DeviceManager {
     #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
     fn vits_doorbell(&self) -> u64 {
         let vcpus = self.config.lock().unwrap().cpus.boot_vcpus;
-        gic::Gic::create_default_config(vcpus.into()).msi_addr + 0x1_0040
+        gic::Gic::create_default_config(vcpus.into())
+            .expect("the GIC was created with this vCPU count")
+            .msi_addr
+            + 0x1_0040
     }
 
     fn get_msi_iova_space(&mut self) -> (u64, u64) {
         #[cfg(target_arch = "aarch64")]
         {
             let vcpus = self.config.lock().unwrap().cpus.boot_vcpus;
-            let vgic_config = gic::Gic::create_default_config(vcpus.into());
+            let vgic_config = gic::Gic::create_default_config(vcpus.into())
+                .expect("the GIC was created with this vCPU count");
             (
                 vgic_config.msi_addr,
                 vgic_config.msi_addr + vgic_config.msi_size - 1,

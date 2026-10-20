@@ -1882,7 +1882,8 @@ impl CpuManager {
 
                 madt.append(gicc);
             }
-            let vgic_config = Gic::create_default_config(self.config.boot_vcpus.into());
+            let vgic_config = Gic::create_default_config(self.config.boot_vcpus.into())
+                .expect("the GIC was created with this vCPU count");
 
             // GIC Distributor structure. See section 5.2.12.15 in ACPI spec.
             let gicd = GicD {
