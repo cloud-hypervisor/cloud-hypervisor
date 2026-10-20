@@ -19,6 +19,8 @@ use std::io::{self, Seek, SeekFrom, Write};
 use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::net::UnixStream;
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::process::abort;
 use std::sync::{Arc, Mutex};
 #[cfg(not(target_arch = "riscv64"))]
 use std::time::Instant;
@@ -507,6 +509,18 @@ pub struct Vm {
     numa_nodes: NumaNodes,
     stop_on_boot: bool,
     load_payload_handle: Option<thread::JoinHandle<Result<EntryPoint>>>,
+}
+
+impl Drop for Vm {
+    fn drop(&mut self) {
+        // vCPUs must be stopped before VM owned memory is released.
+        let stopped = catch_unwind(AssertUnwindSafe(|| {
+            self.cpu_manager.lock().unwrap().shutdown()
+        }));
+        if !matches!(stopped, Ok(Ok(()))) {
+            abort();
+        }
+    }
 }
 
 impl Vm {

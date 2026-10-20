@@ -1728,10 +1728,12 @@ impl CpuManager {
 
         self.signal_vcpus()?;
 
-        // Wait for all the threads to finish. This removes the state from the vector.
-        for mut state in self.vcpu_states.lock().unwrap().drain(..) {
+        // Preserve unjoined handles so shutdown can be retried after an error.
+        let mut states = self.vcpu_states.lock().unwrap();
+        for state in states.iter_mut() {
             state.join_thread()?;
         }
+        states.clear();
 
         Ok(())
     }
