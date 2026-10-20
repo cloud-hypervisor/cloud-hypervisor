@@ -1346,17 +1346,17 @@ impl VfioCommon {
             0xffff_0000,
         );
 
-        let clear = |this: &mut Self, reg: u32| {
-            this.patch_reg(reg_idx + (reg / 4) as usize, 0xffff_ffff, 0, 0xffff_ffff);
+        let clear_lnkctl_reg = |this: &mut Self, reg: u32| {
+            this.patch_reg(reg_idx + (reg / 4) as usize, 0x0000_ffff, 0, 0xffff_ffff);
         };
 
-        clear(self, PCI_EXP_LNKCTL);
+        clear_lnkctl_reg(self, PCI_EXP_LNKCTL);
 
         let flags = self.vfio_wrapper.read_config_dword(u32::from(cap_offset));
         let version = (flags & PCI_EXP_FLAGS_VERS_MASK) >> PCI_EXP_FLAGS_VERS_SHIFT;
 
         if version > 1 {
-            clear(self, PCI_EXP_LNKCTL2);
+            clear_lnkctl_reg(self, PCI_EXP_LNKCTL2);
         }
     }
 
