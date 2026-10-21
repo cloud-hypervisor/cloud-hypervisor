@@ -1218,8 +1218,10 @@ impl MemoryManager {
         let mut handler_ranges: Vec<UffdRange> = Vec::new();
 
         for range in saved_regions.ranges() {
+            // The range must not span across multiple guest RAM regions
             let host_addr = guest_memory
-                .get_host_address(GuestAddress(range.gpa))
+                .get_slice(GuestAddress(range.gpa), range.length as usize)
+                .and_then(|_| guest_memory.get_host_address(GuestAddress(range.gpa)))
                 .map_err(|e| UffdError::GpaTranslation {
                     gpa: range.gpa,
                     source: e,
