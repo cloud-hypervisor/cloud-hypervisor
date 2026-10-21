@@ -448,7 +448,11 @@ fn encode_32_bits_bar_size(bar_size: u32) -> Option<u32> {
 
 fn decode_32_bits_bar_size(bar_size: u32) -> Option<u32> {
     if bar_size > 0 {
-        return Some(!bar_size + 1);
+        let size = !bar_size + 1;
+        // PCI specification requires BAR sizes to be non-zero powers of two.
+        if size.is_power_of_two() {
+            return Some(size);
+        }
     }
     None
 }
@@ -466,7 +470,11 @@ fn encode_64_bits_bar_size(bar_size: u64) -> Option<(u32, u32)> {
 fn decode_64_bits_bar_size(bar_size_hi: u32, bar_size_lo: u32) -> Option<u64> {
     let bar_size: u64 = ((bar_size_hi as u64) << 32) | (bar_size_lo as u64);
     if bar_size > 0 {
-        return Some(!bar_size + 1);
+        let size = !bar_size + 1;
+        // PCI specification requires BAR sizes to be non-zero powers of two.
+        if size.is_power_of_two() {
+            return Some(size);
+        }
     }
     None
 }
@@ -1153,11 +1161,8 @@ impl PciConfiguration {
                 );
                 let old_base = u64::from(self.bars[bar_idx].addr & mask);
                 let new_base = u64::from(value & mask);
-                let len = u64::from(
-                    decode_32_bits_bar_size(self.bars[bar_idx].size)
-                        .ok_or(Error::Decode32BarSize)
-                        .unwrap(),
-                );
+                let decoded_len = decode_32_bits_bar_size(self.bars[bar_idx].size)?;
+                let len = u64::from(decoded_len);
                 let region_type = bar_type;
 
                 self.bars[bar_idx].addr = value;
@@ -1183,9 +1188,7 @@ impl PciConfiguration {
                 let new_base = (u64::from(value & mask) << 32)
                     | u64::from(self.registers[reg_idx - 1] & self.writable_bits[reg_idx - 1]);
                 let len =
-                    decode_64_bits_bar_size(self.bars[bar_idx].size, self.bars[bar_idx - 1].size)
-                        .ok_or(Error::Decode64BarSize)
-                        .unwrap();
+                    decode_64_bits_bar_size(self.bars[bar_idx].size, self.bars[bar_idx - 1].size)?;
                 let region_type = PciBarRegionType::Memory64BitRegion;
 
                 self.bars[bar_idx].addr = value;
@@ -1212,11 +1215,8 @@ impl PciConfiguration {
             );
             let old_base = u64::from(self.rom_bar_addr & mask);
             let new_base = u64::from(value & mask);
-            let len = u64::from(
-                decode_32_bits_bar_size(self.rom_bar_size)
-                    .ok_or(Error::Decode32BarSize)
-                    .unwrap(),
-            );
+            let decoded_len = decode_32_bits_bar_size(self.rom_bar_size)?;
+            let len = u64::from(decoded_len);
             let region_type = PciBarRegionType::Memory32BitRegion;
 
             self.rom_bar_addr = value;
@@ -1904,5 +1904,16 @@ mod tests {
         });
 
         assert!(reloc_config(Some(state)).pending_bar_reprogram.is_empty());
+    }
+
+    #[test]
+    fn decode_bar_size_requires_power_of_two() {
+        assert_eq!(decode_32_bits_bar_size(0xfff8_0000), Some(0x80000));
+        assert_eq!(decode_32_bits_bar_size(0xffff_fffa), None);
+        assert_eq!(
+            decode_64_bits_bar_size(0xffff_ffff, 0xfff8_0000),
+            Some(0x80000)
+        );
+        assert_eq!(decode_64_bits_bar_size(0xffff_ffff, 0xffff_fffa), None);
     }
 }
