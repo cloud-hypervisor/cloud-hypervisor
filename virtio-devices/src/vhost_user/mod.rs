@@ -4,7 +4,7 @@
 use std::fs::{File, remove_file};
 use std::io::ErrorKind;
 use std::ops::Deref;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, OwnedFd};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{io, result};
@@ -48,6 +48,25 @@ pub use self::fs::*;
 pub use self::generic_vhost_user::GenericVhostUser;
 pub use self::net::Net;
 pub use self::vu_common_ctrl::VhostUserConfig;
+
+/// A guest memory region mapped by a vhost-user backend.
+pub struct PostcopyRegion {
+    pub guest_phys_addr: u64,
+    pub memory_size: u64,
+    pub backend_addr: u64,
+}
+
+pub trait VhostUserPostcopy: Send + Sync {
+    /// Serve the faults on `fd`, replacing `id`'s previous userfaultfd.
+    fn register_uffd_regions(
+        &self,
+        id: &str,
+        fd: OwnedFd,
+        regions: &[PostcopyRegion],
+    ) -> io::Result<()>;
+
+    fn postcopy_done_event(&self) -> &EventFd;
+}
 
 #[derive(Error, Debug)]
 pub enum Error {
