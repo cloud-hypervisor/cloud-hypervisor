@@ -223,11 +223,13 @@ impl VirtioPciCfgCap {
     }
 
     /// Return the BAR offset and clamped access length for a PCI CFG cap
-    /// indirect BAR access.
-    fn bar_access_params(&self, data_len: usize) -> (u64, usize) {
-        let bar_offset = self.cap.offset.to_native() as u64;
+    /// indirect BAR access at `window_offset` within `pci_cfg_data`.
+    fn bar_access_params(&self, window_offset: usize, data_len: usize) -> (u64, usize) {
+        let bar_offset =
+            u64::from(self.cap.offset.to_native()).saturating_add(window_offset as u64);
         let cap_length = self.cap.length.to_native() as usize;
-        (bar_offset, cmp::min(cap_length, data_len))
+        let rem_length = cap_length.saturating_sub(window_offset);
+        (bar_offset, cmp::min(rem_length, data_len))
     }
 }
 
@@ -788,7 +790,11 @@ impl VirtioPciDevice {
                     .unwrap();
             }
         } else {
-            let (bar_offset, access_len) = self.cap_pci_cfg_info.cap.bar_access_params(data_len);
+            let window_offset = offset - size_of::<VirtioPciCap>();
+            let (bar_offset, access_len) = self
+                .cap_pci_cfg_info
+                .cap
+                .bar_access_params(window_offset, data_len);
             if access_len > 0 {
                 self.read_bar(0, bar_offset, &mut data[..access_len]);
             }
@@ -809,7 +815,11 @@ impl VirtioPciDevice {
             right[..data_len].copy_from_slice(data);
             None
         } else {
-            let (bar_offset, access_len) = self.cap_pci_cfg_info.cap.bar_access_params(data_len);
+            let window_offset = offset - size_of::<VirtioPciCap>();
+            let (bar_offset, access_len) = self
+                .cap_pci_cfg_info
+                .cap
+                .bar_access_params(window_offset, data_len);
             if access_len > 0 {
                 self.write_bar(0, bar_offset, &data[..access_len])
             } else {
@@ -1549,7 +1559,7 @@ mod tests {
         slice[10..14].copy_from_slice(&1u32.to_le_bytes());
 
         // PCI config reads always produce 4 bytes, but cap.length = 1
-        let (bar_offset, access_len) = cap.bar_access_params(4);
+        let (bar_offset, access_len) = cap.bar_access_params(0, 4);
         assert_eq!(bar_offset, 0x14);
         assert_eq!(access_len, 1);
     }
@@ -1563,9 +1573,29 @@ mod tests {
         slice[6..10].copy_from_slice(&0x00u32.to_le_bytes());
         slice[10..14].copy_from_slice(&4u32.to_le_bytes());
 
-        let (bar_offset, access_len) = cap.bar_access_params(2);
+        let (bar_offset, access_len) = cap.bar_access_params(0, 2);
         assert_eq!(bar_offset, 0);
         assert_eq!(access_len, 2);
+    }
+
+    #[test]
+    fn bar_access_params_accounts_for_window_offset() {
+        let mut cap = VirtioPciCfgCap::new();
+        let slice = cap.as_mut_slice();
+
+        // Program cap.offset = 0x14, cap.length = 4
+        slice[6..10].copy_from_slice(&0x14u32.to_le_bytes());
+        slice[10..14].copy_from_slice(&4u32.to_le_bytes());
+
+        // 2-byte access at window_offset = 2 targets 0x16 with length 2
+        let (bar_offset, access_len) = cap.bar_access_params(2, 2);
+        assert_eq!(bar_offset, 0x16);
+        assert_eq!(access_len, 2);
+
+        // Access starting at or past cap.length clamps length to 0
+        let (bar_offset, access_len) = cap.bar_access_params(3, 2);
+        assert_eq!(bar_offset, 0x17);
+        assert_eq!(access_len, 1);
     }
 
     struct TestVirtioDevice {
@@ -1836,5 +1866,30 @@ mod tests {
 
         assert_eq!(dev.queue_evts()[0].read().unwrap(), 1);
         dev.queue_evts()[1].read().unwrap_err();
+    }
+
+    #[test]
+    fn pci_cfg_window_offset_routes_to_matching_bar_register() {
+        let mut dev = make_virtio_pci_device_with_queues(2);
+        dev.common_config.driver_status.store(1, Ordering::Relaxed);
+
+        // Point the 4-byte window at common config 0x14..0x18:
+        // - 0x14 (1B): device_status
+        // - 0x15 (1B): config_generation
+        // - 0x16 (2B): queue_select
+        dev.cap_pci_cfg_info.cap.cap.offset = Le32::from(0x14);
+        dev.cap_pci_cfg_info.cap.cap.length = Le32::from(4);
+
+        let hdr_size = size_of::<VirtioPciCap>();
+        // Write queue_select = 1 at window_offset = 2 (capability offset 16).
+        dev.write_cap_pci_cfg(hdr_size + 2, &1u16.to_le_bytes());
+
+        let mut queue_sel = [0u8; 2];
+        dev.read_cap_pci_cfg(hdr_size + 2, &mut queue_sel);
+        assert_eq!(u16::from_le_bytes(queue_sel), 1);
+
+        let mut status = [0u8; 1];
+        dev.read_cap_pci_cfg(hdr_size, &mut status);
+        assert_eq!(status[0], 1);
     }
 }
