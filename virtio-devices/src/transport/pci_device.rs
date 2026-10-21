@@ -7,7 +7,6 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::any::Any;
-use std::io::Write;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
@@ -774,23 +773,32 @@ impl VirtioPciDevice {
         Ok(())
     }
 
-    fn read_cap_pci_cfg(&mut self, offset: usize, mut data: &mut [u8]) {
+    fn read_cap_pci_cfg(&mut self, offset: usize, data: &mut [u8]) {
         let cap_slice = self.cap_pci_cfg_info.cap.as_slice();
         let data_len = data.len();
         let cap_len = cap_slice.len();
-        if offset + data_len > cap_len {
+        if offset.checked_add(data_len).is_none_or(|end| end > cap_len) {
             error!("Failed to read cap_pci_cfg from config space");
             return;
         }
 
-        if offset < size_of::<VirtioPciCap>() {
-            if let Some(end) = offset.checked_add(data_len) {
-                // This write can't fail, offset and end are checked against config_len.
-                data.write_all(&cap_slice[offset..cmp::min(end, cap_len)])
-                    .unwrap();
+        let cap_hdr_size = size_of::<VirtioPciCap>();
+        if offset < cap_hdr_size {
+            let hdr_len = cmp::min(data_len, cap_hdr_size - offset);
+            data[..hdr_len].copy_from_slice(&cap_slice[offset..offset + hdr_len]);
+
+            if data_len > hdr_len {
+                let bar_data = &mut data[hdr_len..];
+                let (bar_offset, access_len) = self
+                    .cap_pci_cfg_info
+                    .cap
+                    .bar_access_params(0, bar_data.len());
+                if access_len > 0 {
+                    self.read_bar(0, bar_offset, &mut bar_data[..access_len]);
+                }
             }
         } else {
-            let window_offset = offset - size_of::<VirtioPciCap>();
+            let window_offset = offset - cap_hdr_size;
             let (bar_offset, access_len) = self
                 .cap_pci_cfg_info
                 .cap
@@ -805,17 +813,29 @@ impl VirtioPciDevice {
         let cap_slice = self.cap_pci_cfg_info.cap.as_mut_slice();
         let data_len = data.len();
         let cap_len = cap_slice.len();
-        if offset + data_len > cap_len {
+        if offset.checked_add(data_len).is_none_or(|end| end > cap_len) {
             error!("Failed to write cap_pci_cfg to config space");
             return None;
         }
 
-        if offset < size_of::<VirtioPciCap>() {
-            let (_, right) = cap_slice.split_at_mut(offset);
-            right[..data_len].copy_from_slice(data);
+        let cap_hdr_size = size_of::<VirtioPciCap>();
+        if offset < cap_hdr_size {
+            let hdr_len = cmp::min(data_len, cap_hdr_size - offset);
+            cap_slice[offset..offset + hdr_len].copy_from_slice(&data[..hdr_len]);
+
+            if data_len > hdr_len {
+                let bar_data = &data[hdr_len..];
+                let (bar_offset, access_len) = self
+                    .cap_pci_cfg_info
+                    .cap
+                    .bar_access_params(0, bar_data.len());
+                if access_len > 0 {
+                    return self.write_bar(0, bar_offset, &bar_data[..access_len]);
+                }
+            }
             None
         } else {
-            let window_offset = offset - size_of::<VirtioPciCap>();
+            let window_offset = offset - cap_hdr_size;
             let (bar_offset, access_len) = self
                 .cap_pci_cfg_info
                 .cap
@@ -1891,5 +1911,24 @@ mod tests {
         let mut status = [0u8; 1];
         dev.read_cap_pci_cfg(hdr_size, &mut status);
         assert_eq!(status[0], 1);
+    }
+
+    #[test]
+    fn pci_cfg_cross_boundary_access_splits_header_and_window() {
+        let mut dev = make_virtio_pci_device_with_queues(2);
+        dev.common_config.driver_status.store(1, Ordering::Relaxed);
+
+        // Target queue_select (2-byte RW register at common config 0x16).
+        dev.cap_pci_cfg_info.cap.cap.offset = Le32::from(0x16);
+        dev.cap_pci_cfg_info.cap.cap.length = Le32::from(2);
+
+        // 4-byte write at offset 12 crosses the 14-byte VirtioPciCap header:
+        // - bytes 12..14 write the upper 2 bytes of cap.length (0x0000)
+        // - bytes 14..16 write 2 bytes into pci_cfg_data (queue_select = 1)
+        dev.write_cap_pci_cfg(12, &[0x00, 0x00, 0x01, 0x00]);
+
+        let mut buf = [0u8; 4];
+        dev.read_cap_pci_cfg(12, &mut buf);
+        assert_eq!(buf, [0x00, 0x00, 0x01, 0x00]);
     }
 }
