@@ -18,7 +18,8 @@ fi
 mkdir -p mnt
 export ROOTFS=/dev/mapper/$(sudo kpartx -v -a $IMAGE_NAME_BASE.raw | grep "p1 " | cut -f 3 -d " ")
 if [ -n "$VFIO_CUSTOM_IMAGE" ]; then
-    sudo e2fsck -f "$ROOTFS"
+    # 1 means errors were corrected.
+    sudo e2fsck -fy "$ROOTFS" || [ $? -le 1 ]
     sudo resize2fs "$ROOTFS"
 fi
 sudo mount $ROOTFS mnt
