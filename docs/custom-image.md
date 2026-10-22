@@ -28,3 +28,5 @@ Update all references to the previous image name to the new one.
 ## NVIDIA image for VFIO bare-metal CI
 
 Uncomment "VFIO_CUSTOM_IMAGE" in the script listed above to generate the custom image used for the VFIO worker.
+
+Run it with `IMAGE_ARCH=arm64 NVIDIA_CUSTOM_IMAGE=-nvidia` on an arm64 host to generate the arm64 image with Ubuntu's NVIDIA kernel, the open driver and DCGM that the experimental GPU tests use (see [testing.md](testing.md)).
