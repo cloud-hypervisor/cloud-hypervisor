@@ -506,7 +506,12 @@ impl MemoryRangeTable {
     }
 
     pub fn read_from(fd: &mut dyn Read, length: u64) -> Result<MemoryRangeTable, MigratableError> {
-        assert!((length as usize).is_multiple_of(size_of::<MemoryRange>()));
+        if !(length as usize).is_multiple_of(size_of::<MemoryRange>()) {
+            return Err(MigratableError::MigrateReceive(anyhow!(
+                "Memory range table size {length} must be a multiple of MemoryRange size {}",
+                size_of::<MemoryRange>()
+            )));
+        }
 
         let mut data: Vec<MemoryRange> =
             vec![MemoryRange::default(); length as usize / size_of::<MemoryRange>()];
@@ -654,6 +659,21 @@ mod tests {
     use crate::protocol::{
         CURRENT_PROTOCOL_VERSION, Command, ConnectionRole, MemoryRange, MemoryRangeTable, Request,
     };
+
+    #[test]
+    fn test_memory_range_table_incorrect_length() {
+        let mut fd = Cursor::new(vec![0u8; 8]);
+        let result = MemoryRangeTable::read_from(&mut fd, 7);
+        assert!(result.is_err());
+
+        let bytes = MemoryRangeTable::from(&[(0x1000u64, 0x2000u64)])
+            .as_bytes()
+            .to_vec();
+        let len = bytes.len() as u64;
+        let mut fd = Cursor::new(bytes);
+        let table = MemoryRangeTable::read_from(&mut fd, len).unwrap();
+        assert_eq!(table.as_bytes().len() as u64, len);
+    }
 
     #[test]
     fn test_start_request_ignores_residual_command_headers_bytes() {
