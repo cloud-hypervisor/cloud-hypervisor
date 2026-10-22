@@ -15,7 +15,6 @@ sev_snp = ["dep:bitfield-struct", "igvm", "igvm_defs"]
 [dependencies]
 anyhow = { workspace = true }
 arc-swap = "1.9.1"
-byteorder = { workspace = true }
 concat-idents = "1.1.5"
 igvm = { workspace = true, optional = true }
 igvm_defs = { workspace = true, optional = true }
