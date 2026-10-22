@@ -256,50 +256,19 @@ pub struct LapicState {
 
 impl Default for LapicState {
     fn default() -> Self {
-        // SAFETY: this is plain old data structure
-        unsafe { mem::zeroed() }
+        LapicState { regs: [0; 1024] }
     }
 }
 
 impl LapicState {
     pub fn get_klapic_reg(&self, reg_offset: usize) -> u32 {
-        use std::io::Cursor;
-        use std::mem;
-
-        use byteorder::{LittleEndian, ReadBytesExt};
-
-        // SAFETY: plain old data type
-        let sliceu8 = unsafe {
-            // This array is only accessed as parts of a u32 word, so interpret it as a u8 array.
-            // Cursors are only readable on arrays of u8, not i8(c_char).
-            mem::transmute::<&[i8], &[u8]>(&self.regs[reg_offset..])
-        };
-
-        let mut reader = Cursor::new(sliceu8);
-        // Following call can't fail if the offsets defined above are correct.
-        reader
-            .read_u32::<LittleEndian>()
-            .expect("Failed to read klapic register")
+        let bytes: [raw::c_char; 4] = self.regs[reg_offset..reg_offset + 4].try_into().unwrap();
+        u32::from_le_bytes(bytes.map(|byte| byte as u8))
     }
 
     pub fn set_klapic_reg(&mut self, reg_offset: usize, value: u32) {
-        use std::io::Cursor;
-        use std::mem;
-
-        use byteorder::{LittleEndian, WriteBytesExt};
-
-        // SAFETY: plain old data type
-        let sliceu8 = unsafe {
-            // This array is only accessed as parts of a u32 word, so interpret it as a u8 array.
-            // Cursors are only readable on arrays of u8, not i8(c_char).
-            mem::transmute::<&mut [i8], &mut [u8]>(&mut self.regs[reg_offset..])
-        };
-
-        let mut writer = Cursor::new(sliceu8);
-        // Following call can't fail if the offsets defined above are correct.
-        writer
-            .write_u32::<LittleEndian>(value)
-            .expect("Failed to write klapic register");
+        let bytes = value.to_le_bytes().map(|byte| byte as raw::c_char);
+        self.regs[reg_offset..reg_offset + 4].copy_from_slice(&bytes);
     }
 }
 
