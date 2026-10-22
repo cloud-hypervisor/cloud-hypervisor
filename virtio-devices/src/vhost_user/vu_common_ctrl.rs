@@ -744,8 +744,10 @@ impl VhostUserHandle {
         // covering all guest pages for addresses from 0 to the last physical
         // address in guest RAM.
         // A page is always 4kiB from a vhost-user perspective, and each bit is
-        // a page. That's how we can compute mmap_size from the last address.
-        let mmap_size = (last_ram_addr / (VHOST_LOG_PAGE * 8)) + 1;
+        // a page. The bitmap is read back as u64 words, so round it up to a
+        // whole word to keep the last pages of guest RAM covered.
+        let ram_size_per_u64 = VHOST_LOG_PAGE * u64::from(u64::BITS);
+        let mmap_size = (last_ram_addr / ram_size_per_u64 + 1) * size_of::<u64>() as u64;
         let mmap_handle = file.as_raw_fd();
 
         // Set shm_log region size
