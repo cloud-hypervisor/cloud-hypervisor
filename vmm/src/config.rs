@@ -395,13 +395,16 @@ pub enum ValidationError {
     #[cfg(feature = "sev_snp")]
     #[error("SEV-SNP requires an IGVM payload (--payload igvm=<path>)")]
     SevSnpRequiresIgvm,
+    #[cfg(all(feature = "kvm", feature = "sev_snp"))]
+    #[error("SEV-SNP on KVM requires ACPI tables supplied through fw_cfg")]
+    SevSnpRequiresFwCfgAcpi,
     /// Memory hotplug is not supported with SEV-SNP
     #[cfg(feature = "sev_snp")]
     #[error("Memory hotplug is not supported with SEV-SNP")]
     SevSnpNoMemoryHotplug,
-    /// CPU hotplug is not supported with SEV-SNP
+    /// CPU hotplug is not supported with SEV-SNP on MSHV
     #[cfg(feature = "sev_snp")]
-    #[error("CPU hotplug is not supported with SEV-SNP")]
+    #[error("CPU hotplug is not supported with SEV-SNP on MSHV")]
     SevSnpNoCpuHotplug,
     /// Huge pages are not supported with SEV-SNP
     #[cfg(feature = "sev_snp")]
@@ -3541,10 +3544,29 @@ impl VmConfig {
                     return Err(ValidationError::SevSnpRequiresIgvm);
                 }
 
+                #[cfg(feature = "kvm")]
+                {
+                    #[cfg(feature = "fw_cfg")]
+                    let acpi_tables_supplied = self
+                        .payload
+                        .as_ref()
+                        .unwrap()
+                        .fw_cfg_config
+                        .as_ref()
+                        .is_some_and(|fw_cfg| fw_cfg.acpi_tables);
+                    #[cfg(not(feature = "fw_cfg"))]
+                    let acpi_tables_supplied = false;
+
+                    if !acpi_tables_supplied {
+                        return Err(ValidationError::SevSnpRequiresFwCfgAcpi);
+                    }
+                }
+
                 if self.memory.hotplug_size() > 0 || self.memory.hotplugged_size() > 0 {
                     return Err(ValidationError::SevSnpNoMemoryHotplug);
                 }
 
+                #[cfg(not(feature = "kvm"))]
                 if self.cpus.max_vcpus != self.cpus.boot_vcpus {
                     return Err(ValidationError::SevSnpNoCpuHotplug);
                 }
@@ -6324,6 +6346,47 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
     }
 
     #[test]
+    #[cfg(all(feature = "kvm", feature = "sev_snp"))]
+    fn test_sev_snp_fw_cfg_validation() {
+        let mut config: VmConfig = serde_json::from_value(serde_json::json!({
+            "platform": { "sev_snp": true },
+            "payload": { "igvm": "/path/to/igvm" },
+        }))
+        .unwrap();
+        assert_eq!(
+            config.validate(),
+            Err(ValidationError::SevSnpRequiresFwCfgAcpi)
+        );
+
+        #[cfg(feature = "fw_cfg")]
+        {
+            config.payload.as_mut().unwrap().fw_cfg_config = Some(FwCfgConfig {
+                kernel: false,
+                cmdline: false,
+                initramfs: false,
+                acpi_tables: false,
+                ..Default::default()
+            });
+            assert_eq!(
+                config.validate(),
+                Err(ValidationError::SevSnpRequiresFwCfgAcpi)
+            );
+            config.platform.as_mut().unwrap().sev_snp = false;
+            config.validate().unwrap();
+            config.platform.as_mut().unwrap().sev_snp = true;
+            config
+                .payload
+                .as_mut()
+                .unwrap()
+                .fw_cfg_config
+                .as_mut()
+                .unwrap()
+                .acpi_tables = true;
+            config.validate().unwrap();
+        }
+    }
+
+    #[test]
     fn test_config_validation() {
         let mut valid_config = VmConfig {
             cpus: CpusConfig {
@@ -7484,13 +7547,23 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             neither_path_nor_fd.validate(),
             Err(ValidationError::VfioDeviceNeitherPathNorFd),
         ));
-        #[cfg(feature = "sev_snp")]
+        #[cfg(all(feature = "sev_snp", any(not(feature = "kvm"), feature = "fw_cfg")))]
         {
             let mut sev_snp_config = valid_config.clone();
             sev_snp_config.platform = Some(PlatformConfig {
                 sev_snp: true,
                 ..platform_fixture()
             });
+
+            #[cfg(all(feature = "kvm", feature = "fw_cfg"))]
+            {
+                sev_snp_config.payload.as_mut().unwrap().fw_cfg_config = Some(FwCfgConfig {
+                    kernel: false,
+                    cmdline: false,
+                    initramfs: false,
+                    ..Default::default()
+                });
+            }
 
             // Payload with empty host data
             let mut config_with_no_host_data = sev_snp_config.clone();
@@ -7510,18 +7583,9 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
             // Payload with no host data provided
             let mut valid_config_with_no_host_data = sev_snp_config.clone();
-            valid_config_with_no_host_data.payload = Some(PayloadConfig {
-                kernel: Some(PathBuf::from("/path/to/kernel")),
-                firmware: None,
-                cmdline: None,
-                initramfs: None,
-                #[cfg(feature = "igvm")]
-                igvm: Some(PathBuf::from("/path/to/igvm")),
-                #[cfg(feature = "sev_snp")]
-                host_data: None,
-                #[cfg(feature = "fw_cfg")]
-                fw_cfg_config: None,
-            });
+            let payload = valid_config_with_no_host_data.payload.as_mut().unwrap();
+            payload.igvm = Some(PathBuf::from("/path/to/igvm"));
+            payload.host_data = None;
             valid_config_with_no_host_data.validate().unwrap();
 
             // Payload with invalid host data length i.e less than 64
@@ -7561,10 +7625,13 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 Err(ValidationError::SevSnpNoMemoryHotplug)
             );
 
-            let mut invalid_config = sev_snp_config.clone();
-            invalid_config.cpus.max_vcpus = 2;
+            let mut cpu_config = sev_snp_config.clone();
+            cpu_config.cpus.max_vcpus = 2;
+            #[cfg(feature = "kvm")]
+            cpu_config.validate().unwrap();
+            #[cfg(not(feature = "kvm"))]
             assert_eq!(
-                invalid_config.validate(),
+                cpu_config.validate(),
                 Err(ValidationError::SevSnpNoCpuHotplug)
             );
 

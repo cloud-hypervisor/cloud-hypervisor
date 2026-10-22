@@ -1617,6 +1617,14 @@ impl CpuManager {
     ) -> Result<Vec<Arc<Mutex<Vcpu>>>> {
         trace_scoped!("create_boot_vcpus");
 
+        #[cfg(all(feature = "kvm", feature = "sev_snp"))]
+        if self.sev_snp_enabled && self.hypervisor.hypervisor_type() == HypervisorType::Kvm {
+            // SNP_LAUNCH_FINISH initializes and measures every allocated vCPU.
+            // Reserve hotplug vCPUs now so the guest can attach a fresh VMSA
+            // through SNP AP creation when they are activated later.
+            return self.create_vcpus(self.max_vcpus(), snapshot);
+        }
+
         self.create_vcpus(self.boot_vcpus(), snapshot)
     }
 

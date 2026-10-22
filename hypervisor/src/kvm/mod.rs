@@ -775,6 +775,18 @@ impl vm::Vm for KvmVm {
             .create_vcpu(id as u64)
             .map_err(|e| vm::HypervisorVmError::CreateVcpu(e.into()))?;
 
+        #[cfg(all(target_arch = "x86_64", feature = "sev_snp"))]
+        if self.sev_fd.is_some() && id != 0 {
+            // Linux starts SNP APs through AP creation without INIT/SIPI.
+            // KVM's UNINITIALIZED path only accepts INIT and cannot process
+            // the protected guest state update requested by AP creation.
+            // HALTED lets KVM wait for that request without running the AP.
+            fd.set_mp_state(kvm_bindings::kvm_mp_state {
+                mp_state: kvm_bindings::KVM_MP_STATE_HALTED,
+            })
+            .map_err(|e| vm::HypervisorVmError::CreateVcpu(e.into()))?;
+        }
+
         #[cfg(target_arch = "riscv64")]
         {
             // KVM defaults sstateen0 to zero for new RISC-V vCPUs. When AIA is
