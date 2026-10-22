@@ -104,6 +104,7 @@ dependencies = [
  "linux-loader",
  "log",
  "serde",
+ "serde_json",
  "thiserror",
  "uuid",
  "vm-fdt",
@@ -627,9 +628,9 @@ checksum = "ccb1839dadf7e92244d8ae02a6b60f8d120c5674341dc18d401b715809641667"
 
 [[package]]
 name = "iommufd-ioctls"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1554a76cd851e90d53dadf754044a0d7c99797d7b9375fdb04e9cd60064320bb"
+checksum = "848d491b399f8551129347bb949870eb3eee2b390e435dc29570a902e166f353"
 dependencies = [
  "iommufd-bindings",
  "libc",
@@ -1299,18 +1300,18 @@ dependencies = [
 
 [[package]]
 name = "vfio-bindings"
-version = "0.6.3"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92982da90461a5808f78d9eb9b0c116da94bf52fbb0791784b64fc300f274c2a"
+checksum = "01ac6d51577178c2d364280bba14d43efaa948ff5557182c0fa0757207642af2"
 dependencies = [
  "vmm-sys-util",
 ]
 
 [[package]]
 name = "vfio-ioctls"
-version = "0.9.1"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2396defd43c9024f798c272fd9ad2cc4278e71a1121597c2facb2c7a5fad667"
+checksum = "8a80f9cf326a62dc7f86795775ecb33ee077e40c8d5b80396c4b82f51958a348"
 dependencies = [
  "byteorder",
  "iommufd-bindings",
@@ -1327,9 +1328,9 @@ dependencies = [
 
 [[package]]
 name = "vfio_user"
-version = "0.1.6"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea835ab081b29468de55d5066532fc19c99a3ed04b57ea66dfea40559b651070"
+checksum = "7a64e7c1e41fd8574ace87ded52ff64752e821e2769077d150a0a60399b6733e"
 dependencies = [
  "bitflags 2.13.2",
  "enumn",
