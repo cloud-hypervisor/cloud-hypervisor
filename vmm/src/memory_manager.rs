@@ -14,7 +14,7 @@ use std::ops::{BitAnd, Not, Sub};
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, ffi, panic, process, result, thread, time};
@@ -72,7 +72,6 @@ struct UffdHandler {
     result_rx: Receiver<Result<(), io::Error>>,
     handle: thread::JoinHandle<()>,
     fault_socket_fd: Option<OwnedFd>,
-    prefault_complete: Arc<AtomicBool>,
     uffd_registry: Arc<UffdRegistry>,
 }
 
@@ -87,6 +86,16 @@ pub(crate) struct UffdRegistry {
 impl UffdRegistry {
     fn drain_added_uffds(&self) -> Vec<(String, Uffd)> {
         mem::take(&mut *self.added_uffds.lock().unwrap())
+    }
+
+    fn is_done(&self) -> bool {
+        let mut pollfd = libc::pollfd {
+            fd: self.done.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: `pollfd` is valid for the one descriptor polled.
+        unsafe { libc::poll(&mut pollfd, 1, 0) == 1 }
     }
 }
 
@@ -1392,8 +1401,6 @@ impl MemoryManager {
         let panic_exit_evt = exit_evt.try_clone().map_err(Error::EventFdFail)?;
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let (result_tx, result_rx) = mpsc::sync_channel(1);
-        let prefault_complete = Arc::new(AtomicBool::new(false));
-        let thread_prefault_complete = Arc::clone(&prefault_complete);
         let ranges = Box::from(uffd.ranges());
         let uffd_registry = Arc::new(UffdRegistry {
             added_uffds: Mutex::new(vec![(VMM_UFFD_ID.to_string(), uffd)]),
@@ -1413,7 +1420,6 @@ impl MemoryManager {
                         source,
                         served_bitmap,
                         &ready_tx,
-                        &thread_prefault_complete,
                         background_fetch_pages,
                     );
 
@@ -1452,7 +1458,6 @@ impl MemoryManager {
             result_rx,
             handle,
             fault_socket_fd,
-            prefault_complete,
             uffd_registry,
         });
 
@@ -1504,7 +1509,7 @@ impl MemoryManager {
     pub fn restoring(&self) -> bool {
         self.uffd_handler
             .as_ref()
-            .is_some_and(|h| !h.prefault_complete.load(Ordering::Acquire))
+            .is_some_and(|h| !h.uffd_registry.is_done())
     }
 
     /// Poison a page that can no longer be restored. Exits if that's not
@@ -1536,7 +1541,7 @@ impl MemoryManager {
     ///
     /// A userfaultfd received with the id of an earlier one replaces it. Once
     /// all pages are present, `uffd_registry.done` is written.
-    #[expect(clippy::needless_pass_by_value, clippy::too_many_arguments)]
+    #[expect(clippy::needless_pass_by_value)]
     fn uffd_handler_loop(
         uffd_registry: &UffdRegistry,
         stop_event: &EventFd,
@@ -1544,7 +1549,6 @@ impl MemoryManager {
         mut source: Box<dyn UffdMemorySource>,
         served_bitmap: Vec<AtomicBitmap>,
         ready_tx: &SyncSender<()>,
-        prefault_complete: &AtomicBool,
         background_fetch_pages: bool,
     ) -> Result<(), io::Error> {
         let mut uffds = uffd_registry.drain_added_uffds();
@@ -1890,7 +1894,6 @@ impl MemoryManager {
                          prefaulted={pages_prefaulted} served={pages_served} \
                          total={total_pages}"
                     );
-                    prefault_complete.store(true, Ordering::Release);
                     return Ok(());
                 }
                 Ok(prefaulted) => pages_prefaulted += prefaulted,
