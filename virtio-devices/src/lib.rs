@@ -87,6 +87,8 @@ const VIRTIO_F_NOTIFICATION_DATA: u32 = 38;
 pub enum ActivateError {
     #[error("Failed to activate virtio device")]
     BadActivate,
+    #[error("VIRTIO_F_ACCESS_PLATFORM was not acknowledged")]
+    AccessPlatformNotAcknowledged,
     #[error("Failed to clone EventFd")]
     CloneEventFd(#[source] io::Error),
     #[error("Failed to create EventFd")]
