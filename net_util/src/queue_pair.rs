@@ -315,6 +315,12 @@ impl RxVirtio {
                     .next()
                     .ok_or(NetQueuePairError::DescriptorChainTooShort)?;
 
+                // num_buffers is written into the head descriptor, so it must
+                // hold the whole virtio-net header.
+                if (desc.len() as usize) < vnet_hdr_len() {
+                    return Err(NetQueuePairError::DescriptorInvalidHeader);
+                }
+
                 let num_buffers_addr = desc_chain
                     .memory()
                     .checked_offset(
@@ -709,5 +715,49 @@ mod tests {
         assert!(bitmap.dirty_at(BUF1 as usize));
         // Only 6000 - 4096 bytes were written to the second buffer
         assert!(!bitmap.dirty_at(BUF1 as usize + 0x1000));
+    }
+
+    #[test]
+    fn rx_rejects_head_shorter_than_header() {
+        const BUF0: u64 = 0x10000;
+        const BUF1: u64 = 0x20000;
+        const CANARY: u8 = 0xcd;
+
+        let mem =
+            GuestMemoryMmap::<AtomicBitmap>::from_ranges(&[(GuestAddress(0), 0x10_0000)]).unwrap();
+        mem.write_slice(&[CANARY; 16], GuestAddress(BUF0)).unwrap();
+        // One RX chain whose head holds a single byte, followed by a page
+        let vq = MockSplitQueue::new(&mem, 16);
+        vq.add_desc_chains(
+            &[
+                RawDescriptor::from(Descriptor::new(
+                    BUF0,
+                    1,
+                    (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT) as u16,
+                    1,
+                )),
+                RawDescriptor::from(Descriptor::new(BUF1, 0x1000, VRING_DESC_F_WRITE as u16, 0)),
+            ],
+            0,
+        )
+        .unwrap();
+        let mut queue: Queue = vq.create_queue().unwrap();
+        let tap = {
+            let (tx, rx) = UnixDatagram::pair().unwrap();
+            rx.set_nonblocking(true).unwrap();
+            tx.send(&[0xab; 100]).unwrap();
+            Tap::new_for_fuzzing(File::from(OwnedFd::from(rx)), "test")
+        };
+
+        let result = RxVirtio::new().process_desc_chain(&mem, &tap, &mut queue, &mut None, None);
+
+        assert!(matches!(
+            result,
+            Err(NetQueuePairError::DescriptorInvalidHeader)
+        ));
+        // The device must not write num_buffers past the one byte it was given
+        let mut buf = [0u8; 16];
+        mem.read_slice(&mut buf, GuestAddress(BUF0)).unwrap();
+        assert_eq!(buf, [CANARY; 16]);
     }
 }
