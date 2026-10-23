@@ -305,11 +305,22 @@ impl VirtioCommon {
         self.acked_features |= v;
     }
 
+    pub(crate) fn check_access_platform(&self) -> ActivateResult {
+        let access_platform = 1u64 << VIRTIO_F_ACCESS_PLATFORM;
+        if self.avail_features & access_platform != 0 && self.acked_features & access_platform == 0
+        {
+            return Err(ActivateError::AccessPlatformNotAcknowledged);
+        }
+        Ok(())
+    }
+
     pub fn activate(
         &mut self,
         queues: &[(u16, Queue, EventFd)],
         interrupt_cb: Arc<dyn VirtioInterrupt>,
     ) -> ActivateResult {
+        self.check_access_platform()?;
+
         if queues.len() < self.min_queues.into() {
             error!(
                 "Number of enabled queues lower than min: {} vs {}",
@@ -574,6 +585,41 @@ mod tests {
             ..common
         };
         (common, kill_evt_clone)
+    }
+
+    #[test]
+    fn activate_requires_acknowledgment_only_when_access_platform_is_offered() {
+        let access_platform = 1u64 << VIRTIO_F_ACCESS_PLATFORM;
+
+        for (offered, acknowledged, should_activate) in [
+            (false, false, true),
+            (false, true, true),
+            (true, false, false),
+            (true, true, true),
+        ] {
+            let mut common = VirtioCommon {
+                avail_features: if offered { access_platform } else { 0 },
+                ..Default::default()
+            };
+            if acknowledged {
+                common.ack_features(access_platform);
+            }
+            let result = common.activate(&[], Arc::new(NoopInterrupt));
+
+            if should_activate {
+                assert!(
+                    result.is_ok(),
+                    "offered={offered}, acknowledged={acknowledged}"
+                );
+            } else {
+                assert!(matches!(
+                    result,
+                    Err(ActivateError::AccessPlatformNotAcknowledged)
+                ));
+                assert!(common.workers.is_none());
+                assert!(common.pause_evt.is_none());
+            }
+        }
     }
 
     #[test]
