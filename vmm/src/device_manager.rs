@@ -1356,16 +1356,10 @@ impl DeviceManager {
         if let Some(rate_limit_groups_cfg) = config.lock().unwrap().rate_limit_groups.as_ref() {
             for rate_limit_group_cfg in rate_limit_groups_cfg {
                 let rate_limit_cfg = rate_limit_group_cfg.rate_limiter_config;
-                let bw = rate_limit_cfg.bandwidth.unwrap_or_default();
-                let ops = rate_limit_cfg.ops.unwrap_or_default();
                 let mut rate_limit_group = RateLimiterGroup::new(
                     &rate_limit_group_cfg.id,
-                    bw.size,
-                    bw.one_time_burst.unwrap_or(0),
-                    bw.refill_time,
-                    ops.size,
-                    ops.one_time_burst.unwrap_or(0),
-                    ops.refill_time,
+                    rate_limit_cfg.bandwidth.and_then(|b| b.token_bucket()),
+                    rate_limit_cfg.ops.and_then(|o| o.token_bucket()),
                 )
                 .map_err(DeviceManagerError::RateLimiterGroupCreate)?;
 
@@ -2914,16 +2908,10 @@ impl DeviceManager {
                 if let Some(rate_limiter_cfg) = disk_cfg.rate_limiter_config.as_ref() {
                     // Create an anonymous RateLimiterGroup that is dropped when the Disk
                     // is dropped.
-                    let bw = rate_limiter_cfg.bandwidth.unwrap_or_default();
-                    let ops = rate_limiter_cfg.ops.unwrap_or_default();
                     let mut rate_limit_group = RateLimiterGroup::new(
                         disk_cfg.pci_common.id.as_ref().unwrap(),
-                        bw.size,
-                        bw.one_time_burst.unwrap_or(0),
-                        bw.refill_time,
-                        ops.size,
-                        ops.one_time_burst.unwrap_or(0),
-                        ops.refill_time,
+                        rate_limiter_cfg.bandwidth.and_then(|b| b.token_bucket()),
+                        rate_limiter_cfg.ops.and_then(|o| o.token_bucket()),
                     )
                     .map_err(DeviceManagerError::RateLimiterGroupCreate)?;
 
