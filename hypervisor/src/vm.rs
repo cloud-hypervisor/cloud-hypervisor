@@ -234,6 +234,11 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to initialize VM")]
     InitializeVm(#[source] anyhow::Error),
+    ///
+    /// Failed to check the xsave2 capability
+    ///
+    #[error("Failed to check the xsave2 capability")]
+    CheckXsave2(#[source] anyhow::Error),
     #[cfg(all(target_arch = "x86_64", feature = "mshv"))]
     ///
     /// Failed to retrieve list of MSRs.

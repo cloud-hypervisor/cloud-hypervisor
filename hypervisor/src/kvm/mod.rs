@@ -818,7 +818,15 @@ impl vm::Vm for KvmVm {
         // Therefore, cpuid remains unchanged after vcpu creation, and so does `xsave_size`.
         //
         // First vCPU allocation locks the permissions of  `ARCH_GET_XCOMP_GUEST_PERM`.
-        let xsave_size = self.fd.check_extension_int(Cap::Xsave2);
+        let xsave_size = {
+            let size = self.fd.check_extension_int(Cap::Xsave2);
+            if size < 0 {
+                return Err(vm::HypervisorVmError::CheckXsave2(
+                    io::Error::last_os_error().into(),
+                ));
+            }
+            size
+        };
         let vcpu = KvmVcpu {
             fd,
             #[cfg(target_arch = "x86_64")]
@@ -1526,6 +1534,11 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 let sev_snp_enabled = vm_type == KVM_X86_SNP_VM as u64;
                 if sev_snp_enabled {
                     let mask = self.kvm.check_extension_int(Cap::ExitHypercall);
+                    if mask < 0 {
+                        return Err(hypervisor::HypervisorError::CheckExitHypercall(
+                            io::Error::last_os_error().into(),
+                        ));
+                    }
                     let cap = kvm_bindings::kvm_enable_cap {
                         cap: kvm_bindings::KVM_CAP_EXIT_HYPERCALL,
                         args: [mask as _, 0, 0, 0],
