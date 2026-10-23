@@ -3276,6 +3276,67 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg(target_arch = "x86_64")]
+    // The Landlock rule on the vsock socket's directory covers every file
+    // below it, but the VMM needs it only to bind the socket. A file in that
+    // directory granted read-only access must stay read-only: hot-adding it
+    // with readonly=off must fail with EACCES, while the vsock device works.
+    fn test_landlock_vsock_socket_dir() {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let api_socket = temp_api_path(&guest.tmp_dir);
+        let vsock_dir = guest.tmp_dir.as_path().join("vsock_dir");
+        fs::create_dir(&vsock_dir).unwrap();
+        let socket = vsock_dir.join("vsock");
+        let socket = socket.to_str().unwrap();
+        let disk = vsock_dir.join("disk.img");
+        let disk = disk.to_str().unwrap();
+        assert!(exec_host_command_status(&format!("truncate -s 16M {disk}")).success());
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket])
+            .default_cpus()
+            .default_memory()
+            .default_kernel_cmdline()
+            .args(["--landlock"])
+            .args(["--landlock-rules", format!("path={disk},access=r").as_str()])
+            .default_disks()
+            .default_net()
+            .args(["--vsock", format!("cid=3,socket={socket}").as_str()])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            let (cmd_success, _, cmd_stderr) = remote_command_w_output(
+                &api_socket,
+                "add-disk",
+                Some(format!("path={disk},id=rw_disk,image_type=raw").as_str()),
+            );
+            let cmd_stderr = String::from_utf8_lossy(&cmd_stderr);
+            assert!(!cmd_success, "readonly=off hot-add succeeded");
+            assert!(cmd_stderr.contains("Permission denied"), "{cmd_stderr}");
+
+            let (cmd_success, _, cmd_stderr) = remote_command_w_output(
+                &api_socket,
+                "add-disk",
+                Some(format!("path={disk},id=ro_disk,readonly=on,image_type=raw").as_str()),
+            );
+            assert!(cmd_success, "{}", String::from_utf8_lossy(&cmd_stderr));
+
+            // The VMM bound the socket under Landlock, and a host connection
+            // reaches the guest.
+            guest.check_vsock(socket);
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
     fn test_api_http_shutdown() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(4);
 
@@ -3748,6 +3809,85 @@ mod common_parallel {
     fn test_disk_hotplug_with_landlock() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_disk_hotplug(&guest, true, false);
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    // Landlock must grant a readonly=on disk read access only. Re-adding the
+    // image with readonly=off must fail with EACCES, and re-adding it
+    // read-only must work. The read-only disk is unplugged first, so its
+    // shared lock cannot refuse the write lock instead of Landlock.
+    fn test_landlock_readonly_disk() {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let api_socket = temp_api_path(&guest.tmp_dir);
+        let ro_disk = guest.tmp_dir.as_path().join("ro.img");
+        let ro_disk = ro_disk.to_str().unwrap();
+        assert!(exec_host_command_status(&format!("truncate -s 16M {ro_disk}")).success());
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket])
+            .default_cpus()
+            .default_memory()
+            .default_kernel_cmdline()
+            .args(["--landlock"])
+            .default_disks()
+            .args([
+                "--disk",
+                format!("path={ro_disk},id=ro_disk,readonly=on,image_type=raw").as_str(),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            // The read-only disk is vdc, and the VMM can read it.
+            guest
+                .ssh_command("sudo dd if=/dev/vdc of=/dev/null bs=1M iflag=direct count=16")
+                .unwrap();
+
+            assert!(remote_command(
+                &api_socket,
+                "remove-device",
+                Some("ro_disk")
+            ));
+            assert!(wait_until(Duration::from_secs(10), || guest
+                .ssh_command("lsblk | grep -c vdc || true")
+                .is_ok_and(|s| s.trim().parse::<u32>().unwrap_or(1) == 0)));
+            // The guest drops vdc before the VMM closes the image on eject.
+            thread::sleep(Duration::new(5, 0));
+
+            let (cmd_success, _, cmd_stderr) = remote_command_w_output(
+                &api_socket,
+                "add-disk",
+                Some(format!("path={ro_disk},id=rw_disk,image_type=raw").as_str()),
+            );
+            let cmd_stderr = String::from_utf8_lossy(&cmd_stderr);
+            assert!(!cmd_success, "readonly=off re-add succeeded");
+            assert!(cmd_stderr.contains("Permission denied"), "{cmd_stderr}");
+
+            let (cmd_success, _, cmd_stderr) = remote_command_w_output(
+                &api_socket,
+                "add-disk",
+                Some(format!("path={ro_disk},id=ro_disk2,readonly=on,image_type=raw").as_str()),
+            );
+            assert!(cmd_success, "{}", String::from_utf8_lossy(&cmd_stderr));
+            assert!(wait_until(Duration::from_secs(10), || {
+                guest
+                    .ssh_command("lsblk | grep vdc | grep -c 16M")
+                    .is_ok_and(|s| s.trim().parse::<u32>().unwrap_or_default() == 1)
+            }));
+            guest
+                .ssh_command("sudo dd if=/dev/vdc of=/dev/null bs=1M iflag=direct count=16")
+                .unwrap();
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
     }
 
     #[test]

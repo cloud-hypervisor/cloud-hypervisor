@@ -16,6 +16,7 @@ use block::ImageType;
 pub use block::fcntl::LockGranularityChoice;
 #[cfg(target_arch = "x86_64")]
 use devices::debug_console;
+use landlock::{AccessFs, BitFlags};
 use log::{debug, warn};
 use net_util::MacAddr;
 use serde::de::{Error as DeError, Visitor};
@@ -496,10 +497,17 @@ pub struct DiskConfig {
     pub guest_block_size: Option<u32>,
 }
 
+impl DiskConfig {
+    /// The Landlock access a disk needs: a read-only disk is opened read-only.
+    fn landlock_access(&self) -> &'static str {
+        if self.readonly { "r" } else { "rw" }
+    }
+}
+
 impl ApplyLandlock for DiskConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         if let Some(path) = &self.path {
-            landlock.add_rule_with_access(path, "rw")?;
+            landlock.add_rule_with_access(path, self.landlock_access())?;
         }
         Ok(())
     }
@@ -940,10 +948,20 @@ pub struct VsockConfig {
     pub socket: PathBuf,
 }
 
+impl VsockConfig {
+    /// The Landlock access the socket's parent directory needs. The socket
+    /// does not exist until the VMM binds it, so the directory gets the one
+    /// right bind needs. A wider right there would reach every file below
+    /// that directory.
+    pub(crate) fn socket_dir_landlock_access() -> BitFlags<AccessFs> {
+        AccessFs::MakeSock.into()
+    }
+}
+
 impl ApplyLandlock for VsockConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         if let Some(parent) = self.socket.parent() {
-            landlock.add_rule_with_access(parent, "w")?;
+            landlock.add_rule(parent, Self::socket_dir_landlock_access())?;
         }
 
         landlock.add_rule_with_access(&self.socket, "rw")?;
@@ -1423,5 +1441,18 @@ impl VmConfig {
         } else {
             self.cpus.max_vcpus
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_disk_landlock_access_follows_readonly() {
+        let disk = DiskConfig::parse("path=/disk.img").unwrap();
+        assert_eq!(disk.landlock_access(), "rw");
+        let disk = DiskConfig::parse("path=/disk.img,readonly=on").unwrap();
+        assert_eq!(disk.landlock_access(), "r");
     }
 }
