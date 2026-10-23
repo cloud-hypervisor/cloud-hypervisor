@@ -61,6 +61,11 @@ pub enum HypervisorError {
     #[error("Checking extensions")]
     CheckExtensions(#[source] anyhow::Error),
     ///
+    /// Failed to check the exit hypercall capability
+    ///
+    #[error("Failed to check the exit hypercall capability")]
+    CheckExitHypercall(#[source] anyhow::Error),
+    ///
     /// Failed to set partition property
     ///
     #[error("Failed to set partition property")]
