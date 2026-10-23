@@ -243,6 +243,10 @@ impl Vhdx {
                 | bat::PAYLOAD_BLOCK_UNMAPPED
                 | bat::PAYLOAD_BLOCK_ZERO => {}
                 bat::PAYLOAD_BLOCK_FULLY_PRESENT => {
+                    if sector.file_offset < metadata::BLOCK_SIZE_MIN as u64 {
+                        return Err(VhdxIoError::InvalidBatFileOffset);
+                    }
+
                     self.aligned
                         .read_exact_at(
                             &mut buf[read_count..(read_count + sector.free_bytes as usize)],
@@ -508,6 +512,29 @@ mod tests {
             .read_exact_at(&mut signature, 0)
             .unwrap();
         assert_eq!(&signature, b"vhdxfile");
+    }
+
+    #[test]
+    fn read_with_bat_entry_in_header_area_is_rejected() {
+        let Some(tf) = create_dynamic_vhdx(16) else {
+            eprintln!(
+                "skipping read_with_bat_entry_in_header_area_is_rejected: qemu-img unavailable"
+            );
+            return;
+        };
+
+        let mut vhdx = open_vhdx(tf.as_path());
+
+        // Simulate a corrupt image: BAT entry 0 says "fully present at file
+        // offset 0", i.e. on top of the VHDX file header.
+        vhdx.bat_entries[0] = BatEntry(PAYLOAD_BLOCK_FULLY_PRESENT);
+
+        let mut buf = vec![0u8; vhdx.disk_spec.logical_sector_size as usize];
+        let err = vhdx.read_at(&mut buf, 0).unwrap_err();
+        assert!(
+            err.to_string().contains("BAT entry file offset"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
