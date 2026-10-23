@@ -321,10 +321,6 @@ impl Vhdx {
                     BatEntry::write_bat_entries(&self.aligned, bat_offset, &self.bat_entries)
                         .map_err(VhdxIoError::WriteBat)?;
 
-                    if file_offset < block_size_min {
-                        return Err(VhdxIoError::InvalidBatFileOffset);
-                    }
-
                     // The BAT entry addresses the start of the payload block;
                     // the sector's data lives at its own offset within that
                     // block, not at the block base.
