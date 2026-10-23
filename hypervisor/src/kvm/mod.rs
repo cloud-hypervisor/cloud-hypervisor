@@ -825,6 +825,13 @@ impl vm::Vm for KvmVm {
                     io::Error::last_os_error().into(),
                 ));
             }
+            let min_size = size_of::<kvm_bindings::kvm_xsave>() as i32;
+            if size < min_size {
+                return Err(vm::HypervisorVmError::CreateVcpu(anyhow!(
+                    "KVM_CAP_XSAVE2 reports {size} bytes, less than the \
+                     {min_size} bytes of kvm_xsave"
+                )));
+            }
             size
         };
         let vcpu = KvmVcpu {
