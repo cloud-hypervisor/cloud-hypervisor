@@ -19,6 +19,8 @@ use std::io::{self, Seek, SeekFrom, Write};
 use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::net::UnixStream;
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::process::exit;
 use std::sync::{Arc, Mutex};
 #[cfg(not(target_arch = "riscv64"))]
 use std::time::Instant;
@@ -112,6 +114,7 @@ use crate::migration::url_to_file;
 use crate::migration::{SNAPSHOT_CONFIG_FILE, SNAPSHOT_STATE_FILE, get_vm_snapshot, url_to_path};
 #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
 use crate::sev::MeasuredBootInfo;
+use crate::util::flatten_error_chain_to_string;
 #[cfg(feature = "fw_cfg")]
 use crate::vm_config::FwCfgConfig;
 use crate::vm_config::{
@@ -557,6 +560,15 @@ pub struct Vm {
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     stop_on_boot: bool,
     load_payload_handle: Option<thread::JoinHandle<Result<EntryPoint>>>,
+}
+
+impl Drop for Vm {
+    fn drop(&mut self) {
+        if catch_unwind(AssertUnwindSafe(|| self.shutdown())).is_err() {
+            error!("FATAL: Panic during shutdown");
+            exit(1);
+        }
+    }
 }
 
 impl Vm {
@@ -2030,24 +2042,28 @@ impl Vm {
         self.device_manager.lock().unwrap().console_resize_pipe()
     }
 
-    pub fn shutdown(&mut self) -> Result<()> {
-        let new_state = VmState::Shutdown;
+    /// Exit the process on a shutdown error.
+    pub fn shutdown(&mut self) {
+        if self.state == VmState::Shutdown {
+            return;
+        }
 
-        self.state.valid_transition(new_state)?;
-
-        self.cpu_manager
-            .lock()
-            .unwrap()
-            .shutdown()
-            .map_err(Error::CpuManager)?;
+        if let Err(e) = self.cpu_manager.lock().unwrap().shutdown() {
+            error!(
+                "FATAL: Failed stopping vCPUs during shutdown: {}",
+                flatten_error_chain_to_string(&e)
+            );
+            exit(1);
+        }
 
         // Wait for all the threads to finish
         for thread in self.threads.drain(..) {
-            thread.join().map_err(Error::ThreadCleanup)?;
+            if let Err(e) = thread.join() {
+                error!("FATAL: Failed joining VM thread during shutdown: {e:?}");
+                exit(1);
+            }
         }
-        self.state = new_state;
-
-        Ok(())
+        self.state = VmState::Shutdown;
     }
 
     pub fn resize(

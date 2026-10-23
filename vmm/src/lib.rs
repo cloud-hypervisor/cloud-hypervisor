@@ -2023,9 +2023,7 @@ impl Vmm {
 
                 // Since the VMM explicitly no longer owns the VM, the exit
                 // event won't call the shutdown path automatically.
-                if let Err(e) = vm.shutdown() {
-                    error!("Failed shutting down the VM after migration: {e}");
-                }
+                vm.shutdown();
 
                 if let Err(e) = self.exit_evt.write(1) {
                     error!("Failed exiting the VMM after migration: {e}");
@@ -2415,13 +2413,9 @@ impl RequestHandler for Vmm {
         let mut vm = self.vm.take_owned_or(VmError::VmNotRunning)?;
         // Drain console_info so that the FDs are not reused
         let _ = self.console_info.take();
-        let r = vm.shutdown();
-
-        if r.is_ok() {
-            event!("vm", "shutdown");
-        }
-
-        r
+        vm.shutdown();
+        event!("vm", "shutdown");
+        Ok(())
     }
 
     fn vm_reboot(&mut self) -> result::Result<(), VmError> {
@@ -2433,7 +2427,7 @@ impl RequestHandler for Vmm {
             let mut vm = self.vm.take_owned_or(VmError::VmNotCreated)?;
             let config = vm.get_config();
             // First we stop the current VM
-            vm.shutdown()?;
+            vm.shutdown();
             config
         };
 
