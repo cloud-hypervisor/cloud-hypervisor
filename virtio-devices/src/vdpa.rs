@@ -446,6 +446,7 @@ impl VirtioDevice for Vdpa {
             queues,
             ..
         } = context;
+        self.common.check_access_platform()?;
         self.activate_vdpa(&mem.memory(), virtio_interrupt.as_ref(), &queues)
             .map_err(ActivateError::ActivateVdpa)?;
 
@@ -639,5 +640,61 @@ where
                      iova 0x{iova:x}, size 0x{size:x}: {e:?}"
                 ))
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::AtomicU8;
+
+    use vm_memory::GuestAddress;
+
+    use super::*;
+    use crate::{GuestMemoryMmap, VirtioInterruptType};
+
+    struct NoopInterrupt;
+
+    impl VirtioInterrupt for NoopInterrupt {
+        fn trigger(&self, _: VirtioInterruptType) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn set_notifier(
+            &self,
+            _: u32,
+            _: Option<EventFd>,
+            _: &dyn hypervisor::Vm,
+        ) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn activate_requires_access_platform_acknowledgment_before_backend_use() {
+        let mut vdpa = Vdpa {
+            common: VirtioCommon {
+                avail_features: 1u64 << VIRTIO_F_ACCESS_PLATFORM,
+                ..Default::default()
+            },
+            id: "test".to_string(),
+            vhost: None,
+            iova_range: VhostVdpaIovaRange { first: 0, last: 0 },
+            enabled_queues: BTreeMap::new(),
+            backend_features: 0,
+            migrating: false,
+        };
+        let context = ActivationContext {
+            mem: GuestMemoryAtomic::new(
+                GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+            ),
+            interrupt_cb: Arc::new(NoopInterrupt),
+            queues: vec![],
+            device_status: Arc::new(AtomicU8::new(0)),
+        };
+
+        assert!(matches!(
+            vdpa.activate(context),
+            Err(ActivateError::AccessPlatformNotAcknowledged)
+        ));
     }
 }
