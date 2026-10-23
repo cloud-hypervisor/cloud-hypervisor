@@ -8,13 +8,13 @@ use std::collections::BTreeMap;
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom};
-use std::mem::{MaybeUninit, zeroed};
+use std::mem::{self, MaybeUninit, zeroed};
 use std::num::NonZeroUsize;
 use std::ops::{BitAnd, Not, Sub};
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, ffi, panic, process, result, thread, time};
@@ -32,6 +32,7 @@ use thiserror::Error;
 use tracer::trace_scoped;
 use virtio_devices::BlocksState;
 use virtio_devices::mem::Error as VirtioMemError;
+use virtio_devices::vhost_user::{PostcopyRegion, VhostUserPostcopy};
 #[cfg(target_arch = "x86_64")]
 use vm_allocator::GsiApic;
 use vm_allocator::page_size::get_page_size;
@@ -71,7 +72,74 @@ struct UffdHandler {
     result_rx: Receiver<Result<(), io::Error>>,
     handle: thread::JoinHandle<()>,
     fault_socket_fd: Option<OwnedFd>,
-    prefault_complete: Arc<AtomicBool>,
+    external_uffd: Arc<ExternalUffd>,
+}
+
+/// Userfaultfds sent to a UFFD handler.
+struct ExternalUffd {
+    new_uffds: Mutex<Vec<(String, Uffd)>>,
+    new_uffd_evt: EventFd,
+    done: EventFd,
+    // The handler ranges, at the VMM's addresses
+    ranges: Box<[UffdRange]>,
+}
+
+impl ExternalUffd {
+    fn drain_new_uffds(&self) -> Vec<(String, Uffd)> {
+        mem::take(&mut *self.new_uffds.lock().unwrap())
+    }
+
+    fn is_done(&self) -> bool {
+        let mut pollfd = libc::pollfd {
+            fd: self.done.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: `pollfd` is valid for the one descriptor polled.
+        unsafe { libc::poll(&mut pollfd, 1, 0) == 1 }
+    }
+}
+
+impl VhostUserPostcopy for ExternalUffd {
+    fn register_uffd_regions(
+        &self,
+        id: &str,
+        fd: OwnedFd,
+        regions: &[PostcopyRegion],
+    ) -> Result<(), io::Error> {
+        let mut new_uffds = self.new_uffds.lock().unwrap();
+        if self.is_done() {
+            return Ok(());
+        }
+
+        // Faults on `fd` are at the addresses where its process maps guest
+        // memory, so translate the handler ranges to those
+        let mut ranges = Vec::new();
+        for range in self.ranges.iter() {
+            let Some(region) = regions.iter().find(|region| {
+                range.gpa >= region.guest_phys_addr
+                    && range.gpa + range.length <= region.guest_phys_addr + region.memory_size
+            }) else {
+                return Err(io::Error::other(format!(
+                    "no region maps guest range {:#x}-{:#x}",
+                    range.gpa,
+                    range.gpa + range.length
+                )));
+            };
+            ranges.push(UffdRange {
+                host_addr: region.backend_addr + (range.gpa - region.guest_phys_addr),
+                ..range.clone()
+            });
+        }
+
+        let entry = (id.to_string(), Uffd::new(fd, ranges.into())?);
+        new_uffds.push(entry);
+        self.new_uffd_evt.write(1)
+    }
+
+    fn postcopy_done_event(&self) -> &EventFd {
+        &self.done
+    }
 }
 
 pub const MEMORY_MANAGER_ACPI_SIZE: usize = 0x18;
@@ -1260,6 +1328,7 @@ impl MemoryManager {
                 .unwrap_or(base_page_size);
 
             handler_ranges.push(UffdRange {
+                gpa: range.gpa,
                 host_addr,
                 length: range.length,
                 source_offset: source_offset_for(range),
@@ -1293,20 +1362,25 @@ impl MemoryManager {
         let panic_exit_evt = exit_evt.try_clone().map_err(Error::EventFdFail)?;
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let (result_tx, result_rx) = mpsc::sync_channel(1);
-        let prefault_complete = Arc::new(AtomicBool::new(false));
-        let thread_prefault_complete = Arc::clone(&prefault_complete);
+        let ranges = Box::from(uffd.ranges());
+        let external_uffd = Arc::new(ExternalUffd {
+            new_uffds: Mutex::new(vec![("__vmm".to_string(), uffd)]),
+            new_uffd_evt: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
+            done: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
+            ranges,
+        });
+        let thread_external_uffd = Arc::clone(&external_uffd);
         let handle = thread::Builder::new()
             .name("uffd-handler".to_string())
             .spawn(move || {
                 panic::catch_unwind(panic::AssertUnwindSafe(move || {
                     let mut result = Self::uffd_handler_loop(
-                        &[uffd],
+                        &thread_external_uffd,
                         &thread_stop_event,
                         &thread_exit_evt,
                         source,
                         served_bitmap,
                         &ready_tx,
-                        &thread_prefault_complete,
                         background_fetch_pages,
                     );
 
@@ -1345,7 +1419,7 @@ impl MemoryManager {
             result_rx,
             handle,
             fault_socket_fd,
-            prefault_complete,
+            external_uffd,
         });
 
         Ok(())
@@ -1387,11 +1461,16 @@ impl MemoryManager {
         }
     }
 
+    pub(crate) fn external_uffd(&self) -> Option<Arc<dyn VhostUserPostcopy>> {
+        let uffd_handler = self.uffd_handler.as_ref()?;
+        Some(Arc::clone(&uffd_handler.external_uffd) as Arc<dyn VhostUserPostcopy>)
+    }
+
     /// True while an on-demand (UFFD) restore is still faulting in guest RAM.
     pub fn restoring(&self) -> bool {
         self.uffd_handler
             .as_ref()
-            .is_some_and(|h| !h.prefault_complete.load(Ordering::Acquire))
+            .is_some_and(|h| !h.external_uffd.is_done())
     }
 
     /// Poison a page that can no longer be restored. Exits if that's not
@@ -1416,20 +1495,30 @@ impl MemoryManager {
         }
     }
 
-    /// Serve UFFD faults from every userfaultfd in `uffds` via `source`,
-    /// prefaulting one page per idle iteration through the first one. Once
-    /// `source` fails, poison each faulted page instead.
-    #[expect(clippy::needless_pass_by_value, clippy::too_many_arguments)]
+    /// Serve UFFD faults from every userfaultfd received through `ext_uffd` via
+    /// `source`, prefaulting one page per idle iteration through the first
+    /// one, which `ext_uffd` must hold already. Once `source` fails, poison
+    /// each faulted page instead.
+    ///
+    /// A userfaultfd received with the id of an earlier one replaces it. Once
+    /// all pages are present, `ext_uffd.done` is written.
+    #[expect(clippy::needless_pass_by_value)]
     fn uffd_handler_loop(
-        uffds: &[Uffd],
+        ext_uffd: &ExternalUffd,
         stop_event: &EventFd,
         exit_evt: &EventFd,
         mut source: Box<dyn UffdMemorySource>,
         served_bitmap: Vec<AtomicBitmap>,
         ready_tx: &SyncSender<()>,
-        prefault_complete: &AtomicBool,
         background_fetch_pages: bool,
     ) -> Result<(), io::Error> {
+        let mut uffds = Vec::new();
+        let mut ids: HashMap<String, usize> = HashMap::new();
+        for (id, uffd) in ext_uffd.drain_new_uffds() {
+            ids.insert(id, uffds.len());
+            uffds.push(uffd);
+        }
+        assert!(!uffds.is_empty());
         let vmm_uffd = &uffds[0];
         let ranges = vmm_uffd.ranges();
 
@@ -1450,6 +1539,7 @@ impl MemoryManager {
         let prefault_start = time::Instant::now();
 
         const EVENT_STOP: u64 = u64::MAX;
+        const EVENT_NEW_UFFD: u64 = u64::MAX - 1;
 
         let epoll_fd = epoll::create(true).map_err(io::Error::other)?;
         // SAFETY: epoll_fd is valid and owned by this scope.
@@ -1460,6 +1550,14 @@ impl MemoryManager {
             epoll::ControlOptions::EPOLL_CTL_ADD,
             stop_event.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, EVENT_STOP),
+        )
+        .map_err(io::Error::other)?;
+
+        epoll::ctl(
+            epoll_fd,
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            ext_uffd.new_uffd_evt.as_raw_fd(),
+            epoll::Event::new(epoll::Events::EPOLLIN, EVENT_NEW_UFFD),
         )
         .map_err(io::Error::other)?;
 
@@ -1475,7 +1573,7 @@ impl MemoryManager {
 
         ready_tx.send(()).ok();
 
-        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); uffds.len() + 1];
+        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); uffds.len() + 2];
         loop {
             // Block only when prefault is done; otherwise poll non-blocking
             // so we can advance prefault between faults.
@@ -1497,6 +1595,48 @@ impl MemoryManager {
                 info!("UFFD handler: received stop event, exiting");
                 return Ok(());
             }
+
+            if events
+                .iter()
+                .take(num_events)
+                .any(|event| event.data == EVENT_NEW_UFFD)
+            {
+                ext_uffd.new_uffd_evt.read().ok();
+                for (id, uffd) in ext_uffd.drain_new_uffds() {
+                    let idx = if let Some(&idx) = ids.get(&id) {
+                        // Its process remapped guest memory, as on a device reset
+                        epoll::ctl(
+                            epoll_fd,
+                            epoll::ControlOptions::EPOLL_CTL_DEL,
+                            uffds[idx].fd().as_raw_fd(),
+                            epoll::Event::new(epoll::Events::empty(), 0),
+                        )
+                        .map_err(io::Error::other)?;
+                        uffds[idx] = uffd;
+                        idx
+                    } else {
+                        uffds.push(uffd);
+                        let idx = uffds.len() - 1;
+                        ids.insert(id, idx);
+                        idx
+                    };
+                    epoll::ctl(
+                        epoll_fd,
+                        epoll::ControlOptions::EPOLL_CTL_ADD,
+                        uffds[idx].fd().as_raw_fd(),
+                        epoll::Event::new(epoll::Events::EPOLLIN, idx as u64),
+                    )
+                    .map_err(io::Error::other)?;
+                }
+                events.resize(
+                    uffds.len() + 2,
+                    epoll::Event::new(epoll::Events::empty(), 0),
+                );
+                continue;
+            }
+
+            let vmm_uffd = &uffds[0];
+            let ranges = vmm_uffd.ranges();
 
             let mut ready_uffd = None;
             for event in events.iter().take(num_events) {
@@ -1696,13 +1836,25 @@ impl MemoryManager {
                 &pages_loading,
             ) {
                 Ok(0) => {
+                    let mut new_uffds = ext_uffd.new_uffds.lock().unwrap();
+                    for (_, uffd) in new_uffds.drain(..) {
+                        uffds.push(uffd);
+                    }
+                    // Every page is present, so the faults still queued on
+                    // the other userfaultfds only need waking up.
+                    for uffd in &uffds[1..] {
+                        for range in uffd.ranges() {
+                            uffd::wake(uffd.fd(), range.host_addr, range.length)?;
+                        }
+                    }
+                    ext_uffd.done.write(1)?;
+
                     let elapsed = prefault_start.elapsed();
                     info!(
                         "UFFD handler: prefault done in {elapsed:.3?} — \
                          prefaulted={pages_prefaulted} served={pages_served} \
                          total={total_pages}"
                     );
-                    prefault_complete.store(true, Ordering::Release);
                     return Ok(());
                 }
                 Ok(prefaulted) => pages_prefaulted += prefaulted,
@@ -4125,12 +4277,14 @@ mod tests {
         let page = page_size();
         let ranges = [
             UffdRange {
+                gpa: 0,
                 host_addr: 0x10_0000,
                 length: 2 * page,
                 source_offset: 0,
                 page_size: page,
             },
             UffdRange {
+                gpa: 2 * page,
                 host_addr: 0x20_0000,
                 length: page,
                 source_offset: 2 * page,
@@ -4204,6 +4358,7 @@ mod tests {
     fn uffd_prefault_retries_page_after_source_failure() {
         let page = page_size();
         let ranges = [UffdRange {
+            gpa: 0,
             host_addr: 0x10_0000,
             length: page,
             source_offset: 0,
