@@ -151,18 +151,20 @@ pub(super) fn setup_mptable(
     {
         let size = size_of::<mpspec::mpc_cpu>();
         for cpu_id in 0..num_cpus {
-            let mut mpc_cpu = mpspec::mpc_cpu::default();
-            mpc_cpu.type_ = mpspec::MP_PROCESSOR as u8;
-            mpc_cpu.apicid = get_x2apic_id(cpu_id, topology) as u8;
-            mpc_cpu.apicver = APIC_VERSION;
-            mpc_cpu.cpuflag = mpspec::CPU_ENABLED as u8
-                | if cpu_id == 0 {
-                    mpspec::CPU_BOOTPROCESSOR as u8
-                } else {
-                    0
-                };
-            mpc_cpu.cpufeature = CPU_STEPPING;
-            mpc_cpu.featureflag = CPU_FEATURE_APIC | CPU_FEATURE_FPU;
+            let mpc_cpu = mpspec::mpc_cpu {
+                type_: mpspec::MP_PROCESSOR as u8,
+                apicid: get_x2apic_id(cpu_id, topology) as u8,
+                apicver: APIC_VERSION,
+                cpuflag: mpspec::CPU_ENABLED as u8
+                    | if cpu_id == 0 {
+                        mpspec::CPU_BOOTPROCESSOR as u8
+                    } else {
+                        0
+                    },
+                cpufeature: CPU_STEPPING,
+                featureflag: CPU_FEATURE_APIC | CPU_FEATURE_FPU,
+                ..Default::default()
+            };
             mem.write_obj(mpc_cpu, base_mp)
                 .map_err(Error::WriteMpcCpu)?;
             base_mp = base_mp.unchecked_add(size as u64);
@@ -171,10 +173,11 @@ pub(super) fn setup_mptable(
     }
     {
         let size = size_of::<mpspec::mpc_bus>();
-        let mut mpc_bus = mpspec::mpc_bus::default();
-        mpc_bus.type_ = mpspec::MP_BUS as u8;
-        mpc_bus.busid = 0;
-        mpc_bus.bustype = *BUS_TYPE_ISA;
+        let mpc_bus = mpspec::mpc_bus {
+            type_: mpspec::MP_BUS as u8,
+            busid: 0,
+            bustype: *BUS_TYPE_ISA,
+        };
         mem.write_obj(mpc_bus, base_mp)
             .map_err(Error::WriteMpcBus)?;
         base_mp = base_mp.unchecked_add(size as u64);
@@ -182,12 +185,13 @@ pub(super) fn setup_mptable(
     }
     {
         let size = size_of::<mpspec::mpc_ioapic>();
-        let mut mpc_ioapic = mpspec::mpc_ioapic::default();
-        mpc_ioapic.type_ = mpspec::MP_IOAPIC as u8;
-        mpc_ioapic.apicid = ioapicid;
-        mpc_ioapic.apicver = APIC_VERSION;
-        mpc_ioapic.flags = mpspec::MPC_APIC_USABLE as u8;
-        mpc_ioapic.apicaddr = IOAPIC_START.0 as u32;
+        let mpc_ioapic = mpspec::mpc_ioapic {
+            type_: mpspec::MP_IOAPIC as u8,
+            apicid: ioapicid,
+            apicver: APIC_VERSION,
+            flags: mpspec::MPC_APIC_USABLE as u8,
+            apicaddr: IOAPIC_START.0 as u32,
+        };
         mem.write_obj(mpc_ioapic, base_mp)
             .map_err(Error::WriteMpcIoapic)?;
         base_mp = base_mp.unchecked_add(size as u64);
@@ -196,14 +200,15 @@ pub(super) fn setup_mptable(
     // Per kvm_setup_default_irq_routing() in kernel
     for i in 0..16 {
         let size = size_of::<mpspec::mpc_intsrc>();
-        let mut mpc_intsrc = mpspec::mpc_intsrc::default();
-        mpc_intsrc.type_ = mpspec::MP_INTSRC as u8;
-        mpc_intsrc.irqtype = mpspec::MP_IRQ_SOURCE_TYPES_MP_INT as u8;
-        mpc_intsrc.irqflag = mpspec::MP_IRQDIR_DEFAULT as u16;
-        mpc_intsrc.srcbus = 0;
-        mpc_intsrc.srcbusirq = i;
-        mpc_intsrc.dstapic = ioapicid;
-        mpc_intsrc.dstirq = i;
+        let mpc_intsrc = mpspec::mpc_intsrc {
+            type_: mpspec::MP_INTSRC as u8,
+            irqtype: mpspec::MP_IRQ_SOURCE_TYPES_MP_INT as u8,
+            irqflag: mpspec::MP_IRQDIR_DEFAULT as u16,
+            srcbus: 0,
+            srcbusirq: i,
+            dstapic: ioapicid,
+            dstirq: i,
+        };
         mem.write_obj(mpc_intsrc, base_mp)
             .map_err(Error::WriteMpcIntsrc)?;
         base_mp = base_mp.unchecked_add(size as u64);
@@ -211,14 +216,15 @@ pub(super) fn setup_mptable(
     }
     {
         let size = size_of::<mpspec::mpc_lintsrc>();
-        let mut mpc_lintsrc = mpspec::mpc_lintsrc::default();
-        mpc_lintsrc.type_ = mpspec::MP_LINTSRC as u8;
-        mpc_lintsrc.irqtype = mpspec::MP_IRQ_SOURCE_TYPES_MP_EXT_INT as u8;
-        mpc_lintsrc.irqflag = mpspec::MP_IRQDIR_DEFAULT as u16;
-        mpc_lintsrc.srcbusid = 0;
-        mpc_lintsrc.srcbusirq = 0;
-        mpc_lintsrc.destapic = 0;
-        mpc_lintsrc.destapiclint = 0;
+        let mpc_lintsrc = mpspec::mpc_lintsrc {
+            type_: mpspec::MP_LINTSRC as u8,
+            irqtype: mpspec::MP_IRQ_SOURCE_TYPES_MP_EXT_INT as u8,
+            irqflag: mpspec::MP_IRQDIR_DEFAULT as u16,
+            srcbusid: 0,
+            srcbusirq: 0,
+            destapic: 0,
+            destapiclint: 0,
+        };
         mem.write_obj(mpc_lintsrc, base_mp)
             .map_err(Error::WriteMpcLintsrc)?;
         base_mp = base_mp.unchecked_add(size as u64);
@@ -226,14 +232,15 @@ pub(super) fn setup_mptable(
     }
     {
         let size = size_of::<mpspec::mpc_lintsrc>();
-        let mut mpc_lintsrc = mpspec::mpc_lintsrc::default();
-        mpc_lintsrc.type_ = mpspec::MP_LINTSRC as u8;
-        mpc_lintsrc.irqtype = mpspec::MP_IRQ_SOURCE_TYPES_MP_NMI as u8;
-        mpc_lintsrc.irqflag = mpspec::MP_IRQDIR_DEFAULT as u16;
-        mpc_lintsrc.srcbusid = 0;
-        mpc_lintsrc.srcbusirq = 0;
-        mpc_lintsrc.destapic = 0xFF; /* to all local APICs */
-        mpc_lintsrc.destapiclint = 1;
+        let mpc_lintsrc = mpspec::mpc_lintsrc {
+            type_: mpspec::MP_LINTSRC as u8,
+            irqtype: mpspec::MP_IRQ_SOURCE_TYPES_MP_NMI as u8,
+            irqflag: mpspec::MP_IRQDIR_DEFAULT as u16,
+            srcbusid: 0,
+            srcbusirq: 0,
+            destapic: 0xFF, /* to all local APICs */
+            destapiclint: 1,
+        };
         mem.write_obj(mpc_lintsrc, base_mp)
             .map_err(Error::WriteMpcLintsrc)?;
         base_mp = base_mp.unchecked_add(size as u64);
@@ -244,13 +251,15 @@ pub(super) fn setup_mptable(
     let table_end = base_mp;
 
     {
-        let mut mpc_table = mpspec::mpc_table::default();
-        mpc_table.signature = *MPC_SIGNATURE;
-        mpc_table.length = table_end.unchecked_offset_from(table_base) as u16;
-        mpc_table.spec = MPC_SPEC;
-        mpc_table.oem = *MPC_OEM;
-        mpc_table.productid = *MPC_PRODUCT_ID;
-        mpc_table.lapic = APIC_START.0 as u32;
+        let mut mpc_table = mpspec::mpc_table {
+            signature: *MPC_SIGNATURE,
+            length: table_end.unchecked_offset_from(table_base) as u16,
+            spec: MPC_SPEC,
+            oem: *MPC_OEM,
+            productid: *MPC_PRODUCT_ID,
+            lapic: APIC_START.0 as u32,
+            ..Default::default()
+        };
         checksum = checksum.wrapping_add(compute_checksum(&mpc_table));
         mpc_table.checksum = (!checksum).wrapping_add(1);
         mem.write_obj(mpc_table, table_base)
