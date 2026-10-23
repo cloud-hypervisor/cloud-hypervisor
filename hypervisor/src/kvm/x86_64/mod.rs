@@ -8,10 +8,16 @@
 //
 //
 
+#[cfg(feature = "sev_snp")]
+use kvm_bindings::KVM_MEMORY_ATTRIBUTE_PRIVATE;
 use kvm_bindings::nested::KvmNestedStateBuffer;
 #[cfg(feature = "sev_snp")]
 use kvm_ioctls::VmFd;
+#[cfg(feature = "sev_snp")]
+use libc::EINTR;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "sev_snp")]
+use vmm_sys_util::errno;
 use vmm_sys_util::fam;
 ///
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
@@ -75,6 +81,29 @@ pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
 ///
 pub fn check_required_cvm_extensions(vm: &VmFd) -> KvmResult<()> {
     check_extension!(vm, Cap::GuestMemfd);
+    loop {
+        match vm.check_extension_int(Cap::MemoryAttributes) {
+            -1 => {
+                let errno = errno::Error::last();
+                if !matches!(errno.errno(), EINTR) {
+                    return Err(KvmError::CapabilityCheckFailed(
+                        Cap::MemoryAttributes,
+                        errno,
+                    ));
+                }
+            }
+            0 => return Err(KvmError::CapabilityMissing(Cap::MemoryAttributes)),
+            mem_attributes => {
+                // MEMORY_ATTRIBUTES are bit mask and require special handling.
+                let mem_attributes = mem_attributes as u32;
+                if mem_attributes & KVM_MEMORY_ATTRIBUTE_PRIVATE == 0 {
+                    return Err(KvmError::MemoryAttributePrivateMissing(mem_attributes));
+                }
+                break;
+            }
+        }
+    }
+    check_extension!(vm, Cap::UserMemory2);
     Ok(())
 }
 
