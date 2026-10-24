@@ -81,6 +81,10 @@ pub struct CpusConfig {
     pub topology: Option<CpuTopology>,
     #[serde(default)]
     pub kvm_hyperv: bool,
+    /// Advertise KVM_HINTS_REALTIME to the guest (x86-64 with KVM only)
+    #[cfg(target_arch = "x86_64")]
+    #[serde(default)]
+    pub kvm_hint_realtime: bool,
     #[serde(default = "default_cpuconfig_max_phys_bits")]
     pub max_phys_bits: u8,
     #[serde(default)]
@@ -112,6 +116,8 @@ impl Default for CpusConfig {
             max_vcpus: DEFAULT_VCPUS,
             topology: None,
             kvm_hyperv: false,
+            #[cfg(target_arch = "x86_64")]
+            kvm_hint_realtime: false,
             max_phys_bits: DEFAULT_MAX_PHYS_BITS,
             affinity: None,
             features: CpuFeatures::default(),

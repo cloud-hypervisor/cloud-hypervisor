@@ -138,6 +138,8 @@ impl RequestHandler for StubApiRequestHandler {
                     max_vcpus: 1,
                     topology: None,
                     kvm_hyperv: false,
+                    #[cfg(target_arch = "x86_64")]
+                    kvm_hint_realtime: false,
                     max_phys_bits: 46,
                     affinity: None,
                     features: CpuFeatures::default(),

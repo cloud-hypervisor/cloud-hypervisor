@@ -1996,6 +1996,7 @@ impl Vmm {
                 &arch::CpuidConfig {
                     phys_bits,
                     kvm_hyperv: vm_config.cpus.kvm_hyperv,
+                    kvm_hint_realtime: vm_config.cpus.kvm_hint_realtime,
                     amx: vm_config.cpus.features.amx,
                     cpuid_overrides: vm_config.cpus.cpuid_overrides.clone(),
                 },
@@ -3604,6 +3605,8 @@ mod tests {
                 max_vcpus: 1,
                 topology: None,
                 kvm_hyperv: false,
+                #[cfg(target_arch = "x86_64")]
+                kvm_hint_realtime: false,
                 max_phys_bits: 46,
                 affinity: None,
                 features: CpuFeatures::default(),

@@ -234,6 +234,9 @@ pub enum ValidationError {
         usize, /* specified affinity */
         usize, /* maximum affinity */
     ),
+    /// kvm_hint_realtime conflicts with kvm_hyperv
+    #[error("`kvm_hint_realtime=on` cannot be combined with `kvm_hyperv=on`")]
+    KvmHintRealtimeWithKvmHyperv,
     /// Both socket and path specified
     #[error("Disk path and vhost socket both provided")]
     DiskSocketAndPath,
@@ -866,6 +869,8 @@ impl CpusConfig {
             .add("profile");
         #[cfg(target_arch = "x86_64")]
         parser.add("x-cpuid-overrides");
+        #[cfg(target_arch = "x86_64")]
+        parser.add("kvm_hint_realtime");
         parser.parse(cpus).map_err(Error::ParseCpus)?;
 
         let boot_vcpus: u32 = parser
@@ -879,6 +884,12 @@ impl CpusConfig {
         let topology = parser.convert("topology").map_err(Error::ParseCpus)?;
         let kvm_hyperv = parser
             .convert::<Toggle>("kvm_hyperv")
+            .map_err(Error::ParseCpus)?
+            .unwrap_or(Toggle(false))
+            .0;
+        #[cfg(target_arch = "x86_64")]
+        let kvm_hint_realtime = parser
+            .convert::<Toggle>("kvm_hint_realtime")
             .map_err(Error::ParseCpus)?
             .unwrap_or(Toggle(false))
             .0;
@@ -951,6 +962,8 @@ impl CpusConfig {
             max_vcpus,
             topology,
             kvm_hyperv,
+            #[cfg(target_arch = "x86_64")]
+            kvm_hint_realtime,
             max_phys_bits,
             affinity,
             features,
@@ -3605,6 +3618,11 @@ impl VmConfig {
             ));
         }
 
+        #[cfg(target_arch = "x86_64")]
+        if self.cpus.kvm_hint_realtime && self.cpus.kvm_hyperv {
+            return Err(ValidationError::KvmHintRealtimeWithKvmHyperv);
+        }
+
         if self.cpus.max_vcpus > MAX_SUPPORTED_CPUS {
             // Note: historically, Cloud Hypervisor did not support more than 255(254 on x64)
             // vCPUs: self.cpus.max_vcpus was of type u8, so 255 was the maximum;
@@ -4495,6 +4513,20 @@ mod tests {
                 ..Default::default()
             }
         );
+        #[cfg(target_arch = "x86_64")]
+        {
+            assert_eq!(
+                CpusConfig::parse("boot=1,kvm_hint_realtime=on")?,
+                CpusConfig {
+                    boot_vcpus: 1,
+                    max_vcpus: 1,
+                    kvm_hint_realtime: true,
+                    ..Default::default()
+                }
+            );
+            assert!(!CpusConfig::parse("boot=1")?.kvm_hint_realtime);
+            CpusConfig::parse("boot=1,kvm_hint_realtime=maybe").unwrap_err();
+        }
         assert_eq!(
             CpusConfig::parse("boot=2,affinity=[0@[0,2],1@[1,3]]")?,
             CpusConfig {
@@ -6533,6 +6565,18 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             invalid_config.validate(),
             Err(ValidationError::CpusMaxLowerThanBoot(16, 32))
         );
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            let mut hint_config = valid_config.clone();
+            hint_config.cpus.kvm_hint_realtime = true;
+            hint_config.validate().unwrap();
+            hint_config.cpus.kvm_hyperv = true;
+            assert_eq!(
+                hint_config.validate(),
+                Err(ValidationError::KvmHintRealtimeWithKvmHyperv)
+            );
+        }
 
         let mut invalid_config = valid_config.clone();
         invalid_config.cpus.max_vcpus = 16;
