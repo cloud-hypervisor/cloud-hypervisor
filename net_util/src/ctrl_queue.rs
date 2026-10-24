@@ -29,6 +29,9 @@ pub enum Error {
     /// Read queue failed.
     #[error("Read queue failed")]
     GuestMemory(#[source] GuestMemoryError),
+    /// Descriptor has the wrong direction or is too short
+    #[error("Descriptor has the wrong direction or is too short")]
+    InvalidDescriptor,
     /// No control header descriptor
     #[error("No control header descriptor")]
     NoControlHeaderDescriptor,
@@ -110,6 +113,10 @@ impl CtrlQueue {
     ) -> Result<()> {
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(mem) {
             let ctrl_desc = desc_chain.next().ok_or(Error::NoControlHeaderDescriptor)?;
+            if ctrl_desc.is_write_only() || (ctrl_desc.len() as usize) < size_of::<ControlHeader>()
+            {
+                return Err(Error::InvalidDescriptor);
+            }
 
             let ctrl_hdr: ControlHeader = desc_chain
                 .memory()
@@ -124,6 +131,9 @@ impl CtrlQueue {
             let (ok, status_desc) = match u32::from(ctrl_hdr.class) {
                 VIRTIO_NET_CTRL_MQ => {
                     let data_desc = desc_chain.next().ok_or(Error::NoDataDescriptor)?;
+                    if data_desc.is_write_only() || (data_desc.len() as usize) < size_of::<u16>() {
+                        return Err(Error::InvalidDescriptor);
+                    }
                     let data_desc_addr = data_desc
                         .addr()
                         .translate_gva(access_platform, data_desc.len() as usize)
@@ -159,6 +169,9 @@ impl CtrlQueue {
                 }
                 VIRTIO_NET_CTRL_GUEST_OFFLOADS => {
                     let data_desc = desc_chain.next().ok_or(Error::NoDataDescriptor)?;
+                    if data_desc.is_write_only() || (data_desc.len() as usize) < size_of::<u64>() {
+                        return Err(Error::InvalidDescriptor);
+                    }
                     let data_desc_addr = data_desc
                         .addr()
                         .translate_gva(access_platform, data_desc.len() as usize)
@@ -212,6 +225,10 @@ impl CtrlQueue {
                     (ok, status_desc)
                 }
             };
+
+            if !status_desc.is_write_only() || status_desc.len() == 0 {
+                return Err(Error::InvalidDescriptor);
+            }
 
             desc_chain
                 .memory()
@@ -435,5 +452,92 @@ mod tests {
             ctrl_q.process(&mem, &mut queue, None),
             Err(Error::NoDataDescriptor)
         ));
+    }
+
+    /// Build a VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET chain whose data and status
+    /// descriptors have the given lengths and flags, process it, and return
+    /// the result together with the status byte left in guest memory.
+    fn run_mq_chain(
+        data_len: u32,
+        data_flags: u16,
+        status_len: u32,
+        status_flags: u16,
+    ) -> (Result<()>, u8) {
+        const MEM_SIZE: usize = 0x20_0000;
+        const QSIZE: u16 = 4;
+        const QUEUE_ADDR: u64 = 0x0016_0000;
+        const HEADER_ADDR: u64 = 0x0017_0000;
+        const DATA_ADDR: u64 = 0x0017_1000;
+        const STATUS_ADDR: u64 = 0x0017_2000;
+
+        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap();
+        let guest_q = GuestQ::new(GuestAddress(QUEUE_ADDR), &mem, QSIZE);
+        let mut queue = guest_q.create_queue();
+
+        guest_q.dtable[0].set(
+            HEADER_ADDR,
+            size_of::<ControlHeader>() as u32,
+            VRING_DESC_F_NEXT.try_into().unwrap(),
+            1,
+        );
+        guest_q.dtable[1].set(
+            DATA_ADDR,
+            data_len,
+            data_flags | u16::try_from(VRING_DESC_F_NEXT).unwrap(),
+            2,
+        );
+        guest_q.dtable[2].set(STATUS_ADDR, status_len, status_flags, 0);
+        guest_q.avail.ring[0].set(0);
+        guest_q.avail.idx.set(1);
+
+        mem.write_obj(
+            ControlHeader {
+                class: VIRTIO_NET_CTRL_MQ as u8,
+                cmd: VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET as u8,
+            },
+            GuestAddress(HEADER_ADDR),
+        )
+        .unwrap();
+        mem.write_obj(1u16, GuestAddress(DATA_ADDR)).unwrap();
+        mem.write_obj(0xff_u8, GuestAddress(STATUS_ADDR)).unwrap();
+
+        let mut ctrl_q = CtrlQueue::new(
+            Vec::new(),
+            Arc::new(AtomicBool::new(false)),
+            1,
+            Arc::new(AtomicU16::new(1)),
+        );
+        let result = ctrl_q.process(&mem, &mut queue, None);
+
+        (
+            result,
+            mem.read_obj::<u8>(GuestAddress(STATUS_ADDR)).unwrap(),
+        )
+    }
+
+    #[test]
+    fn test_process_rejects_status_descriptor_the_device_cannot_write() {
+        // The status byte goes into the last descriptor, so the driver must
+        // offer it as device-writable with room for one byte. A driver-only
+        // descriptor and an empty one must both be refused before any write.
+        let write = u16::try_from(VRING_DESC_F_WRITE).unwrap();
+        for (status_len, status_flags) in [(1, 0), (0, write)] {
+            let (result, status) =
+                run_mq_chain(size_of::<u16>() as u32, 0, status_len, status_flags);
+            assert!(matches!(result, Err(Error::InvalidDescriptor)));
+            assert_eq!(status, 0xff);
+        }
+    }
+
+    #[test]
+    fn test_process_rejects_data_descriptor_shorter_than_the_payload() {
+        // The le16 queue-pair count is read from the data descriptor, which
+        // must be driver-readable and at least two bytes long.
+        let write = u16::try_from(VRING_DESC_F_WRITE).unwrap();
+        for (data_len, data_flags) in [(1, 0), (size_of::<u16>() as u32, write)] {
+            let (result, status) = run_mq_chain(data_len, data_flags, 1, write);
+            assert!(matches!(result, Err(Error::InvalidDescriptor)));
+            assert_eq!(status, 0xff);
+        }
     }
 }
