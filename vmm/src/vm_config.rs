@@ -464,7 +464,7 @@ pub struct DiskConfig {
     #[serde(default)]
     pub direct: bool,
     #[serde(default = "default_diskconfig_num_queues")]
-    pub num_queues: usize,
+    pub num_queues: u16,
     #[serde(default = "default_diskconfig_queue_size")]
     pub queue_size: u16,
     #[serde(default)]
@@ -505,9 +505,9 @@ impl ApplyLandlock for DiskConfig {
     }
 }
 
-pub const DEFAULT_DISK_NUM_QUEUES: usize = 1;
+pub const DEFAULT_DISK_NUM_QUEUES: u16 = 1;
 
-pub fn default_diskconfig_num_queues() -> usize {
+pub fn default_diskconfig_num_queues() -> u16 {
     DEFAULT_DISK_NUM_QUEUES
 }
 
@@ -537,7 +537,7 @@ pub struct NetConfig {
     #[serde(default)]
     pub mtu: Option<u16>,
     #[serde(default = "default_netconfig_num_queues")]
-    pub num_queues: usize,
+    pub num_queues: u16,
     #[serde(default = "default_netconfig_queue_size")]
     pub queue_size: u16,
     #[serde(default)]
@@ -567,9 +567,9 @@ pub fn default_netconfig_tap() -> Option<String> {
     None
 }
 
-pub const DEFAULT_NET_NUM_QUEUES: usize = 2;
+pub const DEFAULT_NET_NUM_QUEUES: u16 = 2;
 
-pub fn default_netconfig_num_queues() -> usize {
+pub fn default_netconfig_num_queues() -> u16 {
     DEFAULT_NET_NUM_QUEUES
 }
 
@@ -652,12 +652,12 @@ pub struct FsConfig {
     pub tag: String,
     pub socket: PathBuf,
     #[serde(default = "default_fsconfig_num_queues")]
-    pub num_queues: usize,
+    pub num_queues: u16,
     #[serde(default = "default_fsconfig_queue_size")]
     pub queue_size: u16,
 }
 
-pub fn default_fsconfig_num_queues() -> usize {
+pub fn default_fsconfig_num_queues() -> u16 {
     1
 }
 
@@ -918,10 +918,10 @@ pub struct VdpaConfig {
     pub pci_common: PciDeviceCommonConfig,
     pub path: PathBuf,
     #[serde(default = "default_vdpaconfig_num_queues")]
-    pub num_queues: usize,
+    pub num_queues: u16,
 }
 
-pub fn default_vdpaconfig_num_queues() -> usize {
+pub fn default_vdpaconfig_num_queues() -> u16 {
     1
 }
 

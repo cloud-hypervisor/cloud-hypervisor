@@ -2849,7 +2849,7 @@ impl DeviceManager {
             let socket = disk_cfg.vhost_socket.as_ref().unwrap().clone();
             let vu_cfg = VhostUserConfig {
                 socket,
-                num_queues: disk_cfg.num_queues,
+                num_queues: disk_cfg.num_queues as usize,
                 queue_size: disk_cfg.queue_size,
             };
             let vhost_user_block = Arc::new(Mutex::new(
@@ -2961,7 +2961,7 @@ impl DeviceManager {
                     .clone(),
                 disk_cfg.readonly,
                 self.force_access_platform | disk_cfg.pci_common.iommu.attached(),
-                disk_cfg.num_queues,
+                disk_cfg.num_queues as usize,
                 disk_cfg.queue_size,
                 disk_cfg.serial.clone(),
                 self.seccomp_action.clone(),
@@ -3048,7 +3048,7 @@ impl DeviceManager {
             let socket = net_cfg.vhost_socket.as_ref().unwrap().clone();
             let vu_cfg = VhostUserConfig {
                 socket,
-                num_queues: net_cfg.num_queues,
+                num_queues: net_cfg.num_queues as usize,
                 queue_size: net_cfg.queue_size,
             };
             let server = match net_cfg.vhost_mode {
@@ -3100,7 +3100,7 @@ impl DeviceManager {
                         net_cfg.host_mac,
                         net_cfg.mtu,
                         self.force_access_platform | net_cfg.pci_common.iommu.attached(),
-                        net_cfg.num_queues,
+                        net_cfg.num_queues as usize,
                         net_cfg.queue_size,
                         self.seccomp_action.clone(),
                         net_cfg.rate_limiter_config,
@@ -3151,7 +3151,7 @@ impl DeviceManager {
                         net_cfg.host_mac,
                         net_cfg.mtu,
                         self.force_access_platform | net_cfg.pci_common.iommu.attached(),
-                        net_cfg.num_queues,
+                        net_cfg.num_queues as usize,
                         net_cfg.queue_size,
                         self.seccomp_action.clone(),
                         net_cfg.rate_limiter_config,
@@ -3391,7 +3391,7 @@ impl DeviceManager {
                     id.clone(),
                     fs_socket,
                     &fs_cfg.tag,
-                    fs_cfg.num_queues,
+                    fs_cfg.num_queues as usize,
                     fs_cfg.queue_size,
                     None,
                     self.seccomp_action.clone(),
@@ -3925,7 +3925,7 @@ impl DeviceManager {
                 id.clone(),
                 device_path,
                 self.memory_manager.lock().unwrap().guest_memory(),
-                vdpa_cfg.num_queues as u16,
+                vdpa_cfg.num_queues,
                 state_from_id(snapshot, id.as_str())
                     .map_err(DeviceManagerError::RestoreGetState)?,
             )
