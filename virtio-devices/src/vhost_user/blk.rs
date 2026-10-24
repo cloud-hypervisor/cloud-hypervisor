@@ -31,11 +31,11 @@ use crate::seccomp_filters::Thread;
 use crate::vhost_user::{VhostUserCommon, VhostUserState};
 use crate::{GuestRegionMmap, VIRTIO_F_ACCESS_PLATFORM, VirtioInterrupt, VirtioInterruptType};
 
-const DEFAULT_QUEUE_NUMBER: usize = 1;
+const DEFAULT_QUEUE_NUMBER: u16 = 1;
 
 pub type State = VhostUserState<VirtioBlockConfig>;
 
-fn get_block_config(vu: &mut VhostUserHandle, num_queues: usize) -> Result<VirtioBlockConfig> {
+fn get_block_config(vu: &mut VhostUserHandle, num_queues: u16) -> Result<VirtioBlockConfig> {
     let config_len = size_of::<VirtioBlockConfig>();
     let config_space = vec![0u8; config_len];
     let (_, config_space) = vu
@@ -50,7 +50,7 @@ fn get_block_config(vu: &mut VhostUserHandle, num_queues: usize) -> Result<Virti
     let mut config = VirtioBlockConfig::default();
     if let Some(backend_config) = VirtioBlockConfig::from_slice(config_space.as_slice()) {
         config = *backend_config;
-        config.num_queues = num_queues as u16;
+        config.num_queues = num_queues;
     }
 
     Ok(config)
@@ -59,7 +59,7 @@ fn get_block_config(vu: &mut VhostUserHandle, num_queues: usize) -> Result<Virti
 struct BackendReqHandler {
     vu: Arc<Mutex<VhostUserHandle>>,
     config: Arc<Mutex<VirtioBlockConfig>>,
-    num_queues: usize,
+    num_queues: u16,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
 }
 
@@ -104,7 +104,7 @@ impl Blk {
         let mut vu = VhostUserHandle::connect_vhost_user(
             false,
             &vu_cfg.socket,
-            num_queues as u64,
+            num_queues,
             false,
             &exit_evt,
             |_| Ok(()),
@@ -171,12 +171,12 @@ impl Blk {
                 if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
                     vu.socket_handle()
                         .get_queue_num()
-                        .map_err(Error::VhostUserGetQueueMaxNum)? as usize
+                        .map_err(Error::VhostUserGetQueueMaxNum)?
                 } else {
-                    DEFAULT_QUEUE_NUMBER
+                    DEFAULT_QUEUE_NUMBER as u64
                 };
 
-            if num_queues > backend_num_queues {
+            if num_queues as u64 > backend_num_queues {
                 error!(
                     "vhost-user-blk requested too many queues ({num_queues}) since the backend only supports {backend_num_queues}\n"
                 );
@@ -209,11 +209,11 @@ impl Blk {
             vu_common: VhostUserCommon {
                 virtio_common: VirtioCommon {
                     device_type: VirtioDeviceType::Block as u32,
-                    queue_sizes: vec![vu_cfg.queue_size; num_queues],
+                    queue_sizes: vec![vu_cfg.queue_size; num_queues as usize],
                     avail_features,
                     acked_features,
                     paused_sync: Some(Arc::new(Barrier::new(2))),
-                    min_queues: DEFAULT_QUEUE_NUMBER as u16,
+                    min_queues: DEFAULT_QUEUE_NUMBER,
                     paused: Arc::new(AtomicBool::new(paused)),
                     ..Default::default()
                 },
@@ -313,7 +313,8 @@ impl VirtioDevice for Blk {
             let mut handler = FrontendReqHandler::new(Arc::new(BackendReqHandler {
                 vu: Arc::clone(self.vu_common.vu.as_ref().unwrap()),
                 config: Arc::clone(&self.config),
-                num_queues: self.vu_common.virtio_common.queue_sizes.len(),
+                num_queues: u16::try_from(self.vu_common.virtio_common.queue_sizes.len())
+                    .map_err(|_| crate::ActivateError::VhostUserSetup(Error::BadQueueNum))?,
                 interrupt_cb: Arc::clone(&interrupt_cb),
             }))
             .map_err(|e| {
