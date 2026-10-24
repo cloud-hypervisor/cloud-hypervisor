@@ -36,8 +36,8 @@ use crate::seccomp_filters::Thread;
 use crate::{GuestMemoryMmap, VirtioInterrupt};
 
 const QUEUE_SIZE: u16 = 256;
-const NUM_QUEUES: usize = 2;
-const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE; NUM_QUEUES];
+const NUM_QUEUES: u16 = 2;
+const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE; NUM_QUEUES as usize];
 
 // New descriptors are pending on the virtio queue.
 const INPUT_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
@@ -702,7 +702,7 @@ impl Console {
                     avail_features,
                     acked_features,
                     paused_sync: Some(Arc::new(Barrier::new(2))),
-                    min_queues: NUM_QUEUES as u16,
+                    min_queues: NUM_QUEUES,
                     paused: Arc::new(AtomicBool::new(paused)),
                     ..Default::default()
                 },
