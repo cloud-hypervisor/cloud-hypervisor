@@ -49,8 +49,9 @@ use vmm_sys_util::signal::unblock_signal;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
 use crate::api::{
-    ApiRequest, ApiResponse, BalloonStatsResponse, MigrationMode, RequestHandler, TimeoutStrategy,
-    VmInfoResponse, VmReceiveMigrationData, VmSendMigrationData, VmmPingResponse,
+    ApiRequest, ApiResponse, BalloonStatsResponse, MigrationMode, RequestHandler,
+    SnapshotMemoryBase, TimeoutStrategy, VmInfoResponse, VmReceiveMigrationData,
+    VmSendMigrationData, VmSnapshotConfig, VmmPingResponse,
 };
 use crate::config::{MemoryRestoreMode, RestoreConfig, VmMemoryZoneUpdateData, add_to_config};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -93,6 +94,8 @@ mod igvm;
 pub mod interrupt;
 pub mod landlock;
 pub mod locked_unix_listener;
+#[cfg_attr(not(test), expect(dead_code))]
+mod memory_diff;
 pub mod memory_manager;
 pub mod migration;
 mod pagemap;
@@ -2561,18 +2564,21 @@ impl RequestHandler for Vmm {
         }
     }
 
-    fn vm_snapshot(&mut self, destination_url: &str) -> result::Result<(), VmError> {
+    fn vm_snapshot(&mut self, config: &VmSnapshotConfig) -> result::Result<(), VmError> {
         match self.vm {
             VmOwnership::Owned(ref mut vm) => {
                 if vm.restoring() {
                     return Err(VmError::VmRestoring);
+                }
+                if config.memory_base == SnapshotMemoryBase::Link {
+                    return Err(VmError::SnapshotMemoryBaseLinkUnsupported);
                 }
                 // Drain console_info so that FDs are not reused
                 let _ = self.console_info.take();
                 vm.snapshot()
                     .map_err(VmError::Snapshot)
                     .and_then(|snapshot| {
-                        vm.send(&snapshot, destination_url)
+                        vm.send(&snapshot, &config.destination_url)
                             .map_err(VmError::SnapshotSend)
                     })
             }
