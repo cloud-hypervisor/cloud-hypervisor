@@ -23,7 +23,7 @@ const CONTROL_SIZE: usize = 30;
 const MEM_SIZE: usize = 512 * 1024;
 const BALLOON_SIZE: u64 = 512 * 1024;
 // Number of queues
-const QUEUE_NUM: usize = 3;
+const QUEUE_NUM: u16 = 3;
 // Max entries in the queue.
 const QUEUE_SIZE: u16 = 64;
 // Descriptor table alignment
@@ -121,7 +121,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
         }
     }
 
-    let queue_data = &bytes[..QUEUE_DATA_SIZE * QUEUE_NUM];
+    let queue_data = &bytes[..QUEUE_DATA_SIZE * QUEUE_NUM as usize];
     let mem_bytes = &bytes[CONTROL_SIZE..];
 
     // Setup the guest memory with the input bytes and dedicated queue region.
@@ -378,7 +378,7 @@ fn setup_virt_queues(
         q.try_set_used_ring_address(GuestAddress(used_ring_addr))
             .unwrap();
 
-        let max_size = if i + 1 == QUEUE_NUM {
+        let max_size = if i + 1 == QUEUE_NUM as usize {
             QUEUE_SIZE / 2
         } else {
             QUEUE_SIZE
@@ -780,7 +780,7 @@ fn populate_queue_memory(
     queue_layouts: &[QueueLayout],
     bytes: &[u8],
 ) -> bool {
-    if queue_layouts.len() != QUEUE_NUM {
+    if queue_layouts.len() != QUEUE_NUM as usize {
         return false;
     }
 
