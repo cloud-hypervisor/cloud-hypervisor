@@ -114,7 +114,7 @@ impl VhostUserNetThread {
 
 pub struct VhostUserNetBackend {
     threads: Vec<Mutex<VhostUserNetThread>>,
-    num_queues: usize,
+    num_queues: u16,
     queue_size: u16,
     queues_per_thread: Vec<u64>,
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
@@ -130,7 +130,7 @@ impl VhostUserNetBackend {
         mac: Option<MacAddr>,
         netmask: IpAddr,
         mtu: Option<u16>,
-        num_queues: usize,
+        num_queues: u16,
         queue_size: u16,
         ifname: Option<&str>,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
@@ -141,7 +141,7 @@ impl VhostUserNetBackend {
             Some(netmask),
             Some(host_mac),
             mtu,
-            num_queues / 2,
+            (num_queues / 2) as usize,
             None,
         )
         .map_err(Error::OpenTap)?;
@@ -200,7 +200,7 @@ impl VhostUserBackendMut for VhostUserNetBackend {
     type Vring = VringRwLock<GuestMemoryAtomic<GuestMemoryMmap>>;
 
     fn num_queues(&self) -> usize {
-        self.num_queues
+        self.num_queues as usize
     }
 
     fn max_queue_size(&self) -> usize {
@@ -337,7 +337,7 @@ pub struct VhostUserNetBackendConfig {
     pub mask: IpAddr,
     pub mtu: Option<u16>,
     pub socket: String,
-    pub num_queues: usize,
+    pub num_queues: u16,
     pub queue_size: u16,
     pub tap: Option<String>,
     pub client: bool,

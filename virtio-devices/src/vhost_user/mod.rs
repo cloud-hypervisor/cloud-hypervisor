@@ -148,7 +148,7 @@ pub enum Error {
     #[error("Failed saving/restoring backend state")]
     SaveRestoreBackendState(#[source] io::Error),
     #[error("Vring bases count ({0}) does not match queue count ({1})")]
-    VringBasesCountMismatch(usize, usize),
+    VringBasesCountMismatch(usize, u16),
     #[error("Backend state and vring bases must both be present or both be absent")]
     InconsistentBackendState,
     #[error("Failed to create timerfd")]
@@ -319,10 +319,12 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
             .map(|(i, q, e)| (*i, vm_virtio::clone_queue(q), e.try_clone().unwrap()))
             .collect::<Vec<_>>();
 
+        let num_queues = u16::try_from(self.queues.len())
+            .map_err(|_| EpollHelperError::IoError(io::Error::other(Error::BadQueueNum)))?;
         let mut vhost_user = match VhostUserHandle::connect_vhost_user(
             self.server,
             &self.socket_path,
-            self.queues.len() as u64,
+            num_queues,
             true,
             &self.kill_evt,
             |vhost_user| {
@@ -442,7 +444,7 @@ pub struct VhostUserState<C> {
     pub acked_features: u64,
     pub config: C,
     pub acked_protocol_features: u64,
-    pub vu_num_queues: usize,
+    pub vu_num_queues: u16,
     #[serde(default)]
     pub vring_bases: Option<Vec<u64>>,
     #[serde(default)]
@@ -465,7 +467,7 @@ pub struct VhostUserCommon {
     pub guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     pub acked_protocol_features: u64,
     pub socket_path: String,
-    pub vu_num_queues: usize,
+    pub vu_num_queues: u16,
     pub migration_started: bool,
     pub server: bool,
     pub vring_bases: Option<Vec<u64>>,
@@ -740,7 +742,7 @@ impl VhostUserCommon {
         // Always run the interrupt loop so workers don't get stuck.
         for i in 0..self.vu_num_queues {
             self.virtio_common
-                .trigger_interrupt(crate::VirtioInterruptType::Queue(i as u16))
+                .trigger_interrupt(crate::VirtioInterruptType::Queue(i))
                 .ok();
         }
 

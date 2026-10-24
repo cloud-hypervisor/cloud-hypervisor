@@ -28,8 +28,8 @@ use crate::{
     VirtioDevice, VirtioDeviceType, VirtioSharedMemoryList,
 };
 
-const NUM_QUEUE_OFFSET: usize = 1;
-const DEFAULT_QUEUE_NUMBER: usize = 2;
+const NUM_QUEUE_OFFSET: u16 = 1;
+const DEFAULT_QUEUE_NUMBER: u16 = 2;
 
 pub type State = VhostUserState<VirtioFsConfig>;
 
@@ -76,7 +76,7 @@ impl Fs {
         id: String,
         path: &str,
         tag: &str,
-        req_num_queues: usize,
+        req_num_queues: u16,
         queue_size: u16,
         cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
         seccomp_action: SeccompAction,
@@ -85,17 +85,15 @@ impl Fs {
         state: Option<State>,
     ) -> Result<Fs> {
         // Calculate the actual number of queues needed.
-        let num_queues = NUM_QUEUE_OFFSET + req_num_queues;
+        let num_queues = req_num_queues
+            .checked_add(NUM_QUEUE_OFFSET)
+            .ok_or(Error::BadQueueNum)?;
 
         // Connect to the vhost-user socket.
-        let mut vu = VhostUserHandle::connect_vhost_user(
-            false,
-            path,
-            num_queues as u64,
-            false,
-            &exit_evt,
-            |_| Ok(()),
-        )?;
+        let mut vu =
+            VhostUserHandle::connect_vhost_user(false, path, num_queues, false, &exit_evt, |_| {
+                Ok(())
+            })?;
 
         let (
             avail_features,
@@ -142,12 +140,12 @@ impl Fs {
                 if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
                     vu.socket_handle()
                         .get_queue_num()
-                        .map_err(Error::VhostUserGetQueueMaxNum)? as usize
+                        .map_err(Error::VhostUserGetQueueMaxNum)?
                 } else {
-                    DEFAULT_QUEUE_NUMBER
+                    DEFAULT_QUEUE_NUMBER as u64
                 };
 
-            if num_queues > backend_num_queues {
+            if num_queues as u64 > backend_num_queues {
                 error!(
                     "vhost-user-fs requested too many queues ({num_queues}) since the backend only supports {backend_num_queues}\n"
                 );
@@ -191,7 +189,7 @@ impl Fs {
                     device_type: VirtioDeviceType::Fs as u32,
                     avail_features,
                     acked_features,
-                    queue_sizes: vec![queue_size; num_queues],
+                    queue_sizes: vec![queue_size; num_queues as usize],
                     paused_sync: Some(Arc::new(Barrier::new(2))),
                     min_queues: 1,
                     paused: Arc::new(AtomicBool::new(paused)),

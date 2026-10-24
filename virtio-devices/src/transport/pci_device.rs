@@ -251,7 +251,7 @@ impl PciSubclass for PciVirtioSubclass {
 
 /// Max number of virtio queues Cloud Hypervisor supports.
 /// This is set by the current size of the notification BAR.
-const MAX_QUEUES: u64 = 0x400;
+const MAX_QUEUES: u16 = 0x400;
 
 // Automatically compute the position of the next entry in the BAR.
 // This handles alignment properly and is much less error-prone than
@@ -278,7 +278,7 @@ const ISR_STATUS_CONFIG_BIT: usize = 0x2;
 const DEVICE_CONFIG_BAR_OFFSET: u64 = next_bar_addr(ISR_CONFIG_BAR_OFFSET, ISR_CONFIG_SIZE);
 const DEVICE_CONFIG_SIZE: u64 = 0x1000;
 const NOTIFICATION_BAR_OFFSET: u64 = next_bar_addr(DEVICE_CONFIG_BAR_OFFSET, DEVICE_CONFIG_SIZE);
-const NOTIFICATION_SIZE: u64 = MAX_QUEUES * NOTIFY_OFF_MULTIPLIER as u64;
+const NOTIFICATION_SIZE: u64 = MAX_QUEUES as u64 * NOTIFY_OFF_MULTIPLIER as u64;
 const MSIX_TABLE_BAR_OFFSET: u64 = next_bar_addr(NOTIFICATION_BAR_OFFSET, NOTIFICATION_SIZE);
 
 // The size is 256KiB because the table can hold up to 2048 entries, with each
@@ -447,7 +447,7 @@ impl VirtioPciDevice {
                 VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!("Failed creating eventfd: {e}"))
             })?);
         }
-        let num_queues = locked_device.queue_max_sizes().len();
+        let num_queues = locked_device.queue_max_sizes().len() as u16;
 
         if let Some(access_platform) = access_platform {
             locked_device.set_access_platform(Arc::clone(access_platform));
@@ -557,7 +557,7 @@ impl VirtioPciDevice {
                     driver_feature_select: 0,
                     queue_select: 0,
                     msix_config: VIRTQ_MSI_NO_VECTOR,
-                    msix_queues: vec![VIRTQ_MSI_NO_VECTOR; num_queues],
+                    msix_queues: vec![VIRTQ_MSI_NO_VECTOR; num_queues as usize],
                 },
                 Arc::clone(&device),
             )
@@ -1835,12 +1835,12 @@ mod tests {
         }
     }
 
-    fn make_virtio_pci_device_with_queues(num_queues: usize) -> VirtioPciDevice {
+    fn make_virtio_pci_device_with_queues(num_queues: u16) -> VirtioPciDevice {
         let memory = GuestMemoryAtomic::new(
             GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
         );
         let device = Arc::new(Mutex::new(QueuedTestDevice {
-            queue_sizes: vec![256; num_queues],
+            queue_sizes: vec![256; num_queues as usize],
         }));
         VirtioPciDevice::new(
             "test-dev".to_string(),

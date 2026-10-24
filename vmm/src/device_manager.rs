@@ -3925,7 +3925,7 @@ impl DeviceManager {
                 id.clone(),
                 device_path,
                 self.memory_manager.lock().unwrap().guest_memory(),
-                vdpa_cfg.num_queues as u16,
+                vdpa_cfg.num_queues,
                 state_from_id(snapshot, id.as_str())
                     .map_err(DeviceManagerError::RestoreGetState)?,
             )

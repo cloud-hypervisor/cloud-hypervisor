@@ -36,7 +36,7 @@ const GUEST_MEM_GAP: u64 = 1024 * 1024;
 // Guest physical address for the first virt queue
 const BASE_VIRT_QUEUE_ADDR: u64 = MEM_SIZE as u64 + GUEST_MEM_GAP;
 // Number of queues
-const QUEUE_NUM: usize = 2;
+const QUEUE_NUM: u16 = 2;
 // Max entries in the queue.
 const QUEUE_SIZE: u16 = 256;
 // Descriptor table alignment
@@ -56,7 +56,7 @@ const QUEUE_BYTES_SIZE: usize = align!(
     DESC_TABLE_SIZE + AVAIL_RING_SIZE + PADDING_SIZE + USED_RING_SIZE,
     DESC_TABLE_ALIGN_SIZE
 ) as usize;
-const QUEUE_REGION_SIZE: usize = QUEUE_BYTES_SIZE * QUEUE_NUM;
+const QUEUE_REGION_SIZE: usize = QUEUE_BYTES_SIZE * QUEUE_NUM as usize;
 const VRING_DESC_F_NEXT: u16 = 1;
 const VRING_DESC_F_WRITE: u16 = 2;
 const DESCRIPTORS_PER_QUEUE: u16 = 4;
@@ -632,7 +632,7 @@ fn setup_virt_queues(
     for i in 0..QUEUE_NUM {
         let mut q = Queue::new(QUEUE_SIZE).unwrap();
 
-        let desc_table_addr = base_addr + (QUEUE_BYTES_SIZE * i) as u64;
+        let desc_table_addr = base_addr + (QUEUE_BYTES_SIZE * i as usize) as u64;
         let avail_ring_addr = desc_table_addr + DESC_TABLE_SIZE;
         let used_ring_addr = if bad_used_ring_mask & (1 << i) != 0 {
             MEM_SIZE as u64 + QUEUE_REGION_SIZE as u64 + GUEST_MEM_GAP

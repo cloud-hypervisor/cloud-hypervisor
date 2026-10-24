@@ -31,7 +31,7 @@ macro_rules! align {
     }};
 }
 
-const NUM_QUEUES: usize = 3;
+const NUM_QUEUES: u16 = 3;
 const QUEUE_DATA_SIZE: usize = 4;
 const MEM_SIZE: usize = 1024 * 1024;
 const QUEUE_SIZE: u16 = 256;
@@ -79,10 +79,10 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     let cycle = |len: usize, skip: usize| -> Vec<u8> {
         bytes.iter().copied().cycle().skip(skip).take(len).collect()
     };
-    let queue_data = cycle(QUEUE_DATA_SIZE * NUM_QUEUES, 0);
+    let queue_data = cycle(QUEUE_DATA_SIZE * NUM_QUEUES as usize, 0);
     let queue_bytes_all = cycle(
-        QUEUE_BYTES_SIZE * NUM_QUEUES,
-        (QUEUE_DATA_SIZE * NUM_QUEUES) % bytes.len(),
+        QUEUE_BYTES_SIZE * NUM_QUEUES as usize,
+        (QUEUE_DATA_SIZE * NUM_QUEUES as usize) % bytes.len(),
     );
 
     if !run_worker_scenario(bytes, &queue_data, &queue_bytes_all, bytes, false) {
@@ -385,7 +385,7 @@ fn run_worker_scenario(
         (GuestAddress(0), MEM_SIZE),
         (
             GuestAddress(BASE_VIRT_QUEUE_ADDR),
-            QUEUE_BYTES_SIZE * NUM_QUEUES,
+            QUEUE_BYTES_SIZE * NUM_QUEUES as usize,
         ),
     ]) {
         Ok(mem) => mem,
@@ -406,11 +406,11 @@ fn run_worker_scenario(
     }
 
     let guest_memory = GuestMemoryAtomic::new(mem);
-    let mut queues_with_evts = Vec::with_capacity(NUM_QUEUES);
+    let mut queues_with_evts = Vec::with_capacity(NUM_QUEUES as usize);
     for i in 0..NUM_QUEUES {
         let q = match build_queue(
-            queue_base(i),
-            &queue_data[i * QUEUE_DATA_SIZE..(i + 1) * QUEUE_DATA_SIZE],
+            queue_base(i as usize),
+            &queue_data[i as usize * QUEUE_DATA_SIZE..(i + 1) as usize * QUEUE_DATA_SIZE],
             edge,
         ) {
             Some(q) => q,
@@ -423,14 +423,14 @@ fn run_worker_scenario(
         };
 
         let kick_count = if edge {
-            u64::from(pick(bytes, 14 + i) % 3)
+            u64::from(pick(bytes, 14 + i as usize) % 3)
         } else {
-            1 + u64::from(pick(bytes, 20 + i) & 1)
+            1 + u64::from(pick(bytes, 20 + i as usize) & 1)
         };
         if kick_count > 0 {
             let _ = evt.write(kick_count);
         }
-        queues_with_evts.push((i as u16, q, evt));
+        queues_with_evts.push((i, q, evt));
     }
 
     let _ = queues_with_evts[1].2.write(1);
@@ -646,15 +646,11 @@ fn exercise_device_paths(bytes: &[u8]) {
         device_status: Arc::new(AtomicU8::new(0)),
     });
 
-    let mut queues = Vec::with_capacity(NUM_QUEUES);
+    let mut queues = Vec::with_capacity(NUM_QUEUES as usize);
     for queue_index in 0..NUM_QUEUES {
         let queue_evt = EventFd::new(EFD_NONBLOCK).unwrap();
         let _ = queue_evt.write(1);
-        queues.push((
-            queue_index as u16,
-            Queue::new(QUEUE_SIZE).unwrap(),
-            queue_evt,
-        ));
+        queues.push((queue_index, Queue::new(QUEUE_SIZE).unwrap(), queue_evt));
     }
 
     let _ = device.activate(ActivationContext {

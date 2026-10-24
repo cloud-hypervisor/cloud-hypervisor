@@ -1265,6 +1265,7 @@ components:
           $ref: "#/components/schemas/IommuType"
         num_queues:
           type: integer
+          format: uint16
           default: 1
         queue_size:
           type: integer
@@ -1328,6 +1329,7 @@ components:
           $ref: "#/components/schemas/IommuType"
         num_queues:
           type: integer
+          format: uint16
           default: 2
         queue_size:
           type: integer
@@ -1433,6 +1435,7 @@ components:
           type: string
         num_queues:
           type: integer
+          format: uint16
           default: 1
         queue_size:
           type: integer
@@ -1609,6 +1612,7 @@ components:
           type: string
         num_queues:
           type: integer
+          format: uint16
           default: 1
         iommu:
           $ref: "#/components/schemas/IommuType"

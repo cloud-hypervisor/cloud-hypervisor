@@ -261,13 +261,13 @@ pub enum ValidationError {
     CpuTopologyDiesPerPackage,
     /// Virtio needs a min of 2 queues
     #[error("Number of queues ({0}) to virtio_net should be higher than 2")]
-    VnetQueueLowerThan2(usize),
+    VnetQueueLowerThan2(u16),
     /// Virtio-net queues come in RX/TX pairs
     #[error("Number of queues ({0}) to virtio_net must be even")]
-    VnetQueueOdd(usize),
+    VnetQueueOdd(u16),
     /// The input queue number for virtio_net must match the number of input fds
     #[error("Number of queues ({0}) to virtio_net does not match the number of FDs ({1})")]
-    VnetQueueFdMismatch(usize /* num of queues */, usize /* FD num */),
+    VnetQueueFdMismatch(u16 /* num of queues */, usize /* FD num */),
     /// Using reserved fd
     #[error("Reserved fd number (<= 2): {0}")]
     VnetReservedFd(i32),
@@ -282,7 +282,7 @@ pub enum ValidationError {
     InvalidHugePageSize(u64),
     /// Insufficient vCPUs for queues
     #[error("Queue count ({0}) must not exceed boot vCPUs ({1})")]
-    TooManyQueues(usize /* queues */, usize /* vCPUs */),
+    TooManyQueues(u16 /* queues */, usize /* vCPUs */),
     /// Queue size is not a power of 2 within the spec-permitted range
     #[error("Queue size must be a power of 2 no greater than {VIRTIO_MAX_QUEUE_SIZE}: {0}")]
     InvalidQueueSize(u16),
@@ -291,7 +291,7 @@ pub enum ValidationError {
     BlockQueueSizeTooSmall(u16),
     /// Disk queue affinity refers to a queue the disk does not have
     #[error("Queue affinity refers to queue {0}, but the disk has {1} queues")]
-    InvalidQueueAffinity(u16 /* queue index */, usize /* queues */),
+    InvalidQueueAffinity(u16 /* queue index */, u16 /* queues */),
     /// Disk guest_block_size is not a power of 2 within the supported range
     #[error("Disk guest_block_size must be a power of 2 between 512 and 65536: {0}")]
     InvalidGuestBlockSize(u32),
@@ -1769,7 +1769,7 @@ impl DiskConfig {
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
         self.pci_common.validate(vm_config, true)?;
 
-        if self.num_queues > vm_config.cpus.boot_vcpus as usize {
+        if self.num_queues as u32 > vm_config.cpus.boot_vcpus {
             return Err(ValidationError::TooManyQueues(
                 self.num_queues,
                 vm_config.cpus.boot_vcpus as usize,
@@ -1783,9 +1783,7 @@ impl DiskConfig {
         }
 
         if let Some(affinity) = self.queue_affinity.as_ref()
-            && let Some(invalid) = affinity
-                .iter()
-                .find(|a| a.queue_index as usize >= self.num_queues)
+            && let Some(invalid) = affinity.iter().find(|a| a.queue_index >= self.num_queues)
         {
             return Err(ValidationError::InvalidQueueAffinity(
                 invalid.queue_index,
@@ -2050,7 +2048,7 @@ impl NetConfig {
 
         if let Some(fds) = &self.fds {
             let actual_queues = fds.len() * 2;
-            if actual_queues != self.num_queues {
+            if actual_queues != self.num_queues as usize {
                 return Err(ValidationError::VnetQueueFdMismatch(
                     self.num_queues,
                     actual_queues,
@@ -2064,7 +2062,7 @@ impl NetConfig {
             }
         }
 
-        if (self.num_queues / 2) > vm_config.cpus.boot_vcpus as usize {
+        if (self.num_queues / 2) as u32 > vm_config.cpus.boot_vcpus {
             return Err(ValidationError::TooManyQueues(
                 self.num_queues,
                 vm_config.cpus.boot_vcpus as usize,
@@ -2360,7 +2358,7 @@ impl FsConfig {
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        if self.num_queues > vm_config.cpus.boot_vcpus as usize {
+        if self.num_queues as u32 > vm_config.cpus.boot_vcpus {
             return Err(ValidationError::TooManyQueues(
                 self.num_queues,
                 vm_config.cpus.boot_vcpus as usize,

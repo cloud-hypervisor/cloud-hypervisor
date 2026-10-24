@@ -537,7 +537,7 @@ pub(crate) const OVERRIDDEN_MAC: &str = "de:ad:be:ef:00:01";
 
 pub(crate) fn test_vhost_user_net(
     tap: Option<&str>,
-    num_queues: usize,
+    num_queues: u16,
     prepare_daemon: &PrepareNetDaemon,
     generate_host_mac: bool,
     client_mode_daemon: bool,
@@ -735,10 +735,10 @@ pub(crate) fn test_vhost_user_net(
     handle_child_output(r, &output);
 }
 
-type PrepareBlkDaemon = dyn Fn(&TempDir, &str, usize, bool, bool) -> (Child, String);
+type PrepareBlkDaemon = dyn Fn(&TempDir, &str, u16, bool, bool) -> (Child, String);
 
 pub(crate) fn test_vhost_user_blk(
-    num_queues: usize,
+    num_queues: u16,
     readonly: bool,
     direct: bool,
     prepare_vhost_user_blk_daemon: Option<&PrepareBlkDaemon>,
@@ -865,7 +865,7 @@ pub(crate) fn test_vhost_user_blk(
 }
 
 pub(crate) fn test_boot_from_vhost_user_blk(
-    num_queues: usize,
+    num_queues: u16,
     readonly: bool,
     direct: bool,
     prepare_vhost_user_blk_daemon: Option<&PrepareBlkDaemon>,

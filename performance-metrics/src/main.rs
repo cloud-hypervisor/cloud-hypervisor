@@ -211,7 +211,7 @@ pub struct PerformanceTestControl {
     test_timeout: u32,
     test_iterations: u32,
     warmup_iterations: u32,
-    num_queues: Option<u32>,
+    num_queues: Option<u16>,
     queue_size: Option<u32>,
     net_control: Option<(bool, bool)>, // First bool is for RX(true)/TX(false), second bool is for bandwidth or PPS
     block_control: Option<BlockControl>,
