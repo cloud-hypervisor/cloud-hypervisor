@@ -120,6 +120,8 @@ pub enum Error {
     UnsupportedFeature(#[source] MissingFeatureError),
     #[error("Unsupported refcount order")]
     UnsupportedRefcountOrder,
+    #[error("Images with internal snapshots are not supported")]
+    UnsupportedSnapshots,
     #[error("Unsupported version: {0}")]
     UnsupportedVersion(u32),
     #[error("Failed to write header")]
@@ -248,9 +250,9 @@ pub(crate) fn parse_qcow(
             Error::InvalidMagic
             | Error::BackingFileTooLong(_)
             | Error::InvalidBackingFileName(_) => BlockErrorKind::InvalidFormat,
-            Error::UnsupportedFeature(_) | Error::UnsupportedCompressionType => {
-                BlockErrorKind::UnsupportedFeature
-            }
+            Error::UnsupportedFeature(_)
+            | Error::UnsupportedCompressionType
+            | Error::UnsupportedSnapshots => BlockErrorKind::UnsupportedFeature,
             _ => BlockErrorKind::Io,
         };
         BlockError::new(kind, e)
@@ -375,6 +377,13 @@ pub(crate) fn parse_qcow(
     let mut raw_file = QcowRawFile::from(file, cluster_size, refcount_bits)
         .ok_or_else(|| BlockError::new(BlockErrorKind::InvalidFormat, Error::InvalidClusterSize))?;
     let is_writable = raw_file.file().is_writable();
+
+    if is_writable && header.nb_snapshots != 0 {
+        return Err(BlockError::new(
+            BlockErrorKind::UnsupportedFeature,
+            Error::UnsupportedSnapshots,
+        ));
+    }
 
     if header.is_corrupt() {
         if is_writable {
@@ -1779,6 +1788,39 @@ mod tests {
             result.is_ok(),
             "Expected dirty bit to be accepted, got: {result:?}"
         );
+    }
+
+    fn image_with_internal_snapshots(nb_snapshots: u32) -> TempFile {
+        let tf = QcowTempDisk::new(0x1_0000, None, false, true, false)
+            .unwrap()
+            .into_tempfile();
+        // nb_snapshots is at offset 60 in the v2/v3 header.
+        tf.as_file()
+            .write_all_at(&nb_snapshots.to_be_bytes(), 60)
+            .unwrap();
+        tf
+    }
+
+    #[test]
+    fn internal_snapshots_rejected_for_writable_open() {
+        let tf = image_with_internal_snapshots(1);
+        let file = tf.as_file().try_clone().unwrap();
+        let err = QcowDisk::new(file, false, false, true, false).unwrap_err();
+        assert_eq!(err.kind(), BlockErrorKind::UnsupportedFeature, "{err}");
+    }
+
+    #[test]
+    fn internal_snapshots_allowed_readonly() {
+        let tf = image_with_internal_snapshots(1);
+        let file = OpenOptions::new().read(true).open(tf.as_path()).unwrap();
+        QcowDisk::new(file, false, false, true, false).unwrap();
+    }
+
+    #[test]
+    fn no_snapshots_still_open_writable() {
+        let tf = image_with_internal_snapshots(0);
+        let file = tf.as_file().try_clone().unwrap();
+        QcowDisk::new(file, false, false, true, false).unwrap();
     }
 
     #[test]
