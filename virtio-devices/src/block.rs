@@ -780,7 +780,7 @@ impl Block {
         disk_path: PathBuf,
         read_only: bool,
         access_platform_enabled: bool,
-        num_queues: usize,
+        num_queues: u16,
         queue_size: u16,
         serial: Option<String>,
         seccomp_action: SeccompAction,
@@ -891,7 +891,7 @@ impl Block {
 
                 if num_queues > 1 {
                     avail_features |= 1u64 << VIRTIO_BLK_F_MQ;
-                    config.num_queues = num_queues as u16;
+                    config.num_queues = num_queues;
                 }
 
                 (disk_nsectors, avail_features, 0, config, false)
@@ -906,8 +906,8 @@ impl Block {
                 device_type: VirtioDeviceType::Block as u32,
                 avail_features,
                 acked_features,
-                paused_sync: Some(Arc::new(Barrier::new(num_queues + 1))),
-                queue_sizes: vec![queue_size; num_queues],
+                paused_sync: Some(Arc::new(Barrier::new(num_queues as usize + 1))),
+                queue_sizes: vec![queue_size; num_queues as usize],
                 min_queues: 1,
                 paused: Arc::new(AtomicBool::new(paused)),
                 ..Default::default()

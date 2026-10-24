@@ -2961,7 +2961,7 @@ impl DeviceManager {
                     .clone(),
                 disk_cfg.readonly,
                 self.force_access_platform | disk_cfg.pci_common.iommu.attached(),
-                disk_cfg.num_queues as usize,
+                disk_cfg.num_queues,
                 disk_cfg.queue_size,
                 disk_cfg.serial.clone(),
                 self.seccomp_action.clone(),
