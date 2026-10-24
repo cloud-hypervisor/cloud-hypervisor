@@ -158,8 +158,7 @@ pub(crate) fn performance_net_throughput(control: &PerformanceTestControl) -> f6
 
     let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
-        measure_virtio_net_throughput(test_timeout, (num_queues / 2) as u32, &guest, rx, bandwidth)
-            .unwrap()
+        measure_virtio_net_throughput(test_timeout, num_queues / 2, &guest, rx, bandwidth).unwrap()
     });
 
     let _ = child.kill();

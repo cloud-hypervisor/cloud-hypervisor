@@ -14638,7 +14638,7 @@ mod rate_limiter {
         _test_rate_limiter_net(false);
     }
 
-    fn _test_rate_limiter_block(bandwidth: bool, num_queues: u32) {
+    fn _test_rate_limiter_block(bandwidth: bool, num_queues: u16) {
         let fio_ops = FioOps::RandRW;
 
         let bw_size = if bandwidth {
@@ -14700,9 +14700,9 @@ mod rate_limiter {
 
             // Parse fio output
             let measured_rate = if bandwidth {
-                parse_fio_output(&output, &fio_ops, num_queues).unwrap()
+                parse_fio_output(&output, &fio_ops, num_queues as u32).unwrap()
             } else {
-                parse_fio_output_iops(&output, &fio_ops, num_queues).unwrap()
+                parse_fio_output_iops(&output, &fio_ops, num_queues as u32).unwrap()
             };
             assert!(check_rate_limit(measured_rate, limit_rate, 0.1));
         });
@@ -14712,7 +14712,7 @@ mod rate_limiter {
         handle_child_output(r, &output);
     }
 
-    fn _test_rate_limiter_group_block(bandwidth: bool, num_queues: u32, num_disks: u32) {
+    fn _test_rate_limiter_group_block(bandwidth: bool, num_queues: u16, num_disks: u32) {
         let fio_ops = FioOps::RandRW;
 
         let bw_size = if bandwidth {
@@ -14763,7 +14763,7 @@ mod rate_limiter {
         }
 
         let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", &format!("boot={}", num_queues * num_disks)])
+            .args(["--cpus", &format!("boot={}", num_queues as u32 * num_disks)])
             .args(["--memory", "size=1G"])
             .default_kernel_cmdline()
             .args(["--rate-limit-group", &rate_limit_group_arg])
@@ -14802,9 +14802,9 @@ mod rate_limiter {
 
             // Parse fio output
             let measured_rate = if bandwidth {
-                parse_fio_output(&output, &fio_ops, num_queues * num_disks).unwrap()
+                parse_fio_output(&output, &fio_ops, num_queues as u32 * num_disks).unwrap()
             } else {
-                parse_fio_output_iops(&output, &fio_ops, num_queues * num_disks).unwrap()
+                parse_fio_output_iops(&output, &fio_ops, num_queues as u32 * num_disks).unwrap()
             };
             assert!(check_rate_limit(measured_rate, limit_rate, 0.2));
         });
