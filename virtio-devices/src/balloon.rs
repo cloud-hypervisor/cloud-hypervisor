@@ -54,7 +54,7 @@ use crate::{
 const QUEUE_SIZE: u16 = 128;
 const REPORTING_QUEUE_SIZE: u16 = 32;
 const STATS_QUEUE_SIZE: u16 = 32;
-const MIN_NUM_QUEUES: usize = 2;
+const MIN_NUM_QUEUES: u16 = 2;
 const INFLATE_QUEUE: u16 = 0;
 const DEFLATE_QUEUE: u16 = 1;
 
@@ -831,7 +831,7 @@ impl Balloon {
         exit_evt: EventFd,
         state: Option<BalloonState>,
     ) -> io::Result<Self> {
-        let mut queue_sizes = vec![QUEUE_SIZE; MIN_NUM_QUEUES];
+        let mut queue_sizes = vec![QUEUE_SIZE; MIN_NUM_QUEUES as usize];
 
         let (avail_features, acked_features, config, paused) = if let Some(state) = state {
             info!("Restoring virtio-balloon {id}");
@@ -880,7 +880,7 @@ impl Balloon {
                 acked_features,
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 queue_sizes,
-                min_queues: MIN_NUM_QUEUES as u16,
+                min_queues: MIN_NUM_QUEUES,
                 paused: Arc::new(AtomicBool::new(paused)),
                 ..Default::default()
             },

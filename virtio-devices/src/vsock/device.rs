@@ -57,8 +57,8 @@ use crate::{
 };
 
 const QUEUE_SIZE: u16 = 256;
-const NUM_QUEUES: usize = 3;
-const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE; NUM_QUEUES];
+const NUM_QUEUES: u16 = 3;
+const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE; NUM_QUEUES as usize];
 
 // New descriptors are pending on the rx queue.
 pub(super) const RX_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
@@ -400,7 +400,7 @@ where
                 acked_features,
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 queue_sizes: QUEUE_SIZES.to_vec(),
-                min_queues: NUM_QUEUES as u16,
+                min_queues: NUM_QUEUES,
                 paused: Arc::new(AtomicBool::new(paused)),
                 ..Default::default()
             },
