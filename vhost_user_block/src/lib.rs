@@ -216,7 +216,7 @@ struct VhostUserBlkBackend {
 impl VhostUserBlkBackend {
     fn new(
         image_path: &str,
-        num_queues: usize,
+        num_queues: u16,
         rdonly: bool,
         direct: bool,
         poll_queue: bool,
@@ -243,7 +243,7 @@ impl VhostUserBlkBackend {
             seg_max: 128 - 2,
             min_io_size: 1,
             opt_io_size: 1,
-            num_queues: num_queues as u16,
+            num_queues,
             writeback: 1,
             ..Default::default()
         };
@@ -473,7 +473,7 @@ impl VhostUserBackendMut for VhostUserBlkBackend {
 struct VhostUserBlkBackendConfig {
     path: String,
     socket: String,
-    num_queues: usize,
+    num_queues: u16,
     queue_size: usize,
     readonly: bool,
     direct: bool,
