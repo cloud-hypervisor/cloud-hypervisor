@@ -42,9 +42,9 @@ const TX_BACKPRESSURE_READY_POLLS: u8 = 8;
 const MEM_SIZE: usize = 2 * 1024 * 1024;
 const GUEST_MEM_GAP: u64 = 1024 * 1024;
 const BASE_VIRT_QUEUE_ADDR: u64 = MEM_SIZE as u64 + GUEST_MEM_GAP;
-const QUEUE_NUM: usize = 2;
-const TOTAL_QUEUES: usize = QUEUE_NUM + 1;
-const MAX_VIRTQUEUE_PAIRS: u16 = (QUEUE_NUM / 2) as u16;
+const QUEUE_NUM: u16 = 2;
+const TOTAL_QUEUES: u16 = QUEUE_NUM + 1;
+const MAX_VIRTQUEUE_PAIRS: u16 = QUEUE_NUM / 2;
 const QUEUE_SIZE: u16 = 256;
 const DESC_TABLE_ALIGN_SIZE: u64 = 16;
 const USED_RING_ALIGN_SIZE: u64 = 4;
@@ -671,7 +671,7 @@ fn setup_virt_queues(base_addr: u64, event_idx: bool) -> Vec<Queue> {
     let mut queues = Vec::new();
     for i in 0..TOTAL_QUEUES {
         let mut q = Queue::new(QUEUE_SIZE).unwrap();
-        let desc_table_addr = base_addr + (QUEUE_BYTES_SIZE * i) as u64;
+        let desc_table_addr = base_addr + (QUEUE_BYTES_SIZE * i as usize) as u64;
         let avail_ring_addr = desc_table_addr + DESC_TABLE_SIZE;
         let used_ring_addr = avail_ring_addr + PADDING_SIZE + AVAIL_RING_SIZE;
         q.try_set_desc_table_address(GuestAddress(desc_table_addr))
@@ -725,7 +725,7 @@ fn run_stateful_activation(
         avail_features,
         acked_features,
         config: restored_net_config(guest_mac),
-        queue_size: vec![QUEUE_SIZE; TOTAL_QUEUES],
+        queue_size: vec![QUEUE_SIZE; TOTAL_QUEUES as usize],
         curr_queue_pairs: None,
     };
 
@@ -760,7 +760,7 @@ fn run_stateful_activation(
     let rx_len0 = (vnet_hdr_len + TAP_INPUT_SIZE + usize::from(input.next_u8() % 64)) as u32;
     let rx_len1 = usize::max(1, usize::from(input.next_u8() % (vnet_hdr_len as u8 + 1))) as u32;
 
-    let mut queue_bytes = vec![0_u8; QUEUE_BYTES_SIZE * TOTAL_QUEUES];
+    let mut queue_bytes = vec![0_u8; QUEUE_BYTES_SIZE * TOTAL_QUEUES as usize];
     let rx_invalid = force_rx_invalid || input.next_bool();
     let tx_invalid = force_tx_invalid || input.next_bool();
     build_rx_queue_layout(&mut queue_bytes, rx_len0, rx_len1, rx_invalid);
@@ -1274,7 +1274,7 @@ fn exercise_bad_tap_activation(guest_mac_addr: net_util::MacAddr, rx_avail_idx: 
         avail_features: features,
         acked_features: features,
         config: restored_net_config([0; 6]),
-        queue_size: vec![QUEUE_SIZE; TOTAL_QUEUES],
+        queue_size: vec![QUEUE_SIZE; TOTAL_QUEUES as usize],
         curr_queue_pairs: None,
     };
     let mut net = match virtio_devices::Net::new_with_tap(
@@ -1297,7 +1297,7 @@ fn exercise_bad_tap_activation(guest_mac_addr: net_util::MacAddr, rx_avail_idx: 
     };
 
     let vnet_hdr_len = net_util::vnet_hdr_len();
-    let mut queue_bytes = vec![0_u8; QUEUE_BYTES_SIZE * TOTAL_QUEUES];
+    let mut queue_bytes = vec![0_u8; QUEUE_BYTES_SIZE * TOTAL_QUEUES as usize];
     build_rx_queue_layout(
         &mut queue_bytes,
         (vnet_hdr_len + TAP_INPUT_SIZE) as u32,
@@ -1364,7 +1364,7 @@ fn exercise_bad_queue_activation(guest_mac_addr: net_util::MacAddr, bad_avail_ri
         avail_features: features,
         acked_features: features,
         config: restored_net_config([0; 6]),
-        queue_size: vec![QUEUE_SIZE; TOTAL_QUEUES],
+        queue_size: vec![QUEUE_SIZE; TOTAL_QUEUES as usize],
         curr_queue_pairs: None,
     };
     let mut net = match virtio_devices::Net::new_with_tap(

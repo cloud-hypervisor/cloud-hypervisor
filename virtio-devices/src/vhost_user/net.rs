@@ -230,7 +230,7 @@ impl Net {
                 && mtu.is_none();
 
             let mut config = backend_config.unwrap_or_default();
-            config.populate(guest_mac, num_queues as usize, mtu);
+            config.populate(guest_mac, num_queues, mtu);
 
             // If the control queue feature has been negotiated, let's increase
             // the number of queues.
@@ -362,7 +362,7 @@ impl VirtioDevice for Net {
             .virtio_common
             .activate(&queues, Arc::clone(&interrupt_cb))?;
 
-        let num_queues = queues.len();
+        let num_queues = u16::try_from(queues.len()).map_err(|_| ActivateError::BadActivate)?;
         let event_idx = self
             .vu_common
             .virtio_common
@@ -374,7 +374,7 @@ impl VirtioDevice for Net {
             && !num_queues.is_multiple_of(2)
         {
             let ctrl_queue_index = num_queues - 1;
-            let (_, mut ctrl_queue, ctrl_queue_evt) = queues.remove(ctrl_queue_index);
+            let (_, mut ctrl_queue, ctrl_queue_evt) = queues.remove(ctrl_queue_index as usize);
 
             ctrl_queue.set_event_idx(event_idx);
 
@@ -407,7 +407,7 @@ impl VirtioDevice for Net {
                 queue_evt: ctrl_queue_evt,
                 access_platform: None,
                 interrupt_cb: Arc::clone(&interrupt_cb),
-                queue_index: ctrl_queue_index as u16,
+                queue_index: ctrl_queue_index,
                 announce_evt: self
                     .announce
                     .evt

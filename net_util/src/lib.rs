@@ -58,12 +58,12 @@ pub struct VirtioNetConfig {
 unsafe impl ByteValued for VirtioNetConfig {}
 
 impl VirtioNetConfig {
-    pub fn populate(&mut self, mac: Option<MacAddr>, num_queues: usize, mtu: Option<u16>) {
+    pub fn populate(&mut self, mac: Option<MacAddr>, num_queues: u16, mtu: Option<u16>) {
         if let Some(mac) = mac {
             self.mac.copy_from_slice(mac.get_bytes());
         }
 
-        let num_queue_pairs = (num_queues / 2) as u16;
+        let num_queue_pairs = num_queues / 2;
         if (num_queue_pairs >= VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN as u16)
             && (num_queue_pairs <= VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX as u16)
         {

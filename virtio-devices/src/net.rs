@@ -220,6 +220,8 @@ pub enum Error {
     TapError(#[source] TapError),
     #[error("Error calling dup() on tap fd")]
     DuplicateTapFd(#[source] io::Error),
+    #[error("Invalid queue count")]
+    BadQueueNum,
     #[error("Error creating EventFd")]
     CreateEventFd(#[source] io::Error),
 }
@@ -531,7 +533,7 @@ impl Net {
         taps: Vec<Tap>,
         guest_mac: MacAddr,
         access_platform_enabled: bool,
-        num_queues: usize,
+        num_queues: u16,
         queue_size: u16,
         seccomp_action: SeccompAction,
         rate_limiter_config: Option<RateLimiterConfig>,
@@ -609,7 +611,7 @@ impl Net {
                 avail_features |= 1 << VIRTIO_NET_F_MAC;
                 avail_features |= 1 << VIRTIO_NET_F_MQ;
 
-                let queue_num = num_queues + 1;
+                let queue_num = num_queues.checked_add(1).ok_or(Error::BadQueueNum)?;
 
                 let mut config = VirtioNetConfig::default();
                 config.populate(Some(guest_mac), num_queues, mtu);
@@ -618,7 +620,7 @@ impl Net {
                     avail_features,
                     0,
                     config,
-                    vec![queue_size; queue_num],
+                    vec![queue_size; queue_num as usize],
                     false,
                     false,
                 )
@@ -630,7 +632,7 @@ impl Net {
                 avail_features,
                 acked_features,
                 queue_sizes,
-                paused_sync: Some(Arc::new(Barrier::new((num_queues / 2) + 1))),
+                paused_sync: Some(Arc::new(Barrier::new((num_queues / 2) as usize + 1))),
                 min_queues: 2,
                 paused: Arc::new(AtomicBool::new(paused)),
                 ..Default::default()
@@ -660,7 +662,7 @@ impl Net {
         host_mac: Option<MacAddr>,
         mtu: Option<u16>,
         access_platform_enabled: bool,
-        num_queues: usize,
+        num_queues: u16,
         queue_size: u16,
         seccomp_action: SeccompAction,
         rate_limiter_config: Option<RateLimiterConfig>,
@@ -676,7 +678,7 @@ impl Net {
             netmask,
             host_mac,
             mtu,
-            num_queues / 2,
+            (num_queues / 2) as usize,
             None,
         )
         .map_err(Error::OpenTap)?;
@@ -716,6 +718,10 @@ impl Net {
     ) -> Result<Self> {
         let mut taps: Vec<Tap> = Vec::new();
         let num_queue_pairs = fds.len();
+        let num_queues = u16::try_from(num_queue_pairs)
+            .map_err(|_| Error::BadQueueNum)?
+            .checked_mul(2)
+            .ok_or(Error::BadQueueNum)?;
 
         for fd in fds.iter() {
             // Duplicate so that it can survive reboots
@@ -739,7 +745,7 @@ impl Net {
             taps,
             guest_mac,
             access_platform_enabled,
-            num_queue_pairs * 2,
+            num_queues,
             queue_size,
             seccomp_action,
             rate_limiter_config,
@@ -858,7 +864,7 @@ impl VirtioDevice for Net {
         self.device_status = device_status;
         self.common.activate(&queues, Arc::clone(&interrupt_cb))?;
 
-        let num_queues = queues.len();
+        let num_queues = u16::try_from(queues.len()).map_err(|_| ActivateError::BadActivate)?;
         let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());
 
         // Recompute the barrier size from the queues that are actually activated.
@@ -866,14 +872,16 @@ impl VirtioDevice for Net {
             self.common.feature_acked(VIRTIO_NET_F_CTRL_VQ.into()) && !num_queues.is_multiple_of(2);
         let ctrl_threads = if has_ctrl_queue { 1 } else { 0 };
         let qp_threads = (num_queues - ctrl_threads) / 2;
-        self.common.paused_sync = Some(Arc::new(Barrier::new(1 + qp_threads + ctrl_threads)));
+        self.common.paused_sync = Some(Arc::new(Barrier::new(usize::from(
+            1 + qp_threads + ctrl_threads,
+        ))));
 
         // Only a queue pair with a worker drains its tap queue, so detach the
         // rest before the workers start.
         let curr_queue_pairs = self
             .curr_queue_pairs
             .load(Ordering::Acquire)
-            .min(qp_threads as u16);
+            .min(qp_threads);
         associate_taps(&self.taps, curr_queue_pairs.into()).map_err(|e| {
             error!("Error setting the number of tap queues: {e:?}");
             ActivateError::BadActivate
@@ -883,7 +891,7 @@ impl VirtioDevice for Net {
 
         if has_ctrl_queue {
             let ctrl_queue_index = num_queues - 1;
-            let (_, mut ctrl_queue, ctrl_queue_evt) = queues.remove(ctrl_queue_index);
+            let (_, mut ctrl_queue, ctrl_queue_evt) = queues.remove(ctrl_queue_index as usize);
 
             ctrl_queue.set_event_idx(event_idx);
 
@@ -923,7 +931,7 @@ impl VirtioDevice for Net {
                 queue: ctrl_queue,
                 queue_evt: ctrl_queue_evt,
                 access_platform: self.common.access_platform(),
-                queue_index: ctrl_queue_index as u16,
+                queue_index: ctrl_queue_index,
                 interrupt_cb: Arc::clone(&interrupt_cb),
                 announce_evt: self
                     .announce
