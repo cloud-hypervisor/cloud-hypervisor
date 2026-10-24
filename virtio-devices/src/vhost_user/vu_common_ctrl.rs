@@ -46,7 +46,7 @@ const VHOST_LOG_PAGE: u64 = 0x1000;
 #[derive(Debug, Clone)]
 pub struct VhostUserConfig {
     pub socket: String,
-    pub num_queues: usize,
+    pub num_queues: u16,
     pub queue_size: u16,
 }
 
@@ -167,10 +167,12 @@ impl VhostUserHandle {
         inflight: Option<&mut Inflight>,
         vring_bases: Option<&[u64]>,
     ) -> Result<()> {
+        let num_queues = u16::try_from(queues.len()).map_err(|_| Error::BadQueueNum)?;
+
         if let Some(bases) = &vring_bases
             && bases.len() != queues.len()
         {
-            return Err(Error::VringBasesCountMismatch(bases.len(), queues.len()));
+            return Err(Error::VringBasesCountMismatch(bases.len(), num_queues));
         }
 
         // May run more than once on the same handle (resume after snapshot)
@@ -206,7 +208,7 @@ impl VhostUserHandle {
                 let inflight_req_info = VhostUserInflight {
                     mmap_size: 0,
                     mmap_offset: 0,
-                    num_queues: queues.len() as u16,
+                    num_queues,
                     queue_size: queues[0].1.size(),
                 };
                 let (info, fd) = self
@@ -413,7 +415,7 @@ impl VhostUserHandle {
     pub fn connect_vhost_user(
         server: bool,
         socket_path: &str,
-        num_queues: u64,
+        num_queues: u16,
         unlink_socket: bool,
         kill_evt: &EventFd,
         mut initialize: impl FnMut(&mut Self) -> Result<()>,
@@ -429,7 +431,7 @@ impl VhostUserHandle {
             let (stream, _) = listener.accept().map_err(Error::AcceptConnection)?;
 
             let mut vhost_user = Self {
-                vu: Frontend::from_stream(stream, num_queues),
+                vu: Frontend::from_stream(stream, num_queues as u64),
                 backend_features: 0,
                 ready: false,
                 supports_migration: false,
@@ -486,7 +488,7 @@ impl VhostUserHandle {
             let mut events = [EpollEvent::default(); 1];
 
             loop {
-                let connection = Frontend::connect(socket_path, num_queues)
+                let connection = Frontend::connect(socket_path, num_queues as u64)
                     .map(|vu| Self {
                         vu,
                         backend_features: 0,

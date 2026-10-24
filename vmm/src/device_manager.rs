@@ -2849,7 +2849,7 @@ impl DeviceManager {
             let socket = disk_cfg.vhost_socket.as_ref().unwrap().clone();
             let vu_cfg = VhostUserConfig {
                 socket,
-                num_queues: disk_cfg.num_queues as usize,
+                num_queues: disk_cfg.num_queues,
                 queue_size: disk_cfg.queue_size,
             };
             let vhost_user_block = Arc::new(Mutex::new(
@@ -3048,7 +3048,7 @@ impl DeviceManager {
             let socket = net_cfg.vhost_socket.as_ref().unwrap().clone();
             let vu_cfg = VhostUserConfig {
                 socket,
-                num_queues: net_cfg.num_queues as usize,
+                num_queues: net_cfg.num_queues,
                 queue_size: net_cfg.queue_size,
             };
             let server = match net_cfg.vhost_mode {
@@ -3391,7 +3391,7 @@ impl DeviceManager {
                     id.clone(),
                     fs_socket,
                     &fs_cfg.tag,
-                    fs_cfg.num_queues as usize,
+                    fs_cfg.num_queues,
                     fs_cfg.queue_size,
                     None,
                     self.seccomp_action.clone(),

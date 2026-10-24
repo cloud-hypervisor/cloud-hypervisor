@@ -37,7 +37,7 @@ use crate::{
     VirtioCommon, VirtioDevice, VirtioDeviceType,
 };
 
-const DEFAULT_QUEUE_NUMBER: usize = 2;
+const DEFAULT_QUEUE_NUMBER: u16 = 2;
 
 pub type State = VhostUserState<VirtioNetConfig>;
 
@@ -94,7 +94,7 @@ impl Net {
         let mut vu = VhostUserHandle::connect_vhost_user(
             server,
             &vu_cfg.socket,
-            num_queues as u64,
+            num_queues,
             false,
             &exit_evt,
             |_| Ok(()),
@@ -122,7 +122,7 @@ impl Net {
             // If the control queue feature has been negotiated, let's
             // increase the number of queues.
             if state.acked_features & (1 << VIRTIO_NET_F_CTRL_VQ) != 0 {
-                num_queues += 1;
+                num_queues = num_queues.checked_add(1).ok_or(Error::BadQueueNum)?;
             }
 
             // Always set the announcement pending if the device was restored and
@@ -184,12 +184,12 @@ impl Net {
                 if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
                     vu.socket_handle()
                         .get_queue_num()
-                        .map_err(Error::VhostUserGetQueueMaxNum)? as usize
+                        .map_err(Error::VhostUserGetQueueMaxNum)?
                 } else {
-                    DEFAULT_QUEUE_NUMBER
+                    DEFAULT_QUEUE_NUMBER as u64
                 };
 
-            if num_queues > backend_num_queues {
+            if num_queues as u64 > backend_num_queues {
                 error!(
                     "vhost-user-net requested too many queues ({num_queues}) since the backend only supports {backend_num_queues}\n"
                 );
@@ -230,13 +230,13 @@ impl Net {
                 && mtu.is_none();
 
             let mut config = backend_config.unwrap_or_default();
-            config.populate(guest_mac, num_queues, mtu);
+            config.populate(guest_mac, num_queues as usize, mtu);
 
             // If the control queue feature has been negotiated, let's increase
             // the number of queues.
             let vu_num_queues = num_queues;
             if backend_acked_features & (1 << VIRTIO_NET_F_CTRL_VQ) != 0 {
-                num_queues += 1;
+                num_queues = num_queues.checked_add(1).ok_or(Error::BadQueueNum)?;
             }
 
             // Build the feature set that gets exposed to the guest. Some frontend available
@@ -270,11 +270,11 @@ impl Net {
             vu_common: VhostUserCommon {
                 virtio_common: VirtioCommon {
                     device_type: VirtioDeviceType::Net as u32,
-                    queue_sizes: vec![vu_cfg.queue_size; num_queues],
+                    queue_sizes: vec![vu_cfg.queue_size; num_queues as usize],
                     avail_features,
                     acked_features,
                     paused_sync: Some(Arc::new(Barrier::new(2))),
-                    min_queues: DEFAULT_QUEUE_NUMBER as u16,
+                    min_queues: DEFAULT_QUEUE_NUMBER,
                     paused: Arc::new(AtomicBool::new(paused)),
                     ..Default::default()
                 },

@@ -72,17 +72,14 @@ impl GenericVhostUser {
         state: Option<State>,
     ) -> Result<GenericVhostUser> {
         // Calculate the actual number of queues needed.
-        let num_queues = request_queue_sizes.len();
+        let num_queues =
+            u16::try_from(request_queue_sizes.len()).map_err(|_| Error::BadQueueNum)?;
 
         // Connect to the vhost-user socket.
-        let mut vu = VhostUserHandle::connect_vhost_user(
-            false,
-            path,
-            num_queues as u64,
-            false,
-            &exit_evt,
-            |_| Ok(()),
-        )?;
+        let mut vu =
+            VhostUserHandle::connect_vhost_user(false, path, num_queues, false, &exit_evt, |_| {
+                Ok(())
+            })?;
 
         let (
             avail_features,
@@ -127,12 +124,12 @@ impl GenericVhostUser {
                 if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
                     vu.socket_handle()
                         .get_queue_num()
-                        .map_err(Error::VhostUserGetQueueMaxNum)? as usize
+                        .map_err(Error::VhostUserGetQueueMaxNum)?
                 } else {
-                    num_queues
+                    num_queues as u64
                 };
 
-            if num_queues > backend_num_queues {
+            if num_queues as u64 > backend_num_queues {
                 error!(
                     "generic vhost-user requested too many queues ({num_queues}) \
 since the backend only supports {backend_num_queues}\n",
