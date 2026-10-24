@@ -7,7 +7,7 @@ use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
 use std::os::fd::BorrowedFd;
 use std::os::unix::io::AsRawFd;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result};
 
@@ -33,6 +33,8 @@ use vfio_bindings::bindings::vfio::{
 use vfio_ioctls::{
     DmaLoggingRange, VfioDevice, VfioIrq, VfioOps, VfioRegionInfoCap, VfioRegionSparseMmapArea,
 };
+#[cfg(feature = "kvm")]
+use vfio_ioctls::{VfioIommufd, VfioRegionDmaRange};
 use vm_allocator::page_size::{
     align_page_size_down, align_page_size_up, get_page_size, is_4k_aligned, is_4k_multiple,
     is_page_size_aligned,
@@ -79,6 +81,9 @@ pub enum VfioPciError {
     CreateUserMemoryRegion(#[source] HypervisorVmError),
     #[error("Failed to DMA map: {0} for device {1} (guest BDF: {2})")]
     DmaMap(#[source] vfio_ioctls::VfioError, PathBuf, PciBdf),
+    #[cfg(feature = "kvm")]
+    #[error("Failed to map the dma-buf of device {1:?} at {2}")]
+    DmaMapFile(#[source] iommufd_ioctls::IommufdError, PathBuf, PciBdf),
     #[error("Failed to DMA unmap: {0} for device {1} (guest BDF: {2})")]
     DmaUnmap(#[source] vfio_ioctls::VfioError, PathBuf, PciBdf),
     #[error("Failed to enable INTx")]
@@ -304,6 +309,57 @@ pub(crate) struct UserMemoryRegion {
     pub slot: u32,
     pub start: u64,
     pub mapping: Arc<MmapRegion>,
+}
+
+impl UserMemoryRegion {
+    #[cfg_attr(not(feature = "kvm"), expect(unused_variables))]
+    fn map_for_p2p(
+        &self,
+        device: &VfioDevice,
+        vfio_ops: &Arc<dyn VfioOps>,
+        device_path: &Path,
+        bdf: PciBdf,
+        region_index: u32,
+        offset: u64,
+    ) -> Result<(), VfioPciError> {
+        let iova = self.start;
+        let length = self.mapping.len();
+
+        #[cfg(feature = "kvm")]
+        if let Some(vfio_iommufd) = vfio_ops.as_any().downcast_ref::<VfioIommufd>()
+            && let Some(dma_buf) = device
+                .export_dma_buf(
+                    region_index,
+                    &[VfioRegionDmaRange {
+                        offset,
+                        length: length as u64,
+                    }],
+                    libc::O_RDWR as u32,
+                )
+                .map_err(|e| VfioPciError::DmaMap(e, device_path.to_path_buf(), bdf))?
+        {
+            debug!(
+                "{bdf}: region {region_index} mapped at 0x{iova:x} (0x{length:x} bytes) \
+                 through dma-buf"
+            );
+
+            return vfio_iommufd
+                .ioas()
+                .map_file(dma_buf.as_raw_fd(), 0, length as u64, iova, true)
+                .map_err(|e| VfioPciError::DmaMapFile(e, device_path.to_path_buf(), bdf));
+        }
+
+        debug!(
+            "{bdf}: region {region_index} mapped at 0x{iova:x} (0x{length:x} bytes) \
+             through VFIO dma map since dma-buf isn't available"
+        );
+
+        // SAFETY: MmapRegion invariants guarantee that self.mapping.addr()
+        // points to self.mapping.len() bytes of valid memory that will only
+        // be unmapped with munmap().
+        unsafe { vfio_ops.vfio_dma_map(self.start, self.mapping.len(), self.mapping.addr()) }
+            .map_err(|e| VfioPciError::DmaMap(e, device_path.to_path_buf(), bdf))
+    }
 }
 
 #[derive(Clone)]
@@ -2431,19 +2487,14 @@ impl VfioPciDevice {
                     // Map the MMIO BAR into the host IOMMU address space via VfioOps
                     // Only needed if p2p_dma is enabled.
                     if self.p2p_dma {
-                        // vfio_dma_map should be unsafe but isn't.
-                        // SAFETY: MmapRegion invariants guarantee that
-                        // user_memory_region.mapping.addr() points to
-                        // user_memory_region.mapping.len() bytes of
-                        // valid memory that will only be unmapped with munmap().
-                        unsafe {
-                            self.vfio_ops.vfio_dma_map(
-                                user_memory_region.start,
-                                user_memory_region.mapping.len(),
-                                user_memory_region.mapping.addr(),
-                            )
-                        }
-                        .map_err(|e| VfioPciError::DmaMap(e, self.device_path.clone(), self.bdf))?;
+                        user_memory_region.map_for_p2p(
+                            &self.device,
+                            &self.vfio_ops,
+                            &self.device_path,
+                            self.bdf,
+                            region.index,
+                            area.offset,
+                        )?;
                     }
                     region.user_memory_regions.push(user_memory_region);
                 }
@@ -2625,12 +2676,14 @@ impl PciDevice for VfioPciDevice {
     fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> Result<(), io::Error> {
         for region in self.common.mmio_regions.iter_mut() {
             if region.index as usize == bar_idx {
+                let region_index = region.index;
                 let old_base = region.start.raw_value();
                 region.start = GuestAddress(new_base);
 
                 for user_memory_region in region.user_memory_regions.iter_mut() {
                     let len = user_memory_region.mapping.len();
                     let host_addr = user_memory_region.mapping.addr();
+                    let offset = user_memory_region.start - old_base;
                     // Unmap the old MMIO region from the host IOMMU address space via VfioOps
                     // Only needed if p2p_dma is enabled.
                     if self.p2p_dma
@@ -2689,22 +2742,22 @@ iova 0x{:x}, size 0x{:x}: {}, ",
                     // Map the moved MMIO region into the host IOMMU address space via VfioOps
                     // Only needed if p2p_dma is enabled.
                     if self.p2p_dma {
-                        // vfio_dma_map is unsound and ought to be marked as unsafe
-                        // SAFETY: MmapRegion invariants guarantee that
-                        // host_addr points to len bytes of
-                        // valid memory that will only be unmapped with munmap().
-                        unsafe {
-                            self.vfio_ops
-                                .vfio_dma_map(user_memory_region.start, len, host_addr)
-                        }
-                        .map_err(|e| VfioPciError::DmaMap(e, self.device_path.clone(), self.bdf))
-                        .map_err(|e| {
-                            io::Error::other(format!(
-                                "Could not map MMIO region into the host IOMMU address space: \
+                        user_memory_region
+                            .map_for_p2p(
+                                &self.device,
+                                &self.vfio_ops,
+                                &self.device_path,
+                                self.bdf,
+                                region_index,
+                                offset,
+                            )
+                            .map_err(|e| {
+                                io::Error::other(format!(
+                                    "Could not map MMIO region into the host IOMMU address space: \
 iova 0x{:x}, size 0x{:x}: {}, ",
-                                user_memory_region.start, len, e
-                            ))
-                        })?;
+                                    user_memory_region.start, len, e
+                                ))
+                            })?;
                     }
                 }
             }
