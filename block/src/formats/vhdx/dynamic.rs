@@ -36,7 +36,7 @@ pub(super) type Result<T> = result::Result<T, VhdxError>;
 enum VhdxIoError {
     #[error("Invalid BAT entry state")]
     InvalidBatEntryState,
-    #[error("Invalid BAT entry file offset: payload block inside the header area")]
+    #[error("Invalid BAT entry file offset: payload block overlaps a reserved area")]
     InvalidBatFileOffset,
     #[error("Invalid BAT entry count")]
     InvalidBatIndex,
@@ -106,6 +106,7 @@ pub(super) struct Vhdx {
     aligned: AlignedFile,
     vhdx_header: VhdxHeader,
     bat_entry: RegionTableEntry,
+    mdr_entry: RegionTableEntry,
     disk_spec: DiskSpec,
     bat_entries: Vec<BatEntry>,
     first_write: bool,
@@ -138,6 +139,7 @@ impl Vhdx {
             aligned,
             vhdx_header,
             bat_entry,
+            mdr_entry,
             disk_spec,
             bat_entries,
             first_write: true,
@@ -146,6 +148,22 @@ impl Vhdx {
 
     pub(super) fn virtual_disk_size(&self) -> u64 {
         self.disk_spec.virtual_disk_size
+    }
+
+    /// A fully-present BAT entry must describe a payload block that lies
+    /// outside the areas reserved for the header and the metadata region.
+    fn check_payload_file_offset(&self, offset: u64) -> result::Result<(), VhdxIoError> {
+        let block_size = self.disk_spec.block_size as u64;
+        let mdr_start = self.mdr_entry.file_offset;
+        let mdr_end = mdr_start.saturating_add(self.mdr_entry.length as u64);
+
+        if offset < metadata::BLOCK_SIZE_MIN as u64
+            || (offset < mdr_end && offset.saturating_add(block_size) > mdr_start)
+        {
+            return Err(VhdxIoError::InvalidBatFileOffset);
+        }
+
+        Ok(())
     }
 
     /// Convert `offset` and `buf_len` to a sector index and count, rejecting
@@ -243,9 +261,7 @@ impl Vhdx {
                 | bat::PAYLOAD_BLOCK_UNMAPPED
                 | bat::PAYLOAD_BLOCK_ZERO => {}
                 bat::PAYLOAD_BLOCK_FULLY_PRESENT => {
-                    if sector.file_offset < metadata::BLOCK_SIZE_MIN as u64 {
-                        return Err(VhdxIoError::InvalidBatFileOffset);
-                    }
+                    self.check_payload_file_offset(sector.file_offset)?;
 
                     self.aligned
                         .read_exact_at(
@@ -336,9 +352,7 @@ impl Vhdx {
                         .map_err(VhdxIoError::WriteSectorBlock)?;
                 }
                 bat::PAYLOAD_BLOCK_FULLY_PRESENT => {
-                    if sector.file_offset < metadata::BLOCK_SIZE_MIN as u64 {
-                        return Err(VhdxIoError::InvalidBatFileOffset);
-                    }
+                    self.check_payload_file_offset(sector.file_offset)?;
 
                     self.aligned
                         .write_all_at(
@@ -524,6 +538,61 @@ mod tests {
         // Simulate a corrupt image: BAT entry 0 says "fully present at file
         // offset 0", i.e. on top of the VHDX file header.
         vhdx.bat_entries[0] = BatEntry(PAYLOAD_BLOCK_FULLY_PRESENT);
+
+        let mut buf = vec![0u8; vhdx.disk_spec.logical_sector_size as usize];
+        let err = vhdx.read_at(&mut buf, 0).unwrap_err();
+        assert!(
+            err.to_string().contains("BAT entry file offset"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn write_with_bat_entry_overlapping_metadata_region_is_rejected() {
+        let Some(tf) = create_dynamic_vhdx(16) else {
+            eprintln!(
+                "skipping write_with_bat_entry_overlapping_metadata_region_is_rejected: qemu-img unavailable"
+            );
+            return;
+        };
+
+        let mut vhdx = open_vhdx(tf.as_path());
+        let mdr_offset = vhdx.mdr_entry.file_offset;
+        let mut before = [0u8; 8];
+        vhdx.aligned
+            .file()
+            .read_exact_at(&mut before, mdr_offset)
+            .unwrap();
+
+        vhdx.bat_entries[0] = BatEntry(PAYLOAD_BLOCK_FULLY_PRESENT | mdr_offset);
+
+        let data = [0x44u8; 512];
+        let err = vhdx.write_all_at(&data, 0).unwrap_err();
+        assert!(
+            err.to_string().contains("BAT entry file offset"),
+            "unexpected error: {err}"
+        );
+
+        let mut after = [0u8; 8];
+        vhdx.aligned
+            .file()
+            .read_exact_at(&mut after, mdr_offset)
+            .unwrap();
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn read_with_bat_entry_overlapping_metadata_region_is_rejected() {
+        let Some(tf) = create_dynamic_vhdx(16) else {
+            eprintln!(
+                "skipping read_with_bat_entry_overlapping_metadata_region_is_rejected: qemu-img unavailable"
+            );
+            return;
+        };
+
+        let mut vhdx = open_vhdx(tf.as_path());
+        let mdr_offset = vhdx.mdr_entry.file_offset;
+        vhdx.bat_entries[0] = BatEntry(PAYLOAD_BLOCK_FULLY_PRESENT | mdr_offset);
 
         let mut buf = vec![0u8; vhdx.disk_spec.logical_sector_size as usize];
         let err = vhdx.read_at(&mut buf, 0).unwrap_err();
