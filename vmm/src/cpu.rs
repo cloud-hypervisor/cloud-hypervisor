@@ -954,6 +954,13 @@ impl CpuManager {
                 .map_err(Error::AmxEnable)?;
         }
 
+        #[cfg(all(target_arch = "x86_64", feature = "mshv"))]
+        if config.kvm_hint_realtime
+            && hypervisor.hypervisor_type() == hypervisor::HypervisorType::Mshv
+        {
+            warn!("kvm_hint_realtime is only supported with KVM and will be ignored");
+        }
+
         let proximity_domain_per_cpu: BTreeMap<u32, u32> = {
             let mut cpu_list = Vec::new();
             for (proximity_domain, numa_node) in numa_nodes.iter() {
@@ -993,6 +1000,7 @@ impl CpuManager {
                 &arch::CpuidConfig {
                     phys_bits,
                     kvm_hyperv: config.kvm_hyperv,
+                    kvm_hint_realtime: config.kvm_hint_realtime,
                     amx: config.features.amx,
                     cpuid_overrides: config.cpuid_overrides.clone(),
                 },

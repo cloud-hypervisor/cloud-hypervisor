@@ -15,6 +15,8 @@ struct CpusConfig {
     max_vcpus: u32,
     topology: Option<CpuTopology>,
     kvm_hyperv: bool,
+    // x86-64 only.
+    kvm_hint_realtime: bool,
     max_phys_bits: u8,
     affinity: Option<Vec<CpuAffinity>>,
     features: CpuFeatures,
@@ -27,7 +29,7 @@ struct CpusConfig {
 ```
 
 ```
---cpus boot=<boot_vcpus>,max=<max_vcpus>,topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,kvm_hyperv=on|off,max_phys_bits=<maximum_number_of_physical_bits>,affinity=<list_of_vcpus_with_their_associated_cpuset>,features=<list_of_features_to_enable>,nested=on|off,core_scheduling=vm|vcpu|off,profile=host|path:<file>,x-cpuid-overrides=[[<leaf>,<subleaf>,<eax>,<ebx>,<ecx>,<edx>],...]
+--cpus boot=<boot_vcpus>,max=<max_vcpus>,topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,kvm_hyperv=on|off,kvm_hint_realtime=on|off,max_phys_bits=<maximum_number_of_physical_bits>,affinity=<list_of_vcpus_with_their_associated_cpuset>,features=<list_of_features_to_enable>,nested=on|off,core_scheduling=vm|vcpu|off,profile=host|path:<file>,x-cpuid-overrides=[[<leaf>,<subleaf>,<eax>,<ebx>,<ecx>,<edx>],...]
 ```
 
 ### `boot`
@@ -120,6 +122,27 @@ _Example_
 
 ```
 --cpus kvm_hyperv=on
+```
+
+### `kvm_hint_realtime`
+
+Advertise `KVM_HINTS_REALTIME` (`EDX` bit 0 of CPUID leaf `0x4000_0001`) to
+the guest. This tells the guest that every vCPU runs on a dedicated host CPU,
+like QEMU's `kvm-hint-dedicated`. A Linux guest then disables the paravirtual
+spinlock, TLB flush and scheduler yield paths and can enable the
+`cpuidle-haltpoll` driver, which lowers idle wake-up latency at the cost of
+busy-polling.
+
+Only enable this option when each vCPU is pinned to its own host CPU, for
+example with `affinity`, and nothing else runs there. It is available on
+x86-64 with KVM only and cannot be combined with `kvm_hyperv`.
+
+By default this option is turned off.
+
+_Example_
+
+```
+--cpus boot=4,affinity=[0@[8],1@[9],2@[10],3@[11]],kvm_hint_realtime=on
 ```
 
 ### `max_phys_bits`
