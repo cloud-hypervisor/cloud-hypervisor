@@ -2427,16 +2427,16 @@ fn child_wait_timeout(child: &mut Child, timeout: u64) -> Result<(), WaitTimeout
 
 pub fn measure_virtio_net_throughput(
     test_timeout: u32,
-    queue_pairs: u32,
+    queue_pairs: u16,
     guest: &Guest,
     receive: bool,
     bandwidth: bool,
 ) -> Result<f64, Error> {
-    let default_port = 5201;
+    let default_port: u32 = 5201;
 
     // 1. start the iperf3 server on the guest
     for n in 0..queue_pairs {
-        guest.ssh_command(&format!("iperf3 -s -p {} -D", default_port + n))?;
+        guest.ssh_command(&format!("iperf3 -s -p {} -D", default_port + n as u32))?;
     }
 
     thread::sleep(Duration::new(1, 0));
@@ -2450,7 +2450,7 @@ pub fn measure_virtio_net_throughput(
             "-c",
             &guest.network.guest_ip0,
             "-p",
-            &format!("{}", default_port + n),
+            &format!("{}", default_port + n as u32),
             "-t",
             &format!("{test_timeout}"),
             "-i",

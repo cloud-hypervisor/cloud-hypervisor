@@ -137,7 +137,7 @@ pub(crate) fn prepare_virtiofsd(tmp_dir: &TempDir, shared_dir: &str) -> (Child, 
 pub(crate) fn prepare_vubd(
     tmp_dir: &TempDir,
     blk_img: &str,
-    num_queues: usize,
+    num_queues: u16,
     rdonly: bool,
     direct: bool,
 ) -> (Child, String) {
@@ -245,7 +245,7 @@ pub(crate) fn prepare_vhost_user_net_daemon(
     tap: Option<&str>,
     mac: Option<&str>,
     mtu: Option<u16>,
-    num_queues: usize,
+    num_queues: u16,
     client_mode: bool,
 ) -> (Command, String) {
     let vunet_socket_path = String::from(tmp_dir.as_path().join("vunet.sock").to_str().unwrap());
@@ -713,15 +713,8 @@ pub(super) fn get_msi_interrupt_pattern() -> String {
     }
 }
 
-pub(super) type PrepareNetDaemon = dyn Fn(
-    &TempDir,
-    &str,
-    Option<&str>,
-    Option<&str>,
-    Option<u16>,
-    usize,
-    bool,
-) -> (Command, String);
+pub(super) type PrepareNetDaemon =
+    dyn Fn(&TempDir, &str, Option<&str>, Option<&str>, Option<u16>, u16, bool) -> (Command, String);
 
 pub(super) fn get_ksm_pages_shared() -> u32 {
     fs::read_to_string("/sys/kernel/mm/ksm/pages_shared")
