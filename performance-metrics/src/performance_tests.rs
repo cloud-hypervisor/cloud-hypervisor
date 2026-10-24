@@ -143,7 +143,7 @@ pub(crate) fn performance_net_throughput(control: &PerformanceTestControl) -> f6
         "tap=,mac={},ip={},mask=255.255.255.128,num_queues={},queue_size={}",
         guest.network.guest_mac0, guest.network.host_ip0, num_queues, queue_size,
     );
-    guest.num_cpu = num_queues;
+    guest.num_cpu = num_queues as u32;
     let mut child = GuestCommand::new(&guest)
         .default_cpus()
         .args(["--memory", "size=4G"])
@@ -158,7 +158,8 @@ pub(crate) fn performance_net_throughput(control: &PerformanceTestControl) -> f6
 
     let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
-        measure_virtio_net_throughput(test_timeout, num_queues / 2, &guest, rx, bandwidth).unwrap()
+        measure_virtio_net_throughput(test_timeout, (num_queues / 2) as u32, &guest, rx, bandwidth)
+            .unwrap()
     });
 
     let _ = child.kill();
@@ -183,7 +184,7 @@ pub(crate) fn performance_net_latency(control: &PerformanceTestControl) -> f64 {
         "tap=,mac={},ip={},mask=255.255.255.128,num_queues={},queue_size={}",
         guest.network.guest_mac0, guest.network.host_ip0, num_queues, queue_size,
     );
-    guest.num_cpu = num_queues;
+    guest.num_cpu = num_queues as u32;
     let mut child = GuestCommand::new(&guest)
         .default_cpus()
         .args(["--memory", "size=4G"])
@@ -412,7 +413,7 @@ pub(crate) fn performance_block_io(control: &PerformanceTestControl) -> f64 {
     } else if test_file == BLK_IO_TEST_IMG {
         test_disk_arg.push_str(&format!(",image_type={}", control.test_image_format));
     }
-    guest.num_cpu = num_queues;
+    guest.num_cpu = num_queues as u32;
     let mut child = GuestCommand::new(&guest)
         .default_cpus()
         .args(["--memory", "size=4G"])
@@ -442,9 +443,9 @@ pub(crate) fn performance_block_io(control: &PerformanceTestControl) -> f64 {
 
         // Parse fio output
         if bandwidth {
-            parse_fio_output(&output, fio_ops, num_queues).unwrap()
+            parse_fio_output(&output, fio_ops, num_queues as u32).unwrap()
         } else {
-            parse_fio_output_iops(&output, fio_ops, num_queues).unwrap()
+            parse_fio_output_iops(&output, fio_ops, num_queues as u32).unwrap()
         }
     });
 
