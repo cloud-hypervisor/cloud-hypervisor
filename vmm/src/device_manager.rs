@@ -2963,7 +2963,7 @@ impl DeviceManager {
                 self.force_access_platform | disk_cfg.pci_common.iommu.attached(),
                 disk_cfg.num_queues,
                 disk_cfg.queue_size,
-                disk_cfg.serial.clone(),
+                disk_cfg.serial.as_deref(),
                 self.seccomp_action.clone(),
                 rate_limit_group,
                 self.exit_evt

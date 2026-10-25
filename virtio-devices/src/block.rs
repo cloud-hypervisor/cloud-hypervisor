@@ -782,7 +782,7 @@ impl Block {
         access_platform_enabled: bool,
         num_queues: u16,
         queue_size: u16,
-        serial: Option<String>,
+        serial: Option<&str>,
         seccomp_action: SeccompAction,
         rate_limiter: Option<Arc<RateLimiterGroup>>,
         exit_evt: EventFd,
@@ -897,16 +897,7 @@ impl Block {
                 (disk_nsectors, avail_features, 0, config, false)
             };
 
-        let serial = serial
-            .map_or_else(
-                || build_serial(&disk_path),
-                |s| {
-                    let mut serial = s.into_bytes();
-                    serial.resize(VIRTIO_BLK_ID_BYTES as usize, 0);
-                    serial
-                },
-            )
-            .into_boxed_slice();
+        let serial = build_serial(serial, &disk_path).into_boxed_slice();
 
         Ok(Block {
             common: VirtioCommon {
@@ -1430,7 +1421,7 @@ mod tests {
             false,
             1,
             256,
-            serial.map(str::to_string),
+            serial,
             SeccompAction::Allow,
             None,
             EventFd::new(0).unwrap(),

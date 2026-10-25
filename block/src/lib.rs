@@ -98,20 +98,20 @@ fn build_device_id(disk_path: &Path) -> result::Result<String, Error> {
     Ok(device_id)
 }
 
-pub fn build_serial(disk_path: &Path) -> Vec<u8> {
-    build_device_id(disk_path).map_or_else(
-        |e| {
-            warn!("Error building device serial: {e}, using zero default");
-            vec![0; VIRTIO_BLK_ID_BYTES as usize]
+pub fn build_serial(user_serial: Option<&str>, disk_path: &Path) -> Vec<u8> {
+    let mut serial = user_serial.map_or_else(
+        || {
+            build_device_id(disk_path)
+                .inspect_err(|e| warn!("Error building device serial: {e} using zero default"))
+                .map(String::into_bytes)
+                .unwrap_or_default()
         },
-        |m| {
-            let mut serial = m.into_bytes();
-            // The kernel only knows to read a maximum of VIRTIO_BLK_ID_BYTES.
-            // This will also zero out any leftover bytes.
-            serial.resize(VIRTIO_BLK_ID_BYTES as usize, 0);
-            serial
-        },
-    )
+        |s| s.as_bytes().to_vec(),
+    );
+
+    // Truncate or pad with zeroes to spec length as expected by kernel.
+    serial.resize(VIRTIO_BLK_ID_BYTES as usize, 0);
+    serial
 }
 
 #[derive(Error, Debug)]
