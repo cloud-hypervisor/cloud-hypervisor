@@ -2737,13 +2737,6 @@ impl RequestHandler for Vmm {
             .try_clone()
             .map_err(VmError::EventFdClone)?;
 
-        // The Linux kernel fires off an i8042 reset after doing the ACPI reset so there may be
-        // an event sitting in the shared reset_evt. Without doing this we get very early reboots
-        // during the boot process.
-        if self.reset_evt.read().is_ok() {
-            warn!("Spurious second reset event received. Ignoring.");
-        }
-
         self.console_info =
             Some(pre_create_console_devices(self).map_err(VmError::CreateConsoleDevices)?);
 
