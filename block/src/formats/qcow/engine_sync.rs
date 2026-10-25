@@ -1703,9 +1703,9 @@ mod tests {
         test_qcow2_backing_cross_cluster_read_impl(true);
     }
 
-    fn test_punch_hole_with_backing_fallthrough_impl(direct_io: bool) {
-        // Write to overlay, then punch hole. After punch, the cluster should
-        // fall through to backing data (not zeros).
+    fn test_punch_hole_with_backing_reads_zero_impl(direct_io: bool) {
+        // Write to overlay, then punch hole. Reads must come back as zeros
+        // instead of falling through to the backing data.
         let cluster_size = 1u64 << 16;
         let file_size = cluster_size * 4;
         let pattern: Vec<u8> = (0..file_size as usize).map(|i| (i % 251) as u8).collect();
@@ -1736,7 +1736,7 @@ mod tests {
         let buf = async_read(&disk, 0, cluster_size as usize);
         assert!(buf.iter().all(|&b| b == 0xFF), "Should read written data");
 
-        // Punch hole on cluster 0 - should deallocate and fall through to backing
+        // Punch hole on cluster 0 - reads must become zeros, not backing data.
         {
             let mut async_io = disk.create_async_io(1).unwrap();
             async_io.punch_hole(0, cluster_size, 42).unwrap();
@@ -1745,32 +1745,42 @@ mod tests {
             assert_eq!(res, 0);
         }
 
-        // Now read should return backing data, not zeros
         let buf = async_read(&disk, 0, cluster_size as usize);
-        assert_eq!(
-            &buf[..],
-            &pattern[..cluster_size as usize],
-            "After punch_hole with backing, should read backing data"
+        assert!(
+            buf.iter().all(|&b| b == 0),
+            "After punch_hole with backing, the cluster must read as zeros"
         );
 
-        // Cluster 1 should still be backing data throughout
+        // Cluster 1 is untouched and still reads from backing.
         let buf = async_read(&disk, cluster_size, cluster_size as usize);
         assert_eq!(
             &buf[..],
             &pattern[cluster_size as usize..2 * cluster_size as usize],
             "Untouched cluster should read from backing"
         );
+
+        // Punching an unallocated cluster must also read as zeros.
+        {
+            let mut async_io = disk.create_async_io(1).unwrap();
+            async_io.punch_hole(cluster_size, cluster_size, 43).unwrap();
+            assert_eq!(next_completion(async_io.as_mut()), (43, 0));
+        }
+        let buf = async_read(&disk, cluster_size, cluster_size as usize);
+        assert!(
+            buf.iter().all(|&b| b == 0),
+            "Punched unallocated cluster must read as zeros"
+        );
     }
 
     #[test]
-    fn test_punch_hole_with_backing_fallthrough() {
-        test_punch_hole_with_backing_fallthrough_impl(false);
+    fn test_punch_hole_with_backing_reads_zero() {
+        test_punch_hole_with_backing_reads_zero_impl(false);
     }
 
     #[test]
-    fn test_punch_hole_with_backing_fallthrough_direct_io() {
+    fn test_punch_hole_with_backing_reads_zero_direct_io() {
         require_direct_io!();
-        test_punch_hole_with_backing_fallthrough_impl(true);
+        test_punch_hole_with_backing_reads_zero_impl(true);
     }
 
     fn test_rewrite_allocated_cluster_impl(direct_io: bool) {
