@@ -898,7 +898,14 @@ impl Block {
             };
 
         let serial = serial
-            .map_or_else(|| build_serial(&disk_path), Vec::from)
+            .map_or_else(
+                || build_serial(&disk_path),
+                |s| {
+                    let mut serial = s.into_bytes();
+                    serial.resize(VIRTIO_BLK_ID_BYTES as usize, 0);
+                    serial
+                },
+            )
             .into_boxed_slice();
 
         Ok(Block {
@@ -1354,7 +1361,9 @@ impl Migratable for Block {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::io::Result as IoResult;
+    use std::path::Path;
 
     use block::async_io::{AsyncIoCompletion, AsyncIoOperation, AsyncIoResult};
     use hypervisor::Vm;
@@ -1392,6 +1401,67 @@ mod tests {
         fn next_completed_request(&mut self) -> Option<AsyncIoCompletion> {
             None
         }
+    }
+
+    fn make_block_with_serial(dir: &Path, serial: Option<&str>) -> Block {
+        use block::ImageType;
+        use block::factory::{DiskOpenOptions, open_disk};
+
+        let path = dir.join("serial.raw");
+        fs::write(&path, vec![0u8; 4096]).unwrap();
+        let disk = open_disk(
+            &DiskOpenOptions {
+                path: &path,
+                readonly: false,
+                direct: false,
+                sparse: true,
+                backing_files: false,
+                disable_io_uring: true,
+                disable_aio: true,
+            },
+            ImageType::Raw,
+        )
+        .unwrap();
+        Block::new(
+            "serial".to_string(),
+            disk,
+            path,
+            false,
+            false,
+            1,
+            256,
+            serial.map(str::to_string),
+            SeccompAction::Allow,
+            None,
+            EventFd::new(0).unwrap(),
+            None,
+            BTreeMap::new(),
+            true,
+            LockGranularityChoice::default(),
+            None,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn short_serial_is_nul_padded() {
+        use vmm_sys_util::tempdir::TempDir;
+
+        let dir = TempDir::new_with_prefix("/dev/shm/ch-serial").unwrap();
+        let block = make_block_with_serial(dir.as_path(), Some("abc"));
+        assert_eq!(block.serial.len(), VIRTIO_BLK_ID_BYTES as usize);
+        assert_eq!(&block.serial[..3], b"abc");
+        assert!(block.serial[3..].iter().all(|b| *b == 0));
+    }
+
+    #[test]
+    fn full_length_serial_is_unchanged() {
+        use vmm_sys_util::tempdir::TempDir;
+
+        let dir = TempDir::new_with_prefix("/dev/shm/ch-serial").unwrap();
+        let serial = "0123456789abcdefghij";
+        let block = make_block_with_serial(dir.as_path(), Some(serial));
+        assert_eq!(&block.serial[..], serial.as_bytes());
     }
 
     #[test]
