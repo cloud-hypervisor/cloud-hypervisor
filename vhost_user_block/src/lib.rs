@@ -232,7 +232,7 @@ impl VhostUserBlkBackend {
         let image: File = options.open(image_path).unwrap();
         let raw_img = AlignedFile::new(image, direct);
 
-        let serial = build_serial(&PathBuf::from(&image_path));
+        let serial = build_serial(None, &PathBuf::from(&image_path));
         let image = Arc::new(Mutex::new(raw_img));
 
         let nsectors = query_device_size(image.lock().unwrap().file()).unwrap().0 / SECTOR_SIZE;
