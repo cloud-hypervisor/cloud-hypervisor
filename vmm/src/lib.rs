@@ -476,7 +476,7 @@ pub fn start_vmm_thread(
     exit_event: EventFd,
     seccomp_action: &SeccompAction,
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
-    no_shutdown: bool,
+    shutdown_action: GuestShutdownAction,
     landlock_enable: bool,
 ) -> Result<VmmThreadHandle> {
     #[cfg(feature = "guest_debug")]
@@ -516,7 +516,7 @@ pub fn start_vmm_thread(
                     vmm_seccomp_action,
                     hypervisor,
                     exit_event,
-                    no_shutdown,
+                    shutdown_action,
                 )?;
 
                 vmm.setup_signal_handler(landlock_enable)?;
@@ -693,6 +693,16 @@ impl VmOwnership {
     }
 }
 
+/// Action to take when the guest requests shutdown.
+#[derive(Default, Clone, Copy)]
+pub enum GuestShutdownAction {
+    /// Shut down the VM and exit the VMM.
+    #[default]
+    ExitVmm,
+    /// Shut down the VM while keeping the VMM running.
+    ShutdownVm,
+}
+
 pub struct Vmm {
     epoll: EpollContext,
     exit_evt: EventFd,
@@ -716,7 +726,7 @@ pub struct Vmm {
     console_info: Option<ConsoleInfo>,
     serial_socket_listener: Option<Arc<LockedUnixListener>>,
     console_socket_listener: Option<Arc<LockedUnixListener>>,
-    no_shutdown: bool,
+    shutdown_action: GuestShutdownAction,
     check_migration_evt: EventFd,
 }
 
@@ -881,7 +891,7 @@ impl Vmm {
         seccomp_action: SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         exit_evt: EventFd,
-        no_shutdown: bool,
+        shutdown_action: GuestShutdownAction,
     ) -> Result<Self> {
         let mut epoll = EpollContext::new().map_err(Error::Epoll)?;
         let reset_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
@@ -941,7 +951,7 @@ impl Vmm {
             console_info: None,
             serial_socket_listener: None,
             console_socket_listener: None,
-            no_shutdown,
+            shutdown_action,
             check_migration_evt,
         })
     }
@@ -2246,11 +2256,14 @@ impl Vmm {
                         info!("VM guest exit event");
                         self.guest_exit_evt.read().map_err(Error::EventFdRead)?;
                         // TODO: Future follow-up must resolve lifecycle handling while migrating.
-                        if self.no_shutdown {
-                            self.vm_shutdown().map_err(Error::VmShutdown)?;
-                        } else {
-                            self.vmm_shutdown().map_err(Error::VmmShutdown)?;
-                            break 'outer;
+                        match self.shutdown_action {
+                            GuestShutdownAction::ExitVmm => {
+                                self.vmm_shutdown().map_err(Error::VmmShutdown)?;
+                                break 'outer;
+                            }
+                            GuestShutdownAction::ShutdownVm => {
+                                self.vm_shutdown().map_err(Error::VmShutdown)?;
+                            }
                         }
                     }
                     EpollDispatch::ActivateVirtioDevices => {
@@ -3592,7 +3605,7 @@ mod tests {
             SeccompAction::Allow,
             hypervisor::new().unwrap(),
             EventFd::new(EFD_NONBLOCK).unwrap(),
-            false,
+            GuestShutdownAction::default(),
         )
         .unwrap()
     }

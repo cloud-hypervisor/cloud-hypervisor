@@ -33,7 +33,6 @@ use vmm::config::{self, RestoreConfig, VmParams};
 use vmm::landlock::{Landlock, LandlockError};
 use vmm::seccomp_filters::{Thread, get_seccomp_filter};
 use vmm::vm::Vm;
-use vmm::vm_config;
 #[cfg(feature = "fw_cfg")]
 use vmm::vm_config::FwCfgConfig;
 #[cfg(feature = "ivshmem")]
@@ -44,6 +43,7 @@ use vmm::vm_config::{
     RateLimiterGroupConfig, RngConfig, RtcConfig, SerialConfig, TpmConfig, UserDeviceConfig,
     VdpaConfig, VmConfig, VsockConfig,
 };
+use vmm::{GuestShutdownAction, vm_config};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::block_signal;
 
@@ -710,7 +710,11 @@ fn start_vmm(
 
     let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateExitEventFd)?;
     let landlock_enable = cmd_arguments.get_flag("landlock");
-    let no_shutdown = cmd_arguments.get_flag("no-shutdown");
+    let shutdown_action = if cmd_arguments.get_flag("no-shutdown") {
+        GuestShutdownAction::ShutdownVm
+    } else {
+        GuestShutdownAction::ExitVmm
+    };
 
     #[allow(unused_mut)]
     let mut event_monitor = cmd_arguments
@@ -806,7 +810,7 @@ fn start_vmm(
         exit_evt.try_clone().unwrap(),
         &seccomp_action,
         hypervisor,
-        no_shutdown,
+        shutdown_action,
         landlock_enable,
     )
     .map_err(Error::StartVmmThread)?;
