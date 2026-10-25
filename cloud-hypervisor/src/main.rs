@@ -349,6 +349,16 @@ fn get_cli_options_sorted(
             .num_args(1..)
             .action(ArgAction::Append)
             .group("vm-config"),
+        Arg::new("guest-shutdown-action")
+            .long("guest-shutdown-action")
+            .help(
+                "Action when the guest shuts down: exit the VMM, \
+                 or shut down the VM and keep the VMM running",
+            )
+            .num_args(1)
+            .value_parser(["exit-vmm", "shutdown-vm"])
+            .default_value("exit-vmm")
+            .group("vmm-config"),
         #[cfg(feature = "igvm")]
         Arg::new("igvm")
             .long("igvm")
@@ -445,9 +455,13 @@ fn get_cli_options_sorted(
             .group("vm-config"),
         Arg::new("no-shutdown")
             .long("no-shutdown")
-            .help("Do not exit the VMM when the guest shuts down")
+            .help(
+                "Do not exit the VMM when the guest shuts down \
+                 (deprecated: use --guest-shutdown-action=shutdown-vm)",
+            )
             .num_args(0)
             .action(ArgAction::SetTrue)
+            .conflicts_with("guest-shutdown-action")
             .group("vmm-config"),
         Arg::new("numa")
             .long("numa")
@@ -610,6 +624,23 @@ fn parse_api_socket(cmd_arguments: &ArgMatches) -> Result<(Option<String>, Optio
     }
 }
 
+fn parse_shutdown_action(cmd_arguments: &ArgMatches) -> GuestShutdownAction {
+    if cmd_arguments.get_flag("no-shutdown") {
+        warn!("--no-shutdown is deprecated: use --guest-shutdown-action=shutdown-vm instead");
+        return GuestShutdownAction::ShutdownVm;
+    }
+
+    match cmd_arguments
+        .get_one::<String>("guest-shutdown-action")
+        .unwrap()
+        .as_str()
+    {
+        "exit-vmm" => GuestShutdownAction::ExitVmm,
+        "shutdown-vm" => GuestShutdownAction::ShutdownVm,
+        _ => unreachable!("Clap validates --guest-shutdown-action values"),
+    }
+}
+
 fn start_vmm(
     cmd_arguments: &ArgMatches,
     api_socket_path: &Option<String>,
@@ -634,6 +665,8 @@ fn start_vmm(
     log::set_boxed_logger(Box::new(logger))
         .map(|()| log::set_max_level(log_level))
         .map_err(Error::LoggerSetup)?;
+
+    let shutdown_action = parse_shutdown_action(cmd_arguments);
 
     let (api_request_sender, api_request_receiver) = channel();
     let api_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateApiEventFd)?;
@@ -710,11 +743,6 @@ fn start_vmm(
 
     let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateExitEventFd)?;
     let landlock_enable = cmd_arguments.get_flag("landlock");
-    let shutdown_action = if cmd_arguments.get_flag("no-shutdown") {
-        GuestShutdownAction::ShutdownVm
-    } else {
-        GuestShutdownAction::ExitVmm
-    };
 
     #[allow(unused_mut)]
     let mut event_monitor = cmd_arguments
@@ -1041,7 +1069,65 @@ mod tests {
     };
 
     use crate::test_util::assert_args_sorted;
-    use crate::{SeccompSiginfo, create_app, get_cli_options_sorted, prepare_default_values};
+    use crate::{
+        GuestShutdownAction, SeccompSiginfo, create_app, get_cli_options_sorted,
+        parse_shutdown_action, prepare_default_values,
+    };
+
+    #[test]
+    fn test_shutdown_action() {
+        for (options, shutdown) in [
+            (vec![], false),
+            (vec!["--guest-shutdown-action", "exit-vmm"], false),
+            (vec!["--guest-shutdown-action", "shutdown-vm"], true),
+            (vec!["--guest-shutdown-action=shutdown-vm"], true),
+            (vec!["--no-shutdown"], true),
+        ] {
+            let mut args = vec!["cloud-hypervisor", "--api-socket", "/tmp/api.sock"];
+            args.extend(options);
+            let (default_vcpus, default_memory, default_rng) = prepare_default_values();
+            let matches = create_app(default_vcpus, default_memory, default_rng)
+                .try_get_matches_from(&args)
+                .unwrap();
+            assert_eq!(
+                matches!(
+                    parse_shutdown_action(&matches),
+                    GuestShutdownAction::ShutdownVm
+                ),
+                shutdown,
+                "args: {args:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn test_shutdown_action_invalid_arguments() {
+        use clap::error::ErrorKind;
+
+        for (options, expected_error) in [
+            (
+                vec!["--guest-shutdown-action", "reset-vm"],
+                ErrorKind::InvalidValue,
+            ),
+            (vec!["--guest-shutdown-action"], ErrorKind::InvalidValue),
+            (
+                vec!["--no-shutdown", "--guest-shutdown-action", "exit-vmm"],
+                ErrorKind::ArgumentConflict,
+            ),
+            (
+                vec!["--guest-shutdown-action", "shutdown-vm", "--no-shutdown"],
+                ErrorKind::ArgumentConflict,
+            ),
+        ] {
+            let mut args = vec!["cloud-hypervisor", "--api-socket", "/tmp/api.sock"];
+            args.extend(options);
+            let (default_vcpus, default_memory, default_rng) = prepare_default_values();
+            let error = create_app(default_vcpus, default_memory, default_rng)
+                .try_get_matches_from(&args)
+                .unwrap_err();
+            assert_eq!(error.kind(), expected_error, "args: {args:?}");
+        }
+    }
 
     #[test]
     fn test_seccomp_siginfo_output() {
