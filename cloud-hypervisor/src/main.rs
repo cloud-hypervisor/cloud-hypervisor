@@ -14,7 +14,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::ptr::from_ref;
 use std::sync::mpsc::channel;
-use std::{any, cmp, env, io, num, process, str};
+use std::{any, cmp, env, io, num, process};
 
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use event_monitor::event;
@@ -664,6 +664,16 @@ fn parse_reset_action(cmd_arguments: &ArgMatches) -> GuestResetAction {
     }
 }
 
+fn parse_seccomp_action(cmd_arguments: &ArgMatches) -> SeccompAction {
+    match cmd_arguments.get_one::<String>("seccomp").unwrap().as_str() {
+        "true" => SeccompAction::Trap,
+        "false" => SeccompAction::Allow,
+        "log" => SeccompAction::Log,
+        "errno" => SeccompAction::Errno(libc::EPERM as u32),
+        _ => unreachable!("Clap validates --seccomp values"),
+    }
+}
+
 fn start_vmm(
     cmd_arguments: &ArgMatches,
     api_socket_path: &Option<String>,
@@ -691,25 +701,12 @@ fn start_vmm(
 
     let shutdown_action = parse_shutdown_action(cmd_arguments);
     let reset_action = parse_reset_action(cmd_arguments);
+    let seccomp_action = parse_seccomp_action(cmd_arguments);
 
     let (api_request_sender, api_request_receiver) = channel();
     let api_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateApiEventFd)?;
 
     let api_request_sender_clone = api_request_sender.clone();
-    let seccomp_action = if let Some(seccomp_value) = cmd_arguments.get_one::<String>("seccomp") {
-        match seccomp_value as &str {
-            "true" => SeccompAction::Trap,
-            "false" => SeccompAction::Allow,
-            "log" => SeccompAction::Log,
-            "errno" => SeccompAction::Errno(libc::EPERM as u32),
-            val => {
-                // The user providing an invalid value will be rejected
-                panic!("Invalid parameter {val} for \"--seccomp\" flag");
-            }
-        }
-    } else {
-        SeccompAction::Trap
-    };
 
     if seccomp_action == SeccompAction::Trap {
         // SAFETY: handle_sigsys only performs async signal safe operations.
