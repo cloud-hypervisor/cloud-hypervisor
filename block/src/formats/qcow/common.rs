@@ -84,7 +84,13 @@ pub(super) fn deallocate_range_result(
         AsyncIoError::PunchHole
     };
     let result = metadata
-        .deallocate_bytes(offset, length, sparse, write_zeroes, backing_file)
+        .deallocate_bytes(
+            offset,
+            length,
+            sparse,
+            write_zeroes || backing_file.is_some(),
+            backing_file,
+        )
         .and_then(|actions| {
             let mut first_error = None;
             for action in &actions {
