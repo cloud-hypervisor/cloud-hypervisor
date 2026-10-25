@@ -252,6 +252,75 @@ mod common_parallel {
         _test_power_button(&guest, false);
     }
 
+    fn test_reboot(reboot_method: Option<&str>) {
+        let mut guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(2);
+        if let Some(method) = reboot_method {
+            guest.kernel_cmdline = Some(format!("{DIRECT_KERNEL_BOOT_CMDLINE} reboot={method}"));
+        }
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
+        let mut child = GuestCommand::new(&guest)
+            .default_cpus()
+            .default_memory()
+            .default_kernel_cmdline()
+            .default_disks()
+            .default_net()
+            .args(["--event-monitor", &format!("path={event_path}")])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+            guest.reboot_linux(0);
+            guest.reboot_linux(1);
+
+            // Count VMM boots too: an extra reset before userspace starts
+            // might not appear in the guest's boot history.
+            let boot_events = parse_event_file(&event_path)
+                .iter()
+                .filter(|event| {
+                    event["source"] == "vm"
+                        && matches!(event["event"].as_str(), Some("booted" | "rebooted"))
+                })
+                .count();
+            assert_eq!(boot_events, 3);
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_reboot_default() {
+        test_reboot(None);
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_reboot_acpi() {
+        test_reboot(Some("acpi"));
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_reboot_keyboard() {
+        test_reboot(Some("kbd"));
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_reboot_bios() {
+        test_reboot(Some("bios"));
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_reboot_triple_fault() {
+        test_reboot(Some("triple"));
+    }
+
     #[test]
     fn test_user_defined_memory_regions() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());

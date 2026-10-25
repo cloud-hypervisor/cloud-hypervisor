@@ -542,7 +542,7 @@ pub(crate) fn fw_path(_fw_type: FwType) -> String {
 
 /// Parse the event_monitor file based on the format that each event
 /// is followed by a double newline
-fn parse_event_file(event_file: &str) -> Vec<serde_json::Value> {
+pub(crate) fn parse_event_file(event_file: &str) -> Vec<serde_json::Value> {
     let content = fs::read(event_file).unwrap();
     String::from_utf8_lossy(&content)
         .trim()
