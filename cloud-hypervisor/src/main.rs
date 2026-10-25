@@ -43,7 +43,7 @@ use vmm::vm_config::{
     RateLimiterGroupConfig, RngConfig, RtcConfig, SerialConfig, TpmConfig, UserDeviceConfig,
     VdpaConfig, VmConfig, VsockConfig,
 };
-use vmm::{GuestShutdownAction, vm_config};
+use vmm::{GuestResetAction, GuestShutdownAction, vm_config};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::block_signal;
 
@@ -349,6 +349,16 @@ fn get_cli_options_sorted(
             .num_args(1..)
             .action(ArgAction::Append)
             .group("vm-config"),
+        Arg::new("guest-reset-action")
+            .long("guest-reset-action")
+            .help(
+                "Action when the guest resets: reset the VM, exit the VMM, \
+                 or shut down the VM and keep the VMM running",
+            )
+            .num_args(1)
+            .value_parser(["reset-vm", "exit-vmm", "shutdown-vm"])
+            .default_value("reset-vm")
+            .group("vmm-config"),
         Arg::new("guest-shutdown-action")
             .long("guest-shutdown-action")
             .help(
@@ -641,6 +651,19 @@ fn parse_shutdown_action(cmd_arguments: &ArgMatches) -> GuestShutdownAction {
     }
 }
 
+fn parse_reset_action(cmd_arguments: &ArgMatches) -> GuestResetAction {
+    match cmd_arguments
+        .get_one::<String>("guest-reset-action")
+        .unwrap()
+        .as_str()
+    {
+        "reset-vm" => GuestResetAction::ResetVm,
+        "exit-vmm" => GuestResetAction::ExitVmm,
+        "shutdown-vm" => GuestResetAction::ShutdownVm,
+        _ => unreachable!("Clap validates --guest-reset-action values"),
+    }
+}
+
 fn start_vmm(
     cmd_arguments: &ArgMatches,
     api_socket_path: &Option<String>,
@@ -667,6 +690,7 @@ fn start_vmm(
         .map_err(Error::LoggerSetup)?;
 
     let shutdown_action = parse_shutdown_action(cmd_arguments);
+    let reset_action = parse_reset_action(cmd_arguments);
 
     let (api_request_sender, api_request_receiver) = channel();
     let api_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateApiEventFd)?;
@@ -839,6 +863,7 @@ fn start_vmm(
         &seccomp_action,
         hypervisor,
         shutdown_action,
+        reset_action,
         landlock_enable,
     )
     .map_err(Error::StartVmmThread)?;
@@ -1070,9 +1095,70 @@ mod tests {
 
     use crate::test_util::assert_args_sorted;
     use crate::{
-        GuestShutdownAction, SeccompSiginfo, create_app, get_cli_options_sorted,
-        parse_shutdown_action, prepare_default_values,
+        GuestResetAction, GuestShutdownAction, SeccompSiginfo, create_app, get_cli_options_sorted,
+        parse_reset_action, parse_shutdown_action, prepare_default_values,
     };
+
+    #[test]
+    fn test_reset_action() {
+        for (options, expected) in [
+            (vec![], GuestResetAction::ResetVm),
+            (
+                vec!["--guest-reset-action", "reset-vm"],
+                GuestResetAction::ResetVm,
+            ),
+            (
+                vec!["--guest-reset-action", "exit-vmm"],
+                GuestResetAction::ExitVmm,
+            ),
+            (
+                vec!["--guest-reset-action=shutdown-vm"],
+                GuestResetAction::ShutdownVm,
+            ),
+            (vec!["--no-shutdown"], GuestResetAction::ResetVm),
+            (
+                vec![
+                    "--guest-shutdown-action=shutdown-vm",
+                    "--guest-reset-action=exit-vmm",
+                ],
+                GuestResetAction::ExitVmm,
+            ),
+        ] {
+            let mut args = vec!["cloud-hypervisor", "--api-socket", "/tmp/api.sock"];
+            args.extend(options);
+            let (default_vcpus, default_memory, default_rng) = prepare_default_values();
+            let matches = create_app(default_vcpus, default_memory, default_rng)
+                .try_get_matches_from(&args)
+                .unwrap();
+            assert!(
+                matches!(
+                    (parse_reset_action(&matches), expected),
+                    (GuestResetAction::ResetVm, GuestResetAction::ResetVm)
+                        | (GuestResetAction::ExitVmm, GuestResetAction::ExitVmm)
+                        | (GuestResetAction::ShutdownVm, GuestResetAction::ShutdownVm)
+                ),
+                "args: {args:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn test_reset_action_invalid_arguments() {
+        use clap::error::ErrorKind;
+
+        for options in [
+            vec!["--guest-reset-action", "invalid"],
+            vec!["--guest-reset-action"],
+        ] {
+            let mut args = vec!["cloud-hypervisor", "--api-socket", "/tmp/api.sock"];
+            args.extend(options);
+            let (default_vcpus, default_memory, default_rng) = prepare_default_values();
+            let error = create_app(default_vcpus, default_memory, default_rng)
+                .try_get_matches_from(&args)
+                .unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::InvalidValue);
+        }
+    }
 
     #[test]
     fn test_shutdown_action() {
