@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
-use std::io::{self, Seek, SeekFrom};
+use std::io::{self, Seek, SeekFrom, Write};
 use std::mem::{MaybeUninit, zeroed};
 use std::num::NonZeroUsize;
 use std::ops::{BitAnd, Not, Sub};
@@ -64,7 +64,10 @@ use crate::uffd::{
     self, FileUffdMemorySource, SocketUffdMemorySource, Uffd, UffdMemorySource, UffdRange,
 };
 use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
-use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID, prefault, userfaultfd};
+use crate::{
+    GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID, memory_diff, prefault,
+    userfaultfd,
+};
 
 struct UffdHandler {
     stop_event: EventFd,
@@ -80,6 +83,8 @@ const DEFAULT_MEMORY_ZONE: &str = "mem0";
 
 /// Filename used to store guest RAM in snapshot directories.
 pub const SNAPSHOT_FILENAME: &str = "memory-ranges";
+/// Filename used to store the changed guest pages in linked snapshot directories.
+pub const SNAPSHOT_DIFF_FILENAME: &str = "memory-ranges.diff.1";
 
 #[cfg(target_arch = "x86_64")]
 const X86_64_IRQ_BASE: u32 = 5;
@@ -3732,6 +3737,16 @@ impl Transportable for MemoryManager {
             return Ok(());
         }
 
+        if self.snapshot_memory_base == MemoryBase::Linked {
+            let source = self
+                .cow_source
+                .as_ref()
+                .context("Linked snapshot without a copy-on-write restore source")
+                .map_err(MigratableError::MigrateSend)?;
+            let dir = url_to_path(destination_url)?;
+            return write_diff_file(&self.guest_memory.memory(), source, &dir);
+        }
+
         let mut memory_file_path = url_to_path(destination_url)?;
         memory_file_path.push(String::from(SNAPSHOT_FILENAME));
 
@@ -3916,10 +3931,12 @@ fn write_guest_range(
 }
 
 // Returns the guest ranges that no longer read from the restore source,
-// each with its offset in the memory file of that source.
+// each with its offset in the memory file of that source. Unless `exact`,
+// short runs of unchanged pages between them are joined in.
 fn private_guest_ranges(
     guest_memory: &GuestMemoryMmap,
     source: &CowSource,
+    exact: bool,
 ) -> result::Result<Vec<(u64, MemoryRange)>, MigratableError> {
     let mut ranges = Vec::new();
     let mut file_offset: u64 = 0;
@@ -3928,11 +3945,17 @@ fn private_guest_ranges(
             .get_host_address(GuestAddress(range.gpa))
             .context("Error locating guest memory range")
             .map_err(MigratableError::MigrateSend)?;
-        let private_ranges = source
-            .pagemap
-            .private_ranges(host_addr as u64, range.length)
-            .context("Error reading the pagemap")
-            .map_err(MigratableError::MigrateSend)?;
+        let private_ranges = if exact {
+            source
+                .pagemap
+                .private_ranges_exact(host_addr as u64, range.length)
+        } else {
+            source
+                .pagemap
+                .private_ranges(host_addr as u64, range.length)
+        }
+        .context("Error reading the pagemap")
+        .map_err(MigratableError::MigrateSend)?;
         for private in private_ranges {
             ranges.push((
                 file_offset + private.start,
@@ -3954,9 +3977,51 @@ fn write_private_pages(
     source: &CowSource,
     file: &mut File,
 ) -> result::Result<(), MigratableError> {
-    for (file_offset, range) in private_guest_ranges(guest_memory, source)? {
+    for (file_offset, range) in private_guest_ranges(guest_memory, source, false)? {
         write_guest_range(guest_memory, file, file_offset, range.gpa, range.length)?;
     }
+    Ok(())
+}
+
+// Writes the guest pages that no longer read from the restore source to
+// the diff file of a linked snapshot in `dir`.
+fn write_diff_file(
+    guest_memory: &GuestMemoryMmap,
+    source: &CowSource,
+    dir: &Path,
+) -> result::Result<(), MigratableError> {
+    // Exact ranges, so a restore doesn't copy unchanged base pages into
+    // private memory
+    let entries: Vec<MemoryRange> = private_guest_ranges(guest_memory, source, true)?
+        .into_iter()
+        .map(|(_, range)| range)
+        .collect();
+
+    let path = dir.join(SNAPSHOT_DIFF_FILENAME);
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .with_context(|| format!("Error creating memory diff file {path:?}"))
+        .map_err(MigratableError::MigrateSend)?;
+    let header = memory_diff::encode_header(&entries);
+    file.write_all(&header)
+        .context("Error writing memory diff header")
+        .map_err(MigratableError::MigrateSend)?;
+    let mut file_offset = header.len() as u64;
+    for entry in &entries {
+        write_guest_range(
+            guest_memory,
+            &mut file,
+            file_offset,
+            entry.gpa,
+            entry.length,
+        )?;
+        file_offset += entry.length;
+    }
+    file.sync_all()
+        .context("Error syncing memory diff file")
+        .map_err(MigratableError::MigrateSend)?;
     Ok(())
 }
 
