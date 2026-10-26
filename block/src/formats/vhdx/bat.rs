@@ -33,6 +33,8 @@ pub enum VhdxBatError {
     InvalidBatEntry,
     #[error("Invalid BAT entry count")]
     InvalidEntryCount,
+    #[error("BAT entry payload block extends past end of file")]
+    PayloadPastEnd,
     #[error("Failed to read BAT entry")]
     ReadBat(#[source] io::Error),
     #[error("Failed to write BAT entry")]
@@ -66,7 +68,14 @@ impl BatEntry {
             let mut entry = [0u8; size_of::<u64>()];
             f.read_exact_at(&mut entry, offset + i * size_of::<u64>() as u64)
                 .map_err(VhdxBatError::ReadBat)?;
-            bat.insert(i as usize, BatEntry(LittleEndian::read_u64(&entry)));
+            let raw_entry = LittleEndian::read_u64(&entry);
+            if raw_entry & BAT_STATE_BIT_MASK == PAYLOAD_BLOCK_FULLY_PRESENT
+                && (raw_entry & BAT_FILE_OFF_MASK).saturating_add(disk_spec.block_size as u64)
+                    > disk_spec.image_size
+            {
+                return Err(VhdxBatError::PayloadPastEnd);
+            }
+            bat.insert(i as usize, BatEntry(raw_entry));
         }
 
         Ok(bat)
