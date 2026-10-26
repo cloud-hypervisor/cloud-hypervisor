@@ -7257,7 +7257,7 @@ mod common_parallel {
             .spawn()
             .unwrap();
 
-        if !wait_for_sequential_events_str(
+        if !wait_for_latest_events_exact_str(
             Duration::from_secs(30),
             &["migration-receive-ready"],
             dest_event_path,
@@ -7332,7 +7332,7 @@ mod common_parallel {
             .spawn()
             .unwrap();
 
-        if !wait_for_sequential_events_str(
+        if !wait_for_latest_events_exact_str(
             Duration::from_secs(3),
             &["migration-receive-ready"],
             dest_event_path,
