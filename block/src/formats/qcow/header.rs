@@ -430,6 +430,11 @@ impl QcowHeader {
             }
         }
 
+        // Encryption is not implemented; refuse to treat ciphertext as plain data.
+        if header.crypt_method != 0 {
+            return Err(Error::UnsupportedCryptMethod(header.crypt_method));
+        }
+
         // Everything below derives from the cluster size. Validate it before it is used.
         if !(MIN_CLUSTER_BITS..=MAX_CLUSTER_BITS).contains(&header.cluster_bits) {
             return Err(Error::InvalidClusterSize);
