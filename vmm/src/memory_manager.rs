@@ -59,7 +59,7 @@ use crate::coredump::{
 use crate::migration::transport::SocketStream;
 use crate::migration::url_to_path;
 use crate::pagemap::PageMap;
-use crate::sparse::{clone_file_range, next_data_extent, write_region_sparse};
+use crate::sparse::{clone_file_range, link_file, next_data_extent, write_region_sparse};
 use crate::uffd::{
     self, FileUffdMemorySource, SocketUffdMemorySource, Uffd, UffdMemorySource, UffdRange,
 };
@@ -85,6 +85,8 @@ const DEFAULT_MEMORY_ZONE: &str = "mem0";
 pub const SNAPSHOT_FILENAME: &str = "memory-ranges";
 /// Filename used to store the changed guest pages in linked snapshot directories.
 pub const SNAPSHOT_DIFF_FILENAME: &str = "memory-ranges.diff.1";
+/// Filename of the hard link to the restore source in linked snapshot directories.
+pub const SNAPSHOT_BASE_FILENAME: &str = "memory-ranges.base";
 
 #[cfg(target_arch = "x86_64")]
 const X86_64_IRQ_BASE: u32 = 5;
@@ -3184,6 +3186,31 @@ impl MemoryManager {
             }
         }
         Some(ranges)
+    }
+
+    /// Hard links the copy-on-write restore source into `dir` as the base of
+    /// a linked snapshot, makes the next snapshot a linked one, and returns
+    /// the path of the link.
+    pub fn link_snapshot_base(&mut self, dir: &Path) -> anyhow::Result<PathBuf> {
+        let Some(source) = &self.cow_source else {
+            return Err(anyhow!(
+                "The VM was not restored with memory_restore_mode=copyonwrite"
+            ));
+        };
+        let ranges = self.memory_range_table(MemoryRangePolicy::SkipPersisted)?;
+        if ranges != source.ranges {
+            return Err(anyhow!("The guest memory layout changed since the restore"));
+        }
+        let path = dir.join(SNAPSHOT_BASE_FILENAME);
+        link_file(&source.file, &path).context("Error linking the restore source")?;
+        self.snapshot_memory_base = MemoryBase::Linked;
+
+        Ok(path)
+    }
+
+    /// Makes the next snapshot a full one again.
+    pub fn clear_snapshot_base(&mut self) {
+        self.snapshot_memory_base = MemoryBase::Full;
     }
 
     pub fn snapshot_data(&self) -> MemoryManagerSnapshotData {

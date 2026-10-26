@@ -19,6 +19,7 @@ use std::io::{self, Seek, SeekFrom, Write};
 use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 #[cfg(not(target_arch = "riscv64"))]
 use std::time::Instant;
@@ -192,9 +193,6 @@ pub enum Error {
 
     #[error("VM on-demand memory restore is still in progress")]
     VmRestoring,
-
-    #[error("Linked memory snapshots are not supported yet")]
-    SnapshotMemoryBaseLinkUnsupported,
 
     #[error("Cannot clone EventFd")]
     EventFdClone(#[source] io::Error),
@@ -2734,6 +2732,14 @@ impl Vm {
 
     pub fn memory_manager_data(&self) -> MemoryManagerSnapshotData {
         self.memory_manager.lock().unwrap().snapshot_data()
+    }
+
+    pub fn link_snapshot_base(&self, dir: &Path) -> anyhow::Result<PathBuf> {
+        self.memory_manager.lock().unwrap().link_snapshot_base(dir)
+    }
+
+    pub fn clear_snapshot_base(&self) {
+        self.memory_manager.lock().unwrap().clear_snapshot_base();
     }
 
     #[cfg(feature = "guest_debug")]

@@ -17,7 +17,7 @@ use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender, channel};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
-use std::{any, io, mem, panic, path, process, result, thread};
+use std::{any, fs, io, mem, panic, path, process, result, thread};
 
 use anyhow::{Context, anyhow};
 #[cfg(feature = "dbus_api")]
@@ -69,7 +69,7 @@ use crate::migration::transport::{
 use crate::migration::worker::{
     MigrationSeccompFilters, MigrationWorker, MigrationWorkerHandle, MigrationWorkerResult,
 };
-use crate::migration::{recv_vm_config, recv_vm_state};
+use crate::migration::{recv_vm_config, recv_vm_state, url_to_path};
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::util::flatten_error_chain_to_string;
 use crate::vm::{Error as VmError, Vm, VmState};
@@ -2617,17 +2617,37 @@ impl RequestHandler for Vmm {
                 if vm.restoring() {
                     return Err(VmError::VmRestoring);
                 }
-                if config.memory_base == SnapshotMemoryBase::Link {
-                    return Err(VmError::SnapshotMemoryBaseLinkUnsupported);
-                }
                 // Drain console_info so that FDs are not reused
                 let _ = self.console_info.take();
-                vm.snapshot()
+                let mut linked_base = None;
+                if config.memory_base == SnapshotMemoryBase::Link {
+                    let dir =
+                        url_to_path(&config.destination_url).map_err(VmError::SnapshotSend)?;
+                    match vm.link_snapshot_base(&dir) {
+                        Ok(path) => linked_base = Some(path),
+                        Err(e) => {
+                            warn!(
+                                "Snapshot: writing a full snapshot instead of a linked one: {e:#}"
+                            );
+                        }
+                    }
+                }
+                let result = vm
+                    .snapshot()
                     .map_err(VmError::Snapshot)
                     .and_then(|snapshot| {
                         vm.send(&snapshot, &config.destination_url)
                             .map_err(VmError::SnapshotSend)
-                    })
+                    });
+                vm.clear_snapshot_base();
+                // Drop the link so a failed snapshot doesn't pin the restore source
+                if result.is_err()
+                    && let Some(path) = linked_base
+                    && let Err(e) = fs::remove_file(&path)
+                {
+                    warn!("Snapshot: error removing {}: {e}", path.display());
+                }
+                result
             }
             VmOwnership::Migration { .. } => Err(VmError::VmMigrating),
             VmOwnership::None => Err(VmError::VmNotRunning),
