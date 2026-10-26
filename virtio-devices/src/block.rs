@@ -198,9 +198,10 @@ impl BlockEpollHandler {
     fn check_request(features: u64, request: &Request) -> result::Result<(), ExecuteError> {
         let request_type = request.request_type();
         if (has_feature(features, VIRTIO_BLK_F_RO.into()))
-            && !(request_type == RequestType::In
-                || request_type == RequestType::GetDeviceId
-                || request_type == RequestType::Flush)
+            && matches!(
+                request_type,
+                RequestType::Out | RequestType::Discard | RequestType::WriteZeroes
+            )
         {
             // For virtio spec compliance
             // "A device MUST set the status byte to VIRTIO_BLK_S_IOERR for a write request
@@ -1588,5 +1589,11 @@ mod tests {
     fn rejected_request_writes_one_status_byte() {
         let status = process_one_request(VIRTIO_BLK_T_OUT, 1 << VIRTIO_BLK_F_RO);
         assert_eq!(status, [VIRTIO_BLK_S_IOERR as u8, 0xff, 0xff, 0xff]);
+    }
+
+    #[test]
+    fn read_only_device_reports_unknown_request_unsupported() {
+        let status = process_one_request(0x7f, 1 << VIRTIO_BLK_F_RO);
+        assert_eq!(status[0], VIRTIO_BLK_S_UNSUPP as u8);
     }
 }
