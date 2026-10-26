@@ -5,7 +5,8 @@ use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::os::unix::io::AsRawFd;
+use std::num::Wrapping;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::net::UnixListener;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
@@ -51,6 +52,8 @@ const FILE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
 const RESIZE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 5;
 // New client on the listening socket
 const SOCKET_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 6;
+
+const MAX_INPUT_READ: usize = 4096;
 
 //Console size feature bit
 const VIRTIO_CONSOLE_F_SIZE: u64 = 0;
@@ -103,6 +106,10 @@ struct ConsoleEpollHandler {
     write_out: Option<Arc<AtomicBool>>,
     socket_console: Option<SocketConsole>,
     file_event_registered: bool,
+    // Set while input is not read because the guest has no receive buffers.
+    input_paused: bool,
+    // Set while a client that hung up is kept until its input is read.
+    client_hung_up: bool,
 }
 
 #[derive(Clone)]
@@ -206,6 +213,8 @@ impl ConsoleEpollHandler {
             write_out,
             socket_console,
             file_event_registered: false,
+            input_paused: false,
+            client_hung_up: false,
         }
     }
 
@@ -400,15 +409,37 @@ impl ConsoleEpollHandler {
             return Ok(());
         }
 
-        // Re-arm the file event.
+        // Re-arm the file event. While input is paused it only reports a hang-up.
+        let mut events = epoll::Events::EPOLLONESHOT;
+        if !self.input_paused {
+            events |= epoll::Events::EPOLLIN;
+        }
         helper.mod_event_custom(
             self.endpoint.in_file().unwrap().as_raw_fd(),
             FILE_EVENT,
-            epoll::Events::EPOLLIN | epoll::Events::EPOLLONESHOT,
+            events,
         )?;
         self.file_event_registered = true;
 
         Ok(())
+    }
+
+    // Whether the guest has receive buffers for new input.
+    fn can_take_input(&self) -> bool {
+        if !self.in_buffer.lock().unwrap().is_empty() {
+            return false;
+        }
+        let mem = self.mem.memory();
+        self.input_queue
+            .avail_idx(&*mem, Ordering::Acquire)
+            .is_ok_and(|idx| idx != Wrapping(self.input_queue.next_avail()))
+    }
+
+    fn input_fd(&self) -> Option<RawFd> {
+        match self.socket_console.as_ref() {
+            Some(console) => console.client_fd(),
+            None => self.endpoint.in_file().map(|f| f.as_raw_fd()),
+        }
     }
 }
 
@@ -432,6 +463,15 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                     self.signal_used_queue(0).map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!("Failed to signal used queue: {e:?}"))
                     })?;
+                }
+                if self.input_paused && self.can_take_input() {
+                    self.input_paused = false;
+                    if self.endpoint.is_pty() {
+                        self.file_event_registered = false;
+                        self.register_file_event(helper)?;
+                    } else if let Some(fd) = self.input_fd() {
+                        helper.mod_event_custom(fd, FILE_EVENT, epoll::Events::EPOLLIN)?;
+                    }
                 }
             }
             OUTPUT_QUEUE_EVENT => {
@@ -472,6 +512,15 @@ impl EpollHelperHandler for ConsoleEpollHandler {
             SOCKET_EVENT => {
                 if let Some(console) = self.socket_console.as_mut() {
                     if let Endpoint::TcpListen(listener) = &self.endpoint {
+                        // A new client replaces one that hung up.
+                        if let Some(fd) = console.client_fd() {
+                            helper.del_event_custom(fd, FILE_EVENT, epoll::Events::EPOLLIN)?;
+                            if let Err(e) = console.shutdown() {
+                                warn!("Failed to shut down console socket client: {e}");
+                            }
+                            self.client_hung_up = false;
+                            self.input_paused = false;
+                        }
                         if console
                             .accept_tcp(listener)
                             .map_err(EpollHelperError::IoError)?
@@ -483,12 +532,14 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                                 epoll::Events::EPOLLIN,
                             )?;
                             helper.add_event_custom(fd, FILE_EVENT, epoll::Events::EPOLLIN)?;
+                            self.input_paused = false;
                         }
                         return Ok(());
                     }
                     if let Some(fd) = console.client_fd() {
                         helper.del_event_custom(fd, FILE_EVENT, epoll::Events::EPOLLIN)?;
                         console.shutdown().map_err(EpollHelperError::IoError)?;
+                        self.client_hung_up = false;
                     }
                     if let Endpoint::Socket(listener) = &self.endpoint {
                         console
@@ -498,25 +549,44 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                     if let Some(fd) = console.client_fd() {
                         helper.add_event_custom(fd, FILE_EVENT, epoll::Events::EPOLLIN)?;
                     }
+                    self.input_paused = false;
                 }
             }
             FILE_EVENT => {
-                if event.events & libc::EPOLLIN as u32 != 0
-                    || matches!(self.endpoint, Endpoint::TcpListen(_))
-                        && event.events & (libc::EPOLLHUP | libc::EPOLLERR) as u32 != 0
+                // A client that hangs up while input is paused is kept until its input
+                // is read, and a new client can replace it.
+                if self.input_paused
+                    && let Some(console) = self.socket_console.as_ref()
+                    && console.client_fd().is_some()
                 {
-                    let mut input = [0u8; 64];
+                    console.detach();
+                    if !self.client_hung_up
+                        && let Endpoint::TcpListen(listener) = &self.endpoint
+                    {
+                        helper.add_event(listener.as_raw_fd(), SOCKET_EVENT)?;
+                    }
+                    self.client_hung_up = true;
+                    return Ok(());
+                }
+                let readable = event.events & libc::EPOLLIN as u32 != 0
+                    || matches!(self.endpoint, Endpoint::TcpListen(_))
+                        && event.events & (libc::EPOLLHUP | libc::EPOLLERR) as u32 != 0;
+                if readable && self.can_take_input() {
+                    let mut input = [0u8; MAX_INPUT_READ];
                     let count = if let Some(console) = self.socket_console.as_mut() {
                         let was_connected = console.client_fd().is_some();
                         let count = console.read(&mut input).unwrap_or_else(|e| {
                             warn!("Failed to read console input: {e}");
                             0
                         });
-                        if was_connected
-                            && console.client_fd().is_none()
-                            && let Endpoint::TcpListen(listener) = &self.endpoint
-                        {
-                            helper.add_event(listener.as_raw_fd(), SOCKET_EVENT)?;
+                        if was_connected && console.client_fd().is_none() {
+                            // The listener is registered already if the client hung up.
+                            if !self.client_hung_up
+                                && let Endpoint::TcpListen(listener) = &self.endpoint
+                            {
+                                helper.add_event(listener.as_raw_fd(), SOCKET_EVENT)?;
+                            }
+                            self.client_hung_up = false;
                         }
                         count
                     } else if let Some(mut in_file) = self.endpoint.in_file() {
@@ -540,6 +610,20 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                             ))
                         })?;
                     }
+                }
+                // Leave the input with the sender until the guest posts receive buffers.
+                if readable && !self.can_take_input() {
+                    // Watch for a hang-up only. A PTY is re-armed below.
+                    if !self.endpoint.is_pty()
+                        && let Some(fd) = self.input_fd()
+                    {
+                        helper.mod_event_custom(
+                            fd,
+                            FILE_EVENT,
+                            epoll::Events::EPOLLRDHUP | epoll::Events::EPOLLONESHOT,
+                        )?;
+                    }
+                    self.input_paused = true;
                 }
                 if self.endpoint.is_pty() {
                     self.file_event_registered = false;
@@ -886,3 +970,83 @@ impl Snapshottable for Console {
 }
 impl Transportable for Console {}
 impl Migratable for Console {}
+
+#[cfg(test)]
+mod tests {
+    use std::fs::OpenOptions;
+    use std::io::Result as IoResult;
+    use std::os::fd::OwnedFd;
+    use std::os::unix::net::UnixStream;
+
+    use hypervisor::Vm;
+    use virtio_bindings::virtio_ring::VRING_DESC_F_WRITE;
+    use vm_memory::GuestAddress;
+    use vm_virtio::queue::testing::VirtQueue as GuestQ;
+
+    use super::*;
+
+    struct NoopInterrupt;
+    impl VirtioInterrupt for NoopInterrupt {
+        fn trigger(&self, _: VirtioInterruptType) -> IoResult<()> {
+            Ok(())
+        }
+        fn set_notifier(&self, _: u32, _: Option<EventFd>, _: &dyn Vm) -> IoResult<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn input_waits_for_receive_buffers() {
+        let mem = GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let rx = GuestQ::new(GuestAddress(0x1000), &mem, 4);
+        let tx = GuestQ::new(GuestAddress(0x2000), &mem, 4);
+        let (mut sender, input) = UnixStream::pair().unwrap();
+        let output = OpenOptions::new().write(true).open("/dev/null").unwrap();
+        let endpoint =
+            Endpoint::FilePair(Arc::new(output), Arc::new(File::from(OwnedFd::from(input))));
+        let evt = || EventFd::new(EFD_NONBLOCK).unwrap();
+        let resizer = Arc::new(ConsoleResizer {
+            config_evt: evt(),
+            tty: None,
+            config: Arc::new(Mutex::new(VirtioConsoleConfig::default())),
+            acked_features: AtomicU64::new(0),
+        });
+        let mut handler = ConsoleEpollHandler::new(
+            GuestMemoryAtomic::new(mem.clone()),
+            rx.create_queue(),
+            tx.create_queue(),
+            Arc::new(NoopInterrupt),
+            Arc::new(Mutex::new(VecDeque::new())),
+            resizer,
+            endpoint,
+            evt(),
+            evt(),
+            evt(),
+            None,
+            evt(),
+            evt(),
+            None,
+        );
+        let mut helper = EpollHelper::new(&handler.kill_evt, &handler.pause_evt).unwrap();
+        let input_fd = handler.endpoint.in_file().unwrap().as_raw_fd();
+        helper.add_event(input_fd, FILE_EVENT).unwrap();
+        let file_event = epoll::Event::new(epoll::Events::EPOLLIN, FILE_EVENT.into());
+        let queue_event = epoll::Event::new(epoll::Events::EPOLLIN, INPUT_QUEUE_EVENT.into());
+
+        sender.write_all(b"hello").unwrap();
+        handler.handle_event(&mut helper, &file_event).unwrap();
+        assert!(handler.in_buffer.lock().unwrap().is_empty());
+        assert_eq!(rx.used.idx.get(), 0);
+
+        rx.dtable[0].set(0x3000, 16, VRING_DESC_F_WRITE as u16, 0);
+        rx.avail.ring[0].set(0);
+        rx.avail.idx.set(1);
+        handler.input_queue_evt.write(1).unwrap();
+        handler.handle_event(&mut helper, &queue_event).unwrap();
+        handler.handle_event(&mut helper, &file_event).unwrap();
+        assert_eq!(rx.used.idx.get(), 1);
+        let mut received = [0u8; 5];
+        mem.read_slice(&mut received, GuestAddress(0x3000)).unwrap();
+        assert_eq!(&received, b"hello");
+    }
+}
