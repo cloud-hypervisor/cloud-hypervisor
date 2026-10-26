@@ -59,6 +59,8 @@ use hypervisor::arch::x86::SpecialRegisters;
 use hypervisor::arch::x86::msr_index;
 #[cfg(target_arch = "x86_64")]
 use hypervisor::arch::x86::{CpuIdEntry, VcpuMsrConfigUpdate};
+#[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+use hypervisor::kvm::{Cap, KvmVm};
 #[cfg(feature = "mshv")]
 use hypervisor::mshv;
 use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
@@ -487,6 +489,8 @@ pub struct Vcpu {
     // The hypervisor abstracted CPU.
     vcpu: Box<dyn hypervisor::Vcpu>,
     id: u32,
+    #[cfg_attr(not(all(target_arch = "aarch64", feature = "kvm")), expect(unused))]
+    vm: Arc<dyn hypervisor::Vm>,
     #[cfg(target_arch = "x86_64")]
     vendor: CpuVendor,
 }
@@ -510,7 +514,7 @@ impl Vcpu {
     pub fn new(
         id: u32,
         apic_id: u32,
-        vm: &dyn hypervisor::Vm,
+        vm: Arc<dyn hypervisor::Vm>,
         vm_ops: Option<Arc<dyn VmOps>>,
         #[cfg(target_arch = "x86_64")] cpu_vendor: CpuVendor,
         #[cfg(target_arch = "x86_64")] msr_config_update: Option<VcpuMsrConfigUpdate>,
@@ -527,6 +531,7 @@ impl Vcpu {
         Ok(Vcpu {
             vcpu,
             id,
+            vm,
             #[cfg(target_arch = "x86_64")]
             vendor: cpu_vendor,
         })
@@ -625,6 +630,13 @@ impl Vcpu {
         #[allow(clippy::nonminimal_bool)]
         let sve_supported =
             is_aarch64_feature_detected!("sve") || is_aarch64_feature_detected!("sve2");
+        #[cfg(feature = "kvm")]
+        let sve_supported = sve_supported
+            && self
+                .vm
+                .as_any()
+                .downcast_ref::<KvmVm>()
+                .is_none_or(|vm| vm.check_extension(Cap::ArmSve));
         if sve_supported {
             let finalized_features = self.vcpu.vcpu_get_finalized_features();
             self.vcpu
@@ -1050,7 +1062,7 @@ impl CpuManager {
         let vcpu = Vcpu::new(
             cpu_id,
             x2apic_id,
-            self.vm.as_ref(),
+            Arc::clone(&self.vm),
             Some(Arc::clone(&self.vm_ops)),
             #[cfg(target_arch = "x86_64")]
             self.hypervisor.get_cpu_vendor(),
@@ -3670,6 +3682,7 @@ mod tests {
 mod tests {
     #[cfg(feature = "kvm")]
     use std::mem::offset_of;
+    use std::sync::Arc;
 
     use arch::layout;
     use hypervisor::arch::aarch64::mpidr_from_vcpu_id;
@@ -3733,7 +3746,7 @@ mod tests {
             (17, 0x8000_0101),
             (255, 0x8000_0f0f),
         ] {
-            let vcpu = Vcpu::new(id, id, vm.as_ref(), None).unwrap();
+            let vcpu = Vcpu::new(id, id, Arc::clone(&vm), None).unwrap();
             assert_eq!(mpidr_from_vcpu_id(id as u64), expected, "vCPU {id}");
 
             // Must be what the hypervisor itself calculates.
