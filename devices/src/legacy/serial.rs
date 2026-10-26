@@ -9,13 +9,15 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Barrier};
 use std::{io, result};
 
+use log::error;
 use serde::{Deserialize, Serialize};
 use vm_device::BusDevice;
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::errno::Result;
+use vmm_sys_util::eventfd::EventFd;
 
-const LOOP_SIZE: usize = 0x40;
+const FIFO_SIZE: usize = 0x40;
 
 const DATA: u8 = 0;
 const IER: u8 = 1;
@@ -70,6 +72,7 @@ pub struct Serial {
     in_buffer: VecDeque<u8>,
     interrupt: Arc<dyn InterruptSourceGroup>,
     out: Option<Box<dyn io::Write + Send>>,
+    in_buffer_empty_evt: Option<EventFd>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -141,6 +144,7 @@ impl Serial {
             in_buffer,
             interrupt,
             out,
+            in_buffer_empty_evt: None,
         }
     }
 
@@ -167,11 +171,22 @@ impl Serial {
         self.out = out;
     }
 
+    /// Sets an event signaled when the guest has read all queued input.
+    pub fn set_in_buffer_empty_evt(&mut self, evt: EventFd) {
+        self.in_buffer_empty_evt = Some(evt);
+    }
+
+    /// Returns how many input bytes the receive FIFO can still accept.
+    pub fn fifo_capacity(&self) -> usize {
+        FIFO_SIZE.saturating_sub(self.in_buffer.len())
+    }
+
     /// Queues raw bytes for the guest to read and signals the interrupt if the line status would
-    /// change.
+    /// change. Bytes beyond `fifo_capacity()` are dropped.
     pub fn queue_input_bytes(&mut self, c: &[u8]) -> Result<()> {
         if !self.is_loop() {
-            self.in_buffer.extend(c);
+            let count = c.len().min(self.fifo_capacity());
+            self.in_buffer.extend(&c[..count]);
             self.recv_data()?;
         }
         Ok(())
@@ -254,7 +269,7 @@ impl Serial {
             }
             DATA => {
                 if self.is_loop() {
-                    if self.in_buffer.len() < LOOP_SIZE {
+                    if self.in_buffer.len() < FIFO_SIZE {
                         self.in_buffer.push_back(v);
                         self.recv_data()?;
                     }
@@ -318,7 +333,15 @@ impl BusDevice for Serial {
                 if self.in_buffer.len() <= 1 {
                     self.line_status &= !LSR_DATA_BIT;
                 }
-                self.in_buffer.pop_front().unwrap_or_default()
+                let v = self.in_buffer.pop_front();
+                if v.is_some()
+                    && self.in_buffer.is_empty()
+                    && let Some(evt) = self.in_buffer_empty_evt.as_ref()
+                    && let Err(e) = evt.write(1)
+                {
+                    error!("Failed to signal serial input buffer empty: {e}");
+                }
+                v.unwrap_or_default()
             }
             IER => self.interrupt_enable,
             IIR => {
@@ -541,6 +564,30 @@ mod tests {
         let mut data = [0u8];
         serial.read(0, IIR as u64, &mut data[..]);
         assert_ne!(data[0] & IIR_RECV_BIT, 0);
+    }
+
+    #[test]
+    fn serial_input_bounded() {
+        let intr_evt = EventFd::new(0).unwrap();
+        let empty_evt = EventFd::new(libc::EFD_NONBLOCK).unwrap();
+        let mut serial = Serial::new_sink(
+            String::from(SERIAL_NAME),
+            Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
+            None,
+        );
+        serial.set_in_buffer_empty_evt(empty_evt.try_clone().unwrap());
+
+        serial.queue_input_bytes(&[b'a'; FIFO_SIZE + 1]).unwrap();
+        assert_eq!(serial.fifo_capacity(), 0);
+
+        let mut data = [0u8];
+        for _ in 0..FIFO_SIZE - 1 {
+            serial.read(0, DATA as u64, &mut data[..]);
+        }
+        empty_evt.read().unwrap_err();
+        serial.read(0, DATA as u64, &mut data[..]);
+        assert_eq!(empty_evt.read().unwrap(), 1);
+        assert_eq!(serial.fifo_capacity(), FIFO_SIZE);
     }
 
     #[test]
