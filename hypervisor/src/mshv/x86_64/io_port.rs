@@ -148,6 +148,7 @@ impl MshvVcpu {
         let mut context = MshvEmulatorContext {
             vcpu: self,
             mapping: None,
+            mapping_flags: 0,
         };
         let state = self.io_port_string_cpu_state(&context, info)?;
 

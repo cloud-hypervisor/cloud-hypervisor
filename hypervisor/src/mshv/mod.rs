@@ -673,6 +673,9 @@ impl cpu::Vcpu for MshvVcpu {
                     let mut context = MshvEmulatorContext {
                         vcpu: self,
                         mapping: gva_gpa_valid.then_some((gva, gpa)),
+                        mapping_flags: emulator::intercept_translate_flags(
+                            info.header.intercept_access_type,
+                        ),
                     };
 
                     let old_state = context
