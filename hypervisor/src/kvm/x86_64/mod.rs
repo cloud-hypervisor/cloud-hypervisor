@@ -8,6 +8,8 @@
 //
 //
 
+#[cfg(feature = "sev_snp")]
+use kvm_bindings::KVM_MEMORY_ATTRIBUTE_PRIVATE;
 use kvm_bindings::nested::KvmNestedStateBuffer;
 #[cfg(feature = "sev_snp")]
 use kvm_ioctls::VmFd;
@@ -73,6 +75,16 @@ pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
 /// Check KVM extensions required for SEV-SNP.
 pub fn check_required_sev_snp_extensions(vm: &VmFd) -> KvmResult<()> {
     check_extension!(vm, Cap::GuestMemfd);
+    // MEMORY_ATTRIBUTES is a bit mask and requires special handling.
+    let check_result = vm.check_extension_int(Cap::MemoryAttributes);
+    if check_result <= 0 {
+        return Err(KvmError::CapabilityMissing(Cap::MemoryAttributes));
+    }
+    let memory_attributes = check_result as u32;
+    if memory_attributes & KVM_MEMORY_ATTRIBUTE_PRIVATE == 0 {
+        return Err(KvmError::MemoryAttributePrivateMissing(memory_attributes));
+    }
+    check_extension!(vm, Cap::UserMemory2);
     Ok(())
 }
 
