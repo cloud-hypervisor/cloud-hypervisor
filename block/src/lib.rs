@@ -23,6 +23,7 @@ pub(crate) mod test_util;
 use std::fmt::{self, Debug};
 use std::fs::{File, OpenOptions};
 use std::os::linux::fs::MetadataExt;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{FileExt, FileTypeExt};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::Path;
@@ -31,6 +32,7 @@ use std::{cmp, io, mem, result};
 
 pub use aligned_file::AlignedFile;
 use formats::qcow;
+use formats::rbd_uri::is_rbd_path;
 #[cfg(feature = "io_uring")]
 use io_uring::{IoUring, Probe, opcode};
 use libc::{
@@ -99,6 +101,10 @@ fn build_device_id(disk_path: &Path) -> result::Result<String, Error> {
 }
 
 pub fn build_serial(disk_path: &Path) -> Vec<u8> {
+    if is_rbd_path(disk_path) {
+        return build_path_serial(disk_path);
+    }
+
     build_device_id(disk_path).map_or_else(
         |e| {
             warn!("Error building device serial: {e}, using zero default");
@@ -112,6 +118,30 @@ pub fn build_serial(disk_path: &Path) -> Vec<u8> {
             serial
         },
     )
+}
+
+/// Builds a deterministic serial for a disk without a host file (e.g. RBD).
+///
+/// Two disks using the same RBD URI get the same serial, while different
+/// images or snapshots get different ones. This mirrors the inode-derived
+/// serial used for regular files.
+fn build_path_serial(path: &Path) -> Vec<u8> {
+    const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+    let mut hash = FNV_OFFSET;
+    for byte in path.as_os_str().as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+
+    let mut serial = Vec::with_capacity(VIRTIO_BLK_ID_BYTES as usize);
+    while serial.len() < VIRTIO_BLK_ID_BYTES as usize {
+        serial.extend_from_slice(&hash.to_le_bytes());
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    serial.truncate(VIRTIO_BLK_ID_BYTES as usize);
+    serial
 }
 
 #[derive(Error, Debug)]
@@ -484,6 +514,7 @@ pub enum ImageType {
     FixedVhd,
     Qcow2,
     Raw,
+    Rbd,
     Vhdx,
     #[default]
     Unknown,
@@ -496,12 +527,14 @@ impl fmt::Display for ImageType {
             ImageType::FixedVhd => write!(f, "vhd"),
             ImageType::Qcow2 => write!(f, "qcow2"),
             ImageType::Raw => write!(f, "raw"),
+            ImageType::Rbd => write!(f, "rbd"),
             ImageType::Vhdx => write!(f, "vhdx"),
             ImageType::Unknown => write!(f, "unknown"),
         }
     }
 }
 
+#[derive(Debug)]
 pub enum ImageTypeParseError {
     InvalidValue(String),
 }
@@ -515,6 +548,7 @@ impl FromStr for ImageType {
             "vhd" => Ok(ImageType::FixedVhd),
             "qcow2" => Ok(ImageType::Qcow2),
             "raw" => Ok(ImageType::Raw),
+            "rbd" => Ok(ImageType::Rbd),
             "vhdx" => Ok(ImageType::Vhdx),
             _ => Err(ImageTypeParseError::InvalidValue(s.to_string())),
         }
@@ -571,6 +605,7 @@ pub fn validate_image_type(f: &mut File, image_type: ImageType) -> BlockResult<b
             }
         }
         ImageType::Raw => Ok(true),
+        ImageType::Rbd => Ok(false),
         ImageType::Unknown => Ok(false),
     }
 }
@@ -706,6 +741,24 @@ mod tests {
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
+
+    #[test]
+    fn image_type_rbd_roundtrip() {
+        assert_eq!("rbd".parse::<ImageType>().unwrap(), ImageType::Rbd);
+        assert_eq!(ImageType::Rbd.to_string(), "rbd");
+    }
+
+    #[test]
+    fn rbd_serial_is_path_derived() {
+        let first = build_serial(Path::new("rbd:pool/image"));
+        let same = build_serial(Path::new("rbd:pool/image"));
+        let different = build_serial(Path::new("rbd:pool/other"));
+
+        assert_eq!(first, same);
+        assert_ne!(first, different);
+        assert_eq!(first.len(), VIRTIO_BLK_ID_BYTES as usize);
+        assert!(first.iter().any(|byte| *byte != 0));
+    }
 
     #[test]
     fn with_block_size_raises_physical_and_min_io() {

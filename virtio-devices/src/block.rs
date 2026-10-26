@@ -747,6 +747,7 @@ pub struct Block {
     id: String,
     disk_image: Box<dyn AsyncFullDiskFile>,
     disk_path: PathBuf,
+    is_rbd: bool,
     disk_nsectors: Arc<AtomicU64>,
     config: VirtioBlockConfig,
     writeback: Arc<AtomicBool>,
@@ -791,6 +792,7 @@ impl Block {
         sparse: bool,
         lock_granularity: LockGranularityChoice,
         guest_block_size: Option<u32>,
+        is_rbd: bool,
     ) -> io::Result<Self> {
         let (disk_nsectors, avail_features, acked_features, config, paused) =
             if let Some(state) = state {
@@ -922,6 +924,7 @@ impl Block {
             id,
             disk_image,
             disk_path,
+            is_rbd,
             disk_nsectors: Arc::new(AtomicU64::new(disk_nsectors)),
             config,
             writeback: Arc::new(AtomicBool::new(true)),
@@ -971,7 +974,7 @@ impl Block {
     }
 
     /// Returns the granularity for the advisory lock for this disk.
-    fn lock_granularity(&mut self) -> LockGranularity {
+    fn lock_granularity(&self) -> LockGranularity {
         match self.lock_granularity_choice {
             LockGranularityChoice::Full => LockGranularity::WholeFile,
             LockGranularityChoice::ByteRange => {
@@ -1001,6 +1004,14 @@ impl Block {
 
     /// Tries to set an advisory lock for the corresponding disk image.
     pub fn try_lock_image(&mut self) -> Result<()> {
+        let Some(fd) = self.disk_image.fd() else {
+            debug!(
+                "No backing file descriptor for disk image id={},path={}; skipping advisory image lock",
+                self.id,
+                self.disk_path.display()
+            );
+            return Ok(());
+        };
         let lock_type = match self.read_only() {
             true => LockType::Read,
             false => LockType::Write,
@@ -1011,7 +1022,6 @@ impl Block {
             self.id,
             self.disk_path.display()
         );
-        let fd = self.disk_image.fd();
         fcntl::try_acquire_lock(&fd, lock_type, granularity).map_err(|error| {
             let current_lock = get_lock_state(&fd, granularity);
             // Don't propagate the error to the outside, as it is not useful at all. Instead,
@@ -1037,12 +1047,19 @@ impl Block {
 
     /// Releases the advisory lock held for the corresponding disk image.
     pub fn unlock_image(&mut self) -> Result<()> {
+        let Some(fd) = self.disk_image.fd() else {
+            debug!(
+                "No backing file descriptor for disk image id={},path={}; skipping advisory image unlock",
+                self.id,
+                self.disk_path.display()
+            );
+            return Ok(());
+        };
         let granularity = self.lock_granularity();
 
         // It is very unlikely that this fails;
         // Should we remove the Result to simplify the error propagation on
         // higher levels?
-        let fd = self.disk_image.fd();
         fcntl::clear_lock(&fd, granularity).map_err(|error| Error::LockDiskImage {
             path: self.disk_path.clone(),
             error,
@@ -1085,22 +1102,31 @@ impl Block {
             return Err(Error::InvalidSize);
         }
 
-        self.disk_image
-            .resize(new_size)
-            .map_err(Error::DiskResize)?;
-
-        let nsectors = new_size / SECTOR_SIZE;
-
         let was_paused = self.common.paused.load(Ordering::SeqCst);
-        self.common.pause().map_err(Error::Pause)?;
+        if !was_paused {
+            // Drain in-flight requests before touching the backend. Some
+            // backends (e.g. RBD) cannot resize while asynchronous I/O is
+            // outstanding, and metadata must be consistent for the resize.
+            Pausable::pause(self).map_err(Error::Pause)?;
+        }
 
-        self.disk_nsectors.store(nsectors, Ordering::SeqCst);
-        self.config.capacity = nsectors;
-        self.state().disk_nsectors = nsectors;
+        let result = self.disk_image.resize(new_size).map_err(Error::DiskResize);
+
+        if result.is_ok() {
+            let nsectors = new_size / SECTOR_SIZE;
+
+            self.disk_nsectors.store(nsectors, Ordering::SeqCst);
+            self.config.capacity = nsectors;
+            self.state().disk_nsectors = nsectors;
+        }
 
         if !was_paused {
-            self.common.resume().map_err(Error::Resume)?;
+            // Resume even when the resize failed, otherwise the device stays
+            // parked and the guest cannot make progress.
+            Pausable::resume(self).map_err(Error::Resume)?;
         }
+
+        result?;
 
         self.common
             .trigger_interrupt(VirtioInterruptType::Config)
@@ -1226,7 +1252,11 @@ impl VirtioDevice for Block {
             self.common.spawn_worker(
                 &format!("{}_q{}", self.id.clone(), i),
                 &self.seccomp_action,
-                Thread::VirtioBlock,
+                if self.is_rbd {
+                    Thread::VirtioBlockRbd
+                } else {
+                    Thread::VirtioBlock
+                },
                 &self.exit_evt,
                 Arc::clone(&self.device_status),
                 Arc::clone(&interrupt_cb),

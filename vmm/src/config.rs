@@ -6,7 +6,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 #[cfg(feature = "ivshmem")]
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::result;
 use std::str::FromStr;
 use std::sync::LazyLock;
@@ -15,6 +15,7 @@ use arch::CpuProfileConfig;
 #[cfg(target_arch = "x86_64")]
 use arch::CpuidOverride;
 use block::ImageType;
+use block::formats::rbd_uri::is_rbd_path;
 use clap::ArgMatches;
 use log::{debug, warn};
 #[cfg(target_arch = "x86_64")]
@@ -240,6 +241,24 @@ pub enum ValidationError {
     /// No image type specified for virtio-block
     #[error("Image type required for disk")]
     ImageTypeRequired,
+    /// RBD disk path is missing
+    #[error("RBD disk path is required")]
+    RbdPathRequired,
+    /// RBD image type and path disagree
+    #[error("RBD image paths require image_type=rbd and vice versa")]
+    RbdImageTypeMismatch,
+    /// RBD-specific options were used on a non-RBD disk
+    #[error("RBD options require image_type=rbd")]
+    RbdOptionsRequireRbd,
+    /// RBD snapshot without readonly
+    #[error("RBD snapshots require readonly=on")]
+    RbdSnapshotRequiresReadonly,
+    /// direct=on is meaningless for librbd
+    #[error("direct=on is not supported for RBD disks")]
+    RbdDirectNotSupported,
+    /// RBD feature not compiled in
+    #[error("RBD support is not compiled in (build with --features rbd)")]
+    RbdNotSupported,
     /// Using vhost user requires shared memory
     #[error("Using vhost-user requires using shared memory or huge pages")]
     VhostUserRequiresSharedMemory,
@@ -1579,7 +1598,8 @@ impl DiskConfig {
          rate_limit_group=<group_id>,\
          queue_affinity=<list_of_queue_indices_with_their_associated_cpuset>,\
          serial=<serial_number>,backing_files=on|off,sparse=on|off,\
-         image_type=<raw,qcow2,vhd,vhdx,vmdk>,lock_granularity=byte-range|full,\
+         image_type=<raw,qcow2,vhd,vhdx,vmdk,rbd>,lock_granularity=byte-range|full,\
+         rbd_conf=<path>,rbd_user=<client_id>,rbd_namespace=<namespace>,\
          guest_block_size=<size_in_bytes>";
 
     pub fn parse(disk: &str) -> Result<Self> {
@@ -1606,6 +1626,9 @@ impl DiskConfig {
             .add("backing_files")
             .add("sparse")
             .add("image_type")
+            .add("rbd_conf")
+            .add("rbd_user")
+            .add("rbd_namespace")
             .add("lock_granularity")
             .add("guest_block_size")
             .add_all(PciDeviceCommonConfig::OPTIONS_IOMMU);
@@ -1700,6 +1723,10 @@ impl DiskConfig {
             ImageType::Unknown
         };
 
+        let rbd_conf = parser.get("rbd_conf").map(PathBuf::from);
+        let rbd_user = parser.get("rbd_user");
+        let rbd_namespace = parser.get("rbd_namespace");
+
         let lock_granularity = parser
             .convert::<LockGranularityChoice>("lock_granularity")
             .map_err(Error::ParseDisk)?
@@ -1761,6 +1788,9 @@ impl DiskConfig {
             backing_files,
             sparse,
             image_type,
+            rbd_conf,
+            rbd_user,
+            rbd_namespace,
             lock_granularity,
             guest_block_size,
         })
@@ -1819,6 +1849,41 @@ impl DiskConfig {
                 serial.len(),
                 VIRTIO_BLK_ID_BYTES as usize,
             ));
+        }
+
+        let is_rbd = self.image_type == ImageType::Rbd;
+        let path_is_rbd = self.path.as_deref().is_some_and(is_rbd_path);
+
+        if is_rbd && self.path.is_none() {
+            return Err(ValidationError::RbdPathRequired);
+        }
+
+        if is_rbd != path_is_rbd {
+            return Err(ValidationError::RbdImageTypeMismatch);
+        }
+
+        if !is_rbd
+            && (self.rbd_conf.is_some() || self.rbd_user.is_some() || self.rbd_namespace.is_some())
+        {
+            return Err(ValidationError::RbdOptionsRequireRbd);
+        }
+
+        if is_rbd
+            && !self.readonly
+            && let Some(path) = self.path.as_deref().and_then(Path::to_str)
+            && path
+                .rsplit_once('@')
+                .is_some_and(|(_, snapshot)| !snapshot.is_empty())
+        {
+            return Err(ValidationError::RbdSnapshotRequiresReadonly);
+        }
+
+        if is_rbd && self.direct {
+            return Err(ValidationError::RbdDirectNotSupported);
+        }
+
+        if is_rbd && !cfg!(feature = "rbd") {
+            return Err(ValidationError::RbdNotSupported);
         }
 
         if !self.vhost_user && self.image_type == ImageType::Unknown {
@@ -4841,6 +4906,9 @@ mod tests {
             backing_files: false,
             sparse: true,
             image_type: ImageType::Unknown,
+            rbd_conf: None,
+            rbd_user: None,
+            rbd_namespace: None,
             lock_granularity: LockGranularityChoice::default(),
             guest_block_size: None,
         }
@@ -4968,6 +5036,20 @@ mod tests {
                         host_cpus: Box::new([5, 6, 7, 8]),
                     }
                 ])),
+                ..disk_fixture()
+            }
+        );
+        assert_eq!(
+            DiskConfig::parse(
+                "path=rbd:rbd/vm-root,image_type=rbd,rbd_conf=/etc/ceph/ceph.conf,\
+                 rbd_user=client.vm,rbd_namespace=ns"
+            )?,
+            DiskConfig {
+                path: Some(PathBuf::from("rbd:rbd/vm-root")),
+                image_type: ImageType::Rbd,
+                rbd_conf: Some(PathBuf::from("/etc/ceph/ceph.conf")),
+                rbd_user: Some("client.vm".to_string()),
+                rbd_namespace: Some("ns".to_string()),
                 ..disk_fixture()
             }
         );
@@ -6420,6 +6502,86 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             invalid_config.validate(),
             Err(ValidationError::ImageTypeRequired)
         );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.disks = Some(vec![DiskConfig {
+            path: Some(PathBuf::from("rbd:rbd/vm-root")),
+            image_type: ImageType::Raw,
+            ..raw_disk_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::RbdImageTypeMismatch)
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.disks = Some(vec![DiskConfig {
+            rbd_user: Some("client.vm".to_string()),
+            ..raw_disk_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::RbdOptionsRequireRbd)
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.disks = Some(vec![DiskConfig {
+            path: Some(PathBuf::from("rbd:rbd/vm-root@snap")),
+            image_type: ImageType::Rbd,
+            ..raw_disk_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::RbdSnapshotRequiresReadonly)
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.disks = Some(vec![DiskConfig {
+            path: Some(PathBuf::from("rbd:rbd/vm-root")),
+            image_type: ImageType::Rbd,
+            direct: true,
+            ..raw_disk_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::RbdDirectNotSupported)
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.disks = Some(vec![DiskConfig {
+            path: None,
+            image_type: ImageType::Rbd,
+            ..raw_disk_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::RbdPathRequired)
+        );
+
+        #[cfg(not(feature = "rbd"))]
+        {
+            let mut invalid_config = valid_config.clone();
+            invalid_config.disks = Some(vec![DiskConfig {
+                path: Some(PathBuf::from("rbd:rbd/vm-root")),
+                image_type: ImageType::Rbd,
+                ..raw_disk_fixture()
+            }]);
+            assert_eq!(
+                invalid_config.validate(),
+                Err(ValidationError::RbdNotSupported)
+            );
+        }
+
+        #[cfg(feature = "rbd")]
+        {
+            let mut rbd_config = valid_config.clone();
+            rbd_config.disks = Some(vec![DiskConfig {
+                path: Some(PathBuf::from("rbd:rbd/vm-root")),
+                image_type: ImageType::Rbd,
+                ..raw_disk_fixture()
+            }]);
+            rbd_config.validate().unwrap();
+        }
 
         let mut invalid_config = valid_config.clone();
         invalid_config.serial.common.mode = ConsoleOutputMode::Tty;

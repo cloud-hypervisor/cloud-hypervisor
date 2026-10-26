@@ -22,12 +22,25 @@ use crate::disk_file::AsyncFullDiskFile;
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::formats::qcow::QcowDisk;
 use crate::formats::raw::{RawBackend, RawDisk};
+#[cfg(feature = "rbd")]
+use crate::formats::rbd::open_rbd;
 use crate::formats::vhd::VhdDisk;
 use crate::formats::vhdx::VhdxDisk;
 use crate::formats::vmdk::VmdkDisk;
 use crate::{
     ImageType, block_aio_is_supported, open_disk_image, preallocate_disk, validate_image_type,
 };
+
+/// Options for opening an RBD image.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RbdOpenOptions<'a> {
+    /// Path to the Ceph configuration file.
+    pub conf: Option<&'a Path>,
+    /// Ceph client id, passed to `rados_create`.
+    pub user: Option<&'a str>,
+    /// RADOS namespace inside the pool.
+    pub namespace: Option<&'a str>,
+}
 
 /// Options for opening a disk image via [`open_disk`].
 pub struct DiskOpenOptions<'a> {
@@ -38,6 +51,7 @@ pub struct DiskOpenOptions<'a> {
     pub backing_files: bool,
     pub disable_io_uring: bool,
     pub disable_aio: bool,
+    pub rbd: RbdOpenOptions<'a>,
 }
 
 /// Returns true when io_uring is supported on the running kernel.
@@ -68,6 +82,21 @@ pub fn open_disk(
     options: &DiskOpenOptions<'_>,
     image_type: ImageType,
 ) -> BlockResult<Box<dyn AsyncFullDiskFile>> {
+    if image_type == ImageType::Rbd {
+        #[cfg(feature = "rbd")]
+        {
+            return open_rbd(options);
+        }
+        #[cfg(not(feature = "rbd"))]
+        {
+            return Err(BlockError::new(
+                BlockErrorKind::UnsupportedFeature,
+                io::Error::other("RBD support is not compiled in (build with --features rbd)"),
+            )
+            .with_path(options.path));
+        }
+    }
+
     let mut fs_options = fs::OpenOptions::new();
     fs_options.read(true);
     fs_options.write(!options.readonly);
@@ -89,6 +118,7 @@ pub fn open_disk(
         ImageType::Qcow2 => open_qcow2(file, options)?,
         ImageType::Vhdx => open_vhdx(file, options)?,
         ImageType::FlatVmdk => open_flat_vmdk(file, options)?,
+        ImageType::Rbd => unreachable!("RBD is opened before the file-backed formats"),
         ImageType::Unknown => unreachable!(),
     };
 
@@ -242,6 +272,7 @@ mod tests {
             backing_files: false,
             disable_io_uring: true,
             disable_aio: true,
+            rbd: RbdOpenOptions::default(),
         }
     }
 
@@ -315,6 +346,7 @@ mod tests {
             backing_files: false,
             disable_io_uring: true,
             disable_aio: true,
+            rbd: RbdOpenOptions::default(),
         };
         let disk = open_disk(&options, ImageType::Raw).unwrap();
         assert_eq!(disk.logical_size().unwrap(), size);

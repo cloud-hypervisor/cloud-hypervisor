@@ -9,6 +9,9 @@
 
 pub mod qcow;
 pub mod raw;
+#[cfg(feature = "rbd")]
+pub(crate) mod rbd;
+pub mod rbd_uri;
 pub mod vhd;
 pub mod vhdx;
 pub mod vmdk;

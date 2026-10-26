@@ -14,6 +14,7 @@ use arch::CpuProfileConfig;
 use arch::CpuidOverride;
 use block::ImageType;
 pub use block::fcntl::LockGranularityChoice;
+use block::formats::rbd_uri::is_rbd_path;
 #[cfg(target_arch = "x86_64")]
 use devices::debug_console;
 use log::{debug, warn};
@@ -491,6 +492,12 @@ pub struct DiskConfig {
     #[serde(default)]
     pub image_type: ImageType,
     #[serde(default)]
+    pub rbd_conf: Option<PathBuf>,
+    #[serde(default)]
+    pub rbd_user: Option<String>,
+    #[serde(default)]
+    pub rbd_namespace: Option<String>,
+    #[serde(default)]
     pub lock_granularity: LockGranularityChoice,
     #[serde(default)]
     pub guest_block_size: Option<u32>,
@@ -498,9 +505,39 @@ pub struct DiskConfig {
 
 impl ApplyLandlock for DiskConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        if let Some(path) = &self.path {
-            landlock.add_rule_with_access(path, "rw")?;
+        let is_rbd =
+            self.image_type == ImageType::Rbd || self.path.as_deref().is_some_and(is_rbd_path);
+
+        if !is_rbd {
+            if let Some(path) = &self.path {
+                landlock.add_rule_with_access(path, "rw")?;
+            }
+            return Ok(());
         }
+
+        // librbd reads the Ceph configuration/keyring and the resolver
+        // configuration. Add read-only rules for the paths that exist;
+        // custom paths must be supplied through --landlock-rules.
+        let mut paths = HashSet::new();
+        paths.insert(PathBuf::from("/etc/ceph"));
+        if let Some(conf) = &self.rbd_conf {
+            if let Some(parent) = conf.parent()
+                && parent.is_absolute()
+            {
+                paths.insert(parent.to_path_buf());
+            }
+            paths.insert(conf.clone());
+        }
+        for path in ["/etc/hosts", "/etc/resolv.conf", "/etc/nsswitch.conf"] {
+            paths.insert(PathBuf::from(path));
+        }
+
+        for path in paths {
+            if path.exists() {
+                landlock.add_rule_with_access(&path, "r")?;
+            }
+        }
+
         Ok(())
     }
 }

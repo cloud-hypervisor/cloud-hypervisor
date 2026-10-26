@@ -42,6 +42,9 @@ RUN apt-get update \
         libpixman-1-dev \
         libseccomp-dev \
         libcap-ng-dev \
+        libclang-dev \
+        librados-dev \
+        librbd-dev \
         socat \
         dosfstools \
         cpio \

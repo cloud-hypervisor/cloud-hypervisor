@@ -8,6 +8,7 @@ version = "0.1.0"
 [features]
 default = []
 io_uring = ["dep:io-uring"]
+rbd = ["dep:rbd-sys", "dep:rados-sys"]
 test-utils = []
 
 [dependencies]
@@ -18,6 +19,8 @@ flate2 = "1.1"
 io-uring = { version = "0.7.12", optional = true }
 libc = { workspace = true }
 log = { workspace = true }
+rados-sys = { workspace = true, optional = true }
+rbd-sys = { workspace = true, optional = true }
 remain = "0.2.15"
 serde = { workspace = true, features = ["derive"] }
 smallvec = { workspace = true }

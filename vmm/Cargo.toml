@@ -33,6 +33,7 @@ mshv = [
   "vm-device/mshv",
 ]
 pvmemcontrol = ["devices/pvmemcontrol"]
+rbd = ["block/rbd"]
 sev_snp = [
   "arch/sev_snp",
   "dep:sha2",

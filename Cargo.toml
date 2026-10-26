@@ -127,6 +127,8 @@ itertools = "0.15.0"
 jiff = { version = "0.2", default-features = false, features = ["std"] }
 libc = "0.2.186"
 log = "0.4.30"
+rados-sys = "=0.1.0"
+rbd-sys = "=0.1.0"
 rustls = { version = "0.23.46", default-features = false, features = [
   "logging",
   "ring",

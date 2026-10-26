@@ -1633,6 +1633,7 @@ mod common_parallel {
             ImageType::FixedVhd => ("vpc", &["-o", "subformat=fixed"]),
             ImageType::Vhdx => ("vhdx", &[]),
             ImageType::FlatVmdk => ("vmdk", &["-o", "subformat=monolithicFlat"]),
+            ImageType::Rbd => panic!("RBD images are not created with qemu-img"),
             ImageType::Unknown => panic!("unsupported image_type {image_type}"),
         };
         let image_type_str = image_type.to_string();

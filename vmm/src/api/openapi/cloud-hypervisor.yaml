@@ -1243,7 +1243,7 @@ components:
     ImageType:
       type: string
       description: Unknown is only valid for vhost-user disks.
-      enum: ["FlatVmdk", "FixedVhd", "Qcow2", "Raw", "Vhdx", "Unknown"]
+      enum: ["FlatVmdk", "FixedVhd", "Qcow2", "Raw", "Rbd", "Vhdx", "Unknown"]
 
     LockGranularity:
       type: string
@@ -1301,6 +1301,12 @@ components:
           default: true
         image_type:
           $ref: "#/components/schemas/ImageType"
+        rbd_conf:
+          type: string
+        rbd_user:
+          type: string
+        rbd_namespace:
+          type: string
         lock_granularity:
           $ref: "#/components/schemas/LockGranularity"
         guest_block_size:

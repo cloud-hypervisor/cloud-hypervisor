@@ -745,6 +745,33 @@ fn vmm_thread_rules(
         (libc::SYS_arch_prctl, vec![]),
         (libc::SYS_bind, vec![]),
         (libc::SYS_brk, vec![]),
+        // librados/librbd and their dependencies still use some legacy
+        // syscalls (notably epoll_create and eventfd) alongside the modern
+        // ones already listed below.
+        #[cfg(feature = "rbd")]
+        (libc::SYS_capget, vec![]),
+        #[cfg(feature = "rbd")]
+        (libc::SYS_epoll_create, vec![]),
+        #[cfg(feature = "rbd")]
+        (libc::SYS_eventfd, vec![]),
+        #[cfg(all(feature = "rbd", any(target_arch = "x86_64", target_arch = "riscv64")))]
+        (libc::SYS_faccessat, vec![]),
+        #[cfg(feature = "rbd")]
+        (libc::SYS_fstatfs, vec![]),
+        #[cfg(feature = "rbd")]
+        (libc::SYS_getgid, vec![]),
+        #[cfg(feature = "rbd")]
+        (libc::SYS_getppid, vec![]),
+        #[cfg(feature = "rbd")]
+        (libc::SYS_getrlimit, vec![]),
+        #[cfg(feature = "rbd")]
+        (libc::SYS_mlock, vec![]),
+        #[cfg(feature = "rbd")]
+        (libc::SYS_munlock, vec![]),
+        #[cfg(feature = "rbd")]
+        (libc::SYS_pipe, vec![]),
+        #[cfg(feature = "rbd")]
+        (libc::SYS_sysinfo, vec![]),
         (libc::SYS_clock_gettime, vec![]),
         (libc::SYS_clock_nanosleep, vec![]),
         (libc::SYS_clone, vec![]),
@@ -773,12 +800,20 @@ fn vmm_thread_rules(
         (libc::SYS_newfstatat, vec![]),
         (libc::SYS_futex, vec![]),
         (libc::SYS_getcwd, vec![]),
+        #[cfg(feature = "rbd")]
+        (libc::SYS_getegid, vec![]),
+        #[cfg(feature = "rbd")]
+        (libc::SYS_geteuid, vec![]),
         (libc::SYS_getdents64, vec![]),
         (libc::SYS_getpgid, vec![]),
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_getpgrp, vec![]),
+        #[cfg(feature = "rbd")]
+        (libc::SYS_getpeername, vec![]),
         (libc::SYS_getrandom, vec![]),
         (libc::SYS_getsockname, vec![]),
+        #[cfg(feature = "rbd")]
+        (libc::SYS_getsockopt, vec![]),
         (libc::SYS_gettimeofday, vec![]),
         (libc::SYS_getuid, vec![]),
         (
@@ -801,6 +836,8 @@ fn vmm_thread_rules(
         (libc::SYS_lseek, vec![]),
         (libc::SYS_madvise, vec![]),
         (libc::SYS_mbind, vec![]),
+        #[cfg(feature = "rbd")]
+        (libc::SYS_membarrier, vec![]),
         (libc::SYS_memfd_create, vec![]),
         (libc::SYS_mincore, vec![]),
         (libc::SYS_mmap, vec![]),
@@ -818,6 +855,8 @@ fn vmm_thread_rules(
         (libc::SYS_poll, vec![]),
         #[cfg(target_arch = "aarch64")]
         (libc::SYS_ppoll, vec![]),
+        #[cfg(all(feature = "rbd", any(target_arch = "x86_64", target_arch = "riscv64")))]
+        (libc::SYS_ppoll, vec![]),
         (libc::SYS_prctl, vec![]),
         (libc::SYS_pread64, vec![]),
         (libc::SYS_preadv, vec![]),
@@ -831,6 +870,8 @@ fn vmm_thread_rules(
         (libc::SYS_readlinkat, vec![]),
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_recvmsg, vec![]),
+        #[cfg(feature = "rbd")]
+        (libc::SYS_recvmmsg, vec![]),
         (libc::SYS_restart_syscall, vec![]),
         (libc::SYS_rseq, vec![]),
         (libc::SYS_rt_sigreturn, vec![]),
@@ -839,6 +880,8 @@ fn vmm_thread_rules(
         (libc::SYS_sched_yield, vec![]),
         (libc::SYS_seccomp, vec![]),
         (libc::SYS_sendmsg, vec![]),
+        #[cfg(feature = "rbd")]
+        (libc::SYS_sendmmsg, vec![]),
         (libc::SYS_sendto, vec![]),
         (libc::SYS_set_robust_list, vec![]),
         (libc::SYS_setsid, vec![]),
@@ -869,6 +912,8 @@ fn vmm_thread_rules(
         (libc::SYS_unlink, vec![]),
         #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
         (libc::SYS_unlinkat, vec![]),
+        #[cfg(feature = "rbd")]
+        (libc::SYS_uname, vec![]),
         (libc::SYS_userfaultfd, vec![]),
         (libc::SYS_wait4, vec![]),
         (libc::SYS_writev, vec![]),

@@ -18,6 +18,7 @@ use seccompiler::{
 pub enum Thread {
     VirtioBalloon,
     VirtioBlock,
+    VirtioBlockRbd,
     VirtioConsole,
     VirtioIommu,
     VirtioMem,
@@ -145,6 +146,69 @@ fn create_virtio_block_ioctl_seccomp_rule() -> Vec<SeccompRule> {
         and![Cond::new(1, ArgLen::Dword, Eq, BLKZEROOUT as _).unwrap()],
         #[cfg(feature = "sev_snp")]
         mshv_sev_snp_ioctl_seccomp_rule(),
+    ]
+}
+
+/// Seccomp rules for a virtio-block worker backed by a userspace RBD image.
+///
+/// librbd's I/O submission and its worker threads may use the librados
+/// network stack (notably when a thread is created lazily from the queue
+/// worker), so this profile extends the regular block rules with the rados
+/// socket, thread and timer syscalls.
+fn virtio_block_rbd_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
+    let mut rules = virtio_block_thread_rules();
+    rules.extend([
+        (libc::SYS_capget, vec![]),
+        (libc::SYS_clone, vec![]),
+        (libc::SYS_clone3, vec![]),
+        (libc::SYS_clock_nanosleep, vec![]),
+        (libc::SYS_connect, vec![]),
+        (libc::SYS_epoll_create, vec![]),
+        (libc::SYS_eventfd, vec![]),
+        (libc::SYS_eventfd2, vec![]),
+        (libc::SYS_faccessat, vec![]),
+        (libc::SYS_fstatfs, vec![]),
+        (libc::SYS_getegid, vec![]),
+        (libc::SYS_geteuid, vec![]),
+        (libc::SYS_getgid, vec![]),
+        (libc::SYS_getpeername, vec![]),
+        (libc::SYS_getppid, vec![]),
+        (libc::SYS_getrlimit, vec![]),
+        (libc::SYS_getsockname, vec![]),
+        (libc::SYS_getsockopt, vec![]),
+        (libc::SYS_getuid, vec![]),
+        (libc::SYS_membarrier, vec![]),
+        (libc::SYS_mlock, vec![]),
+        (libc::SYS_munlock, vec![]),
+        (libc::SYS_nanosleep, vec![]),
+        (libc::SYS_pipe, vec![]),
+        (libc::SYS_ppoll, vec![]),
+        (libc::SYS_recvfrom, vec![]),
+        (libc::SYS_recvmmsg, vec![]),
+        (libc::SYS_recvmsg, vec![]),
+        (libc::SYS_sched_yield, vec![]),
+        (libc::SYS_sendmmsg, vec![]),
+        (libc::SYS_sendmsg, vec![]),
+        (libc::SYS_sendto, vec![]),
+        (libc::SYS_setsockopt, vec![]),
+        (libc::SYS_shutdown, vec![]),
+        (libc::SYS_socket, create_rbd_socket_seccomp_rule()),
+        (libc::SYS_socketpair, vec![]),
+        (libc::SYS_sysinfo, vec![]),
+        (libc::SYS_timerfd_create, vec![]),
+        (libc::SYS_uname, vec![]),
+    ]);
+    #[cfg(target_arch = "x86_64")]
+    rules.push((libc::SYS_poll, vec![]));
+    rules
+}
+
+fn create_rbd_socket_seccomp_rule() -> Vec<SeccompRule> {
+    or![
+        and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_UNIX as u64).unwrap()],
+        and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_INET as u64).unwrap()],
+        and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_INET6 as u64).unwrap()],
+        and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_NETLINK as u64).unwrap()],
     ]
 }
 
@@ -331,6 +395,7 @@ fn get_seccomp_rules(thread_type: Thread) -> Vec<(i64, Vec<SeccompRule>)> {
     let mut rules = match thread_type {
         Thread::VirtioBalloon => virtio_balloon_thread_rules(),
         Thread::VirtioBlock => virtio_block_thread_rules(),
+        Thread::VirtioBlockRbd => virtio_block_rbd_thread_rules(),
         Thread::VirtioConsole => virtio_console_thread_rules(),
         Thread::VirtioIommu => virtio_iommu_thread_rules(),
         Thread::VirtioMem => virtio_mem_thread_rules(),

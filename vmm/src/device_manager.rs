@@ -42,7 +42,7 @@ use arch::{DeviceType, MmioDeviceInfo};
 use arch::{NumaNodes, layout};
 use block::ImageType;
 use block::error::BlockError;
-use block::factory::{DiskOpenOptions, open_disk};
+use block::factory::{DiskOpenOptions, RbdOpenOptions, open_disk};
 #[cfg(target_arch = "aarch64")]
 use devices::acpi_tad;
 #[cfg(target_arch = "riscv64")]
@@ -2890,6 +2890,11 @@ impl DeviceManager {
                     backing_files: disk_cfg.backing_files,
                     disable_io_uring: disk_cfg.disable_io_uring,
                     disable_aio: disk_cfg.disable_aio,
+                    rbd: RbdOpenOptions {
+                        conf: disk_cfg.rbd_conf.as_deref(),
+                        user: disk_cfg.rbd_user.as_deref(),
+                        namespace: disk_cfg.rbd_namespace.as_deref(),
+                    },
                 },
                 disk_cfg.image_type,
             )
@@ -2975,6 +2980,7 @@ impl DeviceManager {
                 disk_cfg.sparse,
                 disk_cfg.lock_granularity,
                 disk_cfg.guest_block_size,
+                matches!(disk_cfg.image_type, ImageType::Rbd),
             )
             .map_err(DeviceManagerError::CreateVirtioBlock)?;
 

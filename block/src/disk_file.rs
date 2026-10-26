@@ -54,7 +54,11 @@ pub trait PhysicalSize: Send + Debug {
 /// Backing file descriptor access for disk images backed by a file.
 pub trait DiskFd: Send + Debug {
     /// Borrows the underlying file descriptor.
-    fn fd(&self) -> BorrowedDiskFd<'_>;
+    ///
+    /// Returns `None` for backends that do not expose a host file
+    /// descriptor (e.g. a userspace RBD image). Host-local advisory
+    /// locking is unavailable for such backends.
+    fn fd(&self) -> Option<BorrowedDiskFd<'_>>;
 }
 
 /// Sector and cluster geometry of a disk image.

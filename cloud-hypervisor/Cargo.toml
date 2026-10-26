@@ -54,6 +54,7 @@ ivshmem = ["vmm/ivshmem"]
 kvm = ["vmm/kvm"]
 mshv = ["vmm/mshv"]
 pvmemcontrol = ["vmm/pvmemcontrol"]
+rbd = ["vmm/rbd"]
 sev_snp = ["igvm", "vmm/sev_snp"]
 tracing = ["tracer/tracing", "vmm/tracing"]
 
