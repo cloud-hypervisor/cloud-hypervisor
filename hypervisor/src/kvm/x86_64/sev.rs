@@ -7,7 +7,7 @@ use std::fs::OpenOptions;
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
-use std::result;
+use std::{fmt, result};
 
 use igvm_defs::{IGVM_VHS_SNP_ID_BLOCK, SnpPolicy};
 use kvm_bindings::{
@@ -29,10 +29,82 @@ pub(crate) const GPA_METADATA_SHIFT_OFFSET: u32 = 12;
 // SNP in VMSA - linux/arch/x86/include/asm/svm.h
 const SVM_SEV_FEAT_SNP_ACTIVE: u64 = 1 << 0;
 
+// Firmware status codes from Linux: include/uapi/linux/psp-sev.h.
+struct SevFirmwareError(u32);
+
+impl fmt::Display for SevFirmwareError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let description = match self.0 {
+            0x00 => "No firmware error reported",
+            0x01 => "Invalid platform state",
+            0x02 => "Invalid guest state",
+            0x03 => "Invalid platform configuration",
+            0x04 => "Buffer too small",
+            0x05 => "Platform already owned",
+            0x06 => "Invalid certificate",
+            0x07 => "Policy failure",
+            0x08 => "Guest inactive",
+            0x09 => "Invalid address",
+            0x0a => "Bad signature",
+            0x0b => "Bad measurement",
+            0x0c => "ASID already owned",
+            0x0d => "Invalid ASID",
+            0x0e => "WBINVD required",
+            0x0f => "DF_FLUSH required",
+            0x10 => "Invalid guest handle",
+            0x11 => "Invalid command",
+            0x12 => "Guest active",
+            0x13 => "Hardware platform error",
+            0x14 => "Unsafe hardware condition",
+            0x15 => "Unsupported feature",
+            0x16 => "Invalid parameter",
+            0x17 => "Firmware resource limit reached",
+            0x18 => "Invalid secure data",
+            0x19 => "Invalid page size",
+            0x1a => "Invalid page state",
+            0x1b => "Invalid metadata entry",
+            0x1c => "Invalid page owner",
+            0x1d => "AEAD counter overflow",
+            0x1f => "Exit ring buffer mode",
+            0x20 => "RMP initialization required",
+            0x21 => "Invalid security version number",
+            0x22 => "Invalid version",
+            0x23 => "Shutdown required",
+            0x24 => "Firmware update failed",
+            0x25 => "Restore required",
+            0x26 => "RMP initialization failed",
+            0x27 => "Invalid key",
+            0x28 => "Shutdown incomplete",
+            0x30 => "Incorrect buffer length",
+            0x31 => "Buffer expansion requested",
+            0x32 => "SPDM request",
+            0x33 => "SPDM error",
+            0x35 => "Device connection error",
+            0x36 => "Invalid device context",
+            0x37 => "Invalid TDI context",
+            0x38 => "Invalid TDI",
+            0x39 => "Reclaim required",
+            0x3a => "Resource in use",
+            0x3b => "Invalid device state",
+            0x3c => "Invalid TDI state",
+            0x3d => "Device certificate changed",
+            0x3e => "Resynchronization required",
+            0x3f => "Response too large",
+            u32::MAX => "Firmware was not called",
+            _ => "Unknown firmware status",
+        };
+        f.write_str(description)
+    }
+}
+
 fn sev_op(vm: &VmFd, sev_cmd: &mut kvm_sev_cmd, name: &str) -> Result<()> {
     let ret = vm.encrypt_op_sev(sev_cmd);
     if ret.is_err() {
-        error!("{name} op failed. error code: 0x{:x}", sev_cmd.error);
+        error!(
+            "{name} op failed: {} ({:#x})",
+            SevFirmwareError(sev_cmd.error),
+            sev_cmd.error
+        );
     }
     ret
 }
