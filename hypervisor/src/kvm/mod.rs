@@ -1423,6 +1423,11 @@ impl KvmHypervisor {
 pub enum KvmError {
     #[error("Capability missing: {0:?}")]
     CapabilityMissing(Cap),
+    #[cfg(feature = "sev_snp")]
+    #[error(
+        "Memory attributes {0:#b} do not include required private attribute ({KVM_MEMORY_ATTRIBUTE_PRIVATE:#b})"
+    )]
+    MemoryAttributePrivateMissing(u32),
 }
 
 pub type KvmResult<T> = result::Result<T, KvmError>;
