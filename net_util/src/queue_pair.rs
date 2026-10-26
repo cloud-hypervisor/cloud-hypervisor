@@ -211,16 +211,9 @@ impl TxVirtio {
                         break;
                     }
 
-                    if e.raw_os_error() == Some(libc::EINVAL) {
-                        error!("net: tx: dropping malformed packet: {e}");
-                        0
-                    } else if e.raw_os_error() == Some(libc::EIO) {
-                        error!("net: tx: dropping frame, tap I/O error: {e}");
-                        0
-                    } else {
-                        error!("net: tx: failed writing to tap: {e}");
-                        return Err(NetQueuePairError::WriteTap(e));
-                    }
+                    // Like QEMU, drop the frame on any other error
+                    error!("net: tx: dropping frame, failed writing to tap: {e}");
+                    0
                 } else if (result as usize) < vnet_hdr_len() {
                     error!("net: tx: short tap write ({result} < {})", vnet_hdr_len());
                     0
@@ -488,8 +481,6 @@ pub enum NetQueuePairError {
     RegisterListener(#[source] io::Error),
     #[error("Error unregistering listener")]
     UnregisterListener(#[source] io::Error),
-    #[error("Error writing to the TAP device")]
-    WriteTap(#[source] io::Error),
     #[error("Error reading from the TAP device")]
     ReadTap(#[source] io::Error),
     #[error("Error related to guest memory")]
@@ -667,6 +658,76 @@ mod tests {
         header[1] = VIRTIO_NET_HDR_GSO_TCPV4 as u8;
         assert!(!TxVirtio::tx_is_header_valid(&header, len, false));
         assert!(TxVirtio::tx_is_header_valid(&header, len, true));
+    }
+
+    #[test]
+    fn tx_drops_frame_the_tap_refuses() {
+        const HDR0: u64 = 0x10000;
+        const DATA0: u64 = 0x20000;
+        const HDR1: u64 = 0x30000;
+        const DATA1: u64 = 0x40000;
+        const SMALL_FRAME: usize = 64;
+
+        let mem =
+            GuestMemoryMmap::<AtomicBitmap>::from_ranges(&[(GuestAddress(0), 0x10_0000)]).unwrap();
+        // Two TX chains: a frame larger than the socket send buffer, then a
+        // small one
+        let vq = MockSplitQueue::new(&mem, 16);
+        vq.add_desc_chains(
+            &[
+                RawDescriptor::from(Descriptor::new(
+                    HDR0,
+                    vnet_hdr_len() as u32,
+                    VRING_DESC_F_NEXT as u16,
+                    1,
+                )),
+                RawDescriptor::from(Descriptor::new(DATA0, 0x8000, 0, 0)),
+                RawDescriptor::from(Descriptor::new(
+                    HDR1,
+                    vnet_hdr_len() as u32,
+                    VRING_DESC_F_NEXT as u16,
+                    3,
+                )),
+                RawDescriptor::from(Descriptor::new(DATA1, SMALL_FRAME as u32, 0, 0)),
+            ],
+            0,
+        )
+        .unwrap();
+        let mut queue: Queue = vq.create_queue().unwrap();
+        let (tap_end, peer) = UnixDatagram::pair().unwrap();
+        peer.set_nonblocking(true).unwrap();
+        let sndbuf: libc::c_int = 4096;
+        // SAFETY: valid socket fd and a pointer to a c_int of the given size
+        let ret = unsafe {
+            libc::setsockopt(
+                tap_end.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_SNDBUF,
+                (&raw const sndbuf).cast(),
+                size_of::<libc::c_int>() as libc::socklen_t,
+            )
+        };
+        assert_eq!(ret, 0);
+        let tap = Tap::new_for_fuzzing(File::from(OwnedFd::from(tap_end)), "test");
+
+        // writev() of the first frame fails with EMSGSIZE, like a tap fails
+        // with ENOBUFS for a frame it cannot allocate. The device must drop
+        // that frame and still send the next one.
+        TxVirtio::new(false)
+            .process_desc_chain(&mem, &tap, &mut queue, &mut None, None)
+            .expect("an undeliverable frame should be dropped");
+
+        assert_eq!(u16::from_le(vq.used().idx().load()), 2);
+        for (i, head) in [(0, 0), (1, 2)] {
+            let used = vq.used().ring().ref_at(i).unwrap().load();
+            assert_eq!((used.id(), used.len()), (head, 0));
+        }
+        let mut buf = [0u8; 0x10000];
+        assert_eq!(peer.recv(&mut buf).unwrap(), vnet_hdr_len() + SMALL_FRAME);
+        assert_eq!(
+            peer.recv(&mut buf).unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
     }
 
     #[test]
