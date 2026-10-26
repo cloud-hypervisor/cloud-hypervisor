@@ -261,7 +261,13 @@ impl Serial {
                     interrupt_result?;
                 }
             }
-            IER => self.interrupt_enable = v & IER_FIFO_BITS,
+            IER => {
+                let recv_was_enabled = self.is_recv_intr_enabled();
+                self.interrupt_enable = v & IER_FIFO_BITS;
+                if !recv_was_enabled && self.is_recv_intr_enabled() && !self.in_buffer.is_empty() {
+                    self.recv_data()?;
+                }
+            }
             LCR => self.line_control = v,
             MCR => self.modem_control = v,
             SCR => self.scratch = v,
@@ -500,6 +506,26 @@ mod tests {
         assert_eq!(data[0], b'b');
         serial.read(0, IIR as u64, &mut data[..]);
         assert_ne!(data[0] & IIR_NONE_BIT, 0);
+    }
+
+    #[test]
+    fn serial_recv_raised_when_enabled() {
+        let intr_evt = EventFd::new(0).unwrap();
+        let mut serial = Serial::new_sink(
+            String::from(SERIAL_NAME),
+            Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
+            None,
+        );
+
+        intr_evt.write(1).unwrap();
+        serial.queue_input_bytes(b"a").unwrap();
+        serial.write(0, IER as u64, &[IER_RECV_BIT]);
+        serial.write(0, IER as u64, &[IER_RECV_BIT]);
+
+        assert_eq!(intr_evt.read().unwrap(), 2);
+        let mut data = [0u8];
+        serial.read(0, IIR as u64, &mut data[..]);
+        assert_ne!(data[0] & IIR_RECV_BIT, 0);
     }
 
     #[test]
