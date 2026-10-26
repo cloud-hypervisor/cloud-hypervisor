@@ -627,9 +627,6 @@ impl Request {
                 .checked_add(u64::from(*data_len))
                 .ok_or(ExecuteError::BadRequest(Error::InvalidOffset))?;
         }
-        if total_bytes == 0 {
-            return Ok(());
-        }
         if !total_bytes.is_multiple_of(SECTOR_SIZE) {
             return Err(ExecuteError::BadRequest(Error::InvalidDataLength));
         }
@@ -830,5 +827,31 @@ mod tests {
         assert!(bitmap.dirty_at(0x1000));
         assert!(bitmap.dirty_at(0x4000));
         assert!(!bitmap.dirty_at(0x5000));
+    }
+
+    // A request without data still has to start within the disk.
+    #[test]
+    fn zero_length_request_past_capacity_is_rejected() {
+        for request_type in [RequestType::In, RequestType::Out] {
+            for (sector, valid) in [(1024, true), (1025, false), (1 << 54, false)] {
+                let request = Request {
+                    request_type,
+                    sector,
+                    data_descriptors: SmallVec::from_slice(&[(GuestAddress(0), 0)]),
+                    status_addr: GuestAddress(0),
+                    writeback: true,
+                    start: Instant::now(),
+                };
+                let result = request.check_data_bounds(1024);
+                if valid {
+                    result.expect("an empty request at capacity should be accepted");
+                } else {
+                    assert!(
+                        matches!(result, Err(ExecuteError::BadRequest(Error::InvalidOffset))),
+                        "empty request at sector {sector} was accepted"
+                    );
+                }
+            }
+        }
     }
 }
