@@ -494,6 +494,35 @@ mod tests {
     }
 
     #[test]
+    fn open_with_bat_entry_past_eof_is_rejected() {
+        let Some(tf) = create_dynamic_vhdx(16) else {
+            eprintln!("skipping open_with_bat_entry_past_eof_is_rejected: qemu-img unavailable");
+            return;
+        };
+
+        let vhdx = open_vhdx(tf.as_path());
+        let bat_offset = vhdx.bat_entry.file_offset;
+        let past_eof = ((vhdx.disk_spec.image_size / (1 << 20) + 1) << 20 & bat::BAT_FILE_OFF_MASK)
+            | PAYLOAD_BLOCK_FULLY_PRESENT;
+        vhdx.aligned
+            .file()
+            .write_all_at(&past_eof.to_le_bytes(), bat_offset)
+            .unwrap();
+        drop(vhdx);
+
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(tf.as_path())
+            .unwrap();
+        let err = Vhdx::new(file, false).unwrap_err();
+        assert!(
+            matches!(err, VhdxError::ReadBatEntry(VhdxBatError::PayloadPastEnd)),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
     fn write_with_bat_entry_in_header_area_is_rejected() {
         let Some(tf) = create_dynamic_vhdx(16) else {
             eprintln!(
