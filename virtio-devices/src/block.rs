@@ -289,7 +289,7 @@ impl BlockEpollHandler {
                 warn!("Request check failed: {request:x?} {e:?}");
                 desc_chain
                     .memory()
-                    .write_obj(VIRTIO_BLK_S_IOERR, request.status_addr())
+                    .write_obj(VIRTIO_BLK_S_IOERR as u8, request.status_addr())
                     .map_err(Error::RequestStatus)?;
 
                 // If no asynchronous operation has been submitted, we can
@@ -1358,6 +1358,7 @@ mod tests {
 
     use block::async_io::{AsyncIoCompletion, AsyncIoOperation, AsyncIoResult};
     use hypervisor::Vm;
+    use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use vm_memory::GuestAddress;
     use vm_virtio::queue::testing::VirtQueue as GuestQ;
     use vmm_sys_util::eventfd::EFD_NONBLOCK;
@@ -1455,18 +1456,11 @@ mod tests {
         assert_eq!(&block.serial[..], serial.as_bytes());
     }
 
-    #[test]
-    fn parse_failure_reclaims_head() {
-        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
-        let vq = GuestQ::new(GuestAddress(0x1000), &mem, 4);
-        vq.dtable[0].set(0x2000, 16, 0, 0);
-        vq.avail.ring[0].set(0);
-        vq.avail.idx.set(1);
-
+    fn make_handler(queue: Queue, mem: &GuestMemoryMmap, acked_features: u64) -> BlockEpollHandler {
         let evt = || EventFd::new(EFD_NONBLOCK).unwrap();
-        let mut handler = BlockEpollHandler {
+        BlockEpollHandler {
             queue_index: 0,
-            queue: vq.create_queue(),
+            queue,
             mem: GuestMemoryAtomic::new(mem.clone()),
             disk_image: Box::new(Noop(evt())),
             disk_nsectors: Arc::new(AtomicU64::new(0)),
@@ -1483,11 +1477,62 @@ mod tests {
             rate_limiter: None,
             access_platform: None,
             host_cpus: None,
-            acked_features: 0,
-        };
+            acked_features,
+        }
+    }
+
+    const REQ_HDR_ADDR: u64 = 0x2000;
+    const REQ_DATA_ADDR: u64 = 0x3000;
+    const REQ_STATUS_ADDR: u64 = 0x4000;
+
+    /// Processes one request of `request_type` with a 16 byte device-readable
+    /// data descriptor and a 1 byte status descriptor. Returns the status
+    /// byte and the 3 bytes after it, which are poisoned with 0xff before.
+    fn process_one_request(request_type: u32, acked_features: u64) -> [u8; 4] {
+        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let vq = GuestQ::new(GuestAddress(0x1000), &mem, 4);
+        mem.write_obj(request_type, GuestAddress(REQ_HDR_ADDR))
+            .unwrap();
+        mem.write_slice(&[0xff; 4], GuestAddress(REQ_STATUS_ADDR))
+            .unwrap();
+        let next = VRING_DESC_F_NEXT as u16;
+        let write = VRING_DESC_F_WRITE as u16;
+        vq.dtable[0].set(REQ_HDR_ADDR, 16, next, 1);
+        vq.dtable[1].set(REQ_DATA_ADDR, 16, next, 2);
+        vq.dtable[2].set(REQ_STATUS_ADDR, 1, write, 0);
+        vq.avail.ring[0].set(0);
+        vq.avail.idx.set(1);
+
+        let mut handler = make_handler(vq.create_queue(), &mem, acked_features);
+        handler.process_queue_submit().unwrap();
+
+        assert_eq!(vq.used.idx.get(), 1);
+        let mut status = [0u8; 4];
+        mem.read_slice(&mut status, GuestAddress(REQ_STATUS_ADDR))
+            .unwrap();
+        status
+    }
+
+    #[test]
+    fn parse_failure_reclaims_head() {
+        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let vq = GuestQ::new(GuestAddress(0x1000), &mem, 4);
+        vq.dtable[0].set(0x2000, 16, 0, 0);
+        vq.avail.ring[0].set(0);
+        vq.avail.idx.set(1);
+
+        let mut handler = make_handler(vq.create_queue(), &mem, 0);
 
         handler.process_queue_submit().unwrap();
 
         assert_eq!(vq.used.idx.get(), 1);
+    }
+
+    // The status descriptor may be a single byte, so a rejected request must
+    // not write past it.
+    #[test]
+    fn rejected_request_writes_one_status_byte() {
+        let status = process_one_request(VIRTIO_BLK_T_OUT, 1 << VIRTIO_BLK_F_RO);
+        assert_eq!(status, [VIRTIO_BLK_S_IOERR as u8, 0xff, 0xff, 0xff]);
     }
 }
