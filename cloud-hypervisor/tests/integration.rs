@@ -7798,6 +7798,141 @@ mod common_parallel {
         }
     }
 
+    #[derive(Clone, Copy)]
+    enum TlsOnlyOn {
+        Sender,
+        Receiver,
+    }
+
+    /// Verifies that a TCP migration fails without falling back to plain TCP
+    /// when only one side uses TLS, and that the source VM keeps running.
+    fn _test_live_migration_tcp_tls_one_sided(tls_only_on: TlsOnlyOn) {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let net_params = guest.default_net_string();
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
+        let src_event_path = format!("{event_path}.src");
+        let dest_event_path = format!("{event_path}.dst");
+        let src_api_socket = temp_api_path(&guest.tmp_dir);
+        let dest_api_socket = format!("{src_api_socket}.dest");
+
+        let tls_arg = format!(",tls_dir={TLS_DIR}");
+        let (send_tls_arg, receive_tls_arg) = match tls_only_on {
+            TlsOnlyOn::Sender => (tls_arg.as_str(), ""),
+            TlsOnlyOn::Receiver => ("", tls_arg.as_str()),
+        };
+
+        let mut src_child = GuestCommand::new(&guest)
+            .args(["--memory", "size=1G"])
+            .default_kernel_cmdline()
+            .default_disks()
+            .args(["--net", net_params.as_str()])
+            .args(["--api-socket", &src_api_socket])
+            .args(["--event-monitor", format!("path={src_event_path}").as_str()])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let mut dest_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &dest_api_socket])
+            .args([
+                "--event-monitor",
+                format!("path={dest_event_path}").as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            let migration_port = get_available_port();
+            let mut receive_migration = Command::new(clh_command("ch-remote"))
+                .args([
+                    &format!("--api-socket={dest_api_socket}"),
+                    "receive-migration",
+                    &format!("receiver_url=tcp:0.0.0.0:{migration_port}{receive_tls_arg}"),
+                ])
+                .stdin(Stdio::null())
+                .stderr(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+
+            assert!(wait_for_latest_events_exact_str(
+                Duration::from_secs(30),
+                &["migration-receive-ready"],
+                &dest_event_path
+            ));
+
+            // send-migration only dispatches the migration, it reports the
+            // failure through the event monitor.
+            let send_migration = Command::new(clh_command("ch-remote"))
+                .args([
+                    &format!("--api-socket={src_api_socket}"),
+                    "send-migration",
+                    &format!("destination_url=tcp:127.0.0.1:{migration_port}{send_tls_arg}"),
+                ])
+                .stdin(Stdio::null())
+                .stderr(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+            assert!(wait_for_migration_command(send_migration, "send_migration"));
+
+            // The timeout also catches both sides waiting on each other.
+            let receive_status = receive_migration
+                .wait_timeout(Duration::from_secs(60))
+                .unwrap();
+            if receive_status.is_none() {
+                let _ = receive_migration.kill();
+                let _ = receive_migration.wait();
+            }
+            assert!(
+                receive_status.is_some_and(|status| !status.success()),
+                "receive-migration should fail: {receive_status:?}"
+            );
+
+            assert!(wait_for_sequential_events_str(
+                Duration::from_secs(30),
+                &["migration-failed"],
+                &src_event_path
+            ));
+            assert!(wait_for_sequential_events_str(
+                Duration::from_secs(30),
+                &["migration-receive-failed"],
+                &dest_event_path
+            ));
+
+            assert_eq!(vm_state(&src_api_socket), "Running");
+            guest.ssh_command("true").unwrap();
+        });
+
+        if r.is_err() {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Error occurred during one-sided TLS live-migration",
+            );
+        }
+
+        let _ = src_child.kill();
+        let _ = dest_child.kill();
+        let src_output = src_child.wait_with_output().unwrap();
+        let dest_output = dest_child.wait_with_output().unwrap();
+
+        // The migration must fail in the TLS setup, not later in the protocol.
+        let (output, expected_error) = match tls_only_on {
+            TlsOnlyOn::Sender => (&src_output, "Error creating TLS migration stream"),
+            TlsOnlyOn::Receiver => (&dest_output, "Failed to accept TLS migration connection"),
+        };
+        let r = panic::catch_unwind(|| {
+            assert!(String::from_utf8_lossy(&output.stderr).contains(expected_error));
+        });
+        handle_child_output(r, output);
+    }
+
     // Postcopy live migration. Verifies the destination boots a guest
     // that touches all of its memory, which forces every page to be
     // demand-faulted across the network.
@@ -8406,6 +8541,16 @@ mod common_parallel {
     #[test]
     fn test_live_migration_tcp_tls_parallel_connections() {
         _test_live_migration_tcp(NonZeroU32::new(8).unwrap(), true);
+    }
+
+    #[test]
+    fn test_live_migration_tcp_tls_only_sender() {
+        _test_live_migration_tcp_tls_one_sided(TlsOnlyOn::Sender);
+    }
+
+    #[test]
+    fn test_live_migration_tcp_tls_only_receiver() {
+        _test_live_migration_tcp_tls_one_sided(TlsOnlyOn::Receiver);
     }
 
     #[test]
