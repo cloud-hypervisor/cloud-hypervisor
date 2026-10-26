@@ -33,37 +33,37 @@ use crate::kvm::{Cap, Kvm, KvmError, KvmResult};
 #[cfg(feature = "sev_snp")]
 pub(crate) mod sev;
 
+macro_rules! check_extension {
+    ($kvm:expr, $cap:expr) => {
+        if !$kvm.check_extension($cap) {
+            return Err(KvmError::CapabilityMissing($cap));
+        }
+    };
+}
+
 ///
 /// Check KVM extension for Linux
 ///
 pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
-    macro_rules! check_extension {
-        ($cap:expr) => {
-            if !kvm.check_extension($cap) {
-                return Err(KvmError::CapabilityMissing($cap));
-            }
-        };
-    }
-
     // DeviceCtrl, EnableCap, and SetGuestDebug are also required, but some kernels have
     // the features implemented without the capability flags.
-    check_extension!(Cap::AdjustClock);
-    check_extension!(Cap::ExtCpuid);
-    check_extension!(Cap::GetTscKhz);
-    check_extension!(Cap::ImmediateExit);
-    check_extension!(Cap::Ioeventfd);
-    check_extension!(Cap::Irqchip);
-    check_extension!(Cap::Irqfd);
-    check_extension!(Cap::IrqRouting);
-    check_extension!(Cap::MpState);
-    check_extension!(Cap::SetIdentityMapAddr);
-    check_extension!(Cap::SetTssAddr);
-    check_extension!(Cap::SplitIrqchip);
-    check_extension!(Cap::TscDeadlineTimer);
-    check_extension!(Cap::UserMemory);
-    check_extension!(Cap::UserNmi);
-    check_extension!(Cap::VcpuEvents);
-    check_extension!(Cap::Xsave2);
+    check_extension!(kvm, Cap::AdjustClock);
+    check_extension!(kvm, Cap::ExtCpuid);
+    check_extension!(kvm, Cap::GetTscKhz);
+    check_extension!(kvm, Cap::ImmediateExit);
+    check_extension!(kvm, Cap::Ioeventfd);
+    check_extension!(kvm, Cap::Irqchip);
+    check_extension!(kvm, Cap::Irqfd);
+    check_extension!(kvm, Cap::IrqRouting);
+    check_extension!(kvm, Cap::MpState);
+    check_extension!(kvm, Cap::SetIdentityMapAddr);
+    check_extension!(kvm, Cap::SetTssAddr);
+    check_extension!(kvm, Cap::SplitIrqchip);
+    check_extension!(kvm, Cap::TscDeadlineTimer);
+    check_extension!(kvm, Cap::UserMemory);
+    check_extension!(kvm, Cap::UserNmi);
+    check_extension!(kvm, Cap::VcpuEvents);
+    check_extension!(kvm, Cap::Xsave2);
     Ok(())
 }
 
