@@ -2,6 +2,7 @@
 // Copyright 2025 Demi Marie Obenour.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{io, result};
@@ -10,10 +11,13 @@ use event_monitor::event;
 use log::{error, info, warn};
 use seccompiler::SeccompAction;
 use vhost::vhost_user::message::{
-    VhostUserConfigFlags, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
+    VhostUserConfigFlags, VhostUserMMap, VhostUserMMapFlags, VhostUserProtocolFeatures,
+    VhostUserVirtioFeatures,
 };
 use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler};
 use vm_device::UserspaceMapping;
+use vm_memory::VolatileMemory;
+use vm_memory::volatile_memory::PtrGuardMut;
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -24,14 +28,48 @@ use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::vhost_user::{VhostUserCommon, VhostUserState};
 use crate::{
-    ActivateResult, GuestRegionMmap, MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon,
-    VirtioDevice, VirtioInterrupt, VirtioInterruptType, VirtioSharedMemoryList,
+    ActivateResult, GuestRegionMmap, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon, VirtioDevice,
+    VirtioInterrupt, VirtioInterruptType, VirtioSharedMemoryList,
 };
 
 pub type State = VhostUserState<()>;
 
 struct BackendReqHandler {
     interrupt_cb: Arc<dyn VirtioInterrupt>,
+    shm_regions: Option<VirtioSharedMemoryList>,
+}
+
+impl BackendReqHandler {
+    fn ptr_guard_mut(&self, req: &VhostUserMMap) -> io::Result<PtrGuardMut> {
+        let shm_list = self
+            .shm_regions
+            .as_ref()
+            .ok_or_else(|| io::Error::from_raw_os_error(libc::EINVAL))?;
+        let region = shm_list
+            .region_list
+            .get(usize::from(req.shmid))
+            .filter(|r| r.len > 0)
+            .ok_or_else(|| io::Error::from_raw_os_error(libc::EINVAL))?;
+        if req
+            .shm_offset
+            .checked_add(req.len)
+            .is_none_or(|end| end > region.len)
+        {
+            return Err(io::Error::from_raw_os_error(libc::EINVAL));
+        }
+        let offset = (region.offset + req.shm_offset)
+            .try_into()
+            .map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
+        let len = req
+            .len
+            .try_into()
+            .map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
+        Ok(shm_list
+            .mapping
+            .get_slice(offset, len)
+            .map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?
+            .ptr_guard_mut())
+    }
 }
 
 impl VhostUserFrontendReqHandler for BackendReqHandler {
@@ -44,6 +82,52 @@ impl VhostUserFrontendReqHandler for BackendReqHandler {
             })?;
         Ok(0)
     }
+
+    fn shmem_map(&self, req: &VhostUserMMap, fd: &dyn AsRawFd) -> io::Result<u64> {
+        let target = self.ptr_guard_mut(req)?;
+        let mut prot = libc::PROT_READ;
+        if req.flags & VhostUserMMapFlags::WRITABLE.bits() != 0 {
+            prot |= libc::PROT_WRITE;
+        }
+        // SAFETY: we've checked we're only giving addr and length
+        // within the region, and are passing MAP_FIXED to ensure they
+        // are respected.
+        let ret = unsafe {
+            libc::mmap(
+                target.as_ptr().cast(),
+                target.len(),
+                prot,
+                libc::MAP_SHARED | libc::MAP_FIXED,
+                fd.as_raw_fd(),
+                req.fd_offset as libc::off_t,
+            )
+        };
+        if ret == libc::MAP_FAILED {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(0)
+    }
+
+    fn shmem_unmap(&self, req: &VhostUserMMap) -> io::Result<u64> {
+        let target = self.ptr_guard_mut(req)?;
+        // SAFETY: we've checked we're only giving addr and length
+        // within the region, and are passing MAP_FIXED to ensure they
+        // are respected.
+        let ret = unsafe {
+            libc::mmap(
+                target.as_ptr().cast(),
+                target.len(),
+                libc::PROT_NONE,
+                libc::MAP_ANONYMOUS | libc::MAP_PRIVATE | libc::MAP_FIXED,
+                -1,
+                0,
+            )
+        };
+        if ret == libc::MAP_FAILED {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(0)
+    }
 }
 
 pub struct GenericVhostUser {
@@ -51,7 +135,7 @@ pub struct GenericVhostUser {
     id: String,
     // Hold ownership of the memory that is allocated for the device
     // which will be automatically dropped when the device is dropped
-    cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
+    cache: Option<VirtioSharedMemoryList>,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
     cfg_warning: AtomicBool,
@@ -65,12 +149,11 @@ impl GenericVhostUser {
         path: &str,
         request_queue_sizes: Vec<u16>,
         device_type: u32,
-        cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
         access_platform_enabled: bool,
         state: Option<State>,
-    ) -> Result<GenericVhostUser> {
+    ) -> Result<(GenericVhostUser, Vec<u64>)> {
         // Calculate the actual number of queues needed.
         let num_queues =
             u16::try_from(request_queue_sizes.len()).map_err(|_| Error::BadQueueNum)?;
@@ -88,6 +171,7 @@ impl GenericVhostUser {
             vu_num_queues,
             paused,
             vring_bases,
+            shmem_sizes,
         ) = if let Some(state) = state {
             info!("Restoring generic vhost-user {id}");
             vu.set_protocol_features_vhost_user(
@@ -104,6 +188,7 @@ impl GenericVhostUser {
                 state.vu_num_queues,
                 true,
                 state.vring_bases,
+                state.shmem_sizes,
             )
         } else {
             let avail_protocol_features = VhostUserProtocolFeatures::CONFIG
@@ -113,7 +198,8 @@ impl GenericVhostUser {
                 | VhostUserProtocolFeatures::INFLIGHT_SHMFD
                 | VhostUserProtocolFeatures::LOG_SHMFD
                 | VhostUserProtocolFeatures::DEVICE_STATE
-                | VhostUserProtocolFeatures::BACKEND_REQ;
+                | VhostUserProtocolFeatures::BACKEND_REQ
+                | VhostUserProtocolFeatures::SHMEM;
 
             let avail_features = super::DEFAULT_VIRTIO_FEATURES;
 
@@ -137,6 +223,22 @@ since the backend only supports {backend_num_queues}\n",
                 return Err(Error::BadQueueNum);
             }
 
+            let has_shmem = acked_protocol_features & VhostUserProtocolFeatures::SHMEM.bits() != 0;
+            let shmem_sizes = has_shmem
+                .then(|| {
+                    let cfg = vu
+                        .socket_handle()
+                        .get_shmem_config()
+                        .map_err(Error::VhostUserGetShmemConfig)?;
+                    let sizes = cfg
+                        .memory_sizes
+                        .get(..(cfg.nregions as usize))
+                        .ok_or(Error::BadShmemRegionCount(cfg.nregions))?;
+                    Ok(sizes.to_vec())
+                })
+                .transpose()?
+                .unwrap_or_default();
+
             let mut avail_features = acked_features;
             if access_platform_enabled {
                 avail_features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
@@ -153,38 +255,46 @@ since the backend only supports {backend_num_queues}\n",
                 num_queues,
                 false,
                 None,
+                shmem_sizes,
             )
         };
 
-        Ok(GenericVhostUser {
-            vu_common: VhostUserCommon {
-                virtio_common: VirtioCommon {
-                    device_type,
-                    avail_features,
-                    acked_features,
-                    queue_sizes: request_queue_sizes,
-                    paused_sync: Some(Arc::new(Barrier::new(2))),
-                    min_queues: 1,
-                    paused: Arc::new(AtomicBool::new(paused)),
+        Ok((
+            GenericVhostUser {
+                vu_common: VhostUserCommon {
+                    virtio_common: VirtioCommon {
+                        device_type,
+                        avail_features,
+                        acked_features,
+                        queue_sizes: request_queue_sizes,
+                        paused_sync: Some(Arc::new(Barrier::new(2))),
+                        min_queues: 1,
+                        paused: Arc::new(AtomicBool::new(paused)),
+                        ..Default::default()
+                    },
+                    vu: Some(Arc::new(Mutex::new(vu))),
+                    acked_protocol_features,
+                    socket_path: path.to_string(),
+                    vu_num_queues,
+                    vring_bases,
                     ..Default::default()
                 },
-                vu: Some(Arc::new(Mutex::new(vu))),
-                acked_protocol_features,
-                socket_path: path.to_string(),
-                vu_num_queues,
-                vring_bases,
-                ..Default::default()
+                id,
+                cache: None,
+                seccomp_action,
+                exit_evt,
+                cfg_warning: AtomicBool::new(false),
             },
-            id,
-            cache,
-            seccomp_action,
-            exit_evt,
-            cfg_warning: AtomicBool::new(false),
-        })
+            shmem_sizes,
+        ))
     }
 
     fn state(&self) -> result::Result<State, MigratableError> {
-        self.vu_common.state(())
+        let mut state = self.vu_common.state(())?;
+        if let Some(cache) = &self.cache {
+            state.shmem_sizes = cache.region_list.iter().map(|r| r.len).collect();
+        }
+        Ok(state)
     }
 
     #[cold]
@@ -300,6 +410,7 @@ impl VirtioDevice for GenericVhostUser {
             .then(|| {
                 let mut handler = FrontendReqHandler::new(Arc::new(BackendReqHandler {
                     interrupt_cb: Arc::clone(&interrupt_cb),
+                    shm_regions: self.cache.clone(),
                 }))
                 .map_err(|e| {
                     crate::ActivateError::VhostUserSetup(Error::FrontendReqHandlerCreation(e))
@@ -350,6 +461,28 @@ impl VirtioDevice for GenericVhostUser {
 
     fn reset(&mut self) {
         self.vu_common.reset(&self.id);
+        if let Some(cache) = &self.cache {
+            // SAFETY: `cache.mapping` owns the anonymous virtual address range of
+            // `cache.mapping.size()` bytes, and `MAP_FIXED` replaces any active
+            // shared-memory sub-mappings in place without freeing the region.
+            let ret = unsafe {
+                libc::mmap(
+                    cache.mapping.as_ptr().cast(),
+                    cache.mapping.size(),
+                    libc::PROT_NONE,
+                    libc::MAP_ANONYMOUS | libc::MAP_PRIVATE | libc::MAP_FIXED,
+                    -1,
+                    0,
+                )
+            };
+            if ret == libc::MAP_FAILED {
+                error!(
+                    "Failed to reset shared memory mapping for {}: {}",
+                    self.id,
+                    io::Error::last_os_error()
+                );
+            }
+        }
     }
 
     fn shutdown(&mut self) {
@@ -357,19 +490,15 @@ impl VirtioDevice for GenericVhostUser {
     }
 
     fn get_shm_regions(&self) -> Option<VirtioSharedMemoryList> {
-        self.cache.as_ref().map(|cache| cache.0.clone())
+        self.cache.clone()
     }
 
     fn set_shm_regions(
         &mut self,
         shm_regions: VirtioSharedMemoryList,
     ) -> result::Result<(), crate::Error> {
-        if let Some(cache) = self.cache.as_mut() {
-            cache.0 = shm_regions;
-            Ok(())
-        } else {
-            Err(crate::Error::SetShmRegionsNotSupported)
-        }
+        self.cache = Some(shm_regions);
+        Ok(())
     }
 
     fn add_memory_region(
@@ -383,9 +512,9 @@ impl VirtioDevice for GenericVhostUser {
         let mut mappings = Vec::new();
         if let Some(cache) = self.cache.as_ref() {
             mappings.push(UserspaceMapping {
-                mem_slot: cache.0.mem_slot,
-                addr: cache.0.addr,
-                mapping: Arc::clone(&cache.0.mapping),
+                mem_slot: cache.mem_slot,
+                addr: cache.addr,
+                mapping: Arc::clone(&cache.mapping),
                 mergeable: false,
             });
         }

@@ -360,6 +360,10 @@ pub enum DeviceManagerError {
     #[error("Cannot find a memory range for persistent memory")]
     PmemRangeAllocation,
 
+    /// Cannot find a memory range for shared memory
+    #[error("Cannot find a memory range for shared memory")]
+    ShmemRangeAllocation,
+
     /// Cannot create iommufd
     #[cfg(feature = "kvm")]
     #[error("Cannot create iommufd")]
@@ -3332,23 +3336,101 @@ impl DeviceManager {
         let mut node = device_node!(id);
 
         if let Some(generic_vhost_user_socket) = generic_vhost_user_cfg.socket.to_str() {
-            let generic_vhost_user_device = Arc::new(Mutex::new(
-                vhost_user::GenericVhostUser::new(
-                    id.clone(),
-                    generic_vhost_user_socket,
-                    generic_vhost_user_cfg.queue_sizes.clone(),
-                    generic_vhost_user_cfg.device_type,
+            let (mut vhost_user_device, shmem_sizes) = vhost_user::GenericVhostUser::new(
+                id.clone(),
+                generic_vhost_user_socket,
+                generic_vhost_user_cfg.queue_sizes.clone(),
+                generic_vhost_user_cfg.device_type,
+                self.seccomp_action.clone(),
+                self.exit_evt
+                    .try_clone()
+                    .map_err(DeviceManagerError::EventFd)?,
+                self.force_access_platform,
+                state_from_id(snapshot, id.as_str())
+                    .map_err(DeviceManagerError::RestoreGetState)?,
+            )
+            .map_err(DeviceManagerError::CreateGenericVhostUser)?;
+
+            let total_size: u64 = shmem_sizes.iter().sum();
+            if total_size > 0 {
+                let bar_size = total_size.next_power_of_two();
+                let restored_addr = if let Some(existing_node) =
+                    self.device_tree.lock().unwrap().get(&id)
+                {
+                    let addr = existing_node
+                        .resources
+                        .iter()
+                        .find_map(|resource| match resource {
+                            Resource::MmioAddressRange { base, size } if *size == bar_size => {
+                                Some(GuestAddress(*base))
+                            }
+                            _ => None,
+                        });
+                    if addr.is_none() {
+                        return Err(DeviceManagerError::ShmemRangeAllocation);
+                    }
+                    addr
+                } else {
+                    None
+                };
+                let addr = self.pci_segments
+                    [generic_vhost_user_cfg.pci_common.pci_segment as usize]
+                    .mem64_allocator
+                    .lock()
+                    .unwrap()
+                    .allocate(restored_addr, bar_size, Some(bar_size))
+                    .ok_or(DeviceManagerError::ShmemRangeAllocation)?;
+
+                // Update the node with correct resource information.
+                node.resources.push(Resource::MmioAddressRange {
+                    base: addr.raw_value(),
+                    size: bar_size,
+                });
+
+                let mmap_region = MmapRegion::build(
                     None,
-                    self.seccomp_action.clone(),
-                    self.exit_evt
-                        .try_clone()
-                        .map_err(DeviceManagerError::EventFd)?,
-                    self.force_access_platform,
-                    state_from_id(snapshot, id.as_str())
-                        .map_err(DeviceManagerError::RestoreGetState)?,
+                    bar_size as usize,
+                    libc::PROT_NONE,
+                    libc::MAP_ANONYMOUS | libc::MAP_PRIVATE,
                 )
-                .map_err(DeviceManagerError::CreateGenericVhostUser)?,
-            ));
+                .map_err(DeviceManagerError::NewMmapRegion)?;
+                // SAFETY: `mmap_region.size()` and `mmap_region.as_ptr()` refer to a valid
+                // anonymous mapping owned by `VirtioSharedMemoryList` until device teardown.
+                let mem_slot = unsafe {
+                    self.memory_manager
+                        .lock()
+                        .unwrap()
+                        .create_userspace_mapping(
+                            addr.raw_value(),
+                            bar_size as usize,
+                            mmap_region.as_ptr(),
+                            false,
+                            false,
+                            false,
+                            hypervisor::MemoryVisibility::Shared,
+                        )
+                        .map_err(DeviceManagerError::MemoryManager)?
+                };
+                let mut offset = 0u64;
+                let region_list = shmem_sizes
+                    .into_iter()
+                    .map(|len| {
+                        let region = virtio_devices::VirtioSharedMemory { offset, len };
+                        offset += len;
+                        region
+                    })
+                    .collect();
+                let shm_list = virtio_devices::VirtioSharedMemoryList {
+                    mem_slot,
+                    addr,
+                    mapping: Arc::new(mmap_region),
+                    region_list,
+                };
+                virtio_devices::VirtioDevice::set_shm_regions(&mut vhost_user_device, shm_list)
+                    .unwrap();
+            }
+
+            let generic_vhost_user_device = Arc::new(Mutex::new(vhost_user_device));
 
             // Update the device tree with the migratable device.
             node.migratable =
