@@ -95,8 +95,7 @@ mod igvm;
 pub mod interrupt;
 pub mod landlock;
 pub mod locked_unix_listener;
-#[cfg_attr(not(test), expect(dead_code))]
-mod memory_diff;
+pub mod memory_diff;
 pub mod memory_manager;
 pub mod migration;
 mod pagemap;

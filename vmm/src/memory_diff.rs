@@ -18,7 +18,7 @@ const PREFIX_LEN: u64 = 16;
 const ENTRY_LEN: u64 = 16;
 
 #[derive(Debug, Error)]
-pub(crate) enum DiffError {
+pub enum DiffError {
     #[error("Error reading the diff header")]
     Read(#[source] io::Error),
     #[error("Not a diff file")]

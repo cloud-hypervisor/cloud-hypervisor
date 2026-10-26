@@ -445,6 +445,16 @@ pub enum Error {
     #[error("Error reading from snapshot file")]
     SnapshotRead(#[source] io::Error),
 
+    /// Invalid memory diff file
+    #[error("Invalid memory diff file")]
+    SnapshotDiff(#[source] memory_diff::DiffError),
+
+    /// Memory diff files with on-demand restore
+    #[error(
+        "A snapshot with a memory diff file cannot be restored with memory_restore_mode=ondemand"
+    )]
+    SnapshotDiffOnDemand,
+
     // Error copying snapshot into region
     #[error("Error copying snapshot into region")]
     SnapshotCopy(#[source] GuestMemoryError),
@@ -2322,11 +2332,18 @@ impl MemoryManager {
         #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         if let Some(source_url) = source_url {
-            let mut memory_file_path = url_to_path(source_url).map_err(Error::Restore)?;
-            memory_file_path.push(String::from(SNAPSHOT_FILENAME));
+            let dir = url_to_path(source_url).map_err(Error::Restore)?;
 
             let mem_snapshot: MemoryManagerSnapshotData =
                 snapshot.to_state().map_err(Error::Restore)?;
+
+            let memory_file_path = match mem_snapshot.memory_base {
+                MemoryBase::Full => dir.join(SNAPSHOT_FILENAME),
+                MemoryBase::Linked if memory_restore_mode == MemoryRestoreMode::OnDemand => {
+                    return Err(Error::SnapshotDiffOnDemand);
+                }
+                MemoryBase::Linked => dir.join(SNAPSHOT_BASE_FILENAME),
+            };
 
             let mm = MemoryManager::new(
                 vm,
@@ -2354,6 +2371,14 @@ impl MemoryManager {
                         .lock()
                         .unwrap()
                         .fill_saved_regions(memory_file_path, &mem_snapshot.memory_ranges)?,
+                }
+
+                if mem_snapshot.memory_base == MemoryBase::Linked {
+                    apply_diff_file(
+                        &mm.lock().unwrap().guest_memory.memory(),
+                        &dir.join(SNAPSHOT_DIFF_FILENAME),
+                        &mem_snapshot.memory_ranges,
+                    )?;
                 }
             }
 
@@ -4046,6 +4071,38 @@ fn write_diff_file(
     Ok(())
 }
 
+// Writes the pages of a memory diff file over restored guest memory, after
+// checking its header against the snapshot memory layout.
+fn apply_diff_file(
+    guest_memory: &GuestMemoryMmap,
+    path: &Path,
+    layout: &MemoryRangeTable,
+) -> Result<(), Error> {
+    let mut file = File::open(path).map_err(Error::SnapshotOpen)?;
+    let file_len = file.metadata().map_err(Error::SnapshotOpen)?.len();
+    let entries =
+        memory_diff::read_header(&mut file, file_len, layout).map_err(Error::SnapshotDiff)?;
+    for entry in entries {
+        let mut offset = 0;
+        while offset < entry.length {
+            let n = guest_memory
+                .read_volatile_from(
+                    GuestAddress(entry.gpa + offset),
+                    &mut file,
+                    (entry.length - offset) as usize,
+                )
+                .map_err(Error::SnapshotCopy)?;
+            if n == 0 {
+                return Err(Error::SnapshotRead(io::Error::from(
+                    io::ErrorKind::UnexpectedEof,
+                )));
+            }
+            offset += n as u64;
+        }
+    }
+    Ok(())
+}
+
 // Reports whether every saved range is page-aligned and lies wholly inside a
 // single plain private-anonymous guest region — the MAP_FIXED overlay
 // preconditions. File-backed regions are rejected: their stale mapping
@@ -4456,6 +4513,60 @@ mod tests {
             length: 2 * page,
         });
         assert!(!is_restore_cow_compatible(&gm, &spanning));
+    }
+
+    #[test]
+    fn diff_file_restores_private_pages_over_the_base() {
+        let page = page_size();
+        let mut file = tempfile::tempfile().unwrap();
+        for i in 0..16u8 {
+            file.write_all(&vec![i + 1; page as usize]).unwrap();
+        }
+        let mut ranges = MemoryRangeTable::default();
+        ranges.push(MemoryRange {
+            gpa: 0,
+            length: 16 * page,
+        });
+
+        // The VM that is snapshotted
+        let before =
+            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), (16 * page) as usize)]).unwrap();
+        do_mmap_cow_saved_regions(&before, &file, &ranges, false).unwrap();
+        let source = CowSource {
+            file,
+            ranges,
+            pagemap: PageMap::open().unwrap(),
+        };
+        before.write_obj::<u8>(0x55, GuestAddress(page)).unwrap();
+        before
+            .write_obj::<u8>(0x77, GuestAddress(12 * page + 9))
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        write_diff_file(&before, &source, dir.path()).unwrap();
+
+        // The VM restored from the base and the diff
+        let after =
+            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), (16 * page) as usize)]).unwrap();
+        do_mmap_cow_saved_regions(&after, &source.file, &source.ranges, false).unwrap();
+        apply_diff_file(
+            &after,
+            &dir.path().join(SNAPSHOT_DIFF_FILENAME),
+            &source.ranges,
+        )
+        .unwrap();
+
+        let mut want = vec![0u8; (16 * page) as usize];
+        before.read_slice(&mut want, GuestAddress(0)).unwrap();
+        let mut got = vec![0u8; (16 * page) as usize];
+        after.read_slice(&mut got, GuestAddress(0)).unwrap();
+        assert!(got == want);
+
+        // Only the diff pages are private, the rest still read from the base
+        let host_addr = after.get_host_address(GuestAddress(0)).unwrap() as u64;
+        assert_eq!(
+            source.pagemap.private_ranges(host_addr, 16 * page).unwrap(),
+            vec![page..2 * page, 12 * page..13 * page]
+        );
     }
 
     #[test]
