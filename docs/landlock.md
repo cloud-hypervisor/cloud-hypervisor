@@ -130,3 +130,13 @@ To enable Landlock with hotplug support:
 # References
 
 * https://landlock.io/
+
+### RBD disks
+
+An RBD path (`rbd:<pool>/<image>[@<snapshot>]`) is not a host file path and is
+not added to the ruleset. For RBD disks Cloud Hypervisor instead grants read
+access to `/etc/ceph`, the parent directory of `rbd_conf`, and `/etc/hosts`,
+`/etc/resolv.conf` and `/etc/nsswitch.conf` when those paths exist. A custom
+configuration file or keyring outside those locations must be granted with
+`--landlock-rules`. Landlock cannot be extended after `vm_create`, so paths
+needed by a hotplugged RBD disk must be pre-declared.

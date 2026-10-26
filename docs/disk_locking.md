@@ -59,3 +59,12 @@ behavior may also vary across network filesystem implementations.
 Cloud Hypervisor supports live disk resizing. Currently, byte-range
 locks are not updated. However, as a part of the file is still locked,
 no new Cloud Hypervisor instance can open the disk image.
+
+## RBD disks
+
+Disks opened through the userspace RBD backend have no host file
+descriptor, so Cloud Hypervisor cannot apply the OFD lock described above.
+The lock is skipped and `lock_granularity` has no effect. Mutual exclusion
+relies on the Ceph `exclusive-lock` image feature and on the platform
+coordinating access, for example during live migration. See
+[rbd.md](rbd.md) for details.

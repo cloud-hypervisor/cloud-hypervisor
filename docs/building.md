@@ -57,6 +57,20 @@ $ popd
 This will build a `cloud-hypervisor` binary under
 `$CLOUDH/cloud-hypervisor/target/release/cloud-hypervisor`.
 
+### Optional features
+
+The userspace RBD backend is disabled by default. To build it, install the
+Ceph client development packages and `libclang`, then enable the `rbd`
+feature:
+
+```shell
+$ sudo apt install librbd-dev librados-dev libclang-dev
+$ cargo build --release --features rbd
+```
+
+The binary dynamically links `librbd` and `librados`. See
+[rbd.md](rbd.md) for usage, credentials and the supported Ceph versions.
+
 ### Containerized builds and tests
 
 If you want to build and test Cloud Hypervisor without having to install all the
