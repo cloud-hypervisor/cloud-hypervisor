@@ -271,6 +271,7 @@ pub struct MemoryManager {
     thp: bool,
     user_provided_zones: bool,
     snapshot_memory_ranges: MemoryRangeTable,
+    snapshot_memory_base: MemoryBase,
     cow_source: Option<CowSource>,
     memory_zones: MemoryZones,
     log_dirty: bool, // Enable dirty logging for created RAM regions
@@ -2283,6 +2284,7 @@ impl MemoryManager {
             reserve: config.reserve,
             user_provided_zones,
             snapshot_memory_ranges: MemoryRangeTable::default(),
+            snapshot_memory_base: MemoryBase::Full,
             cow_source: None,
             memory_zones,
             guest_ram_mappings: Vec::new(),
@@ -3191,6 +3193,7 @@ impl MemoryManager {
             next_memory_slot: self.next_memory_slot.load(Ordering::SeqCst),
             selected_slot: self.selected_slot,
             next_hotplug_slot: self.next_hotplug_slot,
+            memory_base: self.snapshot_memory_base,
         }
     }
 
@@ -3673,6 +3676,16 @@ impl Drop for MemoryManager {
     }
 }
 
+/// Where a snapshot keeps its guest memory.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+enum MemoryBase {
+    /// `memory-ranges`, written by the snapshot
+    #[default]
+    Full,
+    /// `memory-ranges.base`, a hard link to the copy-on-write restore source
+    Linked,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct MemoryManagerSnapshotData {
     memory_ranges: MemoryRangeTable,
@@ -3685,6 +3698,8 @@ pub struct MemoryManagerSnapshotData {
     next_memory_slot: u32,
     selected_slot: usize,
     next_hotplug_slot: usize,
+    #[serde(default)]
+    memory_base: MemoryBase,
 }
 
 impl Snapshottable for MemoryManager {
@@ -4400,5 +4415,29 @@ mod tests {
             do_mmap_cow_saved_regions(&gm, &file, &table, true).unwrap();
             assert_eq!(gm.read_obj::<u8>(GuestAddress(0)).unwrap(), 0xcd);
         }
+    }
+
+    #[test]
+    fn snapshot_state_without_memory_base_reads_as_full() {
+        let data = MemoryManagerSnapshotData {
+            memory_ranges: MemoryRangeTable::default(),
+            guest_ram_mappings: Vec::new(),
+            start_of_device_area: 0,
+            boot_ram: 0,
+            current_ram: 0,
+            arch_mem_regions: Vec::new(),
+            hotplug_slots: Vec::new(),
+            next_memory_slot: 0,
+            selected_slot: 0,
+            next_hotplug_slot: 0,
+            memory_base: MemoryBase::Linked,
+        };
+        let mut json = serde_json::to_value(&data).unwrap();
+        assert_eq!(json["memory_base"], "Linked");
+
+        // A snapshot from a release without the field
+        json.as_object_mut().unwrap().remove("memory_base");
+        let old: MemoryManagerSnapshotData = serde_json::from_value(json).unwrap();
+        assert_eq!(old.memory_base, MemoryBase::Full);
     }
 }
