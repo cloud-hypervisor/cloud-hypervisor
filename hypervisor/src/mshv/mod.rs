@@ -710,7 +710,7 @@ impl cpu::Vcpu for MshvVcpu {
 
                     // Set CPU state back.
                     context
-                        .update_cpu_state(self.vp_index as usize, old_state, new_state)
+                        .update_cpu_state(self.vp_index as usize, &old_state, &new_state)
                         .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
 
                     Ok(cpu::VmExit::Ignore)

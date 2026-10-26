@@ -123,8 +123,8 @@ impl MshvEmulatorContext<'_> {
     pub fn update_cpu_state(
         &self,
         cpu_id: usize,
-        old_state: <Self as PlatformEmulator>::CpuState,
-        new_state: <Self as PlatformEmulator>::CpuState,
+        old_state: &<Self as PlatformEmulator>::CpuState,
+        new_state: &<Self as PlatformEmulator>::CpuState,
     ) -> Result<(), PlatformError> {
         if cpu_id != self.vcpu.vp_index as usize {
             return Err(PlatformError::SetCpuStateFailure(anyhow!(
