@@ -5,6 +5,7 @@
 // See include/uapi/linux/userfaultfd.h in the kernel code.
 pub(crate) const UFFDIO_API: u64 = 0xc018_aa3f; // _IOWR(0xAA, 0x3F, struct uffdio_api)
 pub(crate) const UFFDIO_REGISTER: u64 = 0xc020_aa00; // _IOWR(0xAA, 0x00, struct uffdio_register)
+pub(crate) const UFFDIO_UNREGISTER: u64 = 0x8010_aa01; // _IOR(0xAA, 0x01, struct uffdio_range)
 pub(crate) const UFFDIO_COPY: u64 = 0xc028_aa03; // _IOWR(0xAA, 0x03, struct uffdio_copy)
 pub(crate) const UFFDIO_WAKE: u64 = 0x8010_aa02; // _IOR(0xAA, 0x02, struct uffdio_range)
 pub(crate) const UFFDIO_ZEROPAGE: u64 = 0xc020_aa04; // _IOWR(0xAA, 0x04, struct uffdio_zeropage)
@@ -20,6 +21,7 @@ const IOC_READ: u64 = 2;
 const IOC_READWRITE: u64 = 3;
 const _: () = assert!(UFFDIO_API == ioctl_ioc(IOC_READWRITE, 0xAA, 0x3F, 24));
 const _: () = assert!(UFFDIO_REGISTER == ioctl_ioc(IOC_READWRITE, 0xAA, 0x00, 32));
+const _: () = assert!(UFFDIO_UNREGISTER == ioctl_ioc(IOC_READ, 0xAA, 0x01, 16));
 const _: () = assert!(UFFDIO_COPY == ioctl_ioc(IOC_READWRITE, 0xAA, 0x03, 40));
 const _: () = assert!(UFFDIO_WAKE == ioctl_ioc(IOC_READ, 0xAA, 0x02, 16));
 const _: () = assert!(UFFDIO_ZEROPAGE == ioctl_ioc(IOC_READWRITE, 0xAA, 0x04, 32));
@@ -29,6 +31,7 @@ const _: () = assert!(UFFDIO_POISON == ioctl_ioc(IOC_READWRITE, 0xAA, 0x08, 32))
 // Seccomp compares these as Dword (u32); ensure they fit.
 const _: () = assert!(UFFDIO_API <= u32::MAX as u64);
 const _: () = assert!(UFFDIO_REGISTER <= u32::MAX as u64);
+const _: () = assert!(UFFDIO_UNREGISTER <= u32::MAX as u64);
 const _: () = assert!(UFFDIO_COPY <= u32::MAX as u64);
 const _: () = assert!(UFFDIO_WAKE <= u32::MAX as u64);
 const _: () = assert!(UFFDIO_ZEROPAGE <= u32::MAX as u64);

@@ -30,8 +30,8 @@ use vhost::vhost_kern::vhost_binding::{
 use virtio_devices::vdpa::VHOST_VDPA_RESUME;
 
 use crate::userfaultfd::{
-    UFFDIO_API, UFFDIO_CONTINUE, UFFDIO_COPY, UFFDIO_POISON, UFFDIO_REGISTER, UFFDIO_WAKE,
-    UFFDIO_ZEROPAGE, USERFAULTFD_IOC_NEW,
+    UFFDIO_API, UFFDIO_CONTINUE, UFFDIO_COPY, UFFDIO_POISON, UFFDIO_REGISTER, UFFDIO_UNREGISTER,
+    UFFDIO_WAKE, UFFDIO_ZEROPAGE, USERFAULTFD_IOC_NEW,
 };
 
 #[derive(Copy, Clone)]
@@ -456,6 +456,7 @@ fn create_vmm_ioctl_seccomp_rule_common(
         and![Cond::new(1, ArgLen::Dword, Eq, UFFDIO_API)?],
         and![Cond::new(1, ArgLen::Dword, Eq, UFFDIO_COPY)?],
         and![Cond::new(1, ArgLen::Dword, Eq, UFFDIO_REGISTER)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, UFFDIO_UNREGISTER)?],
         and![Cond::new(1, ArgLen::Dword, Eq, UFFDIO_WAKE)?],
         and![Cond::new(1, ArgLen::Dword, Eq, UFFDIO_ZEROPAGE)?],
         and![Cond::new(1, ArgLen::Dword, Eq, UFFDIO_CONTINUE)?],
