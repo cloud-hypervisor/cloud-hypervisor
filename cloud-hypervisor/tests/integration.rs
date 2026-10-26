@@ -7177,11 +7177,17 @@ mod common_parallel {
             .port()
     }
 
+    /// Development-only certificates for TLS migrations, valid for
+    /// `localhost` and `127.0.0.1`.
+    const TLS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../test_data/tls");
+
     /// Properties of `send-migration` that the TCP helpers pass on; `None`
     /// keeps the default of the VMM.
     #[derive(Default)]
     struct SendMigrationOptions {
         postcopy: bool,
+        /// Use TLS for sender and receiver.
+        tls: bool,
         downtime_ms: Option<u64>,
         timeout_s: Option<u64>,
         timeout_strategy: Option<TimeoutStrategy>,
@@ -7242,7 +7248,10 @@ mod common_parallel {
         let migration_port = get_available_port();
         let host_ip = "127.0.0.1";
 
-        let receive_arg = format!("receiver_url=tcp:0.0.0.0:{migration_port}");
+        let mut receive_arg = format!("receiver_url=tcp:0.0.0.0:{migration_port}");
+        if options.tls {
+            receive_arg.push_str(&format!(",tls_dir={TLS_DIR}"));
+        }
 
         // Start the 'receive-migration' command on the destination
         let mut receive_migration = Command::new(clh_command("ch-remote"))
@@ -7273,6 +7282,9 @@ mod common_parallel {
             format!("destination_url=tcp:{host_ip}:{migration_port},connections={connections}");
         if options.postcopy {
             params.push_str(",memory_mode=postcopy");
+        }
+        if options.tls {
+            params.push_str(&format!(",tls_dir={TLS_DIR}"));
         }
         if let Some(downtime_ms) = options.downtime_ms {
             params.push_str(&format!(",downtime_ms={downtime_ms}"));
@@ -7640,7 +7652,7 @@ mod common_parallel {
         handle_child_output(r, &dest_output);
     }
 
-    fn _test_live_migration_tcp(connections: NonZeroU32) {
+    fn _test_live_migration_tcp(connections: NonZeroU32, tls: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let console_text = String::from("On a branch floating down river a cricket, singing.");
@@ -7714,7 +7726,10 @@ mod common_parallel {
                     &dest_api_socket,
                     &dest_event_path,
                     connections,
-                    &SendMigrationOptions::default(),
+                    &SendMigrationOptions {
+                        tls,
+                        ..Default::default()
+                    },
                 ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
@@ -7741,6 +7756,7 @@ mod common_parallel {
                 "Source VM was not terminated successfully.",
             );
         }
+        let src_output = src_child.wait_with_output().unwrap();
 
         // After live migration, ensure the destination VM is running normally
         let r = panic::catch_unwind(|| {
@@ -7763,6 +7779,23 @@ mod common_parallel {
             assert!(String::from_utf8_lossy(&dest_output.stdout).contains(&console_text));
         });
         handle_child_output(r, &dest_output);
+
+        if tls {
+            let r = panic::catch_unwind(|| {
+                assert!(
+                    String::from_utf8_lossy(&src_output.stderr)
+                        .contains("TLS handshake (client-side/sender) successful")
+                );
+            });
+            handle_child_output(r, &src_output);
+            let r = panic::catch_unwind(|| {
+                assert!(
+                    String::from_utf8_lossy(&dest_output.stderr)
+                        .contains("TLS handshake (server-side/receiver) successful")
+                );
+            });
+            handle_child_output(r, &dest_output);
+        }
     }
 
     // Postcopy live migration. Verifies the destination boots a guest
@@ -8357,12 +8390,22 @@ mod common_parallel {
 
     #[test]
     fn test_live_migration_tcp() {
-        _test_live_migration_tcp(NonZeroU32::new(1).unwrap());
+        _test_live_migration_tcp(NonZeroU32::new(1).unwrap(), false);
     }
 
     #[test]
     fn test_live_migration_tcp_parallel_connections() {
-        _test_live_migration_tcp(NonZeroU32::new(8).unwrap());
+        _test_live_migration_tcp(NonZeroU32::new(8).unwrap(), false);
+    }
+
+    #[test]
+    fn test_live_migration_tcp_tls() {
+        _test_live_migration_tcp(NonZeroU32::new(1).unwrap(), true);
+    }
+
+    #[test]
+    fn test_live_migration_tcp_tls_parallel_connections() {
+        _test_live_migration_tcp(NonZeroU32::new(8).unwrap(), true);
     }
 
     #[test]
