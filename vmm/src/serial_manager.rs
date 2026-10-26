@@ -441,11 +441,6 @@ impl SerialManager {
                                             _ => unreachable!(),
                                         };
 
-                                        // Replace "\n" with "\r" to deal with Windows SAC (#1170)
-                                        if count == 1 && input[0] == 0x0a {
-                                            input[0] = 0x0d;
-                                        }
-
                                         serial
                                             .as_ref()
                                             .lock()
