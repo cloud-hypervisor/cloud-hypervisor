@@ -3342,7 +3342,8 @@ impl LandlockConfig {
         if !self.path.exists() {
             return Err(ValidationError::LandlockPathDoesNotExist(self.path.clone()));
         }
-        LandlockAccess::try_from(self.access.as_str())
+        self.access
+            .parse::<LandlockAccess>()
             .map_err(|e| ValidationError::InvalidLandlockAccess(e.to_string()))?;
         Ok(())
     }

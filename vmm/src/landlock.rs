@@ -2,9 +2,9 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::convert::TryFrom;
 use std::io::Error as IoError;
 use std::path::Path;
+use std::str::FromStr;
 
 #[cfg(test)]
 use landlock::make_bitflags;
@@ -41,10 +41,10 @@ pub(crate) struct LandlockAccess {
     access: BitFlags<AccessFs>,
 }
 
-impl TryFrom<&str> for LandlockAccess {
-    type Error = LandlockError;
+impl FromStr for LandlockAccess {
+    type Err = LandlockError;
 
-    fn try_from(s: &str) -> Result<LandlockAccess, LandlockError> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.is_empty() {
             return Err(LandlockError::InvalidLandlockAccess(
                 "Access cannot be empty".to_string(),
@@ -105,7 +105,7 @@ impl Landlock {
         path: &Path,
         access: &str,
     ) -> Result<(), LandlockError> {
-        self.add_rule(path, LandlockAccess::try_from(access)?.access)?;
+        self.add_rule(path, access.parse::<LandlockAccess>()?.access)?;
         Ok(())
     }
 
@@ -118,7 +118,7 @@ impl Landlock {
 }
 
 #[test]
-fn test_try_from_access() {
+fn test_parse_access() {
     // These access rights could change in future versions of Landlock. Listing
     // them here explicitly to raise their visibility during code reviews.
     let read_access = make_bitflags!(AccessFs::{
@@ -140,14 +140,14 @@ fn test_try_from_access() {
         | Refer
         | Truncate
     });
-    let landlock_access = LandlockAccess::try_from("rw").unwrap();
+    let landlock_access = "rw".parse::<LandlockAccess>().unwrap();
     assert_eq!(landlock_access.access, read_access | write_access);
 
-    let landlock_access = LandlockAccess::try_from("r").unwrap();
+    let landlock_access = "r".parse::<LandlockAccess>().unwrap();
     assert_eq!(landlock_access.access, read_access);
 
-    let landlock_access = LandlockAccess::try_from("w").unwrap();
+    let landlock_access = "w".parse::<LandlockAccess>().unwrap();
     assert_eq!(landlock_access.access, write_access);
 
-    LandlockAccess::try_from("").unwrap_err();
+    "".parse::<LandlockAccess>().unwrap_err();
 }
