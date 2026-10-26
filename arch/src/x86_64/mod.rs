@@ -930,7 +930,7 @@ fn required_common_cpuid_updates(
     CpuidPatch::patch_cpuid(&mut cpuid, &cpuid_patches);
 
     // Update some existing CPUID
-    for entry in cpuid.as_mut_slice().iter_mut() {
+    for entry in cpuid.iter_mut() {
         #[allow(unused_unsafe)]
         match entry.function {
             // Clear AMX related bits if the AMX feature is not enabled
