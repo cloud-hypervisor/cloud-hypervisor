@@ -74,6 +74,8 @@ pub enum Error {
     InvalidClusterIndex,
     #[error("Invalid cluster size")]
     InvalidClusterSize,
+    #[error("Invalid header length: {0}")]
+    InvalidHeaderLength(u32),
     #[error("Invalid index")]
     InvalidIndex,
     #[error("Invalid L1 table offset")]
@@ -1053,6 +1055,16 @@ mod tests {
             header[32..36].copy_from_slice(&1u32.to_be_bytes());
             let err = QcowHeader::new(&basic_file(&header)).unwrap_err();
             assert!(matches!(err, Error::UnsupportedCryptMethod(1)), "{err:?}");
+        }
+    }
+
+    #[test]
+    fn header_with_invalid_v3_length_is_rejected() {
+        for bad in [V2_BARE_HEADER_SIZE, 0xffff_ffff] {
+            let mut header = valid_header_v3();
+            header[100..104].copy_from_slice(&bad.to_be_bytes());
+            let err = QcowHeader::new(&basic_file(&header)).unwrap_err();
+            assert!(matches!(err, Error::InvalidHeaderLength(_)), "{err:?}");
         }
     }
 

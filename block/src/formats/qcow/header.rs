@@ -440,6 +440,15 @@ impl QcowHeader {
             return Err(Error::InvalidClusterSize);
         }
 
+        if version == 3 {
+            let cluster_size = 1u64 << header.cluster_bits;
+            if u64::from(header.header_size) < u64::from(V3_BARE_HEADER_SIZE)
+                || u64::from(header.header_size) > cluster_size
+            {
+                return Err(Error::InvalidHeaderLength(header.header_size));
+            }
+        }
+
         if header.backing_file_size > MAX_BACKING_FILE_SIZE {
             return Err(Error::BackingFileTooLong(header.backing_file_size as usize));
         }
