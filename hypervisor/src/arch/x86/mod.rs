@@ -152,7 +152,7 @@ pub fn segment_type_code(t: u8) -> bool {
 }
 
 pub fn segment_type_ro(t: u8) -> bool {
-    t & !RWRX_SEGMENT_TYPE == 0
+    t & RWRX_SEGMENT_TYPE == 0
 }
 
 pub fn segment_type_expand_down(t: u8) -> bool {

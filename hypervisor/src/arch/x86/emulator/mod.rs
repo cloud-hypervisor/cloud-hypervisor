@@ -154,7 +154,7 @@ pub trait CpuStateManager: Clone {
 
                 // Expand-down segment
                 if segment_type_expand_down(segment_type) {
-                    if logical_addr >= segment_limit.into() {
+                    if logical_addr <= segment_limit.into() {
                         return Err(PlatformError::InvalidAddress(anyhow!(
                             "{logical_addr:#x} is off limits {segment_limit:#x} (expand down)"
                         )));
@@ -976,5 +976,77 @@ mod tests {
 
         let mut vmm = MockVmm::new(ip, vec![], Some((ip, &memory)));
         vmm.emulate_first_insn(cpu_id, &insn).unwrap_err();
+    }
+
+    fn data_segment(type_: u8, limit: u32, db: u8) -> SegmentRegister {
+        SegmentRegister {
+            base: 0x1_0000,
+            limit,
+            selector: 0x10,
+            type_,
+            present: 1,
+            dpl: 0,
+            db,
+            s: 1,
+            l: 0,
+            g: 0,
+            avl: 0,
+            unusable: 0,
+        }
+    }
+
+    #[test]
+    fn test_linearize_read_only_segment() {
+        let vmm = MockVmm::new(0, vec![(Register::CR0, CR0_PE)], None);
+        let mut state = vmm.cpu_state(0).unwrap();
+
+        // Read-only, accessed data segment (type 1): reads are fine, writes
+        // are not.
+        state
+            .write_segment(Register::DS, data_segment(0x1, 0xffff, 1))
+            .unwrap();
+        assert_eq!(
+            state.linearize(Register::DS, 0x10, false).unwrap(),
+            0x1_0010
+        );
+        state.linearize(Register::DS, 0x10, true).unwrap_err();
+
+        // Read/write, accessed data segment (type 3): writes are fine.
+        state
+            .write_segment(Register::DS, data_segment(0x3, 0xffff, 1))
+            .unwrap();
+        assert_eq!(state.linearize(Register::DS, 0x10, true).unwrap(), 0x1_0010);
+    }
+
+    #[test]
+    fn test_linearize_expand_down_segment() {
+        let vmm = MockVmm::new(0, vec![(Register::CR0, CR0_PE)], None);
+        let mut state = vmm.cpu_state(0).unwrap();
+
+        // Read/write, expand-down, accessed data segment (type 7) with a
+        // 32-bit upper bound: the valid offsets are limit + 1 to 0xffff_ffff.
+        state
+            .write_segment(Register::DS, data_segment(0x7, 0xfff, 1))
+            .unwrap();
+        state.linearize(Register::DS, 0x0, true).unwrap_err();
+        state.linearize(Register::DS, 0xfff, true).unwrap_err();
+        assert_eq!(
+            state.linearize(Register::DS, 0x1000, true).unwrap(),
+            0x1_1000
+        );
+        assert_eq!(
+            state.linearize(Register::DS, 0xffff_ffff, true).unwrap(),
+            0x1_0000 + 0xffff_ffff
+        );
+
+        // With a 16-bit upper bound the offset cannot exceed 0xffff.
+        state
+            .write_segment(Register::DS, data_segment(0x7, 0xfff, 0))
+            .unwrap();
+        assert_eq!(
+            state.linearize(Register::DS, 0xffff, true).unwrap(),
+            0x1_ffff
+        );
+        state.linearize(Register::DS, 0x1_0000, true).unwrap_err();
     }
 }
