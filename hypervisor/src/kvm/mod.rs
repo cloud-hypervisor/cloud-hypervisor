@@ -77,6 +77,8 @@ use kvm_bindings::{
 };
 #[cfg(target_arch = "x86_64")]
 use x86_64::check_required_kvm_extensions;
+#[cfg(all(target_arch = "x86_64", feature = "sev_snp"))]
+use x86_64::check_required_sev_snp_extensions;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{CpuId, ExtendedControlRegisters, MsrEntries, VcpuKvmState};
 
@@ -1541,7 +1543,9 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             #[allow(unused_mut)]
             let mut memory_slots = None;
             #[cfg(feature = "sev_snp")]
-            if _config.sev_snp_enabled && fd.check_extension(Cap::GuestMemfd) {
+            if _config.sev_snp_enabled {
+                check_required_sev_snp_extensions(&fd)
+                    .map_err(|e| hypervisor::HypervisorError::CheckExtensions(e.into()))?;
                 memory_slots = Some(Arc::new(RwLock::new(HashMap::new())));
             }
 

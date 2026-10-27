@@ -9,6 +9,8 @@
 //
 
 use kvm_bindings::nested::KvmNestedStateBuffer;
+#[cfg(feature = "sev_snp")]
+use kvm_ioctls::VmFd;
 use serde::{Deserialize, Serialize};
 use vmm_sys_util::fam;
 ///
@@ -64,6 +66,13 @@ pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
     check_extension!(kvm, Cap::UserNmi);
     check_extension!(kvm, Cap::VcpuEvents);
     check_extension!(kvm, Cap::Xsave2);
+    Ok(())
+}
+
+#[cfg(feature = "sev_snp")]
+/// Check KVM extensions required for SEV-SNP.
+pub fn check_required_sev_snp_extensions(vm: &VmFd) -> KvmResult<()> {
+    check_extension!(vm, Cap::GuestMemfd);
     Ok(())
 }
 
