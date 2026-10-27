@@ -36,9 +36,7 @@ use crate::arch::x86::VcpuMsrConfigUpdate;
 use crate::cpu::Vcpu;
 use crate::{ClockRestoreMode, ClockState, IoEventAddress, IrqRoutingEntry};
 
-///
 /// I/O events data matches (32 or 64 bits).
-///
 #[derive(Debug)]
 pub enum DataMatch {
     DataMatch32(u32),
@@ -55,200 +53,129 @@ impl From<DataMatch> for u64 {
 }
 
 #[derive(Error, Debug)]
-///
 /// Enum for VM error
 pub enum HypervisorVmError {
-    ///
     /// Create Vcpu error
-    ///
     #[error("Failed to create Vcpu")]
     CreateVcpu(#[source] anyhow::Error),
-    ///
     /// Identity map address error
-    ///
     #[error("Failed to set identity map address")]
     SetIdentityMapAddress(#[source] anyhow::Error),
-    ///
     /// TSS address error
-    ///
     #[error("Failed to set TSS address")]
     SetTssAddress(#[source] anyhow::Error),
-    ///
     /// Create interrupt controller error
-    ///
     #[error("Failed to create interrupt controller")]
     CreateIrq(#[source] anyhow::Error),
-    ///
     /// Register interrupt event error
-    ///
     #[error("Failed to register interrupt event")]
     RegisterIrqFd(#[source] anyhow::Error),
-    ///
     /// Un register interrupt event error
-    ///
     #[error("Failed to unregister interrupt event")]
     UnregisterIrqFd(#[source] anyhow::Error),
-    ///
     /// Register IO event error
-    ///
     #[error("Failed to register IO event")]
     RegisterIoEvent(#[source] anyhow::Error),
-    ///
     /// Unregister IO event error
-    ///
     #[error("Failed to unregister IO event")]
     UnregisterIoEvent(#[source] anyhow::Error),
-    ///
     /// Set GSI routing error
-    ///
     #[error("Failed to set GSI routing")]
     SetGsiRouting(#[source] anyhow::Error),
-    ///
     /// Create user memory error
-    ///
     #[error("Failed to create user memory")]
     CreateUserMemory(#[source] anyhow::Error),
-    ///
     /// Remove user memory region error
-    ///
     #[error("Failed to remove user memory")]
     RemoveUserMemory(#[source] anyhow::Error),
-    ///
     /// Create device error
-    ///
     #[error("Failed to set GSI routing")]
     CreateDevice(#[source] anyhow::Error),
-    ///
     /// Get preferred target error
-    ///
     #[error("Failed to get preferred target")]
     GetPreferredTarget(#[source] anyhow::Error),
-    ///
     /// Enable split Irq error
-    ///
     #[error("Failed to enable split Irq")]
     EnableSplitIrq(#[source] anyhow::Error),
-    ///
     /// Enable x2apic API error
-    ///
     #[error("Failed to enable x2apic API")]
     EnableX2ApicApi(#[source] anyhow::Error),
     /// Get clock error
-    ///
     #[error("Failed to get clock")]
     GetClock(#[source] anyhow::Error),
-    ///
     /// Set clock error
-    ///
     #[error("Failed to set clock")]
     SetClock(#[source] anyhow::Error),
-    ///
     /// Capture guest timer state error (aarch64)
-    ///
     #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
     #[error("Failed to capture the guest timer state")]
     CaptureTimerState(#[source] anyhow::Error),
-    ///
     /// Restore guest timer state error (aarch64)
-    ///
     #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
     #[error("Failed to restore the guest timer state")]
     RestoreTimerState(#[source] anyhow::Error),
-    ///
     /// Counter frequency mismatch on restore (aarch64)
-    ///
     #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
     #[error(
         "Saved counter frequency ({saved} Hz) != host ({host} Hz); refusing to advance guest counter"
     )]
     CntfrqMismatch { saved: u64, host: u64 },
-    ///
     /// Create passthrough device
-    ///
     #[error("Failed to create passthrough device")]
     CreatePassthroughDevice(#[source] anyhow::Error),
     /// Write to Guest memory
-    ///
     #[error("Failed to write to guest memory")]
     GuestMemWrite(#[source] anyhow::Error),
-    ///
     /// Read Guest memory
-    ///
     #[error("Failed to read guest memory")]
     GuestMemRead(#[source] anyhow::Error),
-    ///
     /// Start dirty log error
-    ///
     #[error("Failed to get dirty log")]
     StartDirtyLog(#[source] anyhow::Error),
-    ///
     /// Get dirty log error
-    ///
     #[error("Failed to get dirty log")]
     GetDirtyLog(#[source] anyhow::Error),
 
     #[cfg(feature = "sev_snp")]
-    ///
     /// Error initializing SEV-SNP on the VM
-    ///
     #[error("Failed to initialize SEV-SNP")]
     InitializeSevSnp(#[source] io::Error),
 
-    ///
     /// Create Vgic error
-    ///
     #[error("Failed to create Vgic")]
     CreateVgic(#[source] anyhow::Error),
-    ///
     /// Create Vaia error
-    ///
     #[error("Failed to create Vaia")]
     CreateVaia(#[source] anyhow::Error),
-    ///
     /// Import isolated pages error
-    ///
     #[error("Failed to import isolated pages")]
     ImportIsolatedPages(#[source] anyhow::Error),
     /// Failed to complete isolated import
-    ///
     #[error("Failed to complete isolated import")]
     CompleteIsolatedImport(#[source] anyhow::Error),
     /// Failed to set VM property
-    ///
     #[error("Failed to set VM property")]
     SetVmProperty(#[source] anyhow::Error),
-    ///
     /// Modify GPA host access error
-    ///
     #[cfg(feature = "sev_snp")]
     #[error("Failed to modify GPA host access")]
     ModifyGpaHostAccess(#[source] anyhow::Error),
-    ///
     /// Failed to mmap
-    ///
     #[cfg(feature = "sev_snp")]
     #[error("Failed to mmap:")]
     MmapToRoot,
-    ///
     /// Failed to initialize VM
-    ///
     #[error("Failed to initialize VM")]
     InitializeVm(#[source] anyhow::Error),
-    ///
     /// Failed to check the xsave2 capability
-    ///
     #[error("Failed to check the xsave2 capability")]
     CheckXsave2(#[source] anyhow::Error),
     #[cfg(all(target_arch = "x86_64", feature = "mshv"))]
-    ///
     /// Failed to retrieve list of MSRs.
-    ///
     #[error("Failed to get the list of supported MSRs")]
     GetMsrList(#[source] anyhow::Error),
 }
-///
 /// Result type for returning from a function
-///
 pub(crate) type Result<T> = result::Result<T, HypervisorVmError>;
 
 /// Configuration data for legacy interrupts.
@@ -300,11 +227,9 @@ pub enum MemoryVisibility {
     Private,
 }
 
-///
 /// Trait to represent a Vm
 ///
 /// This crate provides a hypervisor-agnostic interfaces for Vm
-///
 pub trait Vm: Send + Sync + Any {
     #[cfg(target_arch = "x86_64")]
     /// Sets the address of the one-page region in the VM's address space.

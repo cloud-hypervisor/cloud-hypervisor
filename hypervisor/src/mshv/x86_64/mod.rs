@@ -18,9 +18,7 @@ use crate::arch::x86::{
 pub mod emulator;
 pub mod io_port;
 
-///
 /// Export generically-named wrappers of mshv_bindings for Unix-based platforms
-///
 pub use {
     mshv_bindings::AllVpStateComponents, mshv_bindings::CpuId, mshv_bindings::DebugRegisters,
     mshv_bindings::FloatingPointUnit, mshv_bindings::LapicState as MshvLapicState,

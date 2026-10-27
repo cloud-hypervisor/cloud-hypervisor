@@ -74,7 +74,6 @@ pub trait PlatformEmulator {
     ///
     /// * `gva` - Guest virtual address to read from.
     /// * `data` - Data slice to read into.
-    ///
     fn read_memory(&self, gva: u64, data: &mut [u8]) -> Result<(), PlatformError>;
 
     /// Write a u8 slice into guest memory.
@@ -83,7 +82,6 @@ pub trait PlatformEmulator {
     ///
     /// * `gva` - Guest virtual address to write into.
     /// * `data` - Data slice to be written.
-    ///
     fn write_memory(&mut self, gva: u64, data: &[u8]) -> Result<(), PlatformError>;
 
     /// Get a CPU state from the guest.
@@ -91,7 +89,6 @@ pub trait PlatformEmulator {
     /// # Arguments
     ///
     /// * `cpu_id` - Logical CPU ID.
-    ///
     fn cpu_state(&self, cpu_id: usize) -> Result<Self::CpuState, PlatformError>;
 
     /// Set a guest CPU state.
@@ -100,7 +97,6 @@ pub trait PlatformEmulator {
     ///
     /// * `cpu_id` - Logical CPU ID.
     /// * `state` - State to set the CPU into.
-    ///
     fn set_cpu_state(&self, cpu_id: usize, state: Self::CpuState) -> Result<(), PlatformError>;
 
     /// Fetch instruction bytes from memory.
@@ -108,7 +104,6 @@ pub trait PlatformEmulator {
     /// # Arguments
     ///
     /// * `ip` - Instruction pointer virtual address to start fetching instructions from.
-    ///
     fn fetch(&self, ip: u64, instruction_bytes: &mut [u8]) -> Result<(), PlatformError>;
 }
 

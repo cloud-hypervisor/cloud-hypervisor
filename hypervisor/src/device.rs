@@ -12,17 +12,12 @@
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-///
 /// Enum for device error
 pub enum HypervisorDeviceError {
-    ///
     /// Set device attribute error
-    ///
     #[error("Failed to set device attribute")]
     SetDeviceAttribute(#[source] anyhow::Error),
-    ///
     /// Get device attribute error
-    ///
     #[error("Failed to get device attribute")]
     GetDeviceAttribute(#[source] anyhow::Error),
 }

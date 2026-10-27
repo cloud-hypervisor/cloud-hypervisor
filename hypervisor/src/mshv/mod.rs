@@ -71,9 +71,7 @@ use vmm_sys_util::eventfd::EventFd;
 pub use x86_64::*;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{VcpuMshvState, emulator};
-///
 /// Export generically-named wrappers of mshv-bindings for Unix-based platforms
-///
 pub use {
     mshv_bindings::hv_partition_property_code_HV_PARTITION_PROPERTY_PROCESSORS_PER_SOCKET as HV_PARTITION_PROPERTY_PROCESSORS_PER_SOCKET,
     mshv_bindings::mshv_create_device as CreateDevice,
@@ -267,9 +265,7 @@ impl MshvHypervisor {
 /// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
 /// ```
 impl hypervisor::Hypervisor for MshvHypervisor {
-    ///
     /// Returns the type of the hypervisor
-    ///
     fn hypervisor_type(&self) -> HypervisorType {
         HypervisorType::Mshv
     }
@@ -382,9 +378,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         }
     }
     #[cfg(target_arch = "x86_64")]
-    ///
     /// Get the supported CpuID
-    ///
     fn get_supported_cpuid(&self) -> hypervisor::Result<Vec<CpuIdEntry>> {
         let mut cpuid = Vec::new();
         let functions: [u32; 2] = [0x1, 0xb];
@@ -420,9 +414,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     }
 
     #[cfg(target_arch = "aarch64")]
-    ///
     /// Retrieve AArch64 host maximum IPA size supported by MSHV.
-    ///
     fn get_host_ipa_limit(&self) -> i32 {
         let host_ipa = self.mshv.get_host_partition_property(
             hv_partition_property_code_HV_PARTITION_PROPERTY_PHYSICAL_ADDRESS_WIDTH,
@@ -482,15 +474,11 @@ pub struct MshvVcpu {
 /// let vcpu = vm.create_vcpu(0, None, #[cfg(target_arch = "x86_64")] Default::default()).unwrap();
 /// ```
 impl cpu::Vcpu for MshvVcpu {
-    ///
     /// Returns StandardRegisters with default value set
-    ///
     fn create_standard_regs(&self) -> crate::StandardRegisters {
         mshv_bindings::StandardRegisters::default().into()
     }
-    ///
     /// Returns the vCPU general purpose registers.
-    ///
     fn get_regs(&self) -> cpu::Result<crate::StandardRegisters> {
         Ok(self
             .fd
@@ -499,9 +487,7 @@ impl cpu::Vcpu for MshvVcpu {
             .into())
     }
 
-    ///
     /// Sets the vCPU general purpose registers.
-    ///
     fn set_regs(&self, regs: &crate::StandardRegisters) -> cpu::Result<()> {
         let regs = (*regs).into();
         self.fd
@@ -510,9 +496,7 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "x86_64")]
-    ///
     /// Returns the vCPU special registers.
-    ///
     fn get_sregs(&self) -> cpu::Result<SpecialRegisters> {
         Ok(self
             .fd
@@ -522,9 +506,7 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "x86_64")]
-    ///
     /// Sets the vCPU special registers.
-    ///
     fn set_sregs(&self, sregs: &SpecialRegisters) -> cpu::Result<()> {
         let sregs = (*sregs).into();
         self.fd
@@ -533,9 +515,7 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "x86_64")]
-    ///
     /// Returns the floating point state (FPU) from the vCPU.
-    ///
     fn get_fpu(&self) -> cpu::Result<FpuState> {
         Ok(self
             .fd
@@ -545,9 +525,7 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "x86_64")]
-    ///
     /// Set the floating point state (FPU) of a vCPU.
-    ///
     fn set_fpu(&self, fpu: &FpuState) -> cpu::Result<()> {
         let fpu: mshv_bindings::FloatingPointUnit = (*fpu).clone().into();
         self.fd
@@ -556,9 +534,7 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "x86_64")]
-    ///
     /// Returns the model-specific registers (MSR) for this vCPU.
-    ///
     fn get_msrs(&self, msrs: &mut Vec<MsrEntry>) -> cpu::Result<usize> {
         let mshv_msrs: Vec<msr_entry> = msrs.iter().map(|e| (*e).into()).collect();
         let mut mshv_msrs = MsrEntries::from_entries(&mshv_msrs).unwrap();
@@ -578,10 +554,8 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "x86_64")]
-    ///
     /// Setup the model-specific registers (MSR) for this vCPU.
     /// Returns the number of MSR entries actually written.
-    ///
     fn set_msrs(&self, msrs: &[MsrEntry]) -> cpu::Result<usize> {
         let mshv_msrs: Vec<msr_entry> = msrs.iter().map(|e| (*e).into()).collect();
         let mshv_msrs = MsrEntries::from_entries(&mshv_msrs).unwrap();
@@ -591,9 +565,7 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "x86_64")]
-    ///
     /// X86 specific call to enable HyperV SynIC
-    ///
     fn enable_hyperv_synic(&self) -> cpu::Result<()> {
         /* We always have SynIC enabled on MSHV */
         Ok(())
@@ -1383,9 +1355,7 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "x86_64")]
-    ///
     /// X86 specific call to setup the CPUID registers.
-    ///
     fn set_cpuid2(&self, cpuid: &[CpuIdEntry]) -> cpu::Result<()> {
         let cpuid: Vec<mshv_bindings::hv_cpuid_entry> = cpuid.iter().map(|e| (*e).into()).collect();
         let mshv_cpuid = <CpuId>::from_entries(&cpuid)
@@ -1398,17 +1368,13 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "x86_64")]
-    ///
     /// X86 specific call to retrieve the CPUID registers.
-    ///
     fn get_cpuid2(&self, _num_entries: usize) -> cpu::Result<Vec<CpuIdEntry>> {
         Ok(self.cpuid.clone())
     }
 
     #[cfg(target_arch = "x86_64")]
-    ///
     /// X86 specific call to retrieve cpuid leaf
-    ///
     fn get_cpuid_values(
         &self,
         function: u32,
@@ -1422,9 +1388,7 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "x86_64")]
-    ///
     /// Returns the state of the LAPIC (Local Advanced Programmable Interrupt Controller).
-    ///
     fn get_lapic(&self) -> cpu::Result<LapicState> {
         Ok(self
             .fd
@@ -1434,9 +1398,7 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "x86_64")]
-    ///
     /// Sets the state of the LAPIC (Local Advanced Programmable Interrupt Controller).
-    ///
     fn set_lapic(&self, lapic: &LapicState) -> cpu::Result<()> {
         let lapic: mshv_bindings::LapicState = (*lapic).clone().into();
         self.fd
@@ -1444,24 +1406,18 @@ impl cpu::Vcpu for MshvVcpu {
             .map_err(|e| cpu::HypervisorCpuError::SetLapicState(e.into()))
     }
 
-    ///
     /// Returns the vcpu's current "multiprocessing state".
-    ///
     fn get_mp_state(&self) -> cpu::Result<MpState> {
         Ok(MpState::Mshv)
     }
 
-    ///
     /// Sets the vcpu's current "multiprocessing state".
-    ///
     fn set_mp_state(&self, _mp_state: MpState) -> cpu::Result<()> {
         Ok(())
     }
 
     #[cfg(target_arch = "x86_64")]
-    ///
     /// Set CPU state for x86_64 guest.
-    ///
     fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
         let mut state: VcpuMshvState = state.clone().into();
         self.set_msrs(&state.msrs)?;
@@ -1487,17 +1443,13 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "aarch64")]
-    ///
     /// Set CPU state for aarch64 guest.
-    ///
     fn set_state(&self, _state: &CpuState) -> cpu::Result<()> {
         unimplemented!()
     }
 
     #[cfg(target_arch = "x86_64")]
-    ///
     /// Get CPU State for x86_64 guest
-    ///
     fn state(&self) -> cpu::Result<CpuState> {
         let regs = self.get_regs()?;
         let sregs = self.get_sregs()?;
@@ -1534,17 +1486,13 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "aarch64")]
-    ///
     /// Get CPU state for aarch64 guest.
-    ///
     fn state(&self) -> cpu::Result<CpuState> {
         unimplemented!()
     }
 
     #[cfg(target_arch = "x86_64")]
-    ///
     /// Translate guest virtual address to guest physical address
-    ///
     fn translate_gva(&self, gva: u64, flags: u64) -> cpu::Result<(u64, u32)> {
         let r = self
             .fd
@@ -1559,9 +1507,7 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "x86_64")]
-    ///
     /// Return the list of initial MSR entries for a VCPU
-    ///
     fn boot_msr_entries(&self) -> Vec<MsrEntry> {
         use crate::arch::x86::{MTRR_ENABLE, MTRR_MEM_TYPE_WB, msr_index};
 
@@ -1578,9 +1524,7 @@ impl cpu::Vcpu for MshvVcpu {
         ]
     }
 
-    ///
     /// Sets the AMD specific vcpu's sev control register.
-    ///
     #[cfg(feature = "sev_snp")]
     fn set_sev_control_register(&self, vmsa_pfn: u64) -> cpu::Result<()> {
         let sev_control_reg = snp::get_sev_control_register(vmsa_pfn);
@@ -1590,9 +1534,7 @@ impl cpu::Vcpu for MshvVcpu {
             .map_err(|e| cpu::HypervisorCpuError::SetSevControlRegister(e.into()))
     }
     #[cfg(target_arch = "x86_64")]
-    ///
     /// Trigger NMI interrupt
-    ///
     fn nmi(&self) -> cpu::Result<()> {
         let cfg = InterruptRequest {
             interrupt_type: hv_interrupt_type_HV_X64_INTERRUPT_TYPE_NMI,
@@ -1606,9 +1548,7 @@ impl cpu::Vcpu for MshvVcpu {
             .request_virtual_interrupt(&cfg)
             .map_err(|e| cpu::HypervisorCpuError::Nmi(e.into()))
     }
-    ///
     /// Set the GICR base address for the vcpu.
-    ///
     #[cfg(target_arch = "aarch64")]
     fn set_gic_redistributor_addr(&self, gicr_base_addr: u64) -> cpu::Result<()> {
         debug!(
@@ -1631,9 +1571,7 @@ impl cpu::Vcpu for MshvVcpu {
 }
 
 impl MshvVcpu {
-    ///
     /// Deactivate previously used GHCB page.
-    ///
     #[cfg(feature = "sev_snp")]
     fn disable_prev_ghcb_page(&self) -> cpu::Result<()> {
         let mut reg_assocs = [hv_register_assoc {
@@ -1668,9 +1606,7 @@ impl MshvVcpu {
         Ok(())
     }
     #[cfg(target_arch = "x86_64")]
-    ///
     /// X86 specific call that returns the vcpu's current "xcrs".
-    ///
     fn get_xcrs(&self) -> cpu::Result<ExtendedControlRegisters> {
         self.fd
             .get_xcrs()
@@ -1678,9 +1614,7 @@ impl MshvVcpu {
     }
 
     #[cfg(target_arch = "x86_64")]
-    ///
     /// X86 specific call that sets the vcpu's current "xcrs".
-    ///
     fn set_xcrs(&self, xcrs: &ExtendedControlRegisters) -> cpu::Result<()> {
         self.fd
             .set_xcrs(xcrs)
@@ -1688,10 +1622,8 @@ impl MshvVcpu {
     }
 
     #[cfg(target_arch = "x86_64")]
-    ///
     /// Returns currently pending exceptions, interrupts, and NMIs as well as related
     /// states of the vcpu.
-    ///
     fn get_vcpu_events(&self) -> cpu::Result<VcpuEvents> {
         self.fd
             .get_vcpu_events()
@@ -1699,19 +1631,15 @@ impl MshvVcpu {
     }
 
     #[cfg(target_arch = "x86_64")]
-    ///
     /// Sets pending exceptions, interrupts, and NMIs as well as related states
     /// of the vcpu.
-    ///
     fn set_vcpu_events(&self, events: &VcpuEvents) -> cpu::Result<()> {
         self.fd
             .set_vcpu_events(events)
             .map_err(|e| cpu::HypervisorCpuError::SetVcpuEvents(e.into()))
     }
 
-    ///
     /// Clear SW_EXIT_INFO1 register for SEV-SNP guests.
-    ///
     #[cfg(feature = "sev_snp")]
     fn clear_swexit_info1(&self) -> result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
         // Clear the SW_EXIT_INFO1 register to indicate no error
@@ -1805,7 +1733,6 @@ pub struct MshvVm {
 }
 
 impl MshvVm {
-    ///
     /// Creates an in-kernel device.
     ///
     /// See the documentation for `MSHV_CREATE_DEVICE`.
@@ -1817,7 +1744,6 @@ impl MshvVm {
         Ok(VfioDeviceFd::new_from_mshv(device_fd))
     }
 
-    ///
     /// Sets a partition property.
     ///
     /// This allows runtime configuration of partition properties.
@@ -1828,7 +1754,6 @@ impl MshvVm {
     }
 }
 
-///
 /// Implementation of Vm trait for Mshv
 ///
 /// # Examples
@@ -1843,31 +1768,23 @@ impl MshvVm {
 /// ```
 impl vm::Vm for MshvVm {
     #[cfg(target_arch = "x86_64")]
-    ///
     /// Sets the address of the one-page region in the VM's address space.
-    ///
     fn set_identity_map_address(&self, _address: u64) -> vm::Result<()> {
         Ok(())
     }
 
     #[cfg(target_arch = "x86_64")]
-    ///
     /// Sets the address of the three-page region in the VM's address space.
-    ///
     fn set_tss_address(&self, _offset: usize) -> vm::Result<()> {
         Ok(())
     }
 
-    ///
     /// Creates an in-kernel interrupt controller.
-    ///
     fn create_irq_chip(&self) -> vm::Result<()> {
         Ok(())
     }
 
-    ///
     /// Registers an event that will, when signaled, trigger the `gsi` IRQ.
-    ///
     fn register_irqfd(&self, fd: &EventFd, gsi: u32) -> vm::Result<()> {
         debug!("register_irqfd fd {} gsi {}", fd.as_raw_fd(), gsi);
 
@@ -1878,9 +1795,7 @@ impl vm::Vm for MshvVm {
         Ok(())
     }
 
-    ///
     /// Unregisters an event that will, when signaled, trigger the `gsi` IRQ.
-    ///
     fn unregister_irqfd(&self, fd: &EventFd, gsi: u32) -> vm::Result<()> {
         debug!("unregister_irqfd fd {} gsi {}", fd.as_raw_fd(), gsi);
 
@@ -1891,9 +1806,7 @@ impl vm::Vm for MshvVm {
         Ok(())
     }
 
-    ///
     /// Creates a VcpuFd object from a vcpu RawFd.
-    ///
     fn create_vcpu(
         &self,
         id: u32,
@@ -2104,9 +2017,7 @@ impl vm::Vm for MshvVm {
             .map_err(|e| vm::HypervisorVmError::CreatePassthroughDevice(e.into()))
     }
 
-    ///
     /// Constructs a routing entry
-    ///
     fn make_routing_entry(&self, gsi: u32, config: &InterruptSourceConfig) -> IrqRoutingEntry {
         match config {
             InterruptSourceConfig::MsiIrq(cfg) => mshv_user_irq_entry {
@@ -2161,18 +2072,14 @@ impl vm::Vm for MshvVm {
             .map_err(|e| vm::HypervisorVmError::SetGsiRouting(e.into()))
     }
 
-    ///
     /// Start logging dirty pages
-    ///
     fn start_dirty_log(&self) -> vm::Result<()> {
         self.fd
             .enable_dirty_page_tracking()
             .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))
     }
 
-    ///
     /// Stop logging dirty pages
-    ///
     fn stop_dirty_log(&self) -> vm::Result<()> {
         let dirty_log_slots = self.dirty_log_slots.read().unwrap();
         // Before disabling the dirty page tracking we need
@@ -2193,9 +2100,7 @@ impl vm::Vm for MshvVm {
         Ok(())
     }
 
-    ///
     /// Get dirty pages bitmap (one bit per page)
-    ///
     fn get_dirty_log(&self, _slot: u32, base_gpa: u64, memory_size: u64) -> vm::Result<Vec<u64>> {
         self.fd
             .get_dirty_log(
@@ -2261,7 +2166,6 @@ impl vm::Vm for MshvVm {
             .map_err(|e| vm::HypervisorVmError::InitializeSevSnp(e.into()))
     }
 
-    ///
     /// Importing isolated pages, these pages will be used
     /// for the PSP(Platform Security Processor) measurement.
     #[cfg(feature = "sev_snp")]
@@ -2293,10 +2197,8 @@ impl vm::Vm for MshvVm {
             .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))
     }
 
-    ///
     /// Complete isolated import, telling the hypervisor that
     /// importing the pages to guest memory is complete.
-    ///
     #[cfg(feature = "sev_snp")]
     fn complete_isolated_import(
         &self,

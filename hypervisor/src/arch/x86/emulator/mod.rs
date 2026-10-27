@@ -47,7 +47,6 @@ pub enum CpuMode {
 /// handlers will modify the CPU state by modifying `CpuState` and it is up to
 /// the handler caller to commit those changes back by invoking a
 /// `PlatformEmulator` implementation `set_state()` method.
-///
 pub trait CpuStateManager: Clone {
     /// Reads a CPU register.
     ///

@@ -19,7 +19,6 @@
 //! - x86_64
 //! - arm64
 //! - riscv64 (experimental)
-//!
 
 /// Architecture specific definitions
 #[macro_use]

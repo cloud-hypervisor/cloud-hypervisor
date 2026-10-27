@@ -25,124 +25,78 @@ use crate::{HypervisorType, HypervisorVmConfig};
 
 #[derive(Error, Debug)]
 pub enum HypervisorError {
-    ///
     /// Hypervisor availability check error
-    ///
     #[error("Failed to check availability of the hypervisor")]
     HypervisorAvailableCheck(#[source] anyhow::Error),
-    ///
     /// hypervisor creation error
-    ///
     #[error("Failed to create the hypervisor")]
     HypervisorCreate(#[source] anyhow::Error),
-    ///
     /// Vm creation failure
-    ///
     #[error("Failed to create Vm")]
     VmCreate(#[source] anyhow::Error),
-    ///
     /// CpuId error
-    ///
     #[error("Failed to get cpuid")]
     GetCpuId(#[source] anyhow::Error),
-    ///
     /// Failed to retrieve list of MSRs.
-    ///
     #[error("Failed to get the list of supported MSRs")]
     GetMsrList(#[source] anyhow::Error),
-    ///
     /// API version is not compatible
-    ///
     #[error("Incompatible API version")]
     IncompatibleApiVersion,
-    ///
     /// Checking extensions failed
-    ///
     #[error("Checking extensions")]
     CheckExtensions(#[source] anyhow::Error),
-    ///
     /// Failed to check the exit hypercall capability
-    ///
     #[error("Failed to check the exit hypercall capability")]
     CheckExitHypercall(#[source] anyhow::Error),
-    ///
     /// Failed to set partition property
-    ///
     #[error("Failed to set partition property")]
     SetPartitionProperty(#[source] anyhow::Error),
 
-    ///
     /// The attempt to enable AMX tile state components failed
-    ///
     #[cfg(target_arch = "x86_64")]
     #[error("Failed to enable AMX tile state components")]
     CouldNotEnableAmxStateComponents(#[source] AmxGuestSupportError),
-    ///
     /// Failed to retrieve SEV-SNP capabilities
-    ///
     #[error("Failed to retrieve SEV-SNP capabilities:{0}")]
     SevSnpCapabilities(#[source] anyhow::Error),
-    ///
     /// Unable to read the requested feature MSRs
-    ///
     #[error("Failed to get feature MSRs")]
     GetFeatureMsrs(#[source] anyhow::Error),
-    ///
     /// Unable to read all feature MSRs advertised by the Hypervisor
-    ///
     #[error("Unable to read all feature MSRs")]
     GetFeatureMsrsPartial,
 }
 
-///
 /// Result type for returning from a function
-///
 pub(crate) type Result<T> = result::Result<T, HypervisorError>;
 
-///
 /// Trait to represent a Hypervisor
 ///
 /// This crate provides a hypervisor-agnostic interfaces
-///
 pub trait Hypervisor: Send + Sync {
-    ///
     /// Returns the type of the hypervisor
-    ///
     fn hypervisor_type(&self) -> HypervisorType;
-    ///
     /// Create a Vm using the underlying hypervisor
     /// Return a hypervisor-agnostic Vm trait object
-    ///
     fn create_vm(&self, config: HypervisorVmConfig) -> Result<Arc<dyn Vm>>;
     #[cfg(target_arch = "x86_64")]
-    ///
     /// Get the supported CpuID
-    ///
     fn get_supported_cpuid(&self) -> Result<Vec<CpuIdEntry>>;
     #[cfg(target_arch = "x86_64")]
-    ///
     /// Get feature MSRs supported by the hardware and hypervisor
-    ///
     fn get_feature_msrs(&self) -> Result<Vec<MsrEntry>>;
     #[cfg(target_arch = "x86_64")]
-    ///
     /// Get the MSR indices supported by the hardware and hypervisor
-    ///
     fn get_msr_index_list(&self) -> Result<Vec<u32>>;
-    ///
     /// Check particular extensions if any
-    ///
     fn check_required_extensions(&self) -> Result<()> {
         Ok(())
     }
     #[cfg(target_arch = "aarch64")]
-    ///
     /// Retrieve AArch64 host maximum IPA size supported by KVM
-    ///
     fn get_host_ipa_limit(&self) -> i32;
-    ///
     /// Get the number of supported hardware breakpoints
-    ///
     fn get_guest_debug_hw_bps(&self) -> usize {
         unimplemented!()
     }
@@ -150,9 +104,7 @@ pub trait Hypervisor: Send + Sync {
     /// Get maximum number of vCPUs
     fn get_max_vcpus(&self) -> u32;
     #[cfg(target_arch = "x86_64")]
-    ///
     /// Determine CPU vendor
-    ///
     fn get_cpu_vendor(&self) -> CpuVendor {
         #[allow(unused_unsafe)]
         // SAFETY: not actually unsafe, but considered unsafe by current stable
