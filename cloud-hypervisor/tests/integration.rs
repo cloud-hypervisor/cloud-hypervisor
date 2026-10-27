@@ -2628,6 +2628,78 @@ mod common_parallel {
         handle_child_output(r, &output);
     }
 
+    fn virtio_pmem_direct_io_buffers(direct: bool) {
+        const PMEM_DIRECT_IO: &str = include_str!("common/pmem_direct_io.py");
+
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+
+        let pmem_temp_file = TempFile::new().unwrap();
+        pmem_temp_file.as_file().set_len(128 << 20).unwrap();
+
+        let mut command = GuestCommand::new(&guest);
+        command
+            .default_cpus()
+            .default_memory()
+            .default_kernel_cmdline();
+        if direct {
+            // As default_disks() does, with the root disk opened O_DIRECT.
+            command
+                .args([
+                    "--disk",
+                    format!(
+                        "path={},direct=on,image_type=raw",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                ])
+                .default_cloudinit_disk();
+        } else {
+            command.default_disks();
+        }
+        let mut child = command
+            .default_net()
+            .args([
+                "--pmem",
+                format!("file={}", pmem_temp_file.as_path().to_str().unwrap()).as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            check_direct_io_buffers(
+                &guest,
+                "pmem_direct_io.py",
+                PMEM_DIRECT_IO,
+                "",
+                "pmem buffer: yes",
+            );
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    // aarch64 only: the x86_64 ch_defconfig has no CONFIG_DEV_DAX.
+    #[test]
+    #[cfg(target_arch = "aarch64")]
+    #[ignore = "the aarch64 Graviton CI run is not yet reliable for these tests; run with --ignored"]
+    fn test_virtio_pmem_direct_io_buffers() {
+        virtio_pmem_direct_io_buffers(false);
+    }
+
+    #[test]
+    #[cfg(target_arch = "aarch64")]
+    #[ignore = "the aarch64 Graviton CI run is not yet reliable for these tests; run with --ignored"]
+    fn test_virtio_pmem_direct_io_buffers_direct_disk() {
+        virtio_pmem_direct_io_buffers(true);
+    }
+
     #[test]
     fn test_multiple_network_interfaces() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
