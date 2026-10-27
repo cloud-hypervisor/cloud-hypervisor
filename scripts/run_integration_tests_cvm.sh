@@ -19,6 +19,11 @@ else # kvm
 fi
 test_features="--features $build_features"
 
+VIRTIOFSD="$WORKLOADS_DIR/virtiofsd"
+if [ ! -f "$VIRTIOFSD" ]; then
+    cp /usr/local/bin/virtiofsd "$VIRTIOFSD" || exit 1
+fi
+
 JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.qcow2"
 JAMMY_OS_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_IMAGE_NAME"
 if [ ! -f "$JAMMY_OS_IMAGE" ]; then
