@@ -264,6 +264,21 @@ impl BlockEpollHandler {
             let head = desc_chain.head_index();
             if Self::is_head_in_flight(&self.inflight_requests, &batch_inflight_requests, head) {
                 warn!("Guest reused virtio-blk head_index {head} while the chain was used");
+
+                // The worker exits here; complete requests parsed into this
+                // batch as failed so the guest does not silently lose them.
+                for (desc_index, request) in batch_inflight_requests.drain(..) {
+                    let mem = self.mem.memory();
+                    mem.write_obj(VIRTIO_BLK_S_IOERR as u8, request.status_addr())
+                        .map_err(Error::RequestStatus)?;
+                    queue
+                        .add_used(mem.deref(), desc_index, 1)
+                        .map_err(Error::QueueAddUsed)?;
+                    queue
+                        .enable_notification(mem.deref())
+                        .map_err(Error::QueueEnableNotification)?;
+                }
+                batch_requests.clear();
                 return Err(Error::QueueDuplicatedHeadIndex);
             }
 
@@ -1353,10 +1368,10 @@ impl Migratable for Block {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::io::Result as IoResult;
+    use std::io::{Error as IoError, Result as IoResult};
     use std::path::Path;
 
-    use block::async_io::{AsyncIoCompletion, AsyncIoOperation, AsyncIoResult};
+    use block::async_io::{AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
     use hypervisor::Vm;
     use vm_memory::GuestAddress;
     use vm_virtio::queue::testing::VirtQueue as GuestQ;
@@ -1489,5 +1504,179 @@ mod tests {
         handler.process_queue_submit().unwrap();
 
         assert_eq!(vq.used.idx.get(), 1);
+    }
+    struct MockIo {
+        notifier: EventFd,
+        pending: Vec<AsyncIoOperation>,
+        batch_enabled: bool,
+        fail_batch: bool,
+    }
+    impl MockIo {
+        fn new(batch_enabled: bool, fail_batch: bool) -> Self {
+            Self {
+                notifier: EventFd::new(EFD_NONBLOCK).unwrap(),
+                pending: Vec::new(),
+                batch_enabled,
+                fail_batch,
+            }
+        }
+    }
+    impl AsyncIo for MockIo {
+        fn notifier(&self) -> &EventFd {
+            &self.notifier
+        }
+        fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
+            self.pending.push(op);
+            Ok(())
+        }
+        fn submit_batch_requests(&mut self, batch: Vec<AsyncIoOperation>) -> AsyncIoResult<()> {
+            if self.fail_batch {
+                return Err(AsyncIoError::SubmitBatchRequests(IoError::other(
+                    "injected batch failure",
+                )));
+            }
+            self.pending.extend(batch);
+            Ok(())
+        }
+        fn batch_requests_enabled(&self) -> bool {
+            self.batch_enabled
+        }
+        fn fsync(&mut self, _: Option<u64>) -> AsyncIoResult<()> {
+            Ok(())
+        }
+        fn punch_hole(&mut self, _: u64, _: u64, _: u64) -> AsyncIoResult<()> {
+            Ok(())
+        }
+        fn write_zeroes(&mut self, _: u64, _: u64, _: u64) -> AsyncIoResult<()> {
+            Ok(())
+        }
+        fn next_completed_request(&mut self) -> Option<AsyncIoCompletion> {
+            // LIFO: deliberately complete in reverse submission order.
+            let op = self.pending.pop()?;
+            let user_data = op.user_data();
+            match op {
+                AsyncIoOperation::ReadToVec { buffer, .. }
+                | AsyncIoOperation::WriteFromVec { buffer, .. } => {
+                    Some(AsyncIoCompletion::new(user_data, 512, Some(buffer)))
+                }
+                AsyncIoOperation::ReadToMemory { .. }
+                | AsyncIoOperation::WriteFromMemory { .. } => {
+                    Some(AsyncIoCompletion::new(user_data, 512, None))
+                }
+            }
+        }
+    }
+
+    fn make_mock_handler(mem: &GuestMemoryMmap, vq: &GuestQ, io: MockIo) -> BlockEpollHandler {
+        let evt = || EventFd::new(EFD_NONBLOCK).unwrap();
+        BlockEpollHandler {
+            queue_index: 0,
+            queue: vq.create_queue(),
+            mem: GuestMemoryAtomic::new(mem.clone()),
+            disk_image: Box::new(io),
+            disk_nsectors: Arc::new(AtomicU64::new(1024)),
+            interrupt_cb: Arc::new(Noop(evt())),
+            serial: Box::default(),
+            kill_evt: evt(),
+            pause_evt: evt(),
+            writeback: Arc::new(AtomicBool::new(false)),
+            counters: BlockCounters::default(),
+            queue_evt: evt(),
+            inflight_requests: VecDeque::new(),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            draining_active_requests: Arc::new(AtomicBool::new(false)),
+            rate_limiter: None,
+            access_platform: None,
+            host_cpus: None,
+            acked_features: 0,
+        }
+    }
+
+    fn build_in_chain(mem: &GuestMemoryMmap, vq: &GuestQ, head: u16, sector: u64) {
+        let hdr = 0x2000 + head as u64 * 0x100;
+        let data = 0x3000 + head as u64 * 0x100;
+        let status = 0x4000 + head as u64 * 0x100;
+        mem.write_obj(0u32, GuestAddress(hdr)).unwrap(); // VIRTIO_BLK_T_IN
+        mem.write_obj(sector, GuestAddress(hdr + 8)).unwrap();
+        let i = head as usize;
+        vq.dtable[i].set(hdr, 16, 1, head + 1);
+        vq.dtable[i + 1].set(data, 512, 3, head + 2);
+        vq.dtable[i + 2].set(status, 1, 2, 0);
+    }
+
+    #[test]
+    fn async_completion_out_of_order_does_not_cross_requests() {
+        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let vq = GuestQ::new(GuestAddress(0x1000), &mem, 8);
+        build_in_chain(&mem, &vq, 0, 0);
+        build_in_chain(&mem, &vq, 4, 1);
+        vq.avail.ring[0].set(0);
+        vq.avail.ring[1].set(4);
+        vq.avail.idx.set(2);
+
+        let mut h = make_mock_handler(&mem, &vq, MockIo::new(true, false));
+        h.process_queue_submit().unwrap();
+        assert_eq!(h.inflight_requests.len(), 2);
+        h.process_queue_complete().unwrap();
+        assert!(h.inflight_requests.is_empty(), "both completions consumed");
+        assert_eq!(vq.used.idx.get(), 2);
+        assert_eq!(
+            mem.read_obj::<u8>(GuestAddress(0x4000)).unwrap(),
+            VIRTIO_BLK_S_OK as u8
+        );
+        assert_eq!(
+            mem.read_obj::<u8>(GuestAddress(0x4400)).unwrap(),
+            VIRTIO_BLK_S_OK as u8
+        );
+        assert_eq!(h.active_request_count.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn duplicate_head_is_rejected_without_second_inflight() {
+        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let vq = GuestQ::new(GuestAddress(0x1000), &mem, 8);
+        build_in_chain(&mem, &vq, 0, 0);
+        vq.avail.ring[0].set(0);
+        vq.avail.ring[1].set(0);
+        vq.avail.idx.set(2);
+
+        let mut h = make_mock_handler(&mem, &vq, MockIo::new(true, false));
+        assert!(matches!(
+            h.process_queue_submit(),
+            Err(Error::QueueDuplicatedHeadIndex)
+        ));
+        // The worker still exits, but the request parsed before the duplicate
+        // must be completed with IOERR rather than dropped silently.
+        assert_eq!(h.inflight_requests.len(), 0);
+        assert_eq!(vq.used.idx.get(), 1);
+        assert_eq!(
+            mem.read_obj::<u8>(GuestAddress(0x4000)).unwrap(),
+            VIRTIO_BLK_S_IOERR as u8
+        );
+    }
+
+    #[test]
+    fn batch_submission_failure_completes_all_with_ioerr() {
+        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let vq = GuestQ::new(GuestAddress(0x1000), &mem, 8);
+        build_in_chain(&mem, &vq, 0, 0);
+        build_in_chain(&mem, &vq, 4, 1);
+        vq.avail.ring[0].set(0);
+        vq.avail.ring[1].set(4);
+        vq.avail.idx.set(2);
+
+        let mut h = make_mock_handler(&mem, &vq, MockIo::new(true, true));
+        h.process_queue_submit().unwrap();
+        assert!(h.inflight_requests.is_empty());
+        assert_eq!(vq.used.idx.get(), 2);
+        assert_eq!(
+            mem.read_obj::<u8>(GuestAddress(0x4000)).unwrap(),
+            VIRTIO_BLK_S_IOERR as u8
+        );
+        assert_eq!(
+            mem.read_obj::<u8>(GuestAddress(0x4400)).unwrap(),
+            VIRTIO_BLK_S_IOERR as u8
+        );
+        assert_eq!(h.active_request_count.load(Ordering::SeqCst), 0);
     }
 }
