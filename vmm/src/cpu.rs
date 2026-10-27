@@ -110,7 +110,6 @@ use crate::{CPU_MANAGER_SNAPSHOT_ID, GuestMemoryMmap};
 /// For example, to extrace 2 bits from offset 1 (zero based) of `6u64`,
 /// following expression should return 3 (`0b11`):
 /// `extract_bits_64!(0b0000_0110u64, 1, 2)`
-///
 macro_rules! extract_bits_64 {
     ($value: tt, $offset: tt, $length: tt) => {
         ($value >> $offset) & (!0u64 >> (64 - $length))
@@ -683,9 +682,7 @@ impl Vcpu {
             .map_err(Error::SetupSevSnpRegs)
     }
 
-    ///
     /// Sets the vCPU's GIC redistributor base address.
-    ///
     #[cfg(target_arch = "aarch64")]
     pub fn set_gic_redistributor_addr(
         &self,
@@ -2227,7 +2224,6 @@ impl CpuManager {
         Ok(gpa)
     }
 
-    ///
     /// On AArch64, `translate_gva` API is not provided by KVM. We implemented
     /// it in VMM by walking through translation tables.
     ///
@@ -2242,7 +2238,6 @@ impl CpuManager {
     /// - FEAT_LPA
     /// - FEAT_LVA
     /// - FEAT_LPA2
-    ///
     #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
     fn translate_gva(
         &self,
