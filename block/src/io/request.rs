@@ -13,9 +13,10 @@
 use std::mem;
 use std::os::unix::fs::FileExt;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
-use log::{error, warn};
+use log::{error, info, warn};
 use smallvec::SmallVec;
 use virtio_bindings::virtio_blk::{
     VIRTIO_BLK_T_DISCARD, VIRTIO_BLK_T_WRITE_ZEROES, VIRTIO_BLK_WRITE_ZEROES_FLAG_UNMAP,
@@ -24,8 +25,8 @@ use virtio_bindings::virtio_blk::{
 use virtio_queue::DescriptorChain;
 use vm_memory::bitmap::Bitmap;
 use vm_memory::{
-    Address as _, Bytes as _, GuestAddress, GuestMemoryBackend as _, GuestMemoryError,
-    GuestMemoryLoadGuard,
+    Address as _, Bytes as _, GuestAddress, GuestAddressSpace as _, GuestMemoryAtomic,
+    GuestMemoryBackend as _, GuestMemoryError, GuestMemoryLoadGuard,
 };
 use vm_virtio::AccessPlatform;
 use vm_virtio::checked_descriptor::DescriptorChainExt;
@@ -62,6 +63,9 @@ pub enum RequestType {
 }
 
 pub const DEFAULT_DESCRIPTOR_VEC_SIZE: usize = 32;
+
+// Warn only once when the bounce buffer is used for buffers outside guest RAM.
+static BOUNCED_OUTSIDE_RAM: AtomicBool = AtomicBool::new(false);
 
 pub struct ExecuteAsync {
     // `true` if the execution will complete asynchronously
@@ -236,6 +240,7 @@ impl Request {
         disk_image: &mut dyn AsyncIo,
         serial: &[u8],
         user_data: u64,
+        pinnable: Option<&GuestMemoryAtomic<vm_memory::GuestMemoryMmap<B>>>,
     ) -> Result<ExecuteAsync, ExecuteError> {
         let sector = self.sector;
         let request_type = self.request_type;
@@ -251,7 +256,7 @@ impl Request {
         // Queue operations expected to be submitted.
         match request_type {
             RequestType::In | RequestType::Out => {
-                let op = self.build_data_operation(mem, offset, alignment, user_data)?;
+                let op = self.build_data_operation(mem, offset, alignment, user_data, pinnable)?;
                 if disk_image.batch_requests_enabled() {
                     ret.batch_request = Some(op);
                 } else {
@@ -425,6 +430,7 @@ impl Request {
         offset: libc::off_t,
         alignment: Option<u64>,
         user_data: u64,
+        pinnable: Option<&GuestMemoryAtomic<vm_memory::GuestMemoryMmap<B>>>,
     ) -> Result<AsyncIoOperation, ExecuteError> {
         if offset < 0 {
             return Err(ExecuteError::BadRequest(Error::InvalidOffset));
@@ -440,9 +446,11 @@ impl Request {
         }
 
         if let Some(alignment) = alignment
-            && !self.guest_memory_is_aligned(&mem, alignment)?
+            && (!self.guest_memory_is_aligned(&mem, alignment)? || self.buffers_outside(pinnable))
         {
-            // The guest-memory buffers are unaligned, so use an aligned bounce buffer.
+            // The guest-memory buffers are unaligned, or lie in memory the
+            // host kernel cannot pin for direct I/O, so use an aligned bounce
+            // buffer.
             let mut buffer = OwnedIoBuffer::new(self.data_len(), alignment as usize)
                 .map_err(ExecuteError::TemporaryBufferAllocation)?;
 
@@ -498,6 +506,30 @@ impl Request {
         }
 
         Ok(true)
+    }
+
+    // A GPU's memory BAR is a PFN mapping, which the host kernel cannot pin
+    // for direct I/O, so a request with a buffer outside `pinnable` is bounced.
+    fn buffers_outside<B: Bitmap + 'static>(
+        &self,
+        pinnable: Option<&GuestMemoryAtomic<vm_memory::GuestMemoryMmap<B>>>,
+    ) -> bool {
+        let Some(pinnable) = pinnable else {
+            return false;
+        };
+        // Loaded only when a direct I/O request reaches this check.
+        let pinnable = pinnable.memory();
+        let outside = self
+            .data_descriptors
+            .iter()
+            .any(|(addr, len)| *len != 0 && !pinnable.check_range(*addr, *len as usize));
+        if outside && !BOUNCED_OUTSIDE_RAM.swap(true, Ordering::Relaxed) {
+            info!(
+                "virtio-blk: a direct I/O request has buffers outside guest RAM; such \
+                 requests are copied through a bounce buffer (reported once)"
+            );
+        }
+        outside
     }
 
     // Returns the sum of the lengths of `self.data_descriptors`.
@@ -710,7 +742,8 @@ mod tests {
                     writeback: true,
                     start: Instant::now(),
                 };
-                let result = request.build_data_operation(Arc::clone(&mem), offset, alignment, 1);
+                let result =
+                    request.build_data_operation(Arc::clone(&mem), offset, alignment, 1, None);
                 if offset < 0 {
                     assert!(matches!(
                         result,
@@ -743,7 +776,7 @@ mod tests {
                 start: Instant::now(),
             };
             let op = request
-                .build_data_operation(Arc::clone(&mem), 4096, Some(4096), 1)
+                .build_data_operation(Arc::clone(&mem), 4096, Some(4096), 1, None)
                 .unwrap();
             assert_eq!(op.offset(), 4096);
             assert_eq!(op.total_len(), 4096);
@@ -757,6 +790,59 @@ mod tests {
                 _ => panic!("Expected an owned bounce buffer"),
             }
         }
+    }
+
+    #[test]
+    fn buffers_outside_pinnable_memory_are_bounced() {
+        // Guest RAM at 0 and device memory at 0x10000, both in the virtio guest memory.
+        let virtio_memory = Arc::new(
+            GuestMemoryMmap::<()>::from_ranges(&[
+                (GuestAddress(0), 8192),
+                (GuestAddress(0x10000), 8192),
+            ])
+            .unwrap(),
+        );
+        let ram = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 8192)]).unwrap(),
+        );
+        virtio_memory
+            .write_slice(&vec![0x5a; 4096], GuestAddress(0x10000))
+            .unwrap();
+        let request = |request_type, addr| Request {
+            request_type,
+            sector: 8,
+            data_descriptors: SmallVec::from_slice(&[(GuestAddress(addr), 4096)]),
+            status_addr: GuestAddress(8191),
+            writeback: true,
+            start: Instant::now(),
+        };
+
+        // Without a pinnable map the aligned buffer is used in place.
+        let op = request(RequestType::In, 0x10000)
+            .build_data_operation(Arc::clone(&virtio_memory), 4096, Some(4096), 1, None)
+            .unwrap();
+        assert!(matches!(op, AsyncIoOperation::ReadToMemory { .. }));
+
+        // With one, a buffer outside it is bounced.
+        for request_type in [RequestType::In, RequestType::Out] {
+            let op = request(request_type, 0x10000)
+                .build_data_operation(Arc::clone(&virtio_memory), 4096, Some(4096), 1, Some(&ram))
+                .unwrap();
+            assert_eq!(op.total_len(), 4096);
+            match op {
+                AsyncIoOperation::WriteFromVec { buffer, .. } => {
+                    assert!(buffer.as_slice().iter().all(|byte| *byte == 0x5a));
+                }
+                AsyncIoOperation::ReadToVec { .. } => {}
+                _ => panic!("Expected an owned bounce buffer"),
+            }
+        }
+
+        // A buffer inside the pinnable map is used in place.
+        let op = request(RequestType::In, 4096)
+            .build_data_operation(Arc::clone(&virtio_memory), 4096, Some(4096), 1, Some(&ram))
+            .unwrap();
+        assert!(matches!(op, AsyncIoOperation::ReadToMemory { .. }));
     }
 
     #[test]
@@ -778,7 +864,7 @@ mod tests {
         let mut disk = RecordingAsyncIo::new();
 
         let Err(ExecuteError::BadRequest(Error::InvalidOffset)) =
-            request.execute_async(mem, 1024, &mut disk, &[], 0)
+            request.execute_async(mem, 1024, &mut disk, &[], 0, None)
         else {
             panic!("expected BadRequest(InvalidOffset)");
         };
@@ -811,7 +897,7 @@ mod tests {
         };
         let mut disk = RecordingAsyncIo::new();
         request
-            .execute_async(Arc::clone(&mem), 1024, &mut disk, &[], 0)
+            .execute_async(Arc::clone(&mem), 1024, &mut disk, &[], 0, None)
             .unwrap();
         let op = disk.submitted.pop().unwrap();
         assert!(matches!(op, AsyncIoOperation::ReadToMemory { .. }));

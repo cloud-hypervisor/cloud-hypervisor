@@ -37,6 +37,27 @@ macro_rules! basic_regular_guest {
     }};
 }
 
+fn check_direct_io_buffers(guest: &Guest, name: &str, script: &str, args: &str, placed: &str) {
+    guest
+        .ssh_command(&format!("cat << 'EOF' > {name}\n{script}\nEOF\n"))
+        .unwrap();
+    for size in [4096, 131072, 1048576] {
+        let output = guest
+            .ssh_command(&format!(
+                "sudo python3 {name} {args} {size} 16 /var/tmp/direct_io.dat 2>&1 || true"
+            ))
+            .unwrap();
+        assert!(
+            output.contains(placed),
+            "the buffer is not where expected ({placed}):\n{output}"
+        );
+        assert!(
+            output.lines().any(|line| line.starts_with("OK:")),
+            "direct I/O of {size} B:\n{output}"
+        );
+    }
+}
+
 mod common_parallel {
     use std::cell::Cell;
     use std::io::{self, SeekFrom};
@@ -2605,6 +2626,78 @@ mod common_parallel {
         let output = child.wait_with_output().unwrap();
 
         handle_child_output(r, &output);
+    }
+
+    fn virtio_pmem_direct_io_buffers(direct: bool) {
+        const PMEM_DIRECT_IO: &str = include_str!("common/pmem_direct_io.py");
+
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+
+        let pmem_temp_file = TempFile::new().unwrap();
+        pmem_temp_file.as_file().set_len(128 << 20).unwrap();
+
+        let mut command = GuestCommand::new(&guest);
+        command
+            .default_cpus()
+            .default_memory()
+            .default_kernel_cmdline();
+        if direct {
+            // As default_disks() does, with the root disk opened O_DIRECT.
+            command
+                .args([
+                    "--disk",
+                    format!(
+                        "path={},direct=on,image_type=raw",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                ])
+                .default_cloudinit_disk();
+        } else {
+            command.default_disks();
+        }
+        let mut child = command
+            .default_net()
+            .args([
+                "--pmem",
+                format!("file={}", pmem_temp_file.as_path().to_str().unwrap()).as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            check_direct_io_buffers(
+                &guest,
+                "pmem_direct_io.py",
+                PMEM_DIRECT_IO,
+                "",
+                "pmem buffer: yes",
+            );
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    // aarch64 only: the x86_64 ch_defconfig has no CONFIG_DEV_DAX.
+    #[test]
+    #[cfg(target_arch = "aarch64")]
+    #[ignore = "the aarch64 Graviton CI run is not yet reliable for these tests; run with --ignored"]
+    fn test_virtio_pmem_direct_io_buffers() {
+        virtio_pmem_direct_io_buffers(false);
+    }
+
+    #[test]
+    #[cfg(target_arch = "aarch64")]
+    #[ignore = "the aarch64 Graviton CI run is not yet reliable for these tests; run with --ignored"]
+    fn test_virtio_pmem_direct_io_buffers_direct_disk() {
+        virtio_pmem_direct_io_buffers(true);
     }
 
     #[test]
@@ -14363,6 +14456,124 @@ mod vfio {
     #[test]
     fn test_iommufd_nvidia_guest_numa_generic_initiator() {
         test_nvidia_guest_numa_generic_initiator_common(true);
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+mod vfio {
+    use std::time::Instant;
+
+    use crate::*;
+
+    const GRACE_GPU_DRIVER: &str = "nvgrace_gpu_vfio_pci";
+    const NVIDIA_IMAGE_NAME: &str = "noble-server-cloudimg-arm64-custom-nvidia-20261022-0.raw";
+
+    #[test]
+    #[ignore = "See #9139: needs a Grace GPU bound to nvgrace_gpu_vfio_pci and an image with the NVIDIA driver in ~/workloads; run with --ignored"]
+    fn test_nvidia_card_direct_io_from_gpu_memory() {
+        const GPU_MEMORY_DIRECT_IO: &str = include_str!("common/gpu_memory_direct_io.py");
+        // Memory-less Generic Initiator NUMA nodes the driver needs per GPU.
+        const GPU_NUMA_NODES: usize = 8;
+
+        let Some(device) = fs::read_dir("/sys/bus/pci/devices")
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|device| {
+                fs::read_link(device.join("driver")).is_ok_and(|driver| {
+                    driver
+                        .file_name()
+                        .is_some_and(|name| name == GRACE_GPU_DRIVER)
+                })
+            })
+            .min()
+        else {
+            println!("SKIPPED: no GPU is bound to {GRACE_GPU_DRIVER}");
+            return;
+        };
+
+        let guest = Guest::new(Box::new(UbuntuDiskConfig::new(
+            NVIDIA_IMAGE_NAME.to_string(),
+        )));
+        let mut command = GuestCommand::new(&guest);
+        command
+            .args(["--firmware", edk2_path().to_str().unwrap()])
+            // With 48 bits the GPU's memory BAR lands above the guest
+            // kernel's linear map.
+            .args(["--cpus", "boot=4,max_phys_bits=47"])
+            // vfio_p2p_dma=on: the GPU reaches its own memory through the SMMU.
+            .args([
+                "--platform",
+                "iommufd=on,vfio_p2p_dma=on,num_pci_segments=2",
+            ])
+            .args(["--memory", "size=0"])
+            .args(["--memory-zone", "id=mem0,size=4G"])
+            .args(["--numa", "guest_numa_id=0,cpus=[0-3],memory_zones=mem0"]);
+        for node in 1..=GPU_NUMA_NODES {
+            command.args(["--numa", &format!("guest_numa_id={node},device_id=gpu0")]);
+        }
+        // Behind the emulated SMMUv3 and at device 0 of its own segment,
+        // where the driver looks for the GPU's memory.
+        command.args([
+            "--device",
+            &format!(
+                "id=gpu0,path={},iommu=smmuv3,pci_segment=1,pci_device_id=0",
+                device.display()
+            ),
+        ]);
+        let mut child = command
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            // Persistence mode makes the driver online the GPU's memory; the
+            // driver probes the GPU for a while after boot.
+            let start = Instant::now();
+            let node = loop {
+                let status = guest
+                    .ssh_command(
+                        "sudo nvidia-smi -pm 1 > /dev/null 2>&1; \
+                         cat /proc/driver/nvidia/gpus/*/numa_status 2>&1 || true",
+                    )
+                    .unwrap_or_default();
+                let mut node = None;
+                let mut online = None;
+                for line in status.lines() {
+                    match line.split_whitespace().collect::<Vec<_>>()[..] {
+                        ["Node:", id] => node = id.parse::<u32>().ok(),
+                        ["Status:", "online"] => online = node,
+                        _ => {}
+                    }
+                }
+                if let Some(node) = online {
+                    break node;
+                }
+                assert!(
+                    start.elapsed() < Duration::from_secs(240),
+                    "GPU memory not online after {} s:\n{status}",
+                    start.elapsed().as_secs()
+                );
+                thread::sleep(Duration::from_secs(5));
+            };
+
+            check_direct_io_buffers(
+                &guest,
+                "gpu_memory_direct_io.py",
+                GPU_MEMORY_DIRECT_IO,
+                &node.to_string(),
+                &format!("is on node {node} (requested {node})"),
+            );
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
     }
 }
 

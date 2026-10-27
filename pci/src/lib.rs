@@ -38,7 +38,10 @@ pub use self::msix::{
     MSIX_CONFIG_ID, MSIX_TABLE_ENTRY_SIZE, MaybeMutInterruptSourceGroup, MsixCap, MsixConfig,
     MsixTableEntry,
 };
-pub use self::vfio::{MmioRegion, VfioDmaMapping, VfioPciDevice, VfioPciError};
+pub use self::vfio::{
+    MmioRegion, VfioDmaMapping, VfioPciDevice, VfioPciError, guest_memory_bars_for_driver,
+    vfio_device_sysfs_path,
+};
 pub use self::vfio_user::{VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError};
 
 #[cfg(target_arch = "x86_64")]

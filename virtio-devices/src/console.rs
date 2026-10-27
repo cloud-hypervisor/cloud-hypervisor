@@ -739,6 +739,10 @@ impl VirtioDevice for Console {
         self.common.device_type
     }
 
+    fn uses_virtio_guest_memory(&self) -> bool {
+        true
+    }
+
     fn queue_max_sizes(&self) -> &[u16] {
         &self.common.queue_sizes
     }
