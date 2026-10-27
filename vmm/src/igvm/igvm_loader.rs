@@ -221,7 +221,6 @@ fn import_parameter(
     Ok(())
 }
 
-///
 /// Extract guest policy from the IGVM initialization headers.
 #[cfg(feature = "sev_snp")]
 pub(crate) fn extract_guest_policy(igvm_file: &IgvmFile) -> Option<igvm_defs::SnpPolicy> {
@@ -235,9 +234,7 @@ pub(crate) fn extract_guest_policy(igvm_file: &IgvmFile) -> Option<igvm_defs::Sn
     None
 }
 
-///
 /// Extract sev_features from the boot CPU (vp_index 0) VMSA.
-///
 #[cfg(feature = "sev_snp")]
 pub(crate) fn extract_sev_features(igvm_file: &IgvmFile) -> u64 {
     for header in igvm_file.directives() {
@@ -250,7 +247,6 @@ pub(crate) fn extract_sev_features(igvm_file: &IgvmFile) -> u64 {
     0
 }
 
-///
 /// Load the given IGVM file to guest memory.
 /// Right now it only supports SNP based isolation.
 /// We can boot legacy VM with an igvm file without
