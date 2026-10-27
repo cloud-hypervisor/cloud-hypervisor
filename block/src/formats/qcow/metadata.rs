@@ -951,18 +951,7 @@ impl QcowState {
 
         let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
         self.reject_invalid_cluster_offset(cluster_addr)?;
-        let refcount = self
-            .refcounts
-            .get_cluster_refcount(&mut self.raw_file, cluster_addr)
-            .map_err(|e| {
-                if matches!(e, refcount::Error::RefblockUnaligned(_)) {
-                    self.set_corrupt_bit_best_effort();
-                }
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("failed to get cluster refcount: {e}"),
-                )
-            })?;
+        let refcount = self.cluster_refcount(cluster_addr)?;
         if refcount == 0 {
             return Err(io::Error::from_raw_os_error(EINVAL));
         }
@@ -985,6 +974,20 @@ impl QcowState {
             self.l2_cache.get_mut(l1_index).unwrap()[l2_index] = dealloc_entry;
         }
         Ok(None)
+    }
+
+    fn cluster_refcount(&mut self, cluster_addr: u64) -> io::Result<u64> {
+        self.refcounts
+            .get_cluster_refcount(&mut self.raw_file, cluster_addr)
+            .map_err(|e| {
+                if matches!(e, refcount::Error::RefblockUnaligned(_)) {
+                    self.set_corrupt_bit_best_effort();
+                }
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("failed to get cluster refcount: {e}"),
+                )
+            })
     }
 
     /// Sets refcount for a cluster, tracking any newly freed clusters.
@@ -1148,18 +1151,7 @@ impl QcowState {
         // Decrement refcount for each cluster spanned by the compressed data
         let mut addr = self.raw_file.cluster_address(compressed_addr);
         while addr < compressed_clusters_end {
-            let refcount = self
-                .refcounts
-                .get_cluster_refcount(&mut self.raw_file, addr)
-                .map_err(|e| {
-                    if matches!(e, refcount::Error::RefblockUnaligned(_)) {
-                        self.set_corrupt_bit_best_effort();
-                    }
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("failed to get cluster refcount: {e}"),
-                    )
-                })?;
+            let refcount = self.cluster_refcount(addr)?;
             if refcount > 0 {
                 self.set_cluster_refcount_track_freed(addr, refcount - 1)?;
             }
