@@ -9893,6 +9893,150 @@ mod ivshmem {
         );
     }
 
+    // Takes and restores linked snapshots of a VM restored copy-on-write
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_restore_linked() {
+        use std::os::unix::fs::MetadataExt;
+
+        use vmm::memory_manager::{SNAPSHOT_BASE_FILENAME, SNAPSHOT_DIFF_FILENAME};
+
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let api_socket = |n: u32| format!("{}.{n}", temp_api_path(&guest.tmp_dir));
+        let template_dir = temp_snapshot_dir_path(&guest.tmp_dir);
+        let new_dir = |name: &str| {
+            let dir = guest.tmp_dir.as_path().join(name);
+            fs::create_dir(&dir).unwrap();
+            String::from(dir.to_str().unwrap())
+        };
+        let linked_dir = new_dir("linked");
+        let linked_dir2 = new_dir("linked2");
+
+        let restore = |api_socket: &str, dir: &str, mode: &str| {
+            GuestCommand::new(&guest)
+                .args(["--api-socket", api_socket])
+                .args([
+                    "--restore",
+                    format!("source_url=file://{dir},memory_restore_mode={mode}").as_str(),
+                ])
+                .capture_output()
+                .spawn()
+                .unwrap()
+        };
+        let resume = |api_socket: &str| {
+            assert!(wait_until(Duration::from_secs(30), || remote_command(
+                api_socket, "info", None
+            )));
+            assert!(remote_command(api_socket, "resume", None));
+            guest.wait_for_ssh(Duration::from_secs(30)).unwrap();
+        };
+        let checksum = || {
+            guest
+                .ssh_command("md5sum /dev/shm/data")
+                .unwrap()
+                .trim()
+                .to_string()
+        };
+        let linked_snapshot = |api_socket: &str, dir: &str| {
+            assert!(remote_command(api_socket, "pause", None));
+            let output = Command::new(clh_command("ch-remote"))
+                .arg(format!("--api-socket={api_socket}"))
+                .args(["snapshot", "--memory-base", "link"])
+                .arg(format!("file://{dir}"))
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "linked snapshot failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+
+            // No full memory file means the snapshot did not fall back to a full one
+            let template = fs::metadata(format!("{template_dir}/{SNAPSHOT_FILENAME}")).unwrap();
+            let base = fs::metadata(format!("{dir}/{SNAPSHOT_BASE_FILENAME}")).unwrap();
+            assert_eq!(base.ino(), template.ino());
+            assert!(!Path::new(&format!("{dir}/{SNAPSHOT_FILENAME}")).exists());
+
+            let diff = fs::metadata(format!("{dir}/{SNAPSHOT_DIFF_FILENAME}")).unwrap();
+            assert!(diff.len() >= 64 << 20, "diff is {} bytes", diff.len());
+            assert!(diff.len() < 512 << 20, "diff is {} bytes", diff.len());
+        };
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket(1)])
+            .args(["--cpus", "boot=2"])
+            .args(["--memory", "size=1G"])
+            .default_kernel_cmdline()
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+            assert!(remote_command(&api_socket(1), "pause", None));
+            assert!(remote_command(
+                &api_socket(1),
+                "snapshot",
+                Some(format!("file://{template_dir}").as_str()),
+            ));
+        });
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        let mut child = restore(&api_socket(2), &template_dir, "copyonwrite");
+        let r = panic::catch_unwind(|| {
+            resume(&api_socket(2));
+            guest
+                .ssh_command("head -c 64M /dev/urandom > /dev/shm/data")
+                .unwrap();
+            let sum = checksum();
+            assert!(sum.ends_with("/dev/shm/data"), "md5sum printed {sum:?}");
+            linked_snapshot(&api_socket(2), &linked_dir);
+            sum
+        });
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        let sum = r.as_ref().cloned().unwrap_or_default();
+        handle_child_output(r.map(drop), &output);
+
+        let mut child = restore(&api_socket(3), &linked_dir, "copyonwrite");
+        let pid = child.id();
+        let r = panic::catch_unwind(|| {
+            resume(&api_socket(3));
+            let maps = fs::read_to_string(format!("/proc/{pid}/maps")).unwrap();
+            assert!(maps.contains(&format!("{linked_dir}/{SNAPSHOT_BASE_FILENAME}")));
+            assert_eq!(checksum(), sum);
+            linked_snapshot(&api_socket(3), &linked_dir2);
+        });
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        let mut child = restore(&api_socket(4), &linked_dir2, "ondemand");
+        let status = child.wait_timeout(Duration::from_secs(10)).unwrap();
+        if status.is_none() {
+            kill_child(&mut child);
+        }
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            status.is_some_and(|s| !s.success()),
+            "ondemand restore of a linked snapshot did not fail"
+        );
+        assert!(String::from_utf8_lossy(&output.stderr).contains("SnapshotDiffOnDemand"));
+
+        let mut child = restore(&api_socket(5), &linked_dir2, "copy");
+        let r = panic::catch_unwind(|| {
+            resume(&api_socket(5));
+            assert_eq!(checksum(), sum);
+        });
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+    }
+
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_check_guest_time() {
