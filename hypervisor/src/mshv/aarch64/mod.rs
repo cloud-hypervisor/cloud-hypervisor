@@ -6,9 +6,7 @@ pub mod emulator;
 pub mod gic;
 use std::fmt;
 
-///
 /// Export generically-named wrappers of mshv_bindings for Unix-based platforms
-///
 pub use mshv_bindings::StandardRegisters as MshvStandardRegisters;
 use serde::{Deserialize, Serialize};
 

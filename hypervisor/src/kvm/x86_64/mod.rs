@@ -15,9 +15,7 @@ use kvm_bindings::nested::KvmNestedStateBuffer;
 use kvm_ioctls::VmFd;
 use serde::{Deserialize, Serialize};
 use vmm_sys_util::fam;
-///
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
-///
 pub use {
     kvm_bindings::CpuId, kvm_bindings::KVM_CPUID_FLAG_SIGNIFCANT_INDEX, kvm_bindings::MsrList,
     kvm_bindings::Msrs as MsrEntries, kvm_bindings::Xsave as xsave2,
@@ -45,9 +43,7 @@ macro_rules! check_extension {
     };
 }
 
-///
 /// Check KVM extension for Linux
-///
 pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
     // DeviceCtrl, EnableCap, and SetGuestDebug are also required, but some kernels have
     // the features implemented without the capability flags.
