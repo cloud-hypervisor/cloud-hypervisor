@@ -21,6 +21,7 @@ use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{self, IsTerminal, Seek, SeekFrom, stdout};
 use std::num::Wrapping;
+use std::os::fd::BorrowedFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 #[cfg(not(target_arch = "riscv64"))]
@@ -99,7 +100,8 @@ use net_util::MacAddr;
 use pci::{
     DeviceRelocation, MmioRegion, PasidCap, PciBarConfiguration, PciBarRegionType, PciBdf,
     PciDevice, PciExpressCapability, VfioDmaMapping, VfioPciDevice, VfioUserDmaMapping,
-    VfioUserPciDevice, VfioUserPciDeviceError,
+    VfioUserPciDevice, VfioUserPciDeviceError, guest_memory_bars_for_driver,
+    vfio_device_sysfs_path,
 };
 use rate_limiter::group;
 use rate_limiter::group::RateLimiterGroup;
@@ -4574,15 +4576,50 @@ impl DeviceManager {
             .is_none_or(|p| p.vfio_p2p_dma)
             && device_cfg.pci_common.iommu != IommuType::Virtio;
 
-        let (memory_slot_allocator, guest_memory) = {
+        let (memory_slot_allocator, guest_memory, virtio_guest_memory) = {
             let mut mm = memory_manager.lock().unwrap();
-            (mm.memory_slot_allocator(), mm.guest_memory())
+            (
+                mm.memory_slot_allocator(),
+                mm.guest_memory(),
+                mm.virtio_guest_memory(),
+            )
         };
 
         let extended_caps = pasid_cap
             .into_iter()
             .map(|cap| Arc::new(cap) as Arc<dyn PciExpressCapability + Send + Sync>)
             .collect();
+
+        let sysfs_path = match (&device_cfg.path, device_cfg.fd) {
+            (Some(path), _) => Some(path.clone()),
+            (None, Some(fd)) => {
+                // SAFETY: fd is open: create_vfio_device_from_fd() dup'd it
+                // and added it to preserved_fds, which keep it open until the
+                // device is removed; it is only borrowed for this call.
+                let device_fd = unsafe { BorrowedFd::borrow_raw(fd) };
+                let sysfs_path = vfio_device_sysfs_path(device_fd);
+                if sysfs_path.is_none() {
+                    warn!(
+                        "{vfio_name}: no sysfs directory found behind fd {fd}, so none of its \
+                         BARs joins the virtio guest memory"
+                    );
+                }
+                sysfs_path
+            }
+            (None, None) => None,
+        };
+        let (excluded, guest_memory_bars): (Vec<u8>, Vec<u8>) = sysfs_path
+            .as_deref()
+            .map(guest_memory_bars_for_driver)
+            .unwrap_or_default()
+            .into_iter()
+            .partition(|bar| device_cfg.x_exclude_mmap_bars.contains(&u64::from(*bar)));
+        for bar in excluded {
+            warn!(
+                "{vfio_name}: BAR {bar} holds memory the guest uses as RAM but is excluded \
+                 from mmap, so it stays out of the virtio guest memory"
+            );
+        }
 
         let vfio_pci_device = VfioPciDevice::new(
             vfio_name.clone(),
@@ -4604,8 +4641,8 @@ impl DeviceManager {
                 .iter()
                 .map(|bar| *bar as u8)
                 .collect(),
-            Vec::new(),
-            None,
+            guest_memory_bars.clone(),
+            (!guest_memory_bars.is_empty()).then_some(virtio_guest_memory),
             device_path,
             extended_caps,
         )

@@ -195,6 +195,21 @@ mmio address space is available for use by devices on PCI segment 1.
 --pci-segment pci_segment=1,mmio32_aperture_weight=1
 ```
 
+### NVIDIA Grace GPU memory
+
+An NVIDIA Grace GPU bound to `nvgrace_gpu_vfio_pci` exposes its memory as BAR 4,
+and the guest driver onlines that memory as a NUMA node, so the guest can hand
+virtio devices buffers that live there.  The VMM therefore lets the virtio
+devices it emulates reach that memory as if it were guest RAM.
+
+There is no option for this.  `cloud-hypervisor` checks that the device is
+bound to `nvgrace_gpu_vfio_pci` and adds its BAR 4 to the memory the virtio
+devices can reach.  A BAR excluded with `x_exclude_mmap_bars` stays out of it.
+
+The BAR is mapped a second time for this; on a host with 4 KiB pages that is
+about 2 MiB of page tables per GiB of GPU memory, a sixteenth of that with
+64 KiB pages.
+
 ## Snapshot and Restore of VFIO Devices
 
 Cloud Hypervisor supports snapshotting and restoring VFIO devices that advertise

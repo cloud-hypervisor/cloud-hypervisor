@@ -5,10 +5,11 @@
 
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
-use std::fs::File;
+use std::fs::{self, File};
 use std::os::fd::BorrowedFd;
+use std::os::unix::fs::MetadataExt;
 use std::os::unix::io::AsRawFd;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result};
 
@@ -3055,16 +3056,73 @@ where
     }
 }
 
+/// The vfio-pci variant driver of an NVIDIA Grace GPU. It exposes the GPU's
+/// memory, which the guest driver onlines as a NUMA node, as this BAR.
+const GRACE_GPU_VFIO_DRIVER: &str = "nvgrace_gpu_vfio_pci";
+const GRACE_GPU_MEMORY_BAR: u8 = 4;
+
+pub fn vfio_device_sysfs_path(fd: BorrowedFd<'_>) -> Option<PathBuf> {
+    let rdev = File::from(fd.try_clone_to_owned().ok()?)
+        .metadata()
+        .ok()?
+        .rdev();
+    let class_device = format!(
+        "/sys/dev/char/{}:{}/device",
+        libc::major(rdev),
+        libc::minor(rdev)
+    );
+    fs::canonicalize(class_device).ok()
+}
+
+pub fn guest_memory_bars_for_driver(sysfs_path: &Path) -> Vec<u8> {
+    let driver = fs::read_link(sysfs_path.join("driver"))
+        .ok()
+        .and_then(|link| {
+            link.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        });
+    if driver.as_deref() == Some(GRACE_GPU_VFIO_DRIVER) {
+        vec![GRACE_GPU_MEMORY_BAR]
+    } else {
+        Vec::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::env::temp_dir;
     use std::os::fd::AsFd;
+    use std::os::unix::fs::symlink;
     use std::sync::Mutex;
 
+    use vmm_sys_util::tempdir::TempDir;
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
     use crate::PasidCap;
+
+    #[test]
+    fn grace_gpu_memory_bar_is_a_guest_memory_bar() {
+        let dir = TempDir::new_with_prefix(temp_dir().join("vfio-driver-link")).unwrap();
+        let link = dir.as_path().join("driver");
+        // No driver link, another driver, a near miss, then the Grace GPU driver.
+        assert!(guest_memory_bars_for_driver(dir.as_path()).is_empty());
+        symlink("../../../bus/pci/drivers/vfio-pci", &link).unwrap();
+        assert!(guest_memory_bars_for_driver(dir.as_path()).is_empty());
+        fs::remove_file(&link).unwrap();
+        symlink("../../../bus/pci/drivers/nvgrace_gpu_vfio_pci_foo", &link).unwrap();
+        assert!(guest_memory_bars_for_driver(dir.as_path()).is_empty());
+        fs::remove_file(&link).unwrap();
+        symlink("../../../bus/pci/drivers/nvgrace_gpu_vfio_pci", &link).unwrap();
+        assert_eq!(guest_memory_bars_for_driver(dir.as_path()), vec![4]);
+    }
+
+    #[test]
+    fn a_regular_file_has_no_sysfs_path() {
+        // A regular file has no device number behind it.
+        let file = TempFile::new().unwrap();
+        assert_eq!(vfio_device_sysfs_path(file.as_file().as_fd()), None);
+    }
 
     fn sparse_mmio_regions() -> Vec<MmioRegion> {
         let page_size = get_page_size();
