@@ -45,7 +45,6 @@ const PTM_CAP_SET_DATAFD: u64 = 1 << 12;
 const PTM_CAP_SET_BUFFERSIZE: u64 = 1 << 13;
 
 ///Check if the input command is selftest
-///
 pub fn is_selftest(input: &[u8]) -> bool {
     if input.len() >= TPM_REQ_HDR_SIZE {
         let ordinal: &[u8; 4] = input[6..6 + 4]
@@ -98,7 +97,6 @@ impl Emulator {
     /// # Arguments
     ///
     /// * `path` - A path to the Unix Domain Socket swtpm is listening on
-    ///
     pub fn new(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         if !path.exists() {
@@ -175,7 +173,6 @@ impl Emulator {
     }
 
     /// Gather TPM Capabilities and cache them in Emulator
-    ///
     fn probe_caps(&mut self) -> Result<()> {
         let mut caps: u64 = 0;
         self.run_control_cmd(Commands::CmdGetCapability, &mut caps, 0, size_of::<u64>())?;
@@ -198,14 +195,12 @@ impl Emulator {
         (self.caps & caps) == caps
     }
 
-    ///
     /// # Arguments
     ///
     /// * `cmd` - Control Command to run
     /// * `msg` - Optional msg to be sent along with Control Command
     /// * `msg_len_in` - len of 'msg' in bytes, if passed
     /// * `msg_len_out` - length of expected output from Control Command in bytes
-    ///
     fn run_control_cmd(
         &mut self,
         cmd: Commands,
