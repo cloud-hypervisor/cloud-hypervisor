@@ -2978,6 +2978,12 @@ impl DeviceManager {
             )
             .map_err(DeviceManagerError::CreateVirtioBlock)?;
 
+            // Only a disk opened with O_DIRECT pins its buffers.
+            if disk_cfg.direct {
+                virtio_block
+                    .set_pinnable_memory(self.memory_manager.lock().unwrap().guest_memory());
+            }
+
             // We lock the file here only for hotplugging. In normal operation,
             // state save/resume, and live-migration, locking is part of the outer control flow
             // to ensure proper order of (un)locking.

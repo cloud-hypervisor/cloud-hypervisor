@@ -169,6 +169,8 @@ struct BlockEpollHandler {
     queue_index: u16,
     queue: Queue,
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    // Guest RAM only, to tell which buffers the host kernel can pin for direct I/O.
+    pinnable_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     disk_image: Box<dyn AsyncIo>,
     disk_nsectors: Arc<AtomicU64>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
@@ -342,6 +344,7 @@ impl BlockEpollHandler {
                 self.disk_image.as_mut(),
                 &self.serial,
                 desc_chain.head_index() as u64,
+                self.pinnable_memory.as_ref(),
             );
 
             if let Ok(ExecuteAsync {
@@ -757,6 +760,7 @@ pub struct Block {
     serial: Box<[u8]>,
     queue_affinity: BTreeMap<u16, Box<[usize]>>,
     lock_granularity_choice: LockGranularityChoice,
+    pinnable_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     device_status: Arc<AtomicU8>,
     active_request_count: Arc<AtomicUsize>,
     draining_active_requests: Arc<AtomicBool>,
@@ -922,11 +926,16 @@ impl Block {
             exit_evt,
             serial,
             queue_affinity,
+            pinnable_memory: None,
             lock_granularity_choice: lock_granularity,
             device_status: Arc::new(AtomicU8::new(0)),
             active_request_count: Arc::new(AtomicUsize::new(0)),
             draining_active_requests: Arc::new(AtomicBool::new(false)),
         })
+    }
+
+    pub fn set_pinnable_memory(&mut self, memory: GuestMemoryAtomic<GuestMemoryMmap>) {
+        self.pinnable_memory = Some(memory);
     }
 
     fn wait_for_active_requests(&self) -> result::Result<(), anyhow::Error> {
@@ -1183,6 +1192,7 @@ impl VirtioDevice for Block {
                 queue_index: queue_idx,
                 queue,
                 mem: mem.clone(),
+                pinnable_memory: self.pinnable_memory.clone(),
                 disk_image: self
                     .disk_image
                     .create_async_io(queue_size as u32)
@@ -1481,6 +1491,7 @@ mod tests {
             queue_index: 0,
             queue: vq.create_queue(),
             mem: GuestMemoryAtomic::new(mem.clone()),
+            pinnable_memory: None,
             disk_image: Box::new(Noop(evt())),
             disk_nsectors: Arc::new(AtomicU64::new(0)),
             interrupt_cb: Arc::new(Noop(evt())),
