@@ -565,6 +565,8 @@ impl QcowState {
 
         let l2_entry = self.l2_cache.get(l1_index).unwrap()[l2_index];
         let cluster_addr = if l2_entry_is_compressed(l2_entry) {
+            // Compressed cluster: decompress into a new cluster, then free the old data
+
             let decompressed_cluster = self.decompress_l2_cluster(l2_entry)?;
             let cluster_addr = self.append_data_cluster(None)?;
             let nwritten = match self
@@ -586,7 +588,33 @@ impl QcowState {
             self.update_cluster_addr(l1_index, l2_index, cluster_addr)?;
             self.deallocate_compressed_cluster(l2_entry)?;
             cluster_addr
+        } else if l2_entry_is_zero(l2_entry) && l2_entry_std_cluster_addr(l2_entry) != 0 {
+            // Preallocated zero cluster: zero and reuse it if this entry is its
+            // only reference, otherwise write into a new cluster
+
+            let old_addr = l2_entry_std_cluster_addr(l2_entry);
+            self.reject_invalid_cluster_offset(old_addr)?;
+            match self.cluster_refcount(old_addr)? {
+                1 => {
+                    self.raw_file.zero_cluster(old_addr)?;
+                    self.l2_cache.get_mut(l1_index).unwrap()[l2_index] =
+                        l2_entry_make_std(old_addr);
+                    old_addr
+                }
+                refcount => {
+                    // Shared (e.g. with a snapshot) or not accounted for at
+                    // all: write into a new cluster and drop this reference.
+                    let cluster_addr = self.append_zeroed_data_cluster()?;
+                    self.update_cluster_addr(l1_index, l2_index, cluster_addr)?;
+                    if refcount > 1 {
+                        self.set_cluster_refcount_track_freed(old_addr, refcount - 1)?;
+                    }
+                    cluster_addr
+                }
+            }
         } else if l2_entry_is_empty(l2_entry) || l2_entry_is_zero(l2_entry) {
+            // Unallocated or plain zero cluster: allocate a new one
+
             let cluster_addr = if l2_entry_is_zero(l2_entry) {
                 self.append_zeroed_data_cluster()?
             } else {
@@ -595,6 +623,9 @@ impl QcowState {
             self.update_cluster_addr(l1_index, l2_index, cluster_addr)?;
             cluster_addr
         } else {
+            // Allocated cluster: write in place. Its refcount is 1, as writable
+            // images with internal snapshots are rejected.
+
             let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
             self.reject_invalid_cluster_offset(cluster_addr)?;
             cluster_addr
@@ -1681,6 +1712,55 @@ mod tests {
             refcounts.get_cluster_refcount(raw_file, live_l2).unwrap()
         };
         assert_eq!(refcount, 1);
+    }
+
+    // A non-sparse deallocation keeps the host cluster in a zero entry. The
+    // next write may reuse that cluster only if the entry is its only
+    // reference.
+    #[test]
+    fn write_to_preallocated_zero_cluster_respects_refcount() {
+        use std::os::unix::fs::FileExt;
+
+        let cluster_size: u64 = 1 << 16;
+        // (refcount of the old cluster, reused in place, its refcount after the write)
+        for (refcount, reused, old_refcount) in [(0, false, 0), (1, true, 1), (2, false, 1)] {
+            // Boring setup: a zero entry that keeps its old host cluster, which
+            // gets the refcount under test.
+            let temp = super::super::QcowTempDisk::new(4 * cluster_size, None, false, true, false)
+                .unwrap()
+                .into_tempfile();
+            let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+            let (mut inner, _backing, _sparse) =
+                super::super::parser::parse_qcow(raw, 0, true).unwrap();
+            let read_cluster = |addr| {
+                let mut buf = vec![0; cluster_size as usize];
+                temp.as_file().read_exact_at(&mut buf, addr).unwrap();
+                buf
+            };
+            let super::ClusterWriteMapping::Allocated { offset: old } =
+                inner.map_write(0, None).unwrap();
+            temp.as_file()
+                .write_all_at(&vec![0xa5; cluster_size as usize], old)
+                .unwrap();
+            // Without sparse, the zero entry keeps the host cluster
+            inner.deallocate_cluster(0, false, false).unwrap();
+            inner.set_cluster_refcount(old, refcount).unwrap();
+
+            // The interesting part: rewrite the zeroed guest cluster.
+            let super::ClusterWriteMapping::Allocated { offset } =
+                inner.map_write(0, None).unwrap();
+            // Only the sole owner may write in place
+            assert_eq!(offset == old, reused, "refcount {refcount}");
+            // A shared cluster loses this reference, an uncounted one stays 0
+            assert_eq!(inner.cluster_refcount(old).unwrap(), old_refcount);
+            // The guest must read zeroes, not the old data
+            assert!(read_cluster(offset).iter().all(|&b| b == 0));
+            if !reused {
+                assert_eq!(inner.cluster_refcount(offset).unwrap(), 1);
+                // The other owner of the old cluster keeps its data
+                assert!(read_cluster(old).iter().all(|&b| b == 0xa5));
+            }
+        }
     }
 
     // Allocate past the refcount limit of the virtual size, then reopen after
