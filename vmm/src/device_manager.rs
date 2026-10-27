@@ -3588,6 +3588,17 @@ impl DeviceManager {
             mergeable: false,
         };
 
+        // The guest may online this memory as RAM and hand virtio devices
+        // buffers that live in it.
+        self.memory_manager
+            .lock()
+            .unwrap()
+            .add_virtio_guest_memory_region(Arc::clone(&mapping.mapping), mapping.addr)
+            .map_err(DeviceManagerError::MemoryManager)?;
+        debug!(
+            "virtio-pmem region at 0x{region_base:x} (size 0x{region_size:x}) added to the virtio guest memory"
+        );
+
         let virtio_pmem_device = Arc::new(Mutex::new(
             virtio_devices::Pmem::new(
                 id.clone(),
@@ -5825,7 +5836,29 @@ impl DeviceManager {
 
         // Shutdown and remove the underlying virtio-device if present
         if let Some(virtio_device) = virtio_device {
+            // Only virtio-pmem adds its mapping to the virtio guest memory
+            // (see make_virtio_pmem_device()).
+            let is_pmem =
+                virtio_device.lock().unwrap().device_type() == VirtioDeviceType::Pmem as u32;
             for mapping in virtio_device.lock().unwrap().userspace_mappings() {
+                if is_pmem
+                    && let Err(e) = self
+                        .memory_manager
+                        .lock()
+                        .unwrap()
+                        .remove_virtio_guest_memory_region(
+                            mapping.addr,
+                            mapping.mapping.size() as u64,
+                        )
+                {
+                    // Keep removing the device; the mapping stays alive
+                    // for as long as a snapshot of the virtio guest memory
+                    // refers to it.
+                    error!(
+                        "Could not remove the virtio-pmem region at 0x{:x} from the virtio guest memory: {e}",
+                        mapping.addr.0
+                    );
+                }
                 // SAFETY: userspace_mappings only has valid mappings.
                 // TODO: do not rely on the correctness of all the code in this file
                 // for this to hold.
