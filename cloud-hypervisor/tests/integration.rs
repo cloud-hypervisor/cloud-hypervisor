@@ -37,6 +37,27 @@ macro_rules! basic_regular_guest {
     }};
 }
 
+fn check_direct_io_buffers(guest: &Guest, name: &str, script: &str, args: &str, placed: &str) {
+    guest
+        .ssh_command(&format!("cat << 'EOF' > {name}\n{script}\nEOF\n"))
+        .unwrap();
+    for size in [4096, 131072, 1048576] {
+        let output = guest
+            .ssh_command(&format!(
+                "sudo python3 {name} {args} {size} 16 /var/tmp/direct_io.dat 2>&1 || true"
+            ))
+            .unwrap();
+        assert!(
+            output.contains(placed),
+            "the buffer is not where expected ({placed}):\n{output}"
+        );
+        assert!(
+            output.lines().any(|line| line.starts_with("OK:")),
+            "direct I/O of {size} B:\n{output}"
+        );
+    }
+}
+
 mod common_parallel {
     use std::cell::Cell;
     use std::io::{self, SeekFrom};
@@ -14363,6 +14384,124 @@ mod vfio {
     #[test]
     fn test_iommufd_nvidia_guest_numa_generic_initiator() {
         test_nvidia_guest_numa_generic_initiator_common(true);
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+mod vfio {
+    use std::time::Instant;
+
+    use crate::*;
+
+    const GRACE_GPU_DRIVER: &str = "nvgrace_gpu_vfio_pci";
+    const NVIDIA_IMAGE_NAME: &str = "noble-server-cloudimg-arm64-custom-nvidia-20261022-0.raw";
+
+    #[test]
+    #[ignore = "See #9139: needs a Grace GPU bound to nvgrace_gpu_vfio_pci and an image with the NVIDIA driver in ~/workloads; run with --ignored"]
+    fn test_nvidia_card_direct_io_from_gpu_memory() {
+        const GPU_MEMORY_DIRECT_IO: &str = include_str!("common/gpu_memory_direct_io.py");
+        // Memory-less Generic Initiator NUMA nodes the driver needs per GPU.
+        const GPU_NUMA_NODES: usize = 8;
+
+        let Some(device) = fs::read_dir("/sys/bus/pci/devices")
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|device| {
+                fs::read_link(device.join("driver")).is_ok_and(|driver| {
+                    driver
+                        .file_name()
+                        .is_some_and(|name| name == GRACE_GPU_DRIVER)
+                })
+            })
+            .min()
+        else {
+            println!("SKIPPED: no GPU is bound to {GRACE_GPU_DRIVER}");
+            return;
+        };
+
+        let guest = Guest::new(Box::new(UbuntuDiskConfig::new(
+            NVIDIA_IMAGE_NAME.to_string(),
+        )));
+        let mut command = GuestCommand::new(&guest);
+        command
+            .args(["--firmware", edk2_path().to_str().unwrap()])
+            // With 48 bits the GPU's memory BAR lands above the guest
+            // kernel's linear map.
+            .args(["--cpus", "boot=4,max_phys_bits=47"])
+            // vfio_p2p_dma=on: the GPU reaches its own memory through the SMMU.
+            .args([
+                "--platform",
+                "iommufd=on,vfio_p2p_dma=on,num_pci_segments=2",
+            ])
+            .args(["--memory", "size=0"])
+            .args(["--memory-zone", "id=mem0,size=4G"])
+            .args(["--numa", "guest_numa_id=0,cpus=[0-3],memory_zones=mem0"]);
+        for node in 1..=GPU_NUMA_NODES {
+            command.args(["--numa", &format!("guest_numa_id={node},device_id=gpu0")]);
+        }
+        // Behind the emulated SMMUv3 and at device 0 of its own segment,
+        // where the driver looks for the GPU's memory.
+        command.args([
+            "--device",
+            &format!(
+                "id=gpu0,path={},iommu=smmuv3,pci_segment=1,pci_device_id=0",
+                device.display()
+            ),
+        ]);
+        let mut child = command
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            // Persistence mode makes the driver online the GPU's memory; the
+            // driver probes the GPU for a while after boot.
+            let start = Instant::now();
+            let node = loop {
+                let status = guest
+                    .ssh_command(
+                        "sudo nvidia-smi -pm 1 > /dev/null 2>&1; \
+                         cat /proc/driver/nvidia/gpus/*/numa_status 2>&1 || true",
+                    )
+                    .unwrap_or_default();
+                let mut node = None;
+                let mut online = None;
+                for line in status.lines() {
+                    match line.split_whitespace().collect::<Vec<_>>()[..] {
+                        ["Node:", id] => node = id.parse::<u32>().ok(),
+                        ["Status:", "online"] => online = node,
+                        _ => {}
+                    }
+                }
+                if let Some(node) = online {
+                    break node;
+                }
+                assert!(
+                    start.elapsed() < Duration::from_secs(240),
+                    "GPU memory not online after {} s:\n{status}",
+                    start.elapsed().as_secs()
+                );
+                thread::sleep(Duration::from_secs(5));
+            };
+
+            check_direct_io_buffers(
+                &guest,
+                "gpu_memory_direct_io.py",
+                GPU_MEMORY_DIRECT_IO,
+                &node.to_string(),
+                &format!("is on node {node} (requested {node})"),
+            );
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
     }
 }
 
