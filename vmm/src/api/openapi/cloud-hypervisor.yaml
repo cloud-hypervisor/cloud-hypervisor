@@ -1501,7 +1501,26 @@ components:
 
     ConsoleMode:
       type: string
-      enum: ["Off", "Pty", "Tty", "File", "Socket", "Null"]
+      enum: ["Off", "Pty", "Tty", "File", "Socket", "Tcp", "Null"]
+
+    TcpConsoleConfig:
+      required:
+        - address
+      type: object
+      additionalProperties: false
+      properties:
+        address:
+          type: string
+          description: |
+            Loopback IPv4 or IPv6 literal and a nonzero port.
+            IPv6 addresses must be enclosed in brackets.
+            Hostnames are not accepted.
+          example: "127.0.0.1:4444"
+        server:
+          type: boolean
+          default: true
+          enum: [true]
+          description: Only server mode is supported.
 
     ConsoleConfig:
       required:
@@ -1512,6 +1531,8 @@ components:
           type: string
         socket:
           type: string
+        tcp:
+          $ref: "#/components/schemas/TcpConsoleConfig"
         mode:
           $ref: "#/components/schemas/ConsoleMode"
         iommu:
@@ -1534,6 +1555,8 @@ components:
           type: string
         socket:
           type: string
+        tcp:
+          $ref: "#/components/schemas/TcpConsoleConfig"
         mode:
           $ref: "#/components/schemas/ConsoleMode"
 
