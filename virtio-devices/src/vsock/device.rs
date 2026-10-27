@@ -435,6 +435,10 @@ where
         self.common.device_type
     }
 
+    fn uses_virtio_guest_memory(&self) -> bool {
+        true
+    }
+
     fn queue_max_sizes(&self) -> &[u16] {
         &self.common.queue_sizes
     }
@@ -563,6 +567,12 @@ mod tests {
     use super::super::*;
     use super::*;
     use crate::ActivateError;
+
+    #[test]
+    fn vsock_uses_the_virtio_guest_memory() {
+        let ctx = TestContext::new();
+        assert!(ctx.device.uses_virtio_guest_memory());
+    }
 
     #[test]
     fn test_virtio_device() {

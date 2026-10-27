@@ -4949,7 +4949,11 @@ impl DeviceManager {
             ))));
         }
 
-        let memory = self.memory_manager.lock().unwrap().guest_memory();
+        let memory = if virtio_device.lock().unwrap().uses_virtio_guest_memory() {
+            self.memory_manager.lock().unwrap().virtio_guest_memory()
+        } else {
+            self.memory_manager.lock().unwrap().guest_memory()
+        };
 
         // Map DMA ranges if a DMA handler is available and if the device is
         // not attached to a virtual IOMMU.

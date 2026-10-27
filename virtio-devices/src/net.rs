@@ -836,6 +836,10 @@ impl VirtioDevice for Net {
         self.common.device_type
     }
 
+    fn uses_virtio_guest_memory(&self) -> bool {
+        true
+    }
+
     fn queue_max_sizes(&self) -> &[u16] {
         &self.common.queue_sizes
     }
@@ -1310,6 +1314,13 @@ mod tests {
         let net = test_net(1 << VIRTIO_NET_F_STATUS, None).unwrap();
 
         assert_eq!(read_status(&net), VIRTIO_NET_S_LINK_UP as u16);
+    }
+
+    #[test]
+    fn net_uses_the_virtio_guest_memory() {
+        let net = test_net(0, None).unwrap();
+
+        assert!(net.uses_virtio_guest_memory());
     }
 
     struct TestInterrupt {

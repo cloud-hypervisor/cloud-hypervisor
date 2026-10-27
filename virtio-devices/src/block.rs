@@ -1109,6 +1109,10 @@ impl VirtioDevice for Block {
         self.common.device_type
     }
 
+    fn uses_virtio_guest_memory(&self) -> bool {
+        true
+    }
+
     fn queue_max_sizes(&self) -> &[u16] {
         &self.common.queue_sizes
     }
@@ -1453,6 +1457,15 @@ mod tests {
         let serial = "0123456789abcdefghij";
         let block = make_block_with_serial(dir.as_path(), Some(serial));
         assert_eq!(&block.serial[..], serial.as_bytes());
+    }
+
+    #[test]
+    fn block_uses_the_virtio_guest_memory() {
+        use vmm_sys_util::tempdir::TempDir;
+
+        let dir = TempDir::new_with_prefix("/dev/shm/ch-serial").unwrap();
+        let block = make_block_with_serial(dir.as_path(), None);
+        assert!(block.uses_virtio_guest_memory());
     }
 
     #[test]

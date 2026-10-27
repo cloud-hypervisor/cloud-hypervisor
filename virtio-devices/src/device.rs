@@ -157,6 +157,17 @@ pub trait VirtioDevice: Send {
         Ok(())
     }
 
+    /// Whether the device may be handed the virtio guest memory: guest
+    /// RAM plus memory the VMM maps for devices, such as device memory the
+    /// guest uses as RAM. Only a device that is handed user pages, which the
+    /// guest can place in such memory, needs it; block, net, console
+    /// and vsock return true. A device whose memory map is passed out of
+    /// this process (vhost-user, vDPA) or that must only ever touch guest
+    /// RAM (balloon, virtio-mem) must keep the default, false.
+    fn uses_virtio_guest_memory(&self) -> bool {
+        false
+    }
+
     /// Returns the list of userspace mappings associated with this device.
     fn userspace_mappings(&self) -> Vec<UserspaceMapping> {
         Vec::new()

@@ -483,6 +483,11 @@ mod tests {
     }
 
     #[test]
+    fn a_device_does_not_use_the_virtio_guest_memory_by_default() {
+        assert!(!DummyDevice(0).uses_virtio_guest_memory());
+    }
+
+    #[test]
     fn write_base_regs() {
         let dev: Arc<Mutex<dyn VirtioDevice>> = Arc::new(Mutex::new(DummyDevice(0)));
         let mut regs = VirtioPciCommonConfig {

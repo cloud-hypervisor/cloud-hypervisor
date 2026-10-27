@@ -247,6 +247,8 @@ struct CowSource {
 pub struct MemoryManager {
     boot_guest_memory: GuestMemoryMmap,
     guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
+    // Guest RAM plus device memory, for the virtio devices that opt in.
+    virtio_guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
     next_memory_slot: Arc<AtomicU32>,
     memory_slot_free_list: Arc<Mutex<Vec<u32>>>,
     start_of_device_area: GuestAddress,
@@ -2215,6 +2217,7 @@ impl MemoryManager {
             prefault,
         )?)?;
 
+        let virtio_guest_memory = GuestMemoryAtomic::new(guest_memory.clone());
         let guest_memory = GuestMemoryAtomic::new(guest_memory);
 
         let allocator = Arc::new(Mutex::new(
@@ -2260,6 +2263,7 @@ impl MemoryManager {
         let mut memory_manager = MemoryManager {
             boot_guest_memory,
             guest_memory,
+            virtio_guest_memory,
             next_memory_slot: Arc::new(AtomicU32::new(next_memory_slot)),
             memory_slot_free_list: Arc::new(Mutex::new(Vec::new())),
             start_of_device_area,
@@ -2624,12 +2628,22 @@ impl MemoryManager {
 
     // Update the GuestMemoryMmap with the new range
     fn add_region(&mut self, region: Arc<GuestRegionMmap>) -> Result<(), Error> {
+        // Build both maps before publishing either, so that a failure leaves
+        // them consistent.
         let guest_memory = self
             .guest_memory
             .memory()
+            .insert_region(Arc::clone(&region))
+            .map_err(Error::GuestRegionCollection)?;
+        let virtio_memory_guard = self.virtio_guest_memory.lock().unwrap();
+        let virtio_memory = self
+            .virtio_guest_memory
+            .memory()
             .insert_region(region)
             .map_err(Error::GuestRegionCollection)?;
+
         self.guest_memory.lock().unwrap().replace(guest_memory);
+        virtio_memory_guard.replace(virtio_memory);
 
         Ok(())
     }
@@ -2800,6 +2814,10 @@ impl MemoryManager {
 
     pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemoryMmap> {
         self.guest_memory.clone()
+    }
+
+    pub fn virtio_guest_memory(&self) -> GuestMemoryAtomic<GuestMemoryMmap> {
+        self.virtio_guest_memory.clone()
     }
 
     pub fn boot_guest_memory(&self) -> GuestMemoryMmap {
