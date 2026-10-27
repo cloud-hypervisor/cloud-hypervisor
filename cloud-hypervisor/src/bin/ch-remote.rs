@@ -461,8 +461,11 @@ fn rest_api_do_command(
             simple_api_command(socket, "PUT", "add-vsock", Some(&vsock_config))
                 .map_err(Error::HttpApiClient)
         }
-        Command::Snapshot { destination_url } => {
-            let snapshot_config = snapshot_config(destination_url);
+        Command::Snapshot {
+            destination_url,
+            memory_base,
+        } => {
+            let snapshot_config = snapshot_config(destination_url, memory_base.as_deref());
             simple_api_command(socket, "PUT", "snapshot", Some(&snapshot_config))
                 .map_err(Error::HttpApiClient)
         }
@@ -597,8 +600,11 @@ fn dbus_api_do_command(
             let vsock_config = add_vsock_config(arg_vsock_config)?;
             proxy.api_vm_add_vsock(&vsock_config)
         }
-        Command::Snapshot { destination_url } => {
-            let snapshot_config = snapshot_config(destination_url);
+        Command::Snapshot {
+            destination_url,
+            memory_base,
+        } => {
+            let snapshot_config = snapshot_config(destination_url, memory_base.as_deref());
             proxy.api_vm_snapshot(&snapshot_config)
         }
         Command::Restore { .. } => proxy.api_vm_restore(fd_request_body.as_deref().unwrap()),
@@ -750,10 +756,13 @@ fn add_vsock_config(config: &str) -> Result<String, Error> {
     Ok(vsock_config)
 }
 
-fn snapshot_config(url: &str) -> String {
+fn snapshot_config(url: &str, memory_base: Option<&str>) -> String {
     let snapshot_config = api::VmSnapshotConfig {
         destination_url: String::from(url),
-        ..Default::default()
+        memory_base: match memory_base {
+            Some("link") => api::SnapshotMemoryBase::Link,
+            _ => api::SnapshotMemoryBase::Copy,
+        },
     };
 
     serde_json::to_string(&snapshot_config).unwrap()
@@ -1016,6 +1025,12 @@ enum Command {
         // TODO: Take a PathBuf, as only file:// URLs are supported.
         #[arg(help = "file:// URL of an existing snapshot directory, e.g. file:///tmp/snapshot")]
         destination_url: String,
+        #[arg(
+            long,
+            value_parser = ["copy", "link"],
+            help = "From where the snapshot takes its guest memory (default: copy)"
+        )]
+        memory_base: Option<String>,
     },
 }
 
@@ -1209,6 +1224,13 @@ mod tests {
                 "PUT /api/v1/vm.snapshot HTTP/1.1",
                 Some(
                     serde_json::json!({"destination_url": "file:///tmp/snapshot", "memory_base": "Copy"}),
+                ),
+            ),
+            (
+                vec!["snapshot", "--memory-base", "link", "file:///tmp/snapshot"],
+                "PUT /api/v1/vm.snapshot HTTP/1.1",
+                Some(
+                    serde_json::json!({"destination_url": "file:///tmp/snapshot", "memory_base": "Link"}),
                 ),
             ),
         ] {
