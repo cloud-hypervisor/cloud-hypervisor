@@ -5,6 +5,7 @@
 
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
+use std::fs::File;
 use std::os::fd::BorrowedFd;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
@@ -44,9 +45,11 @@ use vm_device::interrupt::{
 };
 use vm_device::{BusDevice, Resource};
 use vm_memory::bitmap::AtomicBitmap;
+use vm_memory::mmap::MmapRegionError;
 use vm_memory::{
-    Address, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend,
-    GuestMemoryRegion, GuestUsize,
+    Address, FileOffset, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend,
+    GuestMemoryRegion, GuestRegionCollectionError, GuestRegionMmap, GuestUsize,
+    MmapRegion as GuestMmapRegion,
 };
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
@@ -81,6 +84,14 @@ pub enum VfioPciError {
     DmaMap(#[source] vfio_ioctls::VfioError, PathBuf, PciBdf),
     #[error("Failed to DMA unmap: {0} for device {1} (guest BDF: {2})")]
     DmaUnmap(#[source] vfio_ioctls::VfioError, PathBuf, PciBdf),
+    #[error("Failed to map BAR memory for the virtio guest memory")]
+    GuestMemoryBarRegion(#[source] MmapRegionError),
+    #[error("Failed to duplicate the device descriptor for BAR memory")]
+    GuestMemoryBarFd(#[source] io::Error),
+    #[error("BAR memory at 0x{0:x} does not fit the guest address space")]
+    GuestMemoryBarAddress(u64),
+    #[error("Failed to update the virtio guest memory")]
+    VirtioGuestMemory(#[source] GuestRegionCollectionError),
     #[error("Failed to enable INTx")]
     EnableIntx(#[source] VfioError),
     #[error("Failed to enable MSI")]
@@ -299,11 +310,16 @@ impl Interrupt {
     }
 }
 
+/// A region of the virtio guest memory backed by a mapping of BAR
+/// memory.
+type VirtioGuestMemoryRegion = Arc<GuestMmapRegion<AtomicBitmap>>;
+
 #[derive(Clone)]
 pub(crate) struct UserMemoryRegion {
     pub slot: u32,
     pub start: u64,
     pub mapping: Arc<MmapRegion>,
+    pub virtio_guest_memory_region: Option<VirtioGuestMemoryRegion>,
 }
 
 #[derive(Clone)]
@@ -2107,6 +2123,61 @@ impl Snapshottable for VfioCommon {
     }
 }
 
+fn add_guest_memory_bar(
+    virtio_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+    gpa: u64,
+    fd: BorrowedFd,
+    offset: u64,
+    len: usize,
+    prot: i32,
+) -> Result<VirtioGuestMemoryRegion, VfioPciError> {
+    let file = File::from(
+        fd.try_clone_to_owned()
+            .map_err(VfioPciError::GuestMemoryBarFd)?,
+    );
+    let mapping = Arc::new(
+        GuestMmapRegion::<AtomicBitmap>::build(
+            Some(FileOffset::new(file, offset)),
+            len,
+            prot,
+            libc::MAP_SHARED,
+        )
+        .map_err(VfioPciError::GuestMemoryBarRegion)?,
+    );
+    insert_guest_memory_bar(virtio_memory, Arc::clone(&mapping), gpa)?;
+    Ok(mapping)
+}
+
+fn insert_guest_memory_bar(
+    virtio_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+    mapping: VirtioGuestMemoryRegion,
+    gpa: u64,
+) -> Result<(), VfioPciError> {
+    let region = GuestRegionMmap::with_arc(mapping, GuestAddress(gpa))
+        .ok_or(VfioPciError::GuestMemoryBarAddress(gpa))?;
+    let guard = virtio_memory.lock().unwrap();
+    let memory = virtio_memory
+        .memory()
+        .insert_region(Arc::new(region))
+        .map_err(VfioPciError::VirtioGuestMemory)?;
+    guard.replace(memory);
+    Ok(())
+}
+
+fn remove_guest_memory_bar(
+    virtio_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+    gpa: u64,
+    len: usize,
+) -> Result<(), VfioPciError> {
+    let guard = virtio_memory.lock().unwrap();
+    let (memory, _) = virtio_memory
+        .memory()
+        .remove_region(GuestAddress(gpa), len as u64)
+        .map_err(VfioPciError::VirtioGuestMemory)?;
+    guard.replace(memory);
+    Ok(())
+}
+
 /// VfioPciDevice represents a VFIO PCI device.
 /// This structure implements the BusDevice and PciDevice traits.
 ///
@@ -2127,6 +2198,10 @@ pub struct VfioPciDevice {
     // Guest memory layout, used to enumerate the IOVA ranges to track when
     // programming VFIO DMA logging.
     memory: GuestMemoryAtomic<GuestMemoryMmap>,
+    // BARs whose memory the guest uses as RAM, and the virtio guest memory
+    // they are added to (see add_guest_memory_bar()).
+    guest_memory_bars: Vec<u8>,
+    virtio_guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     bdf: PciBdf,
     device_path: PathBuf,
 }
@@ -2149,6 +2224,8 @@ impl VfioPciDevice {
         snapshot: Option<&Snapshot>,
         x_nv_gpudirect_clique: Option<u8>,
         x_exclude_mmap_bars: Vec<u8>,
+        guest_memory_bars: Vec<u8>,
+        virtio_guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
         device_path: PathBuf,
         extended_caps: Vec<Arc<dyn PciExpressCapability + Send + Sync>>,
     ) -> Result<Self, VfioPciError> {
@@ -2178,6 +2255,8 @@ impl VfioPciDevice {
             p2p_dma,
             memory_slot_allocator,
             memory,
+            guest_memory_bars,
+            virtio_guest_memory,
             bdf,
             device_path,
         };
@@ -2406,10 +2485,11 @@ impl VfioPciDevice {
                         }
                     };
 
-                    let user_memory_region = UserMemoryRegion {
+                    let mut user_memory_region = UserMemoryRegion {
                         slot: self.memory_slot_allocator.next_memory_slot(),
                         start: region.start.0 + area.offset,
                         mapping: Arc::new(mapping),
+                        virtio_guest_memory_region: None,
                     };
                     // SAFETY: MmapRegion invariants guarantee that
                     // user_memory_region.mapping.addr() points to
@@ -2445,8 +2525,58 @@ impl VfioPciDevice {
                         }
                         .map_err(|e| VfioPciError::DmaMap(e, self.device_path.clone(), self.bdf))?;
                     }
+
+                    if self.guest_memory_bars.contains(&(region.index as u8))
+                        && let Some(virtio_memory) = &self.virtio_guest_memory
+                    {
+                        if prot & (libc::PROT_READ | libc::PROT_WRITE)
+                            == libc::PROT_READ | libc::PROT_WRITE
+                        {
+                            match add_guest_memory_bar(
+                                virtio_memory,
+                                user_memory_region.start,
+                                fd,
+                                mmap_offset + area.offset,
+                                user_memory_region.mapping.len(),
+                                prot,
+                            ) {
+                                Ok(mapping) => {
+                                    user_memory_region.virtio_guest_memory_region = Some(mapping);
+                                    info!(
+                                        "BAR {} of {} joins the virtio guest memory",
+                                        region.index,
+                                        self.device_path.display()
+                                    );
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        "BAR {} of {} could not be added to the virtio guest memory: {e}",
+                                        region.index,
+                                        self.device_path.display()
+                                    );
+                                }
+                            }
+                        } else {
+                            warn!(
+                                "BAR {} of {} is not readable and writable and stays out of the virtio guest memory",
+                                region.index,
+                                self.device_path.display()
+                            );
+                        }
+                    }
+
                     region.user_memory_regions.push(user_memory_region);
                 }
+            }
+
+            if self.guest_memory_bars.contains(&(region.index as u8))
+                && region.user_memory_regions.is_empty()
+            {
+                warn!(
+                    "BAR {} of {} is not mappable and cannot be added to the virtio guest memory",
+                    region.index,
+                    self.device_path.display()
+                );
             }
         }
 
@@ -2458,6 +2588,16 @@ impl VfioPciDevice {
             for user_memory_region in region.user_memory_regions.drain(..) {
                 let len = user_memory_region.mapping.len();
                 let host_addr = user_memory_region.mapping.addr();
+                if user_memory_region.virtio_guest_memory_region.is_some()
+                    && let Some(virtio_memory) = &self.virtio_guest_memory
+                    && let Err(e) =
+                        remove_guest_memory_bar(virtio_memory, user_memory_region.start, len)
+                {
+                    error!(
+                        "Could not remove BAR memory at 0x{:x} from the virtio guest memory: {e}",
+                        user_memory_region.start
+                    );
+                }
                 // Unmap MMIO region from the host IOMMU address space via VfioOps
                 // Only needed if p2p_dma is enabled.
                 if self.p2p_dma
@@ -2627,6 +2767,7 @@ impl PciDevice for VfioPciDevice {
             if region.index as usize == bar_idx {
                 let old_base = region.start.raw_value();
                 region.start = GuestAddress(new_base);
+                let virtio_memory = self.virtio_guest_memory.as_ref();
 
                 for user_memory_region in region.user_memory_regions.iter_mut() {
                     let len = user_memory_region.mapping.len();
@@ -2647,6 +2788,17 @@ iova 0x{:x}, size 0x{:x}: {}, ",
                             user_memory_region.start, len, e
                         );
                     }
+                    if let Some(virtio_memory) = virtio_memory
+                        && user_memory_region.virtio_guest_memory_region.is_some()
+                        && let Err(e) =
+                            remove_guest_memory_bar(virtio_memory, user_memory_region.start, len)
+                    {
+                        error!(
+                            "Could not remove BAR memory at 0x{:x} from the virtio guest memory: {e}",
+                            user_memory_region.start
+                        );
+                    }
+
                     // Remove old region
                     // SAFETY: MmapRegion invariants guarantee that
                     // host_addr points to len bytes of
@@ -2685,6 +2837,17 @@ iova 0x{:x}, size 0x{:x}: {}, ",
                         )
                     }
                     .map_err(io::Error::other)?;
+
+                    if let Some(virtio_memory) = virtio_memory
+                        && let Some(mapping) = &user_memory_region.virtio_guest_memory_region
+                    {
+                        insert_guest_memory_bar(
+                            virtio_memory,
+                            Arc::clone(mapping),
+                            user_memory_region.start,
+                        )
+                        .map_err(io::Error::other)?;
+                    }
 
                     // Map the moved MMIO region into the host IOMMU address space via VfioOps
                     // Only needed if p2p_dma is enabled.
@@ -2940,11 +3103,13 @@ mod tests {
                     slot: 0,
                     start: page_size,
                     mapping: mapping_a,
+                    virtio_guest_memory_region: None,
                 },
                 UserMemoryRegion {
                     slot: 1,
                     start: 3 * page_size,
                     mapping: mapping_b,
+                    virtio_guest_memory_region: None,
                 },
             ],
         }]
@@ -3721,5 +3886,75 @@ mod tests {
         restored.set_state(&state, None, None, None).unwrap();
 
         assert_eq!(restored.read_config_register(0x40 / 4), 0x0000_1234);
+    }
+
+    #[test]
+    fn test_virtio_guest_memory_bar() {
+        use std::os::unix::fs::FileExt;
+
+        use vm_memory::Bytes;
+
+        let ram = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let virtio_memory = GuestMemoryAtomic::new(ram);
+        let len = 0x20000;
+        let file = TempFile::new().unwrap();
+        file.as_file().set_len(len as u64).unwrap();
+
+        let mapping = add_guest_memory_bar(
+            &virtio_memory,
+            0x10_0000,
+            file.as_file().as_fd(),
+            0,
+            len,
+            libc::PROT_READ | libc::PROT_WRITE,
+        )
+        .unwrap();
+        assert!(
+            virtio_memory
+                .memory()
+                .check_range(GuestAddress(0x10_0000), len)
+        );
+        virtio_memory
+            .memory()
+            .write_obj(0xa5u8, GuestAddress(0x10_0010))
+            .unwrap();
+        let mut byte = [0u8; 1];
+        file.as_file().read_exact_at(&mut byte, 0x10).unwrap();
+        assert_eq!(byte[0], 0xa5);
+
+        // A snapshot of the virtio guest memory as the add path built it.
+        let snapshot = virtio_memory.memory();
+
+        // A BAR move: gone from the old address, reachable at the new one
+        // through the same mapping.
+        remove_guest_memory_bar(&virtio_memory, 0x10_0000, len).unwrap();
+        assert!(
+            !virtio_memory
+                .memory()
+                .check_range(GuestAddress(0x10_0000), 1)
+        );
+        insert_guest_memory_bar(&virtio_memory, Arc::clone(&mapping), 0x20_0000).unwrap();
+        assert_eq!(
+            virtio_memory
+                .memory()
+                .read_obj::<u8>(GuestAddress(0x20_0010))
+                .unwrap(),
+            0xa5
+        );
+
+        // The snapshot, taken before the BAR left the virtio guest memory and the device
+        // went away with it, keeps the mapping alive.
+        remove_guest_memory_bar(&virtio_memory, 0x20_0000, len).unwrap();
+        drop(mapping);
+        assert_eq!(virtio_memory.memory().num_regions(), 1);
+        assert!(virtio_memory.memory().check_range(GuestAddress(0), 0x10000));
+        assert_eq!(
+            snapshot.read_obj::<u8>(GuestAddress(0x10_0010)).unwrap(),
+            0xa5
+        );
+        assert!(matches!(
+            remove_guest_memory_bar(&virtio_memory, 0x20_0000, len),
+            Err(VfioPciError::VirtioGuestMemory(_))
+        ));
     }
 }

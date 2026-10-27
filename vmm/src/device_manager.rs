@@ -4604,6 +4604,8 @@ impl DeviceManager {
                 .iter()
                 .map(|bar| *bar as u8)
                 .collect(),
+            Vec::new(),
+            None,
             device_path,
             extended_caps,
         )

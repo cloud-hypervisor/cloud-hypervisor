@@ -209,6 +209,7 @@ impl VfioUserPciDevice {
                         slot: self.memory_slot_allocator.next_memory_slot(),
                         start: mmio_region.start.0 + s.offset,
                         mapping,
+                        virtio_guest_memory_region: None,
                     };
 
                     // SAFETY: validity of len and host_addr guaranteed by hypervisor::mmap::MmapRegion
