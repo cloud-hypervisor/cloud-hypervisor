@@ -32,7 +32,6 @@ use super::muxer::ConnMapKey;
 use super::{MuxerConnection, defs};
 
 /// A kill queue item, holding the connection key and the scheduled time for termination.
-///
 #[derive(Clone, Copy)]
 struct MuxerKillQItem {
     key: ConnMapKey,
@@ -41,7 +40,6 @@ struct MuxerKillQItem {
 
 /// The connection kill queue: a FIFO structure, storing the connections that are scheduled for
 /// termination.
-///
 pub(super) struct MuxerKillQ {
     /// The kill queue contents.
     q: VecDeque<MuxerKillQItem>,
@@ -50,7 +48,6 @@ pub(super) struct MuxerKillQ {
     /// - when true, all connections that are awaiting termination are guaranteed to be in this
     ///   queue;
     /// - when false, some connections may have been left out.
-    ///
     synced: bool,
 }
 
@@ -58,7 +55,6 @@ impl MuxerKillQ {
     const SIZE: usize = defs::MUXER_KILLQ_SIZE;
 
     /// Trivial kill queue constructor.
-    ///
     pub(super) fn new() -> Self {
         Self {
             q: VecDeque::with_capacity(Self::SIZE),
@@ -70,7 +66,6 @@ impl MuxerKillQ {
     /// set to expire at some point in the future.
     /// Note: if more than `Self::SIZE` connections are found, the queue will be created in an
     ///       out-of-sync state, and will be discarded after it is emptied.
-    ///
     pub(super) fn from_conn_map(conn_map: &HashMap<ConnMapKey, MuxerConnection>) -> Self {
         let mut q_buf: Vec<MuxerKillQItem> = Vec::with_capacity(Self::SIZE);
         let mut synced = true;
@@ -96,7 +91,6 @@ impl MuxerKillQ {
 
     /// Push a connection key to the queue, scheduling it for termination at
     /// `CONN_SHUTDOWN_TIMEOUT_MS` from now (the push time).
-    ///
     pub(super) fn push(&mut self, key: ConnMapKey, kill_time: Instant) {
         if !self.is_synced() || self.is_full() {
             self.synced = false;
@@ -109,7 +103,6 @@ impl MuxerKillQ {
     ///
     /// This will succeed and return a connection key, only if the connection at the front of
     /// the queue has expired. Otherwise, `None` is returned.
-    ///
     pub(super) fn pop(&mut self) -> Option<ConnMapKey> {
         if let Some(item) = self.q.front()
             && Instant::now() > item.kill_time
@@ -121,19 +114,16 @@ impl MuxerKillQ {
     }
 
     /// Check if the kill queue is synchronized with the connection pool.
-    ///
     pub(super) fn is_synced(&self) -> bool {
         self.synced
     }
 
     /// Check if the kill queue is empty, obviously.
-    ///
     pub(super) fn is_empty(&self) -> bool {
         self.q.len() == 0
     }
 
     /// Check if the kill queue is full.
-    ///
     pub(super) fn is_full(&self) -> bool {
         self.q.len() == Self::SIZE
     }

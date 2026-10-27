@@ -45,7 +45,6 @@ use vmm_sys_util::eventfd::EventFd;
 /// - a TX queue FD;
 /// - an event queue FD; and
 /// - a backend FD.
-///
 use super::{VsockBackend, VsockPacket};
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
@@ -92,7 +91,6 @@ enum Error {
 /// - on backend event:
 ///   - forward the event to the backend; then
 ///   - again, attempt to fetch any incoming packets queued by the backend into virtio RX buffers.
-///
 pub(crate) struct VsockEpollHandler<B: VsockBackend> {
     pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
     pub queues: Vec<Queue>,
@@ -110,7 +108,6 @@ where
 {
     /// Signal the guest driver that we've used some virtio buffers that it had previously made
     /// available.
-    ///
     fn signal_used_queue(&self, queue_index: u16) -> result::Result<(), DeviceError> {
         debug!("vsock: raising IRQ");
 
@@ -124,7 +121,6 @@ where
 
     /// Walk the driver-provided RX queue buffers and attempt to fill them up with any data that we
     /// have pending.
-    ///
     fn process_rx(&mut self) -> result::Result<bool, Error> {
         debug!("vsock: epoll_handler::process_rx()");
 
@@ -171,7 +167,6 @@ where
 
     /// Walk the driver-provided TX queue buffers, package them up as vsock packets, and send them to
     /// the backend for processing.
-    ///
     fn process_tx(&mut self) -> result::Result<bool, Error> {
         debug!("vsock: epoll_handler::process_tx()");
 
