@@ -10,7 +10,6 @@
 //! * no interrupt is generated
 //! * RTC cannot be disabled via RTCCR
 //! * no test registers
-//!
 use std::result;
 use std::sync::{Arc, Barrier};
 use std::time::Instant;

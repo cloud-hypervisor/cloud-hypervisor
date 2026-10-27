@@ -4,7 +4,6 @@
 //! ARM PrimeCell UART(PL011)
 //!
 //! This module implements an ARM PrimeCell UART(PL011).
-//!
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Barrier};
