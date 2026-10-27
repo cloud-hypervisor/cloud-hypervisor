@@ -24,7 +24,6 @@ impl TxBufSource for [u8] {
 /// A simple ring-buffer implementation, used by vsock connections to buffer TX (guest -> host)
 /// data.  Memory for this buffer is allocated lazily, since buffering will only be needed when
 /// the host can't read fast enough.
-///
 pub(crate) struct TxBuf {
     /// The actual u8 buffer - only allocated after the first push.
     data: Option<Box<[u8]>>,
@@ -36,11 +35,9 @@ pub(crate) struct TxBuf {
 
 impl TxBuf {
     /// Total buffer size, in bytes.
-    ///
     const SIZE: usize = defs::CONN_TX_BUF_SIZE as usize;
 
     /// Ring-buffer constructor.
-    ///
     pub(crate) fn new() -> Self {
         Self {
             data: None,
@@ -51,7 +48,6 @@ impl TxBuf {
 
     /// Get the used length of this buffer - number of bytes that have been pushed in, but not
     /// yet flushed out.
-    ///
     pub(crate) fn len(&self) -> usize {
         (self.head - self.tail).0 as usize
     }
@@ -60,7 +56,6 @@ impl TxBuf {
     ///
     /// Either the entire length will be pushed to the ring-buffer, or none of it, if there
     /// isn't enough room, in which case `Err(Error::TxBufFull)` is returned.
-    ///
     pub(super) fn push_from<S>(&mut self, src: &S, offset: usize, len: usize) -> Result<()>
     where
         S: TxBufSource + ?Sized,
@@ -107,7 +102,6 @@ impl TxBuf {
     ///
     /// Return the number of bytes that have been transferred out of the ring-buffer and into
     /// the writable stream.
-    ///
     pub(crate) fn flush_to<W>(&mut self, sink: &mut W) -> Result<usize>
     where
         W: Write,
@@ -157,7 +151,6 @@ impl TxBuf {
     }
 
     /// Check if the buffer holds any data that hasn't yet been flushed out.
-    ///
     pub(crate) fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -167,7 +160,6 @@ impl TxBuf {
     /// A thin convenience wrapper around `push_from`, used only by the unit tests to push a
     /// plain slice without having to spell out the offset and length. Production code pushes
     /// directly from a packet buffer via `push_from`.
-    ///
     #[cfg(test)]
     pub(crate) fn push(&mut self, src: &[u8]) -> Result<()> {
         self.push_from(src, 0, src.len())

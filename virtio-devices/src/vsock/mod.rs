@@ -108,7 +108,6 @@ type Result<T> = result::Result<T, VsockError>;
 /// An event-polling control loop will use `get_polled_fd()` and `get_polled_evset()` to query
 /// the listener for the file descriptor and the set of events it's interested in. When such an
 /// event occurs, the control loop will route the event to the listener via `notify()`.
-///
 pub trait VsockEpollListener {
     /// Get the file descriptor the listener needs polled.
     fn get_polled_fd(&self) -> RawFd;

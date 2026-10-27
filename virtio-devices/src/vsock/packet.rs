@@ -243,7 +243,6 @@ fn vsock_error_to_io(err: &VsockError) -> io::Error {
 /// The vsock packet, implemented as a wrapper over a virtq descriptor chain:
 /// - the chain head, holding the packet header; and
 /// - (optional) buffer, only present for data packets (VSOCK_OP_RW).
-///
 pub struct VsockPacket {
     // We still hold the header address in guest memory. We need to write back the modified
     // header in RX buffers.
@@ -258,7 +257,6 @@ impl VsockPacket {
     /// The chain head is expected to hold valid packet header data. A following packet buffer
     /// descriptor can optionally end the chain. Bounds and pointer checks are performed when
     /// creating the wrapper.
-    ///
     pub fn from_tx_virtq_head<M>(
         desc_chain: &mut DescriptorChain<M>,
         access_platform: Option<&dyn AccessPlatform>,
@@ -403,7 +401,6 @@ impl VsockPacket {
     ///
     /// There must be two descriptors in the chain, both writable: a header descriptor and a data
     /// descriptor. Bounds and pointer checks are performed when creating the wrapper.
-    ///
     pub fn from_rx_virtq_head<M>(
         desc_chain: &mut DescriptorChain<M>,
         access_platform: Option<&dyn AccessPlatform>,
@@ -490,19 +487,16 @@ impl VsockPacket {
     }
 
     /// Provides in-place, byte-slice, access to the vsock packet header.
-    ///
     pub fn hdr(&self) -> &[u8] {
         self.hdr.as_slice()
     }
 
     /// Provides in-place, byte-slice, mutable access to the vsock packet header.
-    ///
     pub fn hdr_mut(&mut self) -> &mut [u8] {
         self.hdr.as_mut_slice()
     }
 
     /// Writes the local copy of the packet header to the guest memory.
-    ///
     pub fn commit_hdr<M: GuestMemoryBackend>(&mut self, guest_mem: &M) -> Result<()> {
         self.validate_len()?;
 
