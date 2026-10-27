@@ -199,6 +199,55 @@ Current constraints for `memory_restore_mode=copyonwrite`:
   page-cache sharing is lost for that VM and host memory use grows to the
   eager-copy level. The same applies to `ondemand` restores.
 
+### Linked snapshots
+
+A snapshot of a VM restored with `memory_restore_mode=copyonwrite` normally
+writes a self-contained memory file. A VM restored from that file maps a
+different file, so it no longer shares page cache with the other VMs that use
+the same restore source. A linked snapshot keeps that sharing.
+
+```shell
+ch-remote --api-socket=/tmp/cloud-hypervisor.sock snapshot --memory-base link file:///home/foo/snapshot
+```
+
+Through the API, set `"memory_base": "Link"` in the `vm.snapshot` request.
+
+A linked snapshot directory holds:
+
+- `memory-ranges.base`, a hard link to the copy-on-write restore source.
+- `memory-ranges.diff.1`, the guest pages that changed since the restore: a
+  header that lists the guest physical address and length of each changed
+  range, followed by their contents.
+- `config.json` and `state.json`. The memory manager state records that the
+  snapshot has a linked base.
+
+It has no `memory-ranges` file, so a release without linked snapshots fails to
+restore it instead of restoring the base alone.
+
+Restore needs no extra parameter. With `memory_restore_mode=copyonwrite`, Cloud
+Hypervisor maps the base like any copy-on-write restore, then writes the diff
+over guest memory before the vCPUs run. Only the changed pages become private,
+and clean pages keep coming from the page cache of the restore source. The base
+stays the restore source of the new VM, so its next linked snapshot links the
+same file and writes one new diff. `memory_restore_mode=copy` also works,
+without the sharing. Restore rejects `memory_restore_mode=ondemand`.
+
+Constraints:
+
+- The snapshot directory must be on the same mount as the restore source,
+  because a hard link cannot cross mounts. With Landlock enabled, the
+  directory of the restore source needs `w` access, since Landlock only allows
+  creating a link together with write access.
+- The restore source must not change while a linked snapshot uses it.
+  Deleting or renaming it is safe: its data stays until the last link goes
+  away.
+- If the VM was not restored with `memory_restore_mode=copyonwrite`, its
+  memory layout changed since the restore, or the link fails, Cloud Hypervisor
+  writes a normal snapshot and logs a warning.
+- A copy of the snapshot directory that does not keep hard links (`cp`, or
+  `rsync` without `-H`) turns the base into a separate file. It still restores
+  correctly, but no longer shares page cache.
+
 ## Restore a VM with new Net FDs
 For a VM created with FDs explicitly passed to NetConfig, a set of valid FDs
 need to be provided along with the VM restore command in the following syntax:
