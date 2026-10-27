@@ -60,7 +60,6 @@ impl SystemAllocator {
     /// * `platform_mmio_base` - The starting address of platform MMIO memory.
     /// * `platform_mmio_size` - The size of platform MMIO memory.
     /// * `apics` - (X86) slice of APIC's.
-    ///
     pub fn new(
         io_base: GuestAddress,
         io_size: GuestUsize,
