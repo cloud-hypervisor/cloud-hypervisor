@@ -653,6 +653,10 @@ pub enum DeviceManagerError {
     #[error("Cannot create a RateLimiterGroup")]
     RateLimiterGroupCreate(#[source] group::Error),
 
+    /// The MMIO aperture is too small for all PCI segments
+    #[error("No MMIO aperture left for PCI segment {0}")]
+    PciSegmentMmioAperture(u16),
+
     // Invalid console info
     #[error("Invalid console info")]
     InvalidConsoleInfo,
@@ -1152,7 +1156,7 @@ fn create_mmio_allocators(
     num_pci_segments: u16,
     weights: &[u32],
     alignment: u64,
-) -> Box<[Arc<Mutex<AddressAllocator>>]> {
+) -> DeviceManagerResult<Box<[Arc<Mutex<AddressAllocator>>]>> {
     let total_weight: u32 = weights.iter().sum();
 
     // Start each PCI segment mmio range on an aligned boundary
@@ -1172,14 +1176,15 @@ fn create_mmio_allocators(
         } else {
             pci_segment_mmio_size * weight
         };
-        let allocator = Arc::new(Mutex::new(
-            AddressAllocator::new(GuestAddress(mmio_start), mmio_size).unwrap(),
-        ));
+        let allocator = AddressAllocator::new(GuestAddress(mmio_start), mmio_size).ok_or(
+            DeviceManagerError::PciSegmentMmioAperture(segment_id as u16),
+        )?;
+        let allocator = Arc::new(Mutex::new(allocator));
         mmio_allocators.push(allocator);
         i += weight;
     }
 
-    mmio_allocators.into_boxed_slice()
+    Ok(mmio_allocators.into_boxed_slice())
 }
 
 fn use_64bit_bar_for_virtio_device(
@@ -1248,7 +1253,7 @@ impl DeviceManager {
             num_pci_segments,
             &mmio32_aperture_weights,
             4 << 10,
-        );
+        )?;
 
         let mut mmio64_aperture_weights: Vec<u32> =
             iter::repeat_n(DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT, num_pci_segments.into()).collect();
@@ -1267,7 +1272,7 @@ impl DeviceManager {
             num_pci_segments,
             &mmio64_aperture_weights,
             4 << 30,
-        );
+        )?;
 
         // Keep BARs off reserved ranges.
         for (base, end) in memory_manager.lock().unwrap().reserved_regions() {
@@ -6895,7 +6900,7 @@ mod tests {
 
     #[test]
     fn test_create_mmio_allocators() {
-        let res = create_mmio_allocators(0x100000, 0x3fffff, 1, &[1], 4 << 10);
+        let res = create_mmio_allocators(0x100000, 0x3fffff, 1, &[1], 4 << 10).unwrap();
         assert_eq!(res.len(), 1);
         assert_eq!(
             res[0].lock().unwrap().base(),
@@ -6906,7 +6911,7 @@ mod tests {
             vm_memory::GuestAddress(0x3fffff)
         );
 
-        let res = create_mmio_allocators(0x100000, 0x3fffff, 2, &[1, 1], 4 << 10);
+        let res = create_mmio_allocators(0x100000, 0x3fffff, 2, &[1, 1], 4 << 10).unwrap();
         assert_eq!(res.len(), 2);
         assert_eq!(
             res[0].lock().unwrap().base(),
@@ -6925,7 +6930,7 @@ mod tests {
             vm_memory::GuestAddress(0x3fffff)
         );
 
-        let res = create_mmio_allocators(0x100000, 0x3fffff, 2, &[2, 1], 4 << 10);
+        let res = create_mmio_allocators(0x100000, 0x3fffff, 2, &[2, 1], 4 << 10).unwrap();
         assert_eq!(res.len(), 2);
         assert_eq!(
             res[0].lock().unwrap().base(),
@@ -6943,5 +6948,11 @@ mod tests {
             res[1].lock().unwrap().end(),
             vm_memory::GuestAddress(0x3fffff)
         );
+
+        // The 3 MiB aperture rounds down to 0 for each of 1024 segments.
+        assert!(matches!(
+            create_mmio_allocators(0x100000, 0x3fffff, 1024, &[1; 1024], 4 << 10),
+            Err(DeviceManagerError::PciSegmentMmioAperture(0))
+        ));
     }
 }
