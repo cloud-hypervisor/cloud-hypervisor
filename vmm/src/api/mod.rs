@@ -291,10 +291,9 @@ pub enum MigrationMode {
     #[default]
     Precopy,
     /// Resume the destination first and fault guest pages in on demand.
-    /// This is an experimental mode. It uses a single connection even
-    /// when parallel connections are configured. Pages are served on
-    /// demand, but a background faulting mechanism also pulls in the
-    /// remaining pages to speed up completion.
+    /// This is an experimental mode. Pages are served on demand, but a
+    /// background faulting mechanism also pulls in the remaining pages to
+    /// speed up completion.
     Postcopy,
 }
 
@@ -861,13 +860,6 @@ impl VmSendMigrationData {
         if self.local && matches!(self.memory_mode, MigrationMode::Postcopy) {
             return Err(VmSendMigrationConfigError::ValidationError(
                 "memory_mode=postcopy and the deprecated local option are mutually exclusive."
-                    .to_string(),
-            ));
-        }
-
-        if matches!(self.memory_mode, MigrationMode::Postcopy) && self.connections.get() > 1 {
-            return Err(VmSendMigrationConfigError::ValidationError(
-                "memory_mode=postcopy currently requires a single connection (connections=1)."
                     .to_string(),
             ));
         }
@@ -2664,7 +2656,7 @@ mod tests {
             }
         );
 
-        // Postcopy happy path (TCP only, single connection).
+        // Postcopy happy path (TCP only).
         let data =
             VmSendMigrationData::parse("destination_url=tcp:192.168.1.1:8080,memory_mode=postcopy")
                 .unwrap();
@@ -2674,11 +2666,11 @@ mod tests {
         VmSendMigrationData::parse("destination_url=unix:/tmp/sock,local=on,memory_mode=postcopy")
             .unwrap_err();
 
-        // memory_mode=postcopy + multi-connection must be rejected.
+        // memory_mode=postcopy + multi-connection is accepted.
         VmSendMigrationData::parse(
             "destination_url=tcp:192.168.1.1:8080,memory_mode=postcopy,connections=4",
         )
-        .unwrap_err();
+        .unwrap();
 
         // preserve_source is accepted together with local (offload snapshot).
         let data = VmSendMigrationData::parse(
