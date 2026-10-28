@@ -392,10 +392,13 @@ impl VhostUserBackendMut for VhostUserBlkBackend {
                     // calling process_queue() until it stops finding new
                     // requests on the queue.
                     loop {
-                        vring
+                        if let Err(e) = vring
                             .get_queue_mut()
                             .enable_notification(self.mem.memory().deref())
-                            .unwrap();
+                        {
+                            error!("vhost-user-blk: enable_notification failed: {e:?}");
+                            break;
+                        }
                         if !thread.process_queue(&mut vring) {
                             break;
                         }
