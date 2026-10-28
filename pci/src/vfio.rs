@@ -64,8 +64,8 @@ use crate::configuration::{
     PCI_EXT_CAP_ALIGN, PCI_EXT_CAP_NEXT_MASK, PCI_EXT_CAP_NEXT_SHIFT, PCIE_CONFIG_SPACE_SIZE,
 };
 use crate::mmap::MmapRegion;
-use crate::msi::{MSI_CONFIG_ID, MsiConfigState};
-use crate::msix::{MaybeMutInterruptSourceGroup, MsixConfigState};
+use crate::msi::{Error as MsiError, MSI_CONFIG_ID, MsiConfigState};
+use crate::msix::{Error as MsixError, MaybeMutInterruptSourceGroup, MsixConfigState};
 use crate::{
     BarReprogrammingParams, MSIX_CONFIG_ID, MSIX_TABLE_ENTRY_SIZE, MsiCap, MsiConfig, MsixCap,
     MsixConfig, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType,
@@ -94,6 +94,14 @@ pub enum VfioPciError {
     EnableMsi(#[source] VfioError),
     #[error("Failed to enable MSI-x")]
     EnableMsix(#[source] VfioError),
+    #[error("Failed to create MSI interrupt group")]
+    CreateMsiInterruptGroup(#[source] io::Error),
+    #[error("Failed to create MSI-X interrupt group")]
+    CreateMsixInterruptGroup(#[source] io::Error),
+    #[error("Failed to initialize MSI")]
+    InitializeMsi(#[source] MsiError),
+    #[error("Failed to initialize MSI-X")]
+    InitializeMsix(#[source] MsixError),
     #[error("Failed to mmap the area")]
     MmapArea,
     #[error("Failed to notifier's eventfd")]
@@ -1202,14 +1210,14 @@ impl VfioCommon {
         cap_offset: u32,
         bdf: PciBdf,
         state: Option<MsixConfigState>,
-    ) {
+    ) -> Result<(), VfioPciError> {
         let interrupt_source_group = self
             .msi_interrupt_manager
             .create_group(MsiIrqGroupConfig {
                 base: 0,
                 count: msix_cap.table_size() as InterruptIndex,
             })
-            .unwrap();
+            .map_err(VfioPciError::CreateMsixInterruptGroup)?;
 
         let msix_config = MsixConfig::new(
             msix_cap.table_size(),
@@ -1217,7 +1225,7 @@ impl VfioCommon {
             bdf.into(),
             state,
         )
-        .unwrap();
+        .map_err(VfioPciError::InitializeMsix)?;
 
         self.interrupt.msix = Some(VfioMsix {
             bar: msix_config,
@@ -1225,29 +1233,36 @@ impl VfioCommon {
             cap_offset,
             interrupt_source_group,
         });
+        Ok(())
     }
 
     fn parse_msi_capabilities(&mut self, cap: u8) -> u16 {
         self.vfio_wrapper.read_config_word((cap + 2).into())
     }
 
-    fn initialize_msi(&mut self, msg_ctl: u16, cap_offset: u32, state: Option<MsiConfigState>) {
+    fn initialize_msi(
+        &mut self,
+        msg_ctl: u16,
+        cap_offset: u32,
+        state: Option<MsiConfigState>,
+    ) -> Result<(), VfioPciError> {
         let interrupt_source_group = self
             .msi_interrupt_manager
             .create_group(MsiIrqGroupConfig {
                 base: 0,
                 count: msi_num_enabled_vectors(msg_ctl) as InterruptIndex,
             })
-            .unwrap();
+            .map_err(VfioPciError::CreateMsiInterruptGroup)?;
 
-        let msi_config =
-            MsiConfig::new(msg_ctl, Arc::clone(&interrupt_source_group), state).unwrap();
+        let msi_config = MsiConfig::new(msg_ctl, Arc::clone(&interrupt_source_group), state)
+            .map_err(VfioPciError::InitializeMsi)?;
 
         self.interrupt.msi = Some(VfioMsi {
             cfg: msi_config,
             cap_offset,
             interrupt_source_group,
         });
+        Ok(())
     }
 
     /// Returns true, if the device claims to have a PCI capability list.
@@ -1308,7 +1323,7 @@ impl VfioCommon {
                         // Parse capability only if the VFIO device
                         // supports MSI.
                         let msg_ctl = self.parse_msi_capabilities(cap_iter);
-                        self.initialize_msi(msg_ctl, cap_iter as u32, None);
+                        self.initialize_msi(msg_ctl, cap_iter as u32, None)?;
                     }
                 }
                 PciCapabilityId::MsiX => {
@@ -1318,7 +1333,7 @@ impl VfioCommon {
                         // Parse capability only if the VFIO device
                         // supports MSI-X.
                         let msix_cap = self.parse_msix_capabilities(cap_iter);
-                        self.initialize_msix(msix_cap, cap_iter as u32, bdf, None);
+                        self.initialize_msix(msix_cap, cap_iter as u32, bdf, None)?;
                     }
                 }
                 PciCapabilityId::PciExpress => {
@@ -1950,11 +1965,11 @@ impl VfioCommon {
         }
 
         if let Some(msi) = &state.msi_state {
-            self.initialize_msi(msi.cap.msg_ctl, msi.cap_offset, msi_state);
+            self.initialize_msi(msi.cap.msg_ctl, msi.cap_offset, msi_state)?;
         }
 
         if let Some(msix) = &state.msix_state {
-            self.initialize_msix(msix.cap, msix.cap_offset, msix.bdf.into(), msix_state);
+            self.initialize_msix(msix.cap, msix.cap_offset, msix.bdf.into(), msix_state)?;
         }
 
         // Replay the opaque device state captured at snapshot. The kernel walks
