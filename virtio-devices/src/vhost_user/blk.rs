@@ -312,8 +312,13 @@ impl VirtioDevice for Blk {
             & VhostUserProtocolFeatures::BACKEND_REQ.bits()
             != 0
         {
+            let vu = self
+                .vu_common
+                .vu
+                .as_ref()
+                .ok_or(crate::ActivateError::BadActivate)?;
             let mut handler = FrontendReqHandler::new(Arc::new(BackendReqHandler {
-                vu: Arc::clone(self.vu_common.vu.as_ref().unwrap()),
+                vu: Arc::clone(vu),
                 config: Arc::clone(&self.config),
                 num_queues: u16::try_from(self.vu_common.virtio_common.queue_sizes.len())
                     .map_err(|_| crate::ActivateError::VhostUserSetup(Error::BadQueueNum))?,

@@ -234,11 +234,15 @@ impl VirtioDevice for GenericVhostUser {
             data.fill(0xFF);
             return;
         }
-        if let Err(e) = self
-            .vu_common
-            .vu
-            .as_ref()
-            .unwrap()
+        let Some(vu) = &self.vu_common.vu else {
+            error!(
+                "Missing vhost-user handle for socket {}",
+                self.vu_common.socket_path
+            );
+            data.fill(0xFF);
+            return;
+        };
+        if let Err(e) = vu
             .lock()
             .unwrap()
             .socket_handle()
@@ -261,20 +265,18 @@ impl VirtioDevice for GenericVhostUser {
             self.warn_no_config_access();
             return;
         }
-        if let Err(e) = self
-            .vu_common
-            .vu
-            .as_ref()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .socket_handle()
-            .set_config(
-                offset.try_into().unwrap(),
-                VhostUserConfigFlags::WRITABLE,
-                data,
-            )
-        {
+        let Some(vu) = &self.vu_common.vu else {
+            error!(
+                "Missing vhost-user handle for socket {}",
+                self.vu_common.socket_path
+            );
+            return;
+        };
+        if let Err(e) = vu.lock().unwrap().socket_handle().set_config(
+            offset.try_into().unwrap(),
+            VhostUserConfigFlags::WRITABLE,
+            data,
+        ) {
             error!("Failed setting generic vhost-user configuration: {e}");
         }
     }
