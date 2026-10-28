@@ -2670,8 +2670,11 @@ impl RequestHandler for Vmm {
                 // Swap each VFIO device's saved path or stale FD for the cdev
                 // FD received with the restore request, and install the fresh
                 // iommufd FD backing them. The one saved in the snapshot is
-                // stale, and validate() has confirmed both accompany vfio_fds.
-                if let Some(restored_vfios) = restore_cfg.vfio_fds {
+                // stale, and validate() has confirmed both accompany a
+                // non-empty vfio_fds.
+                if let Some(restored_vfios) = restore_cfg.vfio_fds
+                    && !restored_vfios.is_empty()
+                {
                     let mut config = vm_config.lock().unwrap();
                     if let Some(vm_device_configs) = config.devices.as_mut() {
                         for v in restored_vfios.iter() {
