@@ -424,6 +424,12 @@ impl VhdxHeader {
     pub(super) fn region_entry_count(&self) -> u32 {
         self.region_table_1.entry_count
     }
+
+    /// Return the current header's log region as (offset, length).
+    pub(super) fn log_region(&self) -> Result<(u64, u32)> {
+        let (_, header) = VhdxHeader::current_header(Ok(self.header_1), Ok(self.header_2))?;
+        Ok((header.log_offset, header.log_length))
+    }
 }
 
 /// Calculates the checksum of a buffer that itself contains its checksum
