@@ -722,7 +722,7 @@ impl SendAdditionalConnections {
         // the memory chunks to the workers, but does not send memory anymore. Thus in
         // this case we create one additional thread for each connection.
         for n in 0..configured_connections {
-            let mut socket = send_migration_socket(destination, tls_dir)?;
+            let mut socket = connect_and_setup_socket(destination, tls_dir)?;
             ConnectionRole::PrecopyMemory.write_to(&mut socket)?;
             let guest_memory = guest_memory.clone();
             let message_rx = Arc::clone(&message_rx);
@@ -1096,8 +1096,7 @@ fn set_migration_tcp_options(tcp_stream: &TcpStream) -> io::Result<()> {
     tcp_stream.set_nodelay(true)
 }
 
-/// Connect to a migration endpoint and return the established stream.
-pub(crate) fn send_migration_socket(
+pub(crate) fn connect_and_setup_socket(
     destination_url: &str,
     tls_dir: Option<&Path>,
 ) -> Result<SocketStream, MigratableError> {
@@ -1144,7 +1143,7 @@ pub(crate) fn open_fault_connection(
     destination_url: &str,
     tls_dir: Option<&Path>,
 ) -> Result<SocketStream, MigratableError> {
-    let mut socket = send_migration_socket(destination_url, tls_dir)?;
+    let mut socket = connect_and_setup_socket(destination_url, tls_dir)?;
     ConnectionRole::Fault.write_to(&mut socket)?;
     Ok(socket)
 }
