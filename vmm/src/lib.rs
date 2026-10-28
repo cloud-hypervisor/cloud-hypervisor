@@ -1764,13 +1764,17 @@ impl Vmm {
             (_, _) => (),
         }
 
+        let mut postcopy_connections = None;
+        if matches!(memory_mode, MigrationMode::Postcopy) {
+            postcopy_connections = Some(send_data_migration.connections);
+        }
         let vm_migration_config = VmMigrationConfig {
             vm_config,
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             common_cpuid,
             memory_manager_data: vm.memory_manager_data(),
             memory_mode,
-            postcopy_connections: None,
+            postcopy_connections,
         };
         transport::send_config(&mut socket, &vm_migration_config)?;
 
@@ -1851,26 +1855,30 @@ impl Vmm {
 
         // For postcopy, serve faults before sending State so the destination
         // can fault pages in during restore.
-        let postcopy_handle = if matches!(memory_mode, MigrationMode::Postcopy) {
-            let fault_stream = transport::open_fault_connection(
-                &send_data_migration.destination_url,
-                send_data_migration.tls_dir.as_deref(),
-            )?;
-            let guest_memory = vm.guest_memory();
+        let postcopy_handles = if matches!(memory_mode, MigrationMode::Postcopy) {
+            let mut handles = Vec::new();
+            for _ in 0..send_data_migration.connections.get() {
+                let fault_stream = transport::open_fault_connection(
+                    &send_data_migration.destination_url,
+                    send_data_migration.tls_dir.as_deref(),
+                )?;
+                let guest_memory = vm.guest_memory();
 
-            let seccomp_filters_clone = seccomp_filters.clone();
-            let handle = thread::Builder::new()
-                .name("migrate-send-postcopy".to_owned())
-                .spawn(move || {
-                    Self::serve_postcopy(
-                        &seccomp_filters_clone.postcopy_server,
-                        fault_stream,
-                        guest_memory,
-                    )
-                })
-                .context("Spawning postcopy serve thread")
-                .map_err(MigratableError::MigrateSend)?;
-            Some(handle)
+                let seccomp_filters_clone = seccomp_filters.clone();
+                let handle = thread::Builder::new()
+                    .name("migrate-send-postcopy".to_owned())
+                    .spawn(move || {
+                        Self::serve_postcopy(
+                            &seccomp_filters_clone.postcopy_server,
+                            fault_stream,
+                            guest_memory,
+                        )
+                    })
+                    .context("Spawning postcopy serve thread")
+                    .map_err(MigratableError::MigrateSend)?;
+                handles.push(handle);
+            }
+            Some(handles)
         } else {
             None
         };
@@ -1939,11 +1947,21 @@ impl Vmm {
             vm.stop_dirty_log()?;
         }
 
-        // Wait for the serve thread to drain every page
-        if let Some(handle) = postcopy_handle {
-            handle.join().map_err(|e| {
-                MigratableError::MigrateSend(anyhow!("postcopy serve thread panicked: {e:?}"))
-            })??;
+        // Wait for the serve threads to drain every page
+        if let Some(handles) = postcopy_handles {
+            let mut result = Ok(());
+            for handle in handles {
+                let thread_result = match handle.join() {
+                    Ok(thread_result) => thread_result,
+                    Err(e) => Err(MigratableError::MigrateSend(anyhow!(
+                        "postcopy serve thread panicked: {e:?}"
+                    ))),
+                };
+                if result.is_ok() {
+                    result = thread_result;
+                }
+            }
+            result?;
             // Signal that postcopy has drained every page to the destination.
             event!("vm", "postcopy-migration-completed");
         }
@@ -3555,7 +3573,7 @@ impl RequestHandler for Vmm {
                     })?;
 
             // Build the seccomp filter on the parent thread so any failure aborts
-            // the migration before the serve thread is spawned.
+            // the migration before the serve threads are spawned.
             let postcopy_server =
                 get_seccomp_filter(&self.seccomp_action, Thread::MigrateSendPostcopy, None)
                     .map_err(|e| {
