@@ -61,6 +61,8 @@ pub enum Error {
     InvalidIovaRange(u64, u64),
     #[error("Missing VIRTIO_F_ACCESS_PLATFORM feature")]
     MissingAccessPlatformVirtioFeature,
+    #[error("Missing vDPA device")]
+    MissingDevice,
     #[error("Failed to set backend specific features")]
     SetBackendFeatures(#[source] vhost::Error),
     #[error("Failed to set backend configuration")]
@@ -202,13 +204,11 @@ impl Vdpa {
     }
 
     fn enable_vrings(&mut self, enable: bool) -> Result<()> {
-        assert!(self.vhost.is_some());
+        let vhost = self.vhost.as_ref().ok_or(Error::MissingDevice)?;
 
         for (queue_index, enabled) in self.enabled_queues.iter_mut() {
             if *enabled != enable {
-                self.vhost
-                    .as_ref()
-                    .unwrap()
+                vhost
                     .set_vring_enable(*queue_index as usize, enable)
                     .map_err(Error::SetVringEnable)?;
                 *enabled = enable;
@@ -224,15 +224,14 @@ impl Vdpa {
         virtio_interrupt: &dyn VirtioInterrupt,
         queues: &[(u16, Queue, EventFd)],
     ) -> Result<()> {
-        assert!(self.vhost.is_some());
         self.vhost
             .as_ref()
-            .unwrap()
+            .ok_or(Error::MissingDevice)?
             .set_features(self.common.acked_features)
             .map_err(Error::SetFeatures)?;
         self.vhost
             .as_mut()
-            .unwrap()
+            .ok_or(Error::MissingDevice)?
             .set_backend_features(self.backend_features)
             .map_err(Error::SetBackendFeatures)?;
 
@@ -241,7 +240,7 @@ impl Vdpa {
             let queue_size = queue.size();
             self.vhost
                 .as_ref()
-                .unwrap()
+                .ok_or(Error::MissingDevice)?
                 .set_vring_num(*queue_index as usize, queue_size)
                 .map_err(Error::SetVringNum)?;
 
@@ -275,12 +274,12 @@ impl Vdpa {
 
             self.vhost
                 .as_ref()
-                .unwrap()
+                .ok_or(Error::MissingDevice)?
                 .set_vring_addr(*queue_index as usize, &config_data)
                 .map_err(Error::SetVringAddr)?;
             self.vhost
                 .as_ref()
-                .unwrap()
+                .ok_or(Error::MissingDevice)?
                 .set_vring_base(*queue_index as usize, 0)
                 .map_err(Error::SetVringBase)?;
 
@@ -289,14 +288,14 @@ impl Vdpa {
             {
                 self.vhost
                     .as_ref()
-                    .unwrap()
+                    .ok_or(Error::MissingDevice)?
                     .set_vring_call(*queue_index as usize, &eventfd)
                     .map_err(Error::SetVringCall)?;
             }
 
             self.vhost
                 .as_ref()
-                .unwrap()
+                .ok_or(Error::MissingDevice)?
                 .set_vring_kick(*queue_index as usize, queue_evt)
                 .map_err(Error::SetVringKick)?;
 
@@ -307,7 +306,7 @@ impl Vdpa {
         if let Some(eventfd) = virtio_interrupt.notifier(VirtioInterruptType::Config) {
             self.vhost
                 .as_ref()
-                .unwrap()
+                .ok_or(Error::MissingDevice)?
                 .set_config_call(&eventfd)
                 .map_err(Error::SetConfigCall)?;
         }
@@ -316,7 +315,7 @@ impl Vdpa {
 
         self.vhost
             .as_ref()
-            .unwrap()
+            .ok_or(Error::MissingDevice)?
             .set_status(
                 (DEVICE_ACKNOWLEDGE | DEVICE_DRIVER | DEVICE_DRIVER_OK | DEVICE_FEATURES_OK) as u8,
             )
@@ -326,10 +325,9 @@ impl Vdpa {
     fn reset_vdpa(&mut self) -> Result<()> {
         self.enable_vrings(false)?;
 
-        assert!(self.vhost.is_some());
         self.vhost
             .as_ref()
-            .unwrap()
+            .ok_or(Error::MissingDevice)?
             .set_status(0)
             .map_err(Error::SetStatus)
     }
@@ -357,10 +355,9 @@ impl Vdpa {
             return Err(Error::InvalidIovaRange(iova, iova_last));
         }
 
-        assert!(self.vhost.is_some());
         self.vhost
             .as_ref()
-            .unwrap()
+            .ok_or(Error::MissingDevice)?
             .dma_map(iova, size, host_vaddr, readonly)
             .map_err(Error::DmaMap)
     }
@@ -376,20 +373,18 @@ impl Vdpa {
             return Err(Error::InvalidIovaRange(iova, iova_last));
         }
 
-        assert!(self.vhost.is_some());
         self.vhost
             .as_ref()
-            .unwrap()
+            .ok_or(Error::MissingDevice)?
             .dma_unmap(iova, size)
             .map_err(Error::DmaUnmap)
     }
 
     fn state(&self) -> Result<VdpaState> {
-        assert!(self.vhost.is_some());
         let config_size = self
             .vhost
             .as_ref()
-            .unwrap()
+            .ok_or(Error::MissingDevice)?
             .get_config_size()
             .map_err(Error::GetConfigSize)?;
         let mut config = vec![0; config_size as usize];
@@ -426,15 +421,21 @@ impl VirtioDevice for Vdpa {
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
-        assert!(self.vhost.is_some());
-        if let Err(e) = self.vhost.as_ref().unwrap().get_config(offset as u32, data) {
+        let Some(vhost) = &self.vhost else {
+            error!("Failed reading virtio config: {}", Error::MissingDevice);
+            return;
+        };
+        if let Err(e) = vhost.get_config(offset as u32, data) {
             error!("Failed reading virtio config: {e}");
         }
     }
 
     fn write_config(&mut self, offset: u64, data: &[u8]) {
-        assert!(self.vhost.is_some());
-        if let Err(e) = self.vhost.as_ref().unwrap().set_config(offset as u32, data) {
+        let Some(vhost) = &self.vhost else {
+            error!("Failed writing virtio config: {}", Error::MissingDevice);
+            return;
+        };
+        if let Err(e) = vhost.set_config(offset as u32, data) {
             error!("Failed writing virtio config: {e}");
         }
     }
@@ -543,8 +544,10 @@ impl Migratable for Vdpa {
         // Given there's no way to track dirty pages, we must suspend the
         // device as soon as the migration process starts.
         if self.backend_features & (1 << VHOST_BACKEND_F_SUSPEND) != 0 {
-            assert!(self.vhost.is_some());
-            self.vhost.as_ref().unwrap().suspend().map_err(|e| {
+            let vhost = self.vhost.as_ref().ok_or_else(|| {
+                MigratableError::StartMigration(anyhow!("Missing vDPA device to suspend"))
+            })?;
+            vhost.suspend().map_err(|e| {
                 MigratableError::StartMigration(anyhow!("Error suspending vDPA device: {e:?}"))
             })?;
             self.migrating = true;
@@ -695,6 +698,42 @@ mod tests {
         assert!(matches!(
             vdpa.activate(context),
             Err(ActivateError::AccessPlatformNotAcknowledged)
+        ));
+    }
+
+    // A migration snapshot releases the vDPA device. If the migration fails
+    // afterwards, the source VM resumes and the guest can still access it.
+    #[test]
+    fn guest_access_after_released_device_does_not_panic() {
+        let mut vdpa = Vdpa {
+            common: VirtioCommon {
+                avail_features: 1u64 << VIRTIO_F_ACCESS_PLATFORM,
+                acked_features: 1u64 << VIRTIO_F_ACCESS_PLATFORM,
+                ..Default::default()
+            },
+            id: "test".to_string(),
+            vhost: None,
+            iova_range: VhostVdpaIovaRange { first: 0, last: 0 },
+            enabled_queues: BTreeMap::new(),
+            backend_features: 0,
+            migrating: false,
+        };
+        let context = ActivationContext {
+            mem: GuestMemoryAtomic::new(
+                GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+            ),
+            interrupt_cb: Arc::new(NoopInterrupt),
+            queues: vec![],
+            device_status: Arc::new(AtomicU8::new(0)),
+        };
+
+        let mut config = [0u8; 4];
+        vdpa.read_config(0, &mut config);
+        vdpa.write_config(0, &config);
+        vdpa.reset();
+        assert!(matches!(
+            vdpa.activate(context),
+            Err(ActivateError::ActivateVdpa(Error::MissingDevice))
         ));
     }
 }
