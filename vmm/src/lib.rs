@@ -614,6 +614,8 @@ pub struct VmMigrationConfig {
     /// behavior (e.g., serving page faults for postcopy).
     #[serde(default)]
     memory_mode: MigrationMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    postcopy_connections: Option<NonZeroU32>,
 }
 
 impl VmMigrationConfig {
@@ -763,6 +765,7 @@ struct ReceiveMigrationConfiguredData {
     memory_mode: MigrationMode,
     /// Enable the background thread for faulting all remaining pages.
     background_fetch_pages: bool,
+    postcopy_connections: NonZeroU32,
 }
 
 /// The receiver's state machine behind the migration protocol.
@@ -1022,7 +1025,7 @@ impl Vmm {
              memory_files: HashMap<u32, File>|
              -> result::Result<ReceiveMigrationConfiguredData, MigratableError> {
                 let shared_backing = !memory_files.is_empty();
-                let (memory_manager, memory_mode) =
+                let (memory_manager, memory_mode, postcopy_connections) =
                     self.vm_receive_config(req, socket, memory_files, receive_data_migration)?;
                 let guest_memory = memory_manager.lock().unwrap().guest_memory();
                 // Create the additional-connection receiver even in the single-connection case.
@@ -1047,6 +1050,7 @@ impl Vmm {
                     fault_rx,
                     memory_mode,
                     background_fetch_pages: receive_data_migration.background_fetch_pages,
+                    postcopy_connections,
                 })
             };
 
@@ -1230,22 +1234,27 @@ impl Vmm {
         // Serve faults before restore so accesses during restore resolve on demand.
         if matches!(config_data.memory_mode, MigrationMode::Postcopy) {
             let shared_backing = config_data.shared_backing;
-            let fault_stream = config_data
-                .fault_rx
-                .recv_timeout(FAULT_CONNECTION_ACCEPT_TIMEOUT)
-                .map_err(|e| {
-                    config_data.connections.cleanup().ok();
-                    MigratableError::MigrateReceive(anyhow!(
-                        "Timed out waiting for postcopy fault connection: {e}"
-                    ))
-                })?;
+            let deadline = Instant::now() + FAULT_CONNECTION_ACCEPT_TIMEOUT;
+            let mut fault_streams = Vec::new();
+            for _ in 0..config_data.postcopy_connections.get() {
+                let fault_stream = config_data
+                    .fault_rx
+                    .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                    .map_err(|e| {
+                        config_data.connections.cleanup().ok();
+                        MigratableError::MigrateReceive(anyhow!(
+                            "Timed out waiting for postcopy fault connection: {e}"
+                        ))
+                    })?;
+                fault_streams.push(fault_stream);
+            }
             let mut mm = config_data.memory_manager.lock().unwrap();
             let saved_regions = mm.memory_range_table(MemoryRangePolicy::Full)?;
             mm.start_postcopy_serving(
                 &saved_regions,
                 shared_backing,
                 config_data.background_fetch_pages,
-                vec![fault_stream],
+                fault_streams,
                 &self.exit_evt,
             )
             .map_err(|e| {
@@ -1276,7 +1285,7 @@ impl Vmm {
         socket: &mut T,
         existing_memory_files: HashMap<u32, File>,
         receive_data_migration: &VmReceiveMigrationData,
-    ) -> result::Result<(Arc<Mutex<MemoryManager>>, MigrationMode), MigratableError>
+    ) -> result::Result<(Arc<Mutex<MemoryManager>>, MigrationMode, NonZeroU32), MigratableError>
     where
         T: Read,
     {
@@ -1294,6 +1303,23 @@ impl Vmm {
             .map_err(MigratableError::MigrateReceive)?;
 
         let mode = vm_migration_config.memory_mode();
+        let postcopy_connections = match vm_migration_config.postcopy_connections {
+            None => NonZeroU32::new(1).unwrap(),
+            Some(connections) => {
+                if !matches!(mode, MigrationMode::Postcopy) {
+                    return Err(MigratableError::MigrateReceive(anyhow!(
+                        "Postcopy fault connections require memory_mode=postcopy"
+                    )));
+                }
+                if connections.get() > transport::MAX_MIGRATION_CONNECTIONS {
+                    return Err(MigratableError::MigrateReceive(anyhow!(
+                        "Postcopy fault connections must not exceed {}",
+                        transport::MAX_MIGRATION_CONNECTIONS
+                    )));
+                }
+                connections
+            }
+        };
 
         // Mirrors the vm_restore handling of RestoreConfig.vfio_fds. The
         // received VmConfig carries the source's device paths or stale FDs,
@@ -1379,7 +1405,7 @@ impl Vmm {
         .context("Error creating MemoryManager from snapshot")
         .map_err(MigratableError::MigrateReceive)?;
 
-        Ok((memory_manager, mode))
+        Ok((memory_manager, mode, postcopy_connections))
     }
 
     /// Receives the final VM state (devices, vCPUs) and restores the VM.
@@ -1744,6 +1770,7 @@ impl Vmm {
             common_cpuid,
             memory_manager_data: vm.memory_manager_data(),
             memory_mode,
+            postcopy_connections: None,
         };
         transport::send_config(&mut socket, &vm_migration_config)?;
 
