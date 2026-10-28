@@ -73,6 +73,32 @@ struct UffdHandler {
     uffd_registry: Arc<UffdRegistry>,
 }
 
+struct UffdPages {
+    // Per-range bitmap tracking which pages have been populated by the
+    // on-demand fault handler. Lets the prefault cursor skip them without
+    // doing a wasted file read + UFFDIO_COPY.
+    served: Box<[AtomicBitmap]>,
+    loading: Mutex<HashSet<(usize, u64)>>,
+}
+
+impl UffdPages {
+    fn new(ranges: &[UffdRange]) -> Self {
+        let served = ranges
+            .iter()
+            .map(|r| {
+                AtomicBitmap::new(
+                    r.length as usize,
+                    NonZeroUsize::new(r.page_size as usize).unwrap(),
+                )
+            })
+            .collect();
+        UffdPages {
+            served,
+            loading: Mutex::new(HashSet::new()),
+        }
+    }
+}
+
 /// Userfaultfds sent to a UFFD handler.
 pub(crate) struct UffdRegistry {
     added_uffds: Mutex<Vec<(String /* device identifier */, Uffd)>>,
@@ -1213,22 +1239,10 @@ impl MemoryManager {
         else {
             return Ok(());
         };
-        // Per-range bitmap tracking which pages have been populated by the
-        // on-demand fault handler. Lets the prefault cursor skip them without
-        // doing a wasted file read + UFFDIO_COPY.
-        let served_bitmap: Vec<AtomicBitmap> = uffd
-            .ranges()
-            .iter()
-            .map(|r| {
-                AtomicBitmap::new(
-                    r.length as usize,
-                    NonZeroUsize::new(r.page_size as usize).unwrap(),
-                )
-            })
-            .collect();
+        let pages = UffdPages::new(uffd.ranges());
 
         // For sparse files, we mark holes as served pages so we don't prefault them.
-        for (range, served) in uffd.ranges().iter().zip(&served_bitmap) {
+        for (range, served) in uffd.ranges().iter().zip(&pages.served) {
             let end = range.source_offset + range.length;
             let mut file_cursor = range.source_offset;
             while let Ok(next) = next_data_extent(snapshot_file.as_fd(), file_cursor, end) {
@@ -1246,7 +1260,7 @@ impl MemoryManager {
             }
         }
 
-        self.spawn_uffd_handler(uffd, None, served_bitmap, source, exit_evt, true)?;
+        self.spawn_uffd_handler(uffd, None, pages, source, exit_evt, true)?;
         info!("UFFD restore: demand-paged restore enabled");
         Ok(())
     }
@@ -1277,21 +1291,12 @@ impl MemoryManager {
             return Ok(());
         };
 
-        let served_bitmap: Vec<AtomicBitmap> = uffd
-            .ranges()
-            .iter()
-            .map(|r| {
-                AtomicBitmap::new(
-                    r.length as usize,
-                    NonZeroUsize::new(r.page_size as usize).unwrap(),
-                )
-            })
-            .collect();
+        let pages = UffdPages::new(uffd.ranges());
         info!("UFFD: postcopy background prefault {background_fetch_pages}");
         self.spawn_uffd_handler(
             uffd,
             Some(socket_fd),
-            served_bitmap,
+            pages,
             source,
             exit_evt,
             background_fetch_pages,
@@ -1393,7 +1398,7 @@ impl MemoryManager {
         &mut self,
         uffd: Uffd,
         fault_socket_fd: Option<OwnedFd>,
-        served_bitmap: Vec<AtomicBitmap>,
+        pages: UffdPages,
         source: Box<dyn UffdMemorySource>,
         exit_evt: &EventFd,
         background_fetch_pages: bool,
@@ -1426,7 +1431,7 @@ impl MemoryManager {
                         &thread_stop_event,
                         &thread_exit_evt,
                         source,
-                        served_bitmap,
+                        &pages,
                         &ready_tx,
                         background_fetch_pages,
                     );
@@ -1549,13 +1554,12 @@ impl MemoryManager {
     ///
     /// A userfaultfd received with the id of an earlier one replaces it. Once
     /// all pages are present, `uffd_registry.done` is written.
-    #[expect(clippy::needless_pass_by_value)]
     fn uffd_handler_loop(
         uffd_registry: &UffdRegistry,
         stop_event: &EventFd,
         exit_evt: &EventFd,
         mut source: Box<dyn UffdMemorySource>,
-        served_bitmap: Vec<AtomicBitmap>,
+        pages: &UffdPages,
         ready_tx: &SyncSender<()>,
         background_fetch_pages: bool,
     ) -> Result<(), io::Error> {
@@ -1567,8 +1571,6 @@ impl MemoryManager {
         let total_pages: u64 = ranges.iter().map(UffdRange::num_pages).sum();
         let mut pages_served: u64 = 0;
         let mut pages_prefaulted: u64 = 0;
-
-        let pages_loading: Mutex<HashSet<(usize, u64)>> = Mutex::new(HashSet::new());
 
         let zero_buf = uffd::allocate_zero_buffer(
             ranges.iter().map(|r| r.page_size).max().unwrap_or(0) as usize,
@@ -1746,7 +1748,7 @@ impl MemoryManager {
                 // fault queued on another userfaultfd while the page was
                 // being resolved. Only the latter leaves the page present.
                 if !minor_fault
-                    && served_bitmap[range_idx].is_bit_set(page_idx as usize)
+                    && pages.served[range_idx].is_bit_set(page_idx as usize)
                     && uffd::page_present(ranges[range_idx].page_addr(page_idx))?
                 {
                     uffd::wake(fault_uffd.fd(), range.page_addr(page_idx), range.page_size)?;
@@ -1756,8 +1758,8 @@ impl MemoryManager {
                 let key = (range_idx, page_idx);
 
                 let (served_minor, discarded) = {
-                    let mut loading = pages_loading.lock().unwrap();
-                    let served = served_bitmap[range_idx].is_bit_set(page_idx as usize);
+                    let mut loading = pages.loading.lock().unwrap();
+                    let served = pages.served[range_idx].is_bit_set(page_idx as usize);
 
                     if served && minor_fault {
                         (true, false)
@@ -1826,10 +1828,10 @@ impl MemoryManager {
                 let result = source.resolve(fault_uffd.fd(), range, page_idx);
 
                 {
-                    let mut loading = pages_loading.lock().unwrap();
+                    let mut loading = pages.loading.lock().unwrap();
 
                     if result.is_ok() {
-                        served_bitmap[range_idx].set_bit(page_idx as usize);
+                        pages.served[range_idx].set_bit(page_idx as usize);
                     }
 
                     loading.remove(&key);
@@ -1887,8 +1889,8 @@ impl MemoryManager {
                 &mut page_idx,
                 ranges,
                 &mut source,
-                &served_bitmap,
-                &pages_loading,
+                &pages.served,
+                &pages.loading,
             ) {
                 Ok(0) => {
                     let mut added_uffds = uffd_registry.added_uffds.lock().unwrap();
