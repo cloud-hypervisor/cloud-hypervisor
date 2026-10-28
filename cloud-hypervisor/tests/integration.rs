@@ -9906,6 +9906,8 @@ mod dbus_api {
 
 mod ivshmem {
     use std::fs::remove_dir_all;
+    #[cfg(not(feature = "mshv"))]
+    use std::num::NonZeroU32;
     use std::process::Command;
 
     use test_infra::{Guest, GuestCommand, UbuntuDiskConfig, handle_child_output, kill_child};
@@ -10417,13 +10419,34 @@ mod ivshmem {
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_uffd() {
-        snapshot_restore_common::_test_snapshot_restore_uffd("size=2G", &[], 1_920_000);
+        snapshot_restore_common::_test_snapshot_restore_uffd(
+            "size=2G",
+            &[],
+            1_920_000,
+            Some(NonZeroU32::new(1).unwrap()),
+        );
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_restore_uffd_with_two_handlers() {
+        snapshot_restore_common::_test_snapshot_restore_uffd(
+            "size=512M",
+            &[],
+            480_000,
+            Some(NonZeroU32::new(2).unwrap()),
+        );
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_uffd_shared_memory() {
-        snapshot_restore_common::_test_snapshot_restore_uffd("size=512M,shared=on", &[], 480_000);
+        snapshot_restore_common::_test_snapshot_restore_uffd(
+            "size=512M,shared=on",
+            &[],
+            480_000,
+            None,
+        );
     }
 
     #[test]
@@ -10462,6 +10485,8 @@ mod ivshmem {
 
 mod snapshot_restore_common {
     use std::fs::{read_to_string, remove_dir_all};
+    #[cfg(not(feature = "mshv"))]
+    use std::num::NonZeroU32;
     use std::process::Command;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -10911,6 +10936,7 @@ mod snapshot_restore_common {
         memory_config: &str,
         memory_zone_config: &[&str],
         min_total_memory_kib: u32,
+        num_pagefault_handlers: Option<NonZeroU32>,
     ) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -10973,16 +10999,21 @@ mod snapshot_restore_common {
             String::from(guest.tmp_dir.as_path().join("snapshot2").to_str().unwrap());
         fs::create_dir(&snapshot_dir2).unwrap();
 
+        let mut restore_config =
+            format!("source_url=file://{snapshot_dir},memory_restore_mode=ondemand");
+        let mut expected_pagefault_handlers = 1;
+        if let Some(num_pagefault_handlers) = num_pagefault_handlers {
+            restore_config.push_str(&format!(",num_pagefault_handlers={num_pagefault_handlers}"));
+            expected_pagefault_handlers = num_pagefault_handlers.get();
+        }
+
         let mut child = GuestCommand::new(&guest)
             .args(["--api-socket", &api_socket_restored])
             .args([
                 "--event-monitor",
                 format!("path={event_path_restored}").as_str(),
             ])
-            .args([
-                "--restore",
-                format!("source_url=file://{snapshot_dir},memory_restore_mode=ondemand").as_str(),
-            ])
+            .args(["--restore", restore_config.as_str()])
             .capture_output()
             .spawn()
             .unwrap();
@@ -11036,6 +11067,12 @@ mod snapshot_restore_common {
             assert!(
                 logs.contains("UFFD restore: demand-paged restore enabled"),
                 "Expected UFFD restore path to be enabled. output: {logs}"
+            );
+            assert!(
+                logs.contains(&format!(
+                    "UFFD: spawning {expected_pagefault_handlers} handlers"
+                )),
+                "Expected {expected_pagefault_handlers} UFFD restore handlers. output: {logs}"
             );
         });
         handle_child_output(r, &output);
@@ -11662,6 +11699,7 @@ mod common_sequential {
             "size=0",
             &["id=mem0,size=512M,hugepages=on,hugepage_size=2M,reserve=on"],
             480_000,
+            None,
         );
     }
 
