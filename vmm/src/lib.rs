@@ -74,7 +74,7 @@ use crate::util::flatten_error_chain_to_string;
 use crate::vm::{Error as VmError, Vm, VmState};
 use crate::vm_config::{
     DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
-    UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
+    UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig, LandlockConfig,
 };
 
 mod acpi;
@@ -2062,6 +2062,44 @@ impl Vmm {
 
                 self.vm_config = Some(Arc::clone(&vm_config));
 
+                // Apply Landlock before Vm::new(), so all workers inherit the
+                // domain
+                if self
+                    .vm_config
+                    .as_ref()
+                    .unwrap()
+                    .lock()
+                    .unwrap()
+                    .landlock_enable
+                {
+                    let mut config = self.vm_config.as_ref().unwrap().lock().unwrap();
+                    let path_str = source_url.strip_prefix("file://").unwrap_or(source_url);
+                    let snapshot_path = std::path::PathBuf::from(path_str);
+                    let mut rules: Vec<LandlockConfig> = config.landlock_rules.take().map(Vec::from).unwrap_or_default();
+
+                    // Read access to snapshot
+                    rules.push(LandlockConfig {
+                        path: snapshot_path,
+                        access: "r".to_string(),
+                    });
+
+                    // Read access to pagemap
+                    rules.push(LandlockConfig {
+                        path: std::path::PathBuf::from("/proc/self/pagemap"),
+                        access: "r".to_string(),
+                    });
+
+                    // R/W access to /dev/userfaultfd
+                    if matches ! (memory_restore_mode, MemoryRestoreMode::OnDemand | MemoryRestoreMode::CopyOnWrite) {
+                        rules.push(LandlockConfig {
+                            path: std::path::PathBuf::from("/dev/userfaultfd"),
+                            access: "rw".to_string(),
+                        });
+                    }
+
+                    apply_landlock(&mut config).map_err(VmError::ApplyLandlock)?;
+                }
+
                 // Always re-populate the 'console_info' based on the new 'vm_config'
                 self.console_info =
                     Some(pre_create_console_devices(self).map_err(VmError::CreateConsoleDevices)?);
@@ -2100,18 +2138,6 @@ impl Vmm {
                     Some(prefault),
                     Some(memory_restore_mode),
                 )?;
-
-                if self
-                    .vm_config
-                    .as_ref()
-                    .unwrap()
-                    .lock()
-                    .unwrap()
-                    .landlock_enable
-                {
-                    let mut config = self.vm_config.as_ref().unwrap().lock().unwrap();
-                    apply_landlock(&mut config).map_err(VmError::ApplyLandlock)?;
-                }
 
                 // Now we can restore the rest of the VM.
                 // PANIC: won't panic, we just checked that the VM is there.
