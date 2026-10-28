@@ -22,6 +22,7 @@ use std::{fs, panic, thread};
 
 use block::ImageType;
 use test_infra::*;
+use vmm::memory_manager::SNAPSHOT_FILENAME;
 use vmm_sys_util::tempdir::TempDir;
 use vmm_sys_util::tempfile::TempFile;
 use wait_timeout::ChildExt;
@@ -10123,6 +10124,19 @@ mod snapshot_restore_common {
 
         handle_child_output(r, &output);
 
+        let snapshot_memory_checksum = if memory_restore_mode == Some("copyonwrite") {
+            let memory_file_path = Path::new(&snapshot_dir).join(SNAPSHOT_FILENAME);
+            let mut memory_file = File::open(&memory_file_path).unwrap();
+            let memory_file_size = memory_file.metadata().unwrap().len();
+            Some((
+                memory_file_path,
+                memory_file_size,
+                compute_file_checksum(&mut memory_file, memory_file_size),
+            ))
+        } else {
+            None
+        };
+
         // Remove the vsock socket file.
         Command::new("rm")
             .arg("-f")
@@ -10213,7 +10227,7 @@ mod snapshot_restore_common {
             // fallback to copy keeps RAM anonymous), and the mapped file must
             // outlive the VM.
             let maps = read_to_string(format!("/proc/{}/maps", child.id())).unwrap();
-            assert!(maps.contains(&format!("{snapshot_dir}/memory-ranges")));
+            assert!(maps.contains(&format!("{snapshot_dir}/{SNAPSHOT_FILENAME}")));
         } else {
             // Remove the snapshot dir
             let _ = remove_dir_all(snapshot_dir.as_str());
@@ -10260,6 +10274,15 @@ mod snapshot_restore_common {
             }
 
             guest.check_devices_common(Some(&socket), Some(&console_text), None);
+
+            if memory_restore_mode == Some("copyonwrite") {
+                guest
+                    .ssh_command(
+                        "sudo dd if=/dev/urandom of=/dev/shm/cow-test bs=1M count=64 conv=fsync \
+                         && sudo dd if=/dev/shm/cow-test of=/dev/null bs=1M count=64",
+                    )
+                    .expect("Failed to write and read guest memory during COW restore");
+            }
 
             #[cfg(target_arch = "x86_64")]
             guest.remove_test_disk(&api_socket_restored);
@@ -10327,6 +10350,20 @@ mod snapshot_restore_common {
         });
 
         handle_child_output(r, &output);
+
+        if let Some((memory_file_path, initial_size, initial_checksum)) = snapshot_memory_checksum {
+            let mut memory_file = File::open(&memory_file_path).unwrap();
+            let memory_file_size = memory_file.metadata().unwrap().len();
+            assert_eq!(
+                memory_file_size, initial_size,
+                "Copy-on-write restore changed the snapshot memory file size"
+            );
+            assert_eq!(
+                initial_checksum,
+                compute_file_checksum(&mut memory_file, memory_file_size),
+                "Copy-on-write restore modified the snapshot memory file"
+            );
+        }
     }
 
     #[cfg(not(feature = "mshv"))]
