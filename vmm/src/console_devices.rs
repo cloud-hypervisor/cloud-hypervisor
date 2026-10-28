@@ -54,6 +54,14 @@ pub enum ConsoleDeviceError {
     #[error("Socket path missing for socket console mode")]
     MissingSocketPath,
 
+    /// File path missing for file console mode
+    #[error("File path missing for file console mode")]
+    MissingFilePath,
+
+    /// Address missing for TCP console mode
+    #[error("Address missing for TCP console mode")]
+    MissingTcpAddress,
+
     #[error("TCP console address {0} is not loopback")]
     TcpAddressNotLoopback(SocketAddr),
 
@@ -233,8 +241,13 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
     let console_info = ConsoleInfo {
         console: match vmconfig.console.common.mode {
             ConsoleOutputMode::File => {
-                let file = File::create(vmconfig.console.common.file.as_ref().unwrap())
-                    .map_err(ConsoleDeviceError::CreateConsoleDevice)?;
+                let path = vmconfig
+                    .console
+                    .common
+                    .file
+                    .as_ref()
+                    .ok_or(ConsoleDeviceError::MissingFilePath)?;
+                let file = File::create(path).map_err(ConsoleDeviceError::CreateConsoleDevice)?;
                 ConsoleTransport::File(Arc::new(file))
             }
             ConsoleOutputMode::Pty => {
@@ -293,7 +306,12 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                 }
             }
             ConsoleOutputMode::Tcp => {
-                let tcp = vmconfig.console.common.tcp.as_ref().unwrap();
+                let tcp = vmconfig
+                    .console
+                    .common
+                    .tcp
+                    .as_ref()
+                    .ok_or(ConsoleDeviceError::MissingTcpAddress)?;
                 tcp_console_transport(tcp, vmm.console_tcp_listener.as_ref())?
             }
             ConsoleOutputMode::Null => ConsoleTransport::Null,
@@ -301,8 +319,13 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
         },
         serial: match vmconfig.serial.common.mode {
             ConsoleOutputMode::File => {
-                let file = File::create(vmconfig.serial.common.file.as_ref().unwrap())
-                    .map_err(ConsoleDeviceError::CreateConsoleDevice)?;
+                let path = vmconfig
+                    .serial
+                    .common
+                    .file
+                    .as_ref()
+                    .ok_or(ConsoleDeviceError::MissingFilePath)?;
+                let file = File::create(path).map_err(ConsoleDeviceError::CreateConsoleDevice)?;
                 ConsoleTransport::File(Arc::new(file))
             }
             ConsoleOutputMode::Pty => {
@@ -329,7 +352,12 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                 ConsoleTransport::Tty(Arc::new(stdout))
             }
             ConsoleOutputMode::Socket => {
-                let socket_path = vmconfig.serial.common.socket.as_ref().unwrap();
+                let socket_path = vmconfig
+                    .serial
+                    .common
+                    .socket
+                    .as_ref()
+                    .ok_or(ConsoleDeviceError::MissingSocketPath)?;
                 if let Some(listener) = vmm.serial_socket_listener.as_ref()
                     && listener.path() == socket_path
                 {
@@ -347,7 +375,12 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                 }
             }
             ConsoleOutputMode::Tcp => {
-                let tcp = vmconfig.serial.common.tcp.as_ref().unwrap();
+                let tcp = vmconfig
+                    .serial
+                    .common
+                    .tcp
+                    .as_ref()
+                    .ok_or(ConsoleDeviceError::MissingTcpAddress)?;
                 tcp_console_transport(tcp, vmm.serial_tcp_listener.as_ref())?
             }
             ConsoleOutputMode::Null => ConsoleTransport::Null,
@@ -356,8 +389,12 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
         #[cfg(target_arch = "x86_64")]
         debug: match vmconfig.debug_console.mode {
             ConsoleOutputMode::File => {
-                let file = File::create(vmconfig.debug_console.file.as_ref().unwrap())
-                    .map_err(ConsoleDeviceError::CreateConsoleDevice)?;
+                let path = vmconfig
+                    .debug_console
+                    .file
+                    .as_ref()
+                    .ok_or(ConsoleDeviceError::MissingFilePath)?;
+                let file = File::create(path).map_err(ConsoleDeviceError::CreateConsoleDevice)?;
                 ConsoleTransport::File(Arc::new(file))
             }
             ConsoleOutputMode::Pty => {

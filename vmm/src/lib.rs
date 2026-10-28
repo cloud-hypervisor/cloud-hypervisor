@@ -3615,6 +3615,7 @@ mod tests {
 
     use super::*;
     use crate::config::RestoredVfioConfig;
+    use crate::console_devices::ConsoleDeviceError;
     #[cfg(target_arch = "x86_64")]
     use crate::vm_config::DebugConsoleConfig;
     use crate::vm_config::{
@@ -3746,6 +3747,21 @@ mod tests {
         assert!(matches!(
             vmm.vm_create(config),
             Err(VmError::VmAlreadyCreated)
+        ));
+    }
+
+    // vm.create sets up the console devices before the config is validated.
+    #[test]
+    fn test_vmm_vm_create_serial_file_without_path() {
+        let mut vmm = create_dummy_vmm();
+        let mut config = create_dummy_vm_config();
+        config.serial.common.mode = ConsoleOutputMode::File;
+
+        assert!(matches!(
+            vmm.vm_create(config),
+            Err(VmError::CreateConsoleDevices(
+                ConsoleDeviceError::MissingFilePath
+            ))
         ));
     }
 
