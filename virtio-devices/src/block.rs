@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 use std::{io, mem, result, thread};
 
 use anyhow::anyhow;
-use block::async_io::{AsyncIo, AsyncIoError};
+use block::async_io::AsyncIo;
 use block::disk_file::AsyncFullDiskFile;
 use block::error::BlockError;
 use block::fcntl::{LockError, LockGranularity, LockGranularityChoice, LockType, get_lock_state};
@@ -76,8 +76,6 @@ pub enum Error {
     RequestCompleting(#[source] block::Error),
     #[error("Missing the expected entry in the list of requests")]
     MissingEntryRequestList,
-    #[error("Failed synchronizing the file")]
-    Fsync(#[source] AsyncIoError),
     #[error("Failed adding used index")]
     QueueAddUsed(#[source] virtio_queue::Error),
     #[error("Failed creating an iterator over the queue")]
@@ -484,7 +482,7 @@ impl BlockEpollHandler {
         let mut write_ops = Wrapping(0);
 
         while let Some(mut completion) = self.disk_image.next_completed_request() {
-            let result = completion.result;
+            let mut result = completion.result;
             let desc_index = completion.user_data as u16;
 
             let mut request = self.find_inflight_request(desc_index)?;
@@ -493,6 +491,16 @@ impl BlockEpollHandler {
             request
                 .complete_async(&mem, &mut completion)
                 .map_err(Error::RequestCompleting)?;
+
+            // Generate a virtio-block error if the fsync fails and writethrough requested
+            if result >= 0
+                && request.request_type() == RequestType::Out
+                && !request.writeback
+                && let Err(e) = self.disk_image.fsync(None)
+            {
+                warn!("Writethrough fsync failed: {e}");
+                result = -libc::EIO;
+            }
 
             let latency = request.start().elapsed().as_micros() as u64;
             let read_ops_last = self.counters.read_ops.load(Ordering::Relaxed);
@@ -533,9 +541,6 @@ impl BlockEpollHandler {
                         };
                     }
                     RequestType::Out => {
-                        if !request.writeback {
-                            self.disk_image.fsync(None).map_err(Error::Fsync)?;
-                        }
                         for (_, data_len) in request.data_descriptors() {
                             write_bytes += Wrapping(*data_len as u64);
                         }
@@ -1358,7 +1363,7 @@ mod tests {
     use std::path::Path;
     use std::sync::{Mutex, mpsc};
 
-    use block::async_io::{AsyncIoCompletion, AsyncIoOperation, AsyncIoResult};
+    use block::async_io::{AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
     use hypervisor::Vm;
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use vm_memory::GuestAddress;
@@ -1589,6 +1594,59 @@ mod tests {
     fn rejected_request_writes_one_status_byte() {
         let status = process_one_request(VIRTIO_BLK_T_OUT, 1 << VIRTIO_BLK_F_RO);
         assert_eq!(status, [VIRTIO_BLK_S_IOERR as u8, 0xff, 0xff, 0xff]);
+    }
+
+    // Completes every write in full and fails every fsync.
+    struct FailingFsync(EventFd, Vec<AsyncIoCompletion>);
+    impl AsyncIo for FailingFsync {
+        fn notifier(&self) -> &EventFd {
+            &self.0
+        }
+        fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
+            let len = op.total_len() as i32;
+            self.1.push(AsyncIoCompletion::from_operation(op, len));
+            Ok(())
+        }
+        fn fsync(&mut self, _: Option<u64>) -> AsyncIoResult<()> {
+            Err(AsyncIoError::Fsync(io::Error::from_raw_os_error(libc::EIO)))
+        }
+        fn punch_hole(&mut self, _: u64, _: u64, _: u64) -> AsyncIoResult<()> {
+            unreachable!()
+        }
+        fn write_zeroes(&mut self, _: u64, _: u64, _: u64) -> AsyncIoResult<()> {
+            unreachable!()
+        }
+        fn next_completed_request(&mut self) -> Option<AsyncIoCompletion> {
+            self.1.pop()
+        }
+    }
+
+    #[test]
+    fn writethrough_write_fails_when_fsync_fails() {
+        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let vq = GuestQ::new(GuestAddress(0x1000), &mem, 4);
+        mem.write_obj(VIRTIO_BLK_T_OUT, GuestAddress(REQ_HDR_ADDR))
+            .unwrap();
+        let next = VRING_DESC_F_NEXT as u16;
+        let write = VRING_DESC_F_WRITE as u16;
+        vq.dtable[0].set(REQ_HDR_ADDR, 16, next, 1);
+        vq.dtable[1].set(REQ_DATA_ADDR, 512, next, 2);
+        vq.dtable[2].set(REQ_STATUS_ADDR, 1, write, 0);
+        vq.avail.ring[0].set(0);
+        vq.avail.idx.set(1);
+
+        let mut handler = make_handler(vq.create_queue(), &mem, 0);
+        handler.disk_nsectors.store(1, Ordering::SeqCst);
+        handler.disk_image = Box::new(FailingFsync(
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+            Vec::new(),
+        ));
+        handler.process_queue_submit().unwrap();
+        handler.process_queue_complete().unwrap();
+
+        assert_eq!(vq.used.idx.get(), 1);
+        let status: u8 = mem.read_obj(GuestAddress(REQ_STATUS_ADDR)).unwrap();
+        assert_eq!(status, VIRTIO_BLK_S_IOERR as u8);
     }
 
     #[test]
