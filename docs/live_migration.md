@@ -320,6 +320,23 @@ following parameters. Unless marked otherwise, they apply to
   guest pages in the background after the VM resumed. With `off`, only the
   pages that the guest or the VMM access are fetched. Defaults to `on`.
 
+## Connection Timeouts
+
+Cloud Hypervisor detects unresponsive migration peers with fixed timeouts,
+independent of `timeout_s`, the timeout of the migration itself:
+
+- Connection setup on the destination (10 seconds): \
+  Setting up an incoming connection, including the TLS handshake, must not
+  stall. A failing additional connection (see `connections`) is dropped, a
+  failing main connection fails the migration.
+- TLS handshake on the source (120 seconds): \
+  A destination that stalls the TLS handshake fails the migration. This is
+  longer than on the destination, which handshakes new connections one at a
+  time.
+- Dead peers (120 seconds): \
+  TCP keepalive and `TCP_USER_TIMEOUT` detect a peer whose host or network is
+  gone, or that stops reading.
+
 ## Network Announcements After Resume
 
 After a VM resumes from migration, snapshot restore, or any other path
