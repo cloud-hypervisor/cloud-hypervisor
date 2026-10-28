@@ -9,7 +9,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom};
 use std::mem::{MaybeUninit, zeroed};
-use std::num::NonZeroUsize;
+use std::num::{NonZeroU32, NonZeroUsize};
 use std::ops::{BitAnd, Not, Sub};
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
@@ -1252,14 +1252,19 @@ impl MemoryManager {
         file_path: &Path,
         saved_regions: &MemoryRangeTable,
         background_fetch_pages: bool,
+        num_uffd_handlers: NonZeroU32,
         exit_evt: &EventFd,
     ) -> Result<(), Error> {
         let mut file_offset: u64 = 0;
 
         let snapshot_file = File::open(file_path).map_err(Error::SnapshotOpen)?;
-        let source: Box<dyn UffdMemorySource> = Box::new(FileUffdMemorySource::new(
-            snapshot_file.try_clone().map_err(Error::SnapshotOpen)?,
-        ));
+        let mut sources: Vec<(Box<dyn UffdMemorySource>, Option<OwnedFd>)> = Vec::new();
+        for _ in 0..num_uffd_handlers.get() {
+            let source: Box<dyn UffdMemorySource> = Box::new(FileUffdMemorySource::new(
+                snapshot_file.try_clone().map_err(Error::SnapshotOpen)?,
+            ));
+            sources.push((source, None));
+        }
 
         let Some(uffd) = self.prepare_uffd(
             saved_regions,
@@ -1268,7 +1273,7 @@ impl MemoryManager {
                 file_offset += r.length;
                 o
             },
-            source.requires_uffd_minor_mode(),
+            sources[0].0.requires_uffd_minor_mode(),
         )?
         else {
             return Ok(());
@@ -1297,13 +1302,7 @@ impl MemoryManager {
             }
         }
 
-        self.spawn_uffd_handlers(
-            uffd,
-            vec![(source, None)],
-            pages,
-            exit_evt,
-            background_fetch_pages,
-        )?;
+        self.spawn_uffd_handlers(uffd, sources, pages, exit_evt, background_fetch_pages)?;
         info!("UFFD restore: demand-paged restore enabled");
         Ok(())
     }
@@ -2553,6 +2552,7 @@ impl MemoryManager {
         source_url: Option<&str>,
         prefault: bool,
         memory_restore_mode: MemoryRestoreMode,
+        num_pagefault_handlers: NonZeroU32,
         phys_bits: u8,
         exit_evt: &EventFd,
         #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
@@ -2585,6 +2585,7 @@ impl MemoryManager {
                             &memory_file_path,
                             &mem_snapshot.memory_ranges,
                             background_fetch_pages,
+                            num_pagefault_handlers,
                             exit_evt,
                         )?;
                     }

@@ -7,6 +7,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 #[cfg(feature = "ivshmem")]
 use std::fs;
 use std::mem::discriminant;
+use std::num::NonZeroU32;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -33,12 +34,14 @@ use virtio_devices::{RateLimiterConfig, TokenBucketConfig, net, vhost_user};
 
 use crate::external_fds::{ExternalFds, Target, UpdateFdsError};
 use crate::landlock::LandlockAccess;
+use crate::migration::transport::MAX_MIGRATION_CONNECTIONS;
 use crate::vm_config::*;
 
 const MAX_NUM_PCI_SEGMENTS: u16 = 96;
 const MAX_IOMMU_ADDRESS_WIDTH_BITS: u8 = 64;
 const MIN_PHYS_BITS: u8 = 32;
 const MAX_PHYS_BITS: u8 = 64;
+pub(crate) const DEFAULT_RESTORE_PAGEFAULT_HANDLERS: NonZeroU32 = NonZeroU32::new(1).unwrap();
 
 // Maximum queue size is largest power of 2 that fits into a u16
 const VIRTIO_MAX_QUEUE_SIZE: u16 = 32768;
@@ -501,6 +504,16 @@ pub enum ValidationError {
     /// Postcopy and on-demand restore are not supported with some devices
     #[error("Postcopy and on-demand restore are not supported with {0} devices")]
     PostcopyIncompatibleDevice(String),
+    /// Pagefault handlers only apply to on-demand restore.
+    #[error(
+        "Pagefault handlers require 'memory_restore_mode=ondemand' or 'memory_restore_mode=ondemand_no_background_fetch_pages'"
+    )]
+    InvalidRestorePagefaultHandlersWithoutOnDemand,
+    /// Too many pagefault handlers for restore.
+    #[error(
+        "Too many pagefault handlers: specified {0} but {MAX_MIGRATION_CONNECTIONS} is the limit"
+    )]
+    TooManyRestorePagefaultHandlers(u32),
     /// Path provided in landlock-rules doesn't exist
     #[error("Path {0:?} provided in landlock-rules does not exist")]
     LandlockPathDoesNotExist(PathBuf),
@@ -3116,6 +3129,8 @@ pub struct RestoreConfig {
     pub prefault: bool,
     #[serde(default)]
     pub memory_restore_mode: MemoryRestoreMode,
+    #[serde(default)]
+    pub num_pagefault_handlers: Option<NonZeroU32>,
     /// Deprecated: use `external_fds` with network targets instead.
     #[serde(default)]
     pub net_fds: Option<Vec<RestoredNetConfig>>,
@@ -3142,6 +3157,7 @@ impl RestoreConfig {
     pub const SYNTAX: &'static str = "Restore from a VM snapshot.\
         \nRestore parameters \"source_url=<source_url>,prefault=on|off,\
         memory_restore_mode=copy|ondemand|ondemand_no_background_fetch_pages|copyonwrite,\
+        num_pagefault_handlers=<amount>,\
         external_fds=[net(<id>)@[<fd>,...],vfio(<id>)@[<fd>],iommu@[<fd>]],resume=true|false,\
         zone_updates=<list_of_updates>,\
         serial_file=<path>|serial_socket=<path>|serial_tcp=<ip>:<port>,\
@@ -3154,6 +3170,11 @@ impl RestoreConfig {
         support is unavailable, `memory_restore_mode=ondemand_no_background_fetch_pages` does the \
         same without prefaulting pages in the background, and `memory_restore_mode=copyonwrite` \
         maps the snapshot file copy-on-write (plain private RAM only; falls back to copy otherwise)\
+        \n`num_pagefault_handlers` is the number of handler threads that'll be servicing \
+        pagefaults for on-demand restores. It's only valid with \
+        `memory_restore_mode=ondemand` or \
+        `memory_restore_mode=ondemand_no_background_fetch_pages`. Maximum is 128, and it \
+        defaults to 1\
         \n`external_fds` provides replacement file descriptors. `net(<id>)` entries replace \
         the FDs of network devices, `vfio(<id>)` entries replace VFIO cdev FDs, and `iommu` \
         provides the iommufd FD. \
@@ -3175,6 +3196,7 @@ impl RestoreConfig {
             .add("source_url")
             .add("prefault")
             .add("memory_restore_mode")
+            .add("num_pagefault_handlers")
             .add("net_fds")
             .add("vfio_fds")
             .add("iommufd_fd")
@@ -3203,6 +3225,9 @@ impl RestoreConfig {
             .convert::<MemoryRestoreMode>("memory_restore_mode")
             .map_err(Error::ParseRestore)?
             .unwrap_or_default();
+        let num_pagefault_handlers = parser
+            .convert::<NonZeroU32>("num_pagefault_handlers")
+            .map_err(Error::ParseRestore)?;
         let mut net_fds = parser
             .convert::<TupleList<String, Vec<u64>>>("net_fds")
             .map_err(Error::ParseRestore)?
@@ -3287,6 +3312,7 @@ impl RestoreConfig {
             source_url,
             prefault,
             memory_restore_mode,
+            num_pagefault_handlers,
             net_fds,
             vfio_fds,
             iommufd_fd,
@@ -3301,6 +3327,23 @@ impl RestoreConfig {
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
         if self.memory_restore_mode != MemoryRestoreMode::Copy && self.prefault {
             return Err(ValidationError::InvalidRestorePrefaultWithOnDemand);
+        }
+
+        if self.num_pagefault_handlers.is_some()
+            && !matches!(
+                self.memory_restore_mode,
+                MemoryRestoreMode::OnDemand | MemoryRestoreMode::OnDemandNoBackgroundFetchPages
+            )
+        {
+            return Err(ValidationError::InvalidRestorePagefaultHandlersWithoutOnDemand);
+        }
+
+        if let Some(handlers) = self.num_pagefault_handlers
+            && handlers.get() > MAX_MIGRATION_CONNECTIONS
+        {
+            return Err(ValidationError::TooManyRestorePagefaultHandlers(
+                handlers.get(),
+            ));
         }
 
         if matches!(
