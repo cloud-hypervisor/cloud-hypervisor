@@ -53,8 +53,8 @@ pub enum UffdError {
     #[error("Failed to spawn handler thread")]
     SpawnThread(#[source] io::Error),
 
-    #[error("Handler terminated before startup completed")]
-    HandlerStartup,
+    #[error("Handler {index} terminated before startup completed")]
+    HandlerStartup { index: usize },
 
     #[error("Handler failed after startup")]
     HandlerFailed(#[source] io::Error),
