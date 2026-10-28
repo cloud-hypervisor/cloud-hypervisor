@@ -65,9 +65,15 @@ enum Error {
     /// Failed to handle unknown event.
     #[error("Failed to handle unknown event")]
     HandleEventUnknownEvent,
+    /// Failed to open the disk image
+    #[error("Failed to open the disk image")]
+    OpenImage(#[source] io::Error),
     /// No path provided
     #[error("No path provided")]
     PathParameterMissing,
+    /// Failed to query the disk image size
+    #[error("Failed to query the disk image size")]
+    QueryImageSize(#[source] io::Error),
     /// No socket provided
     #[error("No socket provided")]
     SocketParameterMissing,
@@ -229,13 +235,16 @@ impl VhostUserBlkBackend {
         if direct {
             options.custom_flags(libc::O_DIRECT);
         }
-        let image: File = options.open(image_path).unwrap();
+        let image: File = options.open(image_path).map_err(Error::OpenImage)?;
         let raw_img = AlignedFile::new(image, direct);
 
         let serial = build_serial(None, &PathBuf::from(&image_path));
         let image = Arc::new(Mutex::new(raw_img));
 
-        let nsectors = query_device_size(image.lock().unwrap().file()).unwrap().0 / SECTOR_SIZE;
+        let nsectors = query_device_size(image.lock().unwrap().file())
+            .map_err(Error::QueryImageSize)?
+            .0
+            / SECTOR_SIZE;
         let config = VirtioBlockConfig {
             capacity: nsectors,
             blk_size: BLK_SIZE,
@@ -542,26 +551,41 @@ pub fn start_block_backend(backend_command: &str) {
 
     let mem = GuestMemoryAtomic::new(GuestMemoryMmap::new());
 
-    let blk_backend = Arc::new(RwLock::new(
-        VhostUserBlkBackend::new(
-            &backend_config.path,
-            backend_config.num_queues,
-            backend_config.readonly,
-            backend_config.direct,
-            backend_config.poll_queue,
-            backend_config.queue_size,
-            mem.clone(),
-        )
-        .unwrap(),
-    ));
+    let blk_backend = match VhostUserBlkBackend::new(
+        &backend_config.path,
+        backend_config.num_queues,
+        backend_config.readonly,
+        backend_config.direct,
+        backend_config.poll_queue,
+        backend_config.queue_size,
+        mem.clone(),
+    ) {
+        Ok(backend) => Arc::new(RwLock::new(backend)),
+        Err(e) => {
+            error!("Failed to create vhost-user-block backend: {e:?}");
+            process::exit(1);
+        }
+    };
 
     debug!("blk_backend is created!\n");
 
-    let mut listener = Listener::new(&backend_config.socket, true).unwrap();
+    let mut listener = match Listener::new(&backend_config.socket, true) {
+        Ok(listener) => listener,
+        Err(e) => {
+            error!("Failed to listen on vhost-user-block socket: {e:?}");
+            process::exit(1);
+        }
+    };
 
     let name = "vhost-user-blk-backend";
-    let mut blk_daemon =
-        VhostUserDaemon::new(name.to_string(), Arc::clone(&blk_backend), mem).unwrap();
+    let mut blk_daemon = match VhostUserDaemon::new(name.to_string(), Arc::clone(&blk_backend), mem)
+    {
+        Ok(daemon) => daemon,
+        Err(e) => {
+            error!("Failed to create vhost-user-block daemon: {e:?}");
+            process::exit(1);
+        }
+    };
 
     debug!("blk_daemon is created!\n");
 
