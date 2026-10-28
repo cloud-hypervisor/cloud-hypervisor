@@ -8366,7 +8366,7 @@ mod common_parallel {
     // Postcopy live migration. Verifies the destination boots a guest
     // that touches all of its memory, which forces every page to be
     // demand-faulted across the network.
-    fn _test_live_migration_tcp_postcopy() {
+    fn _test_live_migration_tcp_postcopy(connections: NonZeroU32) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let console_text = String::from("On a branch floating down river a cricket, singing.");
@@ -8418,7 +8418,7 @@ mod common_parallel {
                     &src_api_socket,
                     &dest_api_socket,
                     &dest_event_path,
-                    NonZeroU32::new(1).unwrap(),
+                    connections,
                     &SendMigrationOptions {
                         postcopy: true,
                         ..Default::default()
@@ -8462,6 +8462,19 @@ mod common_parallel {
 
         let _ = dest_child.kill();
         let dest_output = dest_child.wait_with_output().unwrap();
+        handle_child_output(r, &dest_output);
+
+        let r = panic::catch_unwind(|| {
+            let logs = format!(
+                "{}\n{}",
+                String::from_utf8_lossy(&dest_output.stdout),
+                String::from_utf8_lossy(&dest_output.stderr)
+            );
+            assert!(
+                logs.contains(&format!("UFFD: spawning {connections} handlers")),
+                "Expected {connections} postcopy UFFD handlers. output: {logs}"
+            );
+        });
         handle_child_output(r, &dest_output);
     }
 
@@ -9123,7 +9136,13 @@ mod common_parallel {
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_tcp_postcopy() {
-        _test_live_migration_tcp_postcopy();
+        _test_live_migration_tcp_postcopy(NonZeroU32::new(1).unwrap());
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_live_migration_tcp_postcopy_two_connections() {
+        _test_live_migration_tcp_postcopy(NonZeroU32::new(2).unwrap());
     }
 
     #[test]
@@ -10457,18 +10476,28 @@ mod ivshmem {
 
     #[test]
     fn test_snapshot_restore_offload() {
-        snapshot_restore_common::_test_snapshot_restore_offload(false, false);
+        snapshot_restore_common::_test_snapshot_restore_offload(false, false, None);
     }
 
     #[test]
     fn test_snapshot_restore_offload_virtio_mem() {
-        snapshot_restore_common::_test_snapshot_restore_offload(true, false);
+        snapshot_restore_common::_test_snapshot_restore_offload(true, false, None);
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_offload_ondemand() {
-        snapshot_restore_common::_test_snapshot_restore_offload(false, true);
+        snapshot_restore_common::_test_snapshot_restore_offload(false, true, None);
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_restore_offload_ondemand_two_connections() {
+        snapshot_restore_common::_test_snapshot_restore_offload(
+            false,
+            true,
+            Some(NonZeroU32::new(2).unwrap()),
+        );
     }
 
     #[test]
@@ -10485,7 +10514,6 @@ mod ivshmem {
 
 mod snapshot_restore_common {
     use std::fs::{read_to_string, remove_dir_all};
-    #[cfg(not(feature = "mshv"))]
     use std::num::NonZeroU32;
     use std::process::Command;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -11252,7 +11280,11 @@ mod snapshot_restore_common {
     // Round-trip via the reference offload daemon over the existing
     // `vm.send-migration memory_mode=memfds` / `vm.receive-migration`
     // endpoints, proving parity with `vm.snapshot`/`vm.restore`.
-    pub(crate) fn _test_snapshot_restore_offload(virtio_mem: bool, ondemand: bool) {
+    pub(crate) fn _test_snapshot_restore_offload(
+        virtio_mem: bool,
+        ondemand: bool,
+        connections: Option<NonZeroU32>,
+    ) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
@@ -11385,6 +11417,11 @@ mod snapshot_restore_common {
                 .unwrap(),
         );
 
+        let mut expected_connections = 1;
+        if let Some(connections) = connections {
+            expected_connections = connections.get();
+        }
+
         let mut dest_child = GuestCommand::new(&guest)
             .args(["--api-socket", &api_socket_restored])
             .capture_output()
@@ -11429,6 +11466,10 @@ mod snapshot_restore_common {
             if ondemand {
                 restore_args.push("--ondemand".to_string());
             }
+            if let Some(connections) = connections {
+                restore_args.push("--connections".to_string());
+                restore_args.push(connections.to_string());
+            }
             let daemon = Command::new(clh_command("offload_daemon"))
                 .args(&restore_args)
                 .stderr(Stdio::piped())
@@ -11469,6 +11510,21 @@ mod snapshot_restore_common {
         kill_child(&mut dest_child);
         let output = dest_child.wait_with_output().unwrap();
         handle_child_output(r, &output);
+
+        if ondemand {
+            let r = panic::catch_unwind(|| {
+                let logs = format!(
+                    "{}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert!(
+                    logs.contains(&format!("UFFD: spawning {expected_connections} handlers")),
+                    "Expected {expected_connections} offload UFFD handlers. output: {logs}"
+                );
+            });
+            handle_child_output(r, &output);
+        }
 
         let _ = remove_dir_all(offload_dir.as_str());
     }
