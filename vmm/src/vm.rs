@@ -1379,16 +1379,19 @@ impl Vm {
         hypervisor: &dyn hypervisor::Hypervisor,
         config: HypervisorVmConfig,
     ) -> Result<Arc<dyn hypervisor::Vm>> {
-        hypervisor.check_required_extensions().unwrap();
+        hypervisor
+            .check_required_extensions()
+            .map_err(Error::CreateVm)?;
 
         let vm = hypervisor.create_vm(config).map_err(Error::CreateVm)?;
 
         #[cfg(target_arch = "x86_64")]
         {
             vm.set_identity_map_address(KVM_IDENTITY_MAP_START.0)
-                .unwrap();
-            vm.set_tss_address(KVM_TSS_START.0 as usize).unwrap();
-            vm.enable_split_irq().unwrap();
+                .map_err(Error::InitializeVm)?;
+            vm.set_tss_address(KVM_TSS_START.0 as usize)
+                .map_err(Error::InitializeVm)?;
+            vm.enable_split_irq().map_err(Error::InitializeVm)?;
         }
 
         Ok(vm)
