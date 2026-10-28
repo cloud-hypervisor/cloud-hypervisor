@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom};
-use std::mem::{self, MaybeUninit, zeroed};
+use std::mem::{MaybeUninit, zeroed};
 use std::num::NonZeroUsize;
 use std::ops::{BitAnd, Not, Sub};
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
@@ -101,17 +101,13 @@ impl UffdPages {
 
 /// Userfaultfds sent to a UFFD handler.
 pub(crate) struct UffdRegistry {
-    added_uffds: Mutex<Vec<(String /* device identifier */, Uffd)>>,
+    uffds: Mutex<Vec<(String /* device identifier */, Arc<Uffd>)>>,
     added_uffd_evt: EventFd,
     done: EventFd,
     ranges: Box<[UffdRange]>,
 }
 
 impl UffdRegistry {
-    fn drain_added_uffds(&self) -> Vec<(String, Uffd)> {
-        mem::take(&mut *self.added_uffds.lock().unwrap())
-    }
-
     fn is_done(&self) -> bool {
         let mut pollfd = libc::pollfd {
             fd: self.done.as_raw_fd(),
@@ -120,6 +116,21 @@ impl UffdRegistry {
         };
         // SAFETY: `pollfd` is valid for the one descriptor polled.
         unsafe { libc::poll(&mut pollfd, 1, 0) == 1 }
+    }
+
+    fn done(&self) -> Result<(), io::Error> {
+        let uffds = self.uffds.lock().unwrap();
+        // Every page is present, so the faults still queued on the
+        // userfaultfds only need waking up.
+        for (_, uffd) in uffds.iter() {
+            for range in uffd.ranges() {
+                uffd::wake(uffd.fd(), range.host_addr, range.length)?;
+            }
+            for hole in uffd.holes() {
+                uffd::unregister(uffd.fd(), hole.host_addr, hole.length)?;
+            }
+        }
+        self.done.write(1)
     }
 }
 
@@ -147,7 +158,7 @@ impl PostcopyHandler for UffdRegistry {
         fd: OwnedFd,
         regions: &[PostcopyRegion],
     ) -> Result<(), io::Error> {
-        let mut added_uffds = self.added_uffds.lock().unwrap();
+        let mut uffds = self.uffds.lock().unwrap();
         if self.is_done() {
             return Ok(());
         }
@@ -197,8 +208,13 @@ impl PostcopyHandler for UffdRegistry {
             }
         }
 
-        let entry = (id.to_string(), Uffd::new(fd, ranges.into(), holes.into())?);
-        added_uffds.push(entry);
+        let uffd = Arc::new(Uffd::new(fd, ranges.into(), holes.into())?);
+        if let Some(idx) = uffds.iter().position(|(uffd_id, _)| uffd_id == id) {
+            // Its process remapped guest memory, as on a device reset
+            uffds[idx].1 = uffd;
+        } else {
+            uffds.push((id.to_string(), uffd));
+        }
         self.added_uffd_evt.write(1)
     }
 
@@ -1416,7 +1432,7 @@ impl MemoryManager {
         let (result_tx, result_rx) = mpsc::sync_channel(1);
         let ranges = Box::from(uffd.ranges());
         let uffd_registry = Arc::new(UffdRegistry {
-            added_uffds: Mutex::new(vec![(VMM_UFFD_ID.to_string(), uffd)]),
+            uffds: Mutex::new(vec![(VMM_UFFD_ID.to_string(), Arc::new(uffd))]),
             added_uffd_evt: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
             done: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
             ranges,
@@ -1563,7 +1579,7 @@ impl MemoryManager {
         ready_tx: &SyncSender<()>,
         background_fetch_pages: bool,
     ) -> Result<(), io::Error> {
-        let mut uffds = uffd_registry.drain_added_uffds();
+        let mut uffds = uffd_registry.uffds.lock().unwrap().clone();
         assert!(!uffds.is_empty());
         let (_, vmm_uffd) = &uffds[0];
         let ranges = vmm_uffd.ranges();
@@ -1646,23 +1662,23 @@ impl MemoryManager {
                 .any(|event| event.data == EVENT_ADDED_UFFD)
             {
                 uffd_registry.added_uffd_evt.read().ok();
-                for (id, uffd) in uffd_registry.drain_added_uffds() {
-                    let idx =
-                        if let Some(idx) = uffds.iter().position(|(uffd_id, _)| *uffd_id == id) {
-                            // Its process remapped guest memory, as on a device reset
-                            epoll::ctl(
-                                epoll_fd,
-                                epoll::ControlOptions::EPOLL_CTL_DEL,
-                                uffds[idx].1.fd().as_raw_fd(),
-                                epoll::Event::new(epoll::Events::empty(), 0),
-                            )
-                            .map_err(io::Error::other)?;
-                            uffds[idx].1 = uffd;
-                            idx
-                        } else {
-                            uffds.push((id, uffd));
-                            uffds.len() - 1
-                        };
+                let registered = uffd_registry.uffds.lock().unwrap();
+                for (idx, entry) in registered.iter().enumerate() {
+                    if let Some((_, uffd)) = uffds.get(idx) {
+                        if Arc::ptr_eq(uffd, &entry.1) {
+                            continue;
+                        }
+                        epoll::ctl(
+                            epoll_fd,
+                            epoll::ControlOptions::EPOLL_CTL_DEL,
+                            uffd.fd().as_raw_fd(),
+                            epoll::Event::new(epoll::Events::empty(), 0),
+                        )
+                        .map_err(io::Error::other)?;
+                        uffds[idx] = entry.clone();
+                    } else {
+                        uffds.push(entry.clone());
+                    }
                     epoll::ctl(
                         epoll_fd,
                         epoll::ControlOptions::EPOLL_CTL_ADD,
@@ -1893,19 +1909,7 @@ impl MemoryManager {
                 &pages.loading,
             ) {
                 Ok(0) => {
-                    let mut added_uffds = uffd_registry.added_uffds.lock().unwrap();
-                    uffds.append(&mut added_uffds);
-                    // Every page is present, so the faults still queued on
-                    // the userfaultfds only need waking up.
-                    for (_, uffd) in &uffds {
-                        for range in uffd.ranges() {
-                            uffd::wake(uffd.fd(), range.host_addr, range.length)?;
-                        }
-                        for hole in uffd.holes() {
-                            uffd::unregister(uffd.fd(), hole.host_addr, hole.length)?;
-                        }
-                    }
-                    uffd_registry.done.write(1)?;
+                    uffd_registry.done()?;
 
                     let elapsed = prefault_start.elapsed();
                     info!(
