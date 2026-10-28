@@ -51,6 +51,10 @@ pub enum VfioUserPciDeviceError {
     Client(#[source] VfioUserError),
     #[error("Failed to map VFIO PCI region into guest")]
     MapRegionGuest(#[source] HypervisorVmError),
+    #[error("Missing region {0}")]
+    MissingRegion(u32),
+    #[error("Missing file descriptor for mappable region {0}")]
+    MissingRegionFd(u32),
     #[error(
         "Sparse mmap area [0x{offset:x}, +0x{size:x}) outside the 0x{region_size:x} byte region"
     )]
@@ -134,14 +138,14 @@ impl VfioUserPciDevice {
                 .lock()
                 .unwrap()
                 .region(mmio_region.index)
-                .unwrap()
+                .ok_or(VfioUserPciDeviceError::MissingRegion(mmio_region.index))?
                 .flags;
             let file_offset = self
                 .client
                 .lock()
                 .unwrap()
                 .region(mmio_region.index)
-                .unwrap()
+                .ok_or(VfioUserPciDeviceError::MissingRegion(mmio_region.index))?
                 .file_offset
                 .clone();
 
@@ -150,7 +154,7 @@ impl VfioUserPciDevice {
                 .lock()
                 .unwrap()
                 .region(mmio_region.index)
-                .unwrap()
+                .ok_or(VfioUserPciDeviceError::MissingRegion(mmio_region.index))?
                 .sparse_areas
                 .clone();
 
@@ -172,7 +176,9 @@ impl VfioUserPciDevice {
                     sparse_areas
                 };
 
-                let file_offset = file_offset.as_ref().unwrap();
+                let file_offset = file_offset
+                    .as_ref()
+                    .ok_or(VfioUserPciDeviceError::MissingRegionFd(mmio_region.index))?;
 
                 for s in mmaps.iter() {
                     // The area layout comes from the untrusted backend. Never
