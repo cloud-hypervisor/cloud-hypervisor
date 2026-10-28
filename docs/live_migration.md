@@ -329,10 +329,11 @@ independent of `timeout_s`, the timeout of the migration itself:
   Setting up an incoming connection, including the TLS handshake, must not
   stall. A failing additional connection (see `connections`) is dropped, a
   failing main connection fails the migration.
-- TLS handshake on the source (120 seconds): \
-  A destination that stalls the TLS handshake fails the migration. This is
-  longer than on the destination, which handshakes new connections one at a
-  time.
+- Sender reads and writes (120 seconds): \
+  A hung destination fails the migration and the source VM resumes. This
+  also applies to the TLS handshake and to prefaulting the guest memory on
+  the destination. The final handover of the VM and the postcopy fault
+  connection are exempt.
 - Dead peers (120 seconds): \
   TCP keepalive and `TCP_USER_TIMEOUT` detect a peer whose host or network is
   gone, or that stops reading.
