@@ -3919,13 +3919,13 @@ fn write_guest_range(
     Ok(())
 }
 
-// Writes the guest pages that no longer read from the restore source over
-// the clone of that source in `file`.
-fn write_private_pages(
+// Returns the guest ranges that no longer read from the restore source,
+// each with its offset in the memory file of that source.
+fn private_guest_ranges(
     guest_memory: &GuestMemoryMmap,
     source: &CowSource,
-    file: &mut File,
-) -> result::Result<(), MigratableError> {
+) -> result::Result<Vec<(u64, MemoryRange)>, MigratableError> {
+    let mut ranges = Vec::new();
     let mut file_offset: u64 = 0;
     for range in source.ranges.ranges() {
         let host_addr = guest_memory
@@ -3938,15 +3938,28 @@ fn write_private_pages(
             .context("Error reading the pagemap")
             .map_err(MigratableError::MigrateSend)?;
         for private in private_ranges {
-            write_guest_range(
-                guest_memory,
-                file,
+            ranges.push((
                 file_offset + private.start,
-                range.gpa + private.start,
-                private.end - private.start,
-            )?;
+                MemoryRange {
+                    gpa: range.gpa + private.start,
+                    length: private.end - private.start,
+                },
+            ));
         }
         file_offset += range.length;
+    }
+    Ok(ranges)
+}
+
+// Writes the guest pages that no longer read from the restore source over
+// the clone of that source in `file`.
+fn write_private_pages(
+    guest_memory: &GuestMemoryMmap,
+    source: &CowSource,
+    file: &mut File,
+) -> result::Result<(), MigratableError> {
+    for (file_offset, range) in private_guest_ranges(guest_memory, source)? {
+        write_guest_range(guest_memory, file, file_offset, range.gpa, range.length)?;
     }
     Ok(())
 }
