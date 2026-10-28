@@ -1287,7 +1287,7 @@ impl MemoryManager {
             }
         }
 
-        self.spawn_uffd_handler(uffd, None, pages, source, exit_evt, true)?;
+        self.spawn_uffd_handlers(uffd, vec![(source, None)], pages, exit_evt, true)?;
         info!("UFFD restore: demand-paged restore enabled");
         Ok(())
     }
@@ -1320,11 +1320,10 @@ impl MemoryManager {
 
         let pages = UffdPages::new(uffd.ranges());
         info!("UFFD: postcopy background prefault {background_fetch_pages}");
-        self.spawn_uffd_handler(
+        self.spawn_uffd_handlers(
             uffd,
-            Some(socket_fd),
+            vec![(source, Some(socket_fd))],
             pages,
-            source,
             exit_evt,
             background_fetch_pages,
         )
@@ -1420,18 +1419,19 @@ impl MemoryManager {
         ))
     }
 
-    /// Spawn the UFFD handler thread that resolves faults through `source`.
-    fn spawn_uffd_handler(
+    /// Spawn one UFFD handler thread per source, the first one prefaulting
+    /// if `background_fetch_pages`.
+    fn spawn_uffd_handlers(
         &mut self,
         uffd: Uffd,
-        fault_socket_fd: Option<OwnedFd>,
+        sources: Vec<(Box<dyn UffdMemorySource>, Option<OwnedFd>)>,
         pages: UffdPages,
-        source: Box<dyn UffdMemorySource>,
         exit_evt: &EventFd,
         background_fetch_pages: bool,
     ) -> Result<(), Error> {
         info!(
-            "UFFD: spawning handler for {} region(s)",
+            "UFFD: spawning {} handlers for {} region(s)",
+            sources.len(),
             uffd.ranges().len()
         );
 
@@ -1442,27 +1442,40 @@ impl MemoryManager {
             stopped: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
             ranges,
         });
-        let worker = Self::spawn_uffd_worker(
-            &uffd_registry,
-            pages,
-            source,
-            fault_socket_fd,
-            exit_evt,
-            background_fetch_pages,
-        )?;
+        let pages = Arc::new(pages);
+
+        let mut workers = Vec::with_capacity(sources.len());
+        for (index, (source, fault_socket_fd)) in sources.into_iter().enumerate() {
+            match Self::spawn_uffd_worker(
+                index,
+                &uffd_registry,
+                &pages,
+                source,
+                fault_socket_fd,
+                exit_evt,
+                background_fetch_pages && index == 0,
+            ) {
+                Ok(worker) => workers.push(worker),
+                Err(e) => {
+                    Self::stop_uffd_workers(&uffd_registry, workers.into());
+                    return Err(e);
+                }
+            }
+        }
 
         self.uffd_handler = Some(UffdHandler {
-            workers: Box::new([worker]),
+            workers: workers.into(),
             uffd_registry,
         });
 
         Ok(())
     }
 
-    /// Spawn a UFFD handler thread and wait until it serves faults.
+    /// Spawn UFFD handler `index` and wait until it serves faults.
     fn spawn_uffd_worker(
+        index: usize,
         uffd_registry: &Arc<UffdRegistry>,
-        pages: UffdPages,
+        pages: &Arc<UffdPages>,
         source: Box<dyn UffdMemorySource>,
         fault_socket_fd: Option<OwnedFd>,
         exit_evt: &EventFd,
@@ -1473,15 +1486,16 @@ impl MemoryManager {
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let (result_tx, result_rx) = mpsc::sync_channel(1);
         let thread_uffd_registry = Arc::clone(uffd_registry);
+        let thread_pages = Arc::clone(pages);
         let handle = thread::Builder::new()
-            .name("uffd-handler".to_string())
+            .name(format!("uffd-handler-{index}"))
             .spawn(move || {
                 panic::catch_unwind(panic::AssertUnwindSafe(move || {
                     let mut result = Self::uffd_handler_loop(
                         &thread_uffd_registry,
                         &thread_exit_evt,
                         source,
-                        &pages,
+                        &thread_pages,
                         &ready_tx,
                         background_fetch_pages,
                     );
@@ -1492,14 +1506,14 @@ impl MemoryManager {
                     }
 
                     if let Err(e) = &result {
-                        error!("UFFD handler exited with error: {e}");
+                        error!("UFFD handler {index} exited with error: {e}");
                         thread_exit_evt.write(1).ok();
                     }
 
                     result_tx.send(result).ok();
                 }))
                 .map_err(|_| {
-                    error!("uffd-handler thread panicked");
+                    error!("uffd-handler-{index} thread panicked");
                     panic_exit_evt.write(1).ok();
                 })
                 .ok();
@@ -1508,7 +1522,7 @@ impl MemoryManager {
 
         if ready_rx.recv().is_err() {
             handle.join().ok();
-            return Err(UffdError::HandlerStartup.into());
+            return Err(UffdError::HandlerStartup { index }.into());
         }
 
         if let Ok(Err(e)) = result_rx.try_recv() {
@@ -1540,28 +1554,26 @@ impl MemoryManager {
         features
     }
 
-    fn stop_uffd_handler(&mut self) {
-        if let Some(uffd_handler) = self.uffd_handler.take() {
-            if let Err(e) = uffd_handler.uffd_registry.stop() {
-                error!("UFFD registry stop failed: {e}");
+    fn stop_uffd_workers(uffd_registry: &UffdRegistry, workers: Box<[UffdWorker]>) {
+        if let Err(e) = uffd_registry.stop() {
+            error!("UFFD registry stop failed: {e}");
+        }
+        for worker in &workers {
+            if let Some(fd) = &worker.fault_socket_fd {
+                // SAFETY: fd is a valid owned fd for the duration of this call.
+                unsafe { libc::shutdown(fd.as_raw_fd(), libc::SHUT_RDWR) };
             }
-            for worker in &uffd_handler.workers {
-                if let Some(fd) = &worker.fault_socket_fd {
-                    // SAFETY: fd is a valid owned fd for the duration of this call.
-                    unsafe { libc::shutdown(fd.as_raw_fd(), libc::SHUT_RDWR) };
-                }
-            }
+        }
 
-            for worker in uffd_handler.workers {
-                worker.handle.join().ok();
+        for (index, worker) in workers.into_iter().enumerate() {
+            worker.handle.join().ok();
 
-                match worker.result_rx.try_recv() {
-                    Ok(Err(e)) => error!("UFFD handler terminated with error: {e}"),
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        warn!("UFFD handler terminated unexpectedly (possible panic)");
-                    }
-                    _ => {}
+            match worker.result_rx.try_recv() {
+                Ok(Err(e)) => error!("UFFD handler {index} terminated with error: {e}"),
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    warn!("UFFD handler {index} terminated unexpectedly (possible panic)");
                 }
+                _ => {}
             }
         }
     }
@@ -1600,13 +1612,15 @@ impl MemoryManager {
         }
     }
 
-    /// Serve UFFD faults from every userfaultfd received through
-    /// `uffd_registry` via `source`, prefaulting one page per idle iteration
-    /// through the first one, which `uffd_registry` must hold already. Once
+    /// Serve UFFD faults via `source` from every userfaultfd in
+    /// `uffd_registry`, re-synced on its `added_uffd_evt`. If
+    /// `background_fetch_pages`, prefault one page per idle iteration through
+    /// the first userfaultfd, which `uffd_registry` must hold already. Once
     /// `source` fails, poison each faulted page instead.
     ///
     /// A userfaultfd received with the id of an earlier one replaces it. Once
-    /// all pages are present, `uffd_registry.stopped` is written.
+    /// all pages are present, `uffd_registry.stopped` is written and every
+    /// handler returns.
     fn uffd_handler_loop(
         uffd_registry: &UffdRegistry,
         exit_evt: &EventFd,
@@ -1653,7 +1667,11 @@ impl MemoryManager {
             epoll_fd,
             epoll::ControlOptions::EPOLL_CTL_ADD,
             uffd_registry.added_uffd_evt.as_raw_fd(),
-            epoll::Event::new(epoll::Events::EPOLLIN, EVENT_ADDED_UFFD),
+            // Should never be read so that every handler see an event
+            epoll::Event::new(
+                epoll::Events::EPOLLIN | epoll::Events::EPOLLET,
+                EVENT_ADDED_UFFD,
+            ),
         )
         .map_err(io::Error::other)?;
 
@@ -1696,7 +1714,6 @@ impl MemoryManager {
                 .take(num_events)
                 .any(|event| event.data == EVENT_ADDED_UFFD)
             {
-                uffd_registry.added_uffd_evt.read().ok();
                 let registered = uffd_registry.uffds.lock().unwrap();
                 for (idx, entry) in registered.iter().enumerate() {
                     if let Some((_, uffd)) = uffds.get(idx) {
@@ -3764,7 +3781,9 @@ impl Pausable for MemoryManager {}
 
 impl Drop for MemoryManager {
     fn drop(&mut self) {
-        self.stop_uffd_handler();
+        if let Some(uffd_handler) = self.uffd_handler.take() {
+            Self::stop_uffd_workers(&uffd_handler.uffd_registry, uffd_handler.workers);
+        }
     }
 }
 
