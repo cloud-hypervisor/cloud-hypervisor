@@ -122,6 +122,13 @@ guest RAM before restore completes. This mode is strict: if Cloud Hypervisor
 cannot enable the `userfaultfd` restore path, restore fails instead of falling
 back to `copy`.
 
+`num_pagefault_handlers` can be set to specifies the number of handlers used for
+serving pagefaults. Maximum is 128 and it defaults to 1. Every thread serves
+pagefaults and, if prefaulting is enabled, prefaults while it has no pagefault
+to serve.
+
+`num_pagefault_handlers` is rejected unless `memory_restore_mode=ondemand` is selected.
+
 If the page source fails during the restore, the guest memory that was not
 restored yet is poisoned so that the guest cannot use it.
 

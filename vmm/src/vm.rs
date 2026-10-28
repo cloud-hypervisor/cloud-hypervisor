@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ffi;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
-use std::num::Wrapping;
+use std::num::{NonZeroU32, Wrapping};
 use std::ops::Deref;
 use std::os::unix::net::UnixStream;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -83,7 +83,9 @@ use vm_migration::{
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
-use crate::config::{MemoryRestoreMode, ValidationError, add_to_config};
+use crate::config::{
+    DEFAULT_RESTORE_PAGEFAULT_HANDLERS, MemoryRestoreMode, ValidationError, add_to_config,
+};
 use crate::console_devices::{ConsoleDeviceError, ConsoleInfo};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::{
@@ -1346,6 +1348,7 @@ impl Vm {
         source_url: Option<&str>,
         prefault: Option<bool>,
         memory_restore_mode: Option<MemoryRestoreMode>,
+        num_pagefault_handlers: Option<NonZeroU32>,
     ) -> Result<Self> {
         trace_scoped!("Vm::new");
 
@@ -1403,6 +1406,7 @@ impl Vm {
                     source_url,
                     prefault.unwrap_or(false),
                     memory_restore_mode,
+                    num_pagefault_handlers.unwrap_or(DEFAULT_RESTORE_PAGEFAULT_HANDLERS),
                     phys_bits,
                     &exit_evt,
                     #[cfg(feature = "sev_snp")]

@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Write, stdout};
 use std::net::TcpListener;
+use std::num::NonZeroU32;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::panic::AssertUnwindSafe;
 #[cfg(feature = "guest_debug")]
@@ -2048,6 +2049,7 @@ impl Vmm {
         vm_config: Arc<Mutex<VmConfig>>,
         prefault: bool,
         memory_restore_mode: MemoryRestoreMode,
+        num_pagefault_handlers: Option<NonZeroU32>,
     ) -> result::Result<(), VmError> {
         match &self.vm {
             VmOwnership::Owned(_) => Err(VmError::VmAlreadyCreated),
@@ -2100,6 +2102,7 @@ impl Vmm {
                     Some(source_url),
                     Some(prefault),
                     Some(memory_restore_mode),
+                    num_pagefault_handlers,
                 )?;
 
                 {
@@ -2544,6 +2547,7 @@ impl RequestHandler for Vmm {
                             None,
                             None,
                             None,
+                            None,
                         )?;
 
                         let r = vm.boot();
@@ -2684,6 +2688,7 @@ impl RequestHandler for Vmm {
                     vm_config,
                     restore_cfg.prefault,
                     restore_cfg.memory_restore_mode,
+                    restore_cfg.num_pagefault_handlers,
                 )
                 .and_then(|()| {
                     if restore_cfg.resume {
@@ -2778,6 +2783,7 @@ impl RequestHandler for Vmm {
             self.console_info.clone(),
             self.console_resize_pipe.clone(),
             Arc::clone(&self.original_termios_opt),
+            None,
             None,
             None,
             None,
