@@ -648,6 +648,13 @@ impl Vm {
 
         let saved_clock = if let Some(snapshot) = snapshot.as_ref() {
             let vm_snapshot = get_vm_snapshot(snapshot).map_err(Error::Restore)?;
+            // vCPUs restore their own CPUID; keep the manager's baseline in sync.
+            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+            cpu_manager
+                .lock()
+                .unwrap()
+                .set_common_cpuid(vm_snapshot.common_cpuid);
+
             // Restored or migrated in: the guest clock must catch up to wall time
             // on resume (the counter was reset to the saved value).
             vm_snapshot.clock.map(|state| SavedClock {
@@ -3317,6 +3324,109 @@ mod tests {
     #[test]
     fn test_vm_paused_transitions() {
         test_vm_state_transitions(VmState::Paused);
+    }
+
+    #[test]
+    fn test_snapshot_after_restore_preserves_common_cpuid() {
+        use linux_loader::loader::bootparam::boot_params;
+        use vm_memory::ByteValued;
+
+        use crate::console_devices::ConsoleTransport;
+
+        // A minimal bzImage is enough: the vCPUs never need to run.
+        let mut image = [0u8; 4096];
+        let params = boot_params::from_mut_slice(&mut image).unwrap();
+        params.hdr.setup_sects = 1;
+        params.hdr.header = 0x5372_6448;
+        params.hdr.version = 0x0200;
+        params.hdr.loadflags = 1;
+        params.hdr.code32_start = 0x10_0000;
+        let kernel = tempfile::NamedTempFile::new().unwrap();
+        kernel.as_file().write_all(&image).unwrap();
+        let new_vm = |snapshot: Option<&Snapshot>, source_url: Option<&str>| {
+            let config = serde_json::from_value(serde_json::json!({
+                "payload": { "kernel": kernel.path() },
+                "memory": { "size": 16 << 20 },
+                "console": { "mode": "Off" },
+                "serial": { "mode": "Off" }
+            }))
+            .unwrap();
+            Vm::new(
+                Arc::new(Mutex::new(config)),
+                EventFd::new(libc::EFD_NONBLOCK).unwrap(),
+                EventFd::new(libc::EFD_NONBLOCK).unwrap(),
+                EventFd::new(libc::EFD_NONBLOCK).unwrap(),
+                #[cfg(feature = "guest_debug")]
+                EventFd::new(libc::EFD_NONBLOCK).unwrap(),
+                &SeccompAction::Allow,
+                hypervisor::new().unwrap(),
+                EventFd::new(libc::EFD_NONBLOCK).unwrap(),
+                Some(ConsoleInfo {
+                    console: ConsoleTransport::Off,
+                    serial: ConsoleTransport::Off,
+                    debug: ConsoleTransport::Off,
+                }),
+                None,
+                Arc::new(Mutex::new(None)),
+                snapshot,
+                source_url,
+                None,
+                None,
+            )
+            .unwrap()
+        };
+
+        let mut source = new_vm(None, None);
+        source
+            .load_payload_handle
+            .take()
+            .unwrap()
+            .join()
+            .unwrap()
+            .unwrap();
+        let host_cpuid = source.cpu_manager.lock().unwrap().common_cpuid();
+        let mut source_cpuid = host_cpuid.clone();
+        // Model a source host with one fewer feature, without needing two hosts.
+        let features = source_cpuid
+            .iter_mut()
+            .find(|entry| entry.function == 7 && entry.index == 0)
+            .unwrap();
+        assert_ne!(features.ebx, 0);
+        features.ebx &= features.ebx - 1;
+        for vcpu in source.cpu_manager.lock().unwrap().vcpus() {
+            vcpu.lock()
+                .unwrap()
+                .configure(
+                    None,
+                    source_cpuid.clone(),
+                    false,
+                    (1, 1, 1, 1),
+                    false,
+                    #[cfg(feature = "igvm")]
+                    false,
+                )
+                .unwrap();
+        }
+        source.state = VmState::Paused;
+        let mut snapshot = source.snapshot().unwrap();
+        let mut vm_snapshot = get_vm_snapshot(&snapshot).unwrap();
+        vm_snapshot.common_cpuid = source_cpuid.clone();
+        snapshot.snapshot_data =
+            Some(vm_migration::SnapshotData::new_from_state(&vm_snapshot).unwrap());
+        let directory = tempfile::tempdir().unwrap();
+        let url = format!("file://{}", directory.path().display());
+        source.send(&snapshot, &url).unwrap();
+        drop(source);
+
+        arch::CpuidFeatureEntry::check_cpuid_compatibility(&source_cpuid, &host_cpuid).unwrap();
+        assert!(
+            arch::CpuidFeatureEntry::check_cpuid_compatibility(&host_cpuid, &source_cpuid).is_err()
+        );
+        let mut restored = new_vm(Some(&snapshot), Some(&url));
+        let resnapshot = get_vm_snapshot(&restored.snapshot().unwrap()).unwrap();
+        assert_eq!(resnapshot.common_cpuid, source_cpuid);
+        arch::CpuidFeatureEntry::check_cpuid_compatibility(&resnapshot.common_cpuid, &source_cpuid)
+            .unwrap();
     }
 
     #[test]

@@ -1777,6 +1777,11 @@ impl CpuManager {
         self.cpuid.clone()
     }
 
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    pub fn set_common_cpuid(&mut self, cpuid: Vec<CpuIdEntry>) {
+        self.cpuid = cpuid;
+    }
+
     /// Locks the vCPU states and calls [`Self::active_vcpus`].
     fn present_vcpus(&self) -> u32 {
         let lock = self.vcpu_states.lock().unwrap();
