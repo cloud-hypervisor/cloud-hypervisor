@@ -420,27 +420,35 @@ pub fn start_net_backend(backend_command: &str) {
 
     let mem = GuestMemoryAtomic::new(GuestMemoryMmap::new());
 
-    let net_backend = Arc::new(RwLock::new(
-        VhostUserNetBackend::new(
-            backend_config.ip,
-            backend_config.host_mac,
-            backend_config.mac,
-            backend_config.mask,
-            backend_config.mtu,
-            backend_config.num_queues,
-            backend_config.queue_size,
-            tap,
-            mem.clone(),
-        )
-        .unwrap(),
-    ));
+    let net_backend = match VhostUserNetBackend::new(
+        backend_config.ip,
+        backend_config.host_mac,
+        backend_config.mac,
+        backend_config.mask,
+        backend_config.mtu,
+        backend_config.num_queues,
+        backend_config.queue_size,
+        tap,
+        mem.clone(),
+    ) {
+        Ok(backend) => Arc::new(RwLock::new(backend)),
+        Err(e) => {
+            error!("Failed to create vhost-user-net backend: {e:?}");
+            process::exit(1);
+        }
+    };
 
-    let mut net_daemon = VhostUserDaemon::new(
+    let mut net_daemon = match VhostUserDaemon::new(
         "vhost-user-net-backend".to_string(),
         Arc::clone(&net_backend),
         mem,
-    )
-    .unwrap();
+    ) {
+        Ok(daemon) => daemon,
+        Err(e) => {
+            error!("Failed to create vhost-user-net daemon: {e:?}");
+            process::exit(1);
+        }
+    };
 
     let epoll_handlers = net_daemon.get_epoll_handlers();
     if epoll_handlers.len() != net_backend.read().unwrap().threads.len() {
@@ -458,7 +466,13 @@ pub fn start_net_backend(backend_command: &str) {
     if let Err(e) = if backend_config.client {
         net_daemon.start_client(&backend_config.socket)
     } else {
-        net_daemon.start(&mut Listener::new(&backend_config.socket, true).unwrap())
+        match Listener::new(&backend_config.socket, true) {
+            Ok(mut listener) => net_daemon.start(&mut listener),
+            Err(e) => {
+                error!("Failed to listen on vhost-user-net socket: {e:?}");
+                process::exit(1);
+            }
+        }
     } {
         error!("failed to start daemon for vhost-user-net with error: {e:?}");
         process::exit(1);
