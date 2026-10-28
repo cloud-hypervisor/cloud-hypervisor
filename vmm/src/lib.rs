@@ -1708,7 +1708,7 @@ impl Vmm {
         let memory_mode = send_data_migration.effective_memory_mode();
 
         // Set up the socket connection
-        let mut socket = transport::send_migration_socket(
+        let mut socket = transport::connect_and_setup_socket(
             &send_data_migration.destination_url,
             send_data_migration.tls_dir.as_deref(),
         )?;
