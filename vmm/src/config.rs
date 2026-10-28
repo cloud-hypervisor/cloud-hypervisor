@@ -504,6 +504,9 @@ pub enum ValidationError {
     /// More than one update was specified that contains an empty memory zone ID
     #[error("At least one memory zone update with an empty ID was defined")]
     MemoryZoneUpdatesEmptyId,
+    /// A memory size of 0 requires memory zones
+    #[error("Memory zones are required when the memory size is 0")]
+    MemoryZonesMissing,
 }
 
 type ValidationResult<T> = result::Result<T, ValidationError>;
@@ -3718,6 +3721,10 @@ impl VmConfig {
             }
         }
 
+        if self.memory.size == 0 && self.memory.zones.is_none() {
+            return Err(ValidationError::MemoryZonesMissing);
+        }
+
         if let Some(rate_limit_groups) = &self.rate_limit_groups {
             for rate_limit_group in rate_limit_groups {
                 rate_limit_group.validate(self)?;
@@ -6890,6 +6897,13 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             invalid_config.validate(),
             Err(ValidationError::VhostUserRequiresSharedMemory)
+        );
+
+        // Checking for shared memory must not assume memory zones.
+        invalid_config.memory.size = 0;
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::MemoryZonesMissing)
         );
 
         let mut still_valid_config = valid_config.clone();
