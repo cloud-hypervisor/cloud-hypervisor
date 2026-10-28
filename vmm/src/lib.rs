@@ -1897,6 +1897,12 @@ impl Vmm {
         } else {
             Request::complete_paused()
         };
+        // The destination may already run the VM once it got this request.
+        // Giving up would resume the source as well, so wait for the answer.
+        // This needs a more careful investigation, see #9208.
+        socket
+            .set_read_timeout(None)
+            .map_err(MigratableError::MigrateSocket)?;
         let (_, complete_duration) = measure_ok(|| {
             // We might lose an ACK, but this is preferable to an inconsistent
             // source VM or both VMs running. This is a known postcopy tradeoff.

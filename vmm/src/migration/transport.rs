@@ -48,7 +48,8 @@ pub(crate) const MAX_MIGRATION_CONNECTIONS: u32 = 128;
 pub(crate) const CONNECTION_SETUP_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Time after which a migration peer without progress is considered gone.
-/// Applies to the TCP user timeout and to the TLS handshake of the sender.
+/// Applies to the TCP user timeout and to each read and write of the sender,
+/// including its TLS handshake.
 const UNRESPONSIVE_PEER_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Transport-agnostic listener used to receive connections.
@@ -199,6 +200,14 @@ impl SocketStream {
             SocketStream::Unix(s) => s.set_read_timeout(dur),
             SocketStream::Tcp(s) => s.set_read_timeout(dur),
             SocketStream::Tls(s) => s.tcp_stream().set_read_timeout(dur),
+        }
+    }
+
+    pub(crate) fn set_write_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
+        match self {
+            SocketStream::Unix(s) => s.set_write_timeout(dur),
+            SocketStream::Tcp(s) => s.set_write_timeout(dur),
+            SocketStream::Tls(s) => s.tcp_stream().set_write_timeout(dur),
         }
     }
 
@@ -1143,6 +1152,22 @@ pub(crate) fn connect_and_setup_socket(
     destination_url: &str,
     tls_dir: Option<&Path>,
 ) -> Result<SocketStream, MigratableError> {
+    let socket = connect_migration_socket(destination_url, tls_dir)?;
+
+    // A hung destination must not block the sender forever, e.g. while the
+    // source VM is paused for the final transfer.
+    socket
+        .set_read_timeout(Some(UNRESPONSIVE_PEER_TIMEOUT))
+        .and_then(|()| socket.set_write_timeout(Some(UNRESPONSIVE_PEER_TIMEOUT)))
+        .map_err(MigratableError::MigrateSocket)?;
+
+    Ok(socket)
+}
+
+fn connect_migration_socket(
+    destination_url: &str,
+    tls_dir: Option<&Path>,
+) -> Result<SocketStream, MigratableError> {
     if let Some(address) = destination_url.strip_prefix("tcp:") {
         info!("Connecting to TCP socket at {address}");
 
@@ -1193,6 +1218,13 @@ pub(crate) fn open_fault_connection(
 ) -> Result<SocketStream, MigratableError> {
     let mut socket = connect_and_setup_socket(destination_url, tls_dir)?;
     ConnectionRole::Fault.write_to(&mut socket)?;
+
+    // The destination only sends a request when the guest faults on a page,
+    // which can take arbitrarily long.
+    socket
+        .set_read_timeout(None)
+        .map_err(MigratableError::MigrateSocket)?;
+
     Ok(socket)
 }
 
@@ -1255,10 +1287,25 @@ pub(crate) fn send_config(
     socket
         .write_all(&config_data)
         .map_err(MigratableError::MigrateSocket)?;
+
     expect_ok_response(
         socket,
         MigratableError::MigrateSend(anyhow!("Error during config migration")),
     )
+    .inspect_err(|e| {
+        let memory = &config.vm_config.lock().unwrap().memory;
+        let prefault = memory.prefault || memory.zones.iter().flatten().any(|zone| zone.prefault);
+        if prefault
+            && let MigratableError::MigrateSocket(e) = e
+            && matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut)
+        {
+            warn!(
+                "Timed out ({}s) waiting for the destination to apply the config, likely prefaulting {} GiB of guest memory took unexpectedly long",
+                UNRESPONSIVE_PEER_TIMEOUT.as_secs(),
+                memory.total_size() >> 30
+            );
+        }
+    })
 }
 
 /// Serialize and send the VM snapshot payload.
