@@ -107,6 +107,8 @@ pub(super) struct Vhdx {
     vhdx_header: VhdxHeader,
     bat_entry: RegionTableEntry,
     mdr_entry: RegionTableEntry,
+    log_offset: u64,
+    log_length: u32,
     disk_spec: DiskSpec,
     bat_entries: Vec<BatEntry>,
     first_write: bool,
@@ -129,6 +131,9 @@ impl Vhdx {
 
         let bat_entry = collected_entries.bat_entry;
         let mdr_entry = collected_entries.mdr_entry;
+        let (log_offset, log_length) = vhdx_header
+            .log_region()
+            .map_err(VhdxError::ParseVhdxHeader)?;
 
         let disk_spec =
             DiskSpec::new(&aligned, &mdr_entry).map_err(VhdxError::ParseVhdxMetadata)?;
@@ -140,6 +145,8 @@ impl Vhdx {
             vhdx_header,
             bat_entry,
             mdr_entry,
+            log_offset,
+            log_length,
             disk_spec,
             bat_entries,
             first_write: true,
@@ -151,14 +158,19 @@ impl Vhdx {
     }
 
     /// A fully-present BAT entry must describe a payload block that lies
-    /// outside the areas reserved for the header and the metadata region.
+    /// outside the areas reserved for the header, metadata, BAT and log regions.
     fn check_payload_file_offset(&self, offset: u64) -> result::Result<(), VhdxIoError> {
         let block_size = self.disk_spec.block_size as u64;
         let mdr_start = self.mdr_entry.file_offset;
         let mdr_end = mdr_start.saturating_add(self.mdr_entry.length as u64);
+        let bat_start = self.bat_entry.file_offset;
+        let bat_end = bat_start.saturating_add(self.bat_entry.length as u64);
+        let log_end = self.log_offset.saturating_add(self.log_length as u64);
 
         if offset < metadata::BLOCK_SIZE_MIN as u64
             || (offset < mdr_end && offset.saturating_add(block_size) > mdr_start)
+            || (offset < bat_end && offset.saturating_add(block_size) > bat_start)
+            || (offset < log_end && offset.saturating_add(block_size) > self.log_offset)
         {
             return Err(VhdxIoError::InvalidBatFileOffset);
         }
@@ -491,6 +503,88 @@ mod tests {
         let buf = vec![0u8; vhdx.disk_spec.logical_sector_size as usize - 1];
         let err = vhdx.write_all_at(&buf, 0).unwrap_err();
         assert_eq!(err.kind(), IoErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn read_write_with_bat_entry_overlapping_log_region_is_rejected() {
+        use std::process::Command;
+
+        use vmm_sys_util::tempfile::TempFile;
+
+        let tf = TempFile::new().unwrap();
+        let status = Command::new("qemu-img")
+            .args([
+                "create",
+                "-f",
+                "vhdx",
+                "-o",
+                "subformat=dynamic,block_size=1M",
+            ])
+            .arg(tf.as_path())
+            .arg("16M")
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let mut vhdx = open_vhdx(tf.as_path());
+        let (log_offset, _) = vhdx.vhdx_header.log_region().unwrap();
+        vhdx.bat_entries[0] =
+            BatEntry(PAYLOAD_BLOCK_FULLY_PRESENT | (log_offset & bat::BAT_FILE_OFF_MASK));
+
+        let mut buf = [0u8; 512];
+        let read = vhdx.read_at(&mut buf, 0).unwrap_err();
+        assert!(
+            read.to_string().contains("BAT entry file offset"),
+            "unexpected read error: {read}"
+        );
+        let write = vhdx.write_all_at(&[0x44u8; 512], 0).unwrap_err();
+        assert!(
+            write.to_string().contains("BAT entry file offset"),
+            "unexpected write error: {write}"
+        );
+    }
+
+    #[test]
+    fn read_write_with_bat_entry_overlapping_bat_region_is_rejected() {
+        use std::process::Command;
+
+        use vmm_sys_util::tempfile::TempFile;
+
+        let tf = TempFile::new().unwrap();
+        let status = Command::new("qemu-img")
+            .args([
+                "create",
+                "-f",
+                "vhdx",
+                "-o",
+                "subformat=dynamic,block_size=1M",
+            ])
+            .arg(tf.as_path())
+            .arg("16M")
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let mut vhdx = open_vhdx(tf.as_path());
+        let bat_start = vhdx.bat_entry.file_offset;
+        assert_eq!(vhdx.disk_spec.block_size, 1 << 20);
+
+        // The 1 MiB payload ends exactly where the metadata region starts, so
+        // only the BAT-region check can reject it.
+        vhdx.bat_entries[0] =
+            BatEntry(PAYLOAD_BLOCK_FULLY_PRESENT | (bat_start & bat::BAT_FILE_OFF_MASK));
+
+        let mut buf = [0u8; 512];
+        let read = vhdx.read_at(&mut buf, 0).unwrap_err();
+        assert!(
+            read.to_string().contains("BAT entry file offset"),
+            "unexpected read error: {read}"
+        );
+        let write = vhdx.write_all_at(&[0x44u8; 512], 0).unwrap_err();
+        assert!(
+            write.to_string().contains("BAT entry file offset"),
+            "unexpected write error: {write}"
+        );
     }
 
     #[test]
