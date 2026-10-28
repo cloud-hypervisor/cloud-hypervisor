@@ -633,6 +633,10 @@ impl VmMigrationConfig {
     pub fn set_memory_mode(&mut self, memory_mode: MigrationMode) {
         self.memory_mode = memory_mode;
     }
+
+    pub fn set_postcopy_connections(&mut self, connections: NonZeroU32) {
+        self.postcopy_connections = Some(connections);
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -385,6 +385,11 @@ prefault on the receiving side:
     receive-migration receiver_url=unix:/tmp/restore.sock,background_fetch_pages=off &
 ```
 
+The daemon's `--connections` option, only valid together with `--ondemand`,
+selects the number of fault connections, from `1` through `128`, and defaults
+to `1`. CH opens as many UFFD handlers as connections, effectively increasing
+how many pagefaults can be happening at a given time.
+
 ### The daemon protocol
 
 The daemon implements the local live-migration wire protocol defined in
