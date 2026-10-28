@@ -1306,41 +1306,42 @@ impl MemoryManager {
         Ok(())
     }
 
-    /// Register UFFD and spawn the handler that serves faults over `socket`.
-    /// No-op when there are no regions.
+    /// Register UFFD and spawn one handler per socket to serve faults over
+    /// it. No-op when there are no regions.
     pub(crate) fn start_postcopy_serving(
         &mut self,
         saved_regions: &MemoryRangeTable,
         shared_backing: bool,
         background_fetch_pages: bool,
-        socket: SocketStream,
+        sockets: Vec<SocketStream>,
         exit_evt: &EventFd,
     ) -> Result<(), Error> {
-        // Make every fault a small request/response round-trip.
-        socket.set_nodelay(true).map_err(UffdError::SetSocket)?;
-        let socket_fd = socket
-            .as_fd()
-            .try_clone_to_owned()
-            .map_err(UffdError::SetSocket)?;
-        let source: Box<dyn UffdMemorySource> =
-            Box::new(SocketUffdMemorySource::new(socket, shared_backing));
+        let mut sources: Vec<(Box<dyn UffdMemorySource>, Option<OwnedFd>)> = Vec::new();
+        for socket in sockets {
+            // Make every fault a small request/response round-trip.
+            socket.set_nodelay(true).map_err(UffdError::SetSocket)?;
+            let socket_fd = socket
+                .as_fd()
+                .try_clone_to_owned()
+                .map_err(UffdError::SetSocket)?;
+            let source: Box<dyn UffdMemorySource> =
+                Box::new(SocketUffdMemorySource::new(socket, shared_backing));
+            sources.push((source, Some(socket_fd)));
+        }
 
         // PageFault uses the GPA as the page identifier on the wire.
-        let Some(uffd) =
-            self.prepare_uffd(saved_regions, |r| r.gpa, source.requires_uffd_minor_mode())?
+        let Some(uffd) = self.prepare_uffd(
+            saved_regions,
+            |r| r.gpa,
+            sources[0].0.requires_uffd_minor_mode(),
+        )?
         else {
             return Ok(());
         };
 
         let pages = UffdPages::new(uffd.ranges());
         info!("UFFD: postcopy background prefault {background_fetch_pages}");
-        self.spawn_uffd_handlers(
-            uffd,
-            vec![(source, Some(socket_fd))],
-            pages,
-            exit_evt,
-            background_fetch_pages,
-        )
+        self.spawn_uffd_handlers(uffd, sources, pages, exit_evt, background_fetch_pages)
     }
 
     /// Create a UFFD fd and register every range.

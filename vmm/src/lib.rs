@@ -1245,7 +1245,7 @@ impl Vmm {
                 &saved_regions,
                 shared_backing,
                 config_data.background_fetch_pages,
-                fault_stream,
+                vec![fault_stream],
                 &self.exit_evt,
             )
             .map_err(|e| {
