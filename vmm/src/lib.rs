@@ -62,7 +62,8 @@ use crate::memory_manager::{MemoryManager, MemoryRangePolicy};
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::migration::get_vm_snapshot;
 use crate::migration::transport::{
-    self, ReceiveAdditionalConnections, ReceiveListener, SendAdditionalConnections, SocketStream,
+    self, CONNECTION_SETUP_TIMEOUT, ReceiveAdditionalConnections, ReceiveListener,
+    SendAdditionalConnections, SocketStream,
 };
 use crate::migration::worker::{
     MigrationSeccompFilters, MigrationWorker, MigrationWorkerHandle, MigrationWorkerResult,
@@ -1145,6 +1146,11 @@ impl Vmm {
         event!("vm", "migration-receive-ready");
         // Accept the connection and get the socket
         let mut socket = listener.accept()?;
+        // The sender sends its first request right after connecting. Without
+        // a timeout, a peer that stays silent blocks the receiver forever.
+        socket
+            .set_read_timeout(Some(CONNECTION_SETUP_TIMEOUT))
+            .map_err(MigratableError::MigrateSocket)?;
 
         event!("vm", "migration-receive-starting");
         let mut state = ReceiveMigrationState::Established;
@@ -1165,6 +1171,14 @@ impl Vmm {
                 )))
             })?;
             debug!("Command '{:?}' received", req.command());
+
+            if matches!(state, ReceiveMigrationState::Established) {
+                // Later requests can take long, e.g. while the memory goes over
+                // the additional connections.
+                socket
+                    .set_read_timeout(None)
+                    .map_err(MigratableError::MigrateSocket)?;
+            }
 
             state = self
                 .vm_receive_migration_step(
