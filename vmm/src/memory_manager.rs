@@ -1835,16 +1835,23 @@ impl MemoryManager {
                     loading.remove(&key);
                 }
 
-                if let Err(e) = result {
-                    error!(
-                        "UFFD handler: source error at {:#x}, poisoning unrestored guest memory: {e}",
-                        range.page_addr(page_idx)
-                    );
-                    exit_evt.write(1).ok();
-                    prefault_active = false;
-                    source_failed = true;
-                    Self::uffd_poison_page(fault_uffd.fd(), range, page_idx)?;
-                    continue;
+                match result {
+                    Err(_) if stop_event.read().is_ok() => {
+                        info!("UFFD handler: stop received after source error, exiting");
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        error!(
+                            "UFFD handler: source error at {:#x}, poisoning unrestored guest memory: {e}",
+                            range.page_addr(page_idx)
+                        );
+                        exit_evt.write(1).ok();
+                        prefault_active = false;
+                        source_failed = true;
+                        Self::uffd_poison_page(fault_uffd.fd(), range, page_idx)?;
+                        continue;
+                    }
+                    _ => {}
                 }
                 pages_served += 1;
 
