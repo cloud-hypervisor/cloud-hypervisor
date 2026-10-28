@@ -1868,8 +1868,9 @@ impl VfioCommon {
             return self.configuration.read_reg(reg_idx);
         }
 
-        if let Some(id) = self.get_msix_cap_idx() {
-            let msix = self.interrupt.msix.as_mut().unwrap();
+        if let Some(id) = self.get_msix_cap_idx()
+            && let Some(msix) = &self.interrupt.msix
+        {
             if reg_idx * 4 == id + 4 {
                 return msix.cap.table;
             } else if reg_idx * 4 == id + 8 {
@@ -3743,6 +3744,38 @@ mod tests {
             let start = offset as usize;
             space[start..start + data.len()].copy_from_slice(data);
         }
+    }
+
+    #[test]
+    fn msix_capability_without_msix_interrupts_is_read_from_device() {
+        // The device exposes an MSI-X capability, but MSI-X is not set up
+        // because the device reports no MSI-X interrupts.
+        let mock = MockConfigSpace::new(&[]);
+        mock.region_write(
+            VFIO_PCI_CONFIG_REGION_INDEX,
+            PCI_CONFIG_STATUS_OFFSET.into(),
+            &PCI_CONFIG_STATUS_CAPABILITIES_LIST.to_le_bytes(),
+        );
+        // Place the capability at 0x40, the first offset after the
+        // 64-byte standard config header.
+        mock.region_write(
+            VFIO_PCI_CONFIG_REGION_INDEX,
+            PCI_CONFIG_CAPABILITY_OFFSET.into(),
+            &[0x40],
+        );
+        // Capability ID, next pointer 0 (end of list), message control 0,
+        // then the Table Offset/BIR dword with an arbitrary marker 0xab.
+        mock.region_write(
+            VFIO_PCI_CONFIG_REGION_INDEX,
+            0x40,
+            &[PciCapabilityId::MsiX as u8, 0, 0, 0, 0xab, 0, 0, 0],
+        );
+        let mut common = test_vfio_common(mock, None);
+
+        // Register index of the Table Offset/BIR dword at 0x40 + 4. With
+        // MSI-X set up, this read would return the emulated table value
+        // instead of the device's.
+        assert_eq!(common.read_config_register(0x44 / 4), 0xab);
     }
 
     fn test_vfio_common_with_pasid(vfio_wrapper: Arc<MockConfigSpace>) -> VfioCommon {
