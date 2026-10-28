@@ -40,3 +40,8 @@ exclude_loopback = true
 max_retries = 3
 
 retry_wait_time = 5
+
+# Avoid rate limiting when checking remapped GitHub source links.
+[hosts."raw.githubusercontent.com"]
+concurrency = 1
+request_interval = "1s"
