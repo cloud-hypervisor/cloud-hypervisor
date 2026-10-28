@@ -144,6 +144,8 @@ use vm_virtio::{AccessPlatform, VirtioDeviceType};
 use vmm_sys_util::errno;
 use vmm_sys_util::eventfd::EventFd;
 
+#[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+use crate::acpi::iort_smmu_node_id;
 use crate::console_devices::{ConsoleInfo, ConsoleTransport};
 use crate::cpu::{AcpiCpuHotplugController, CPU_MANAGER_ACPI_SIZE, CpuManager};
 use crate::device_tree::{DeviceNode, DeviceTree};
@@ -4232,6 +4234,7 @@ impl DeviceManager {
             event_gsiv: event_irq,
             gerror_gsiv: gerror_irq,
             sync_gsiv: sync_irq,
+            iort_node_id: iort_smmu_node_id(index as u32),
             ..Default::default()
         };
 
