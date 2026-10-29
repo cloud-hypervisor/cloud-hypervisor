@@ -3,28 +3,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::collections::BTreeMap;
+use std::fs::File;
 use std::io;
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, BorrowedFd};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 use iommufd_bindings::iommufd::{
-    iommu_hw_info, iommu_hw_info_arm_smmuv3, iommu_hwpt_arm_smmuv3,
+    iommu_hw_info, iommu_hw_info_arm_smmuv3, iommu_hw_info_tegra241_cmdqv, iommu_hwpt_arm_smmuv3,
     iommu_veventq_flag_IOMMU_VEVENTQ_FLAG_LOST_EVENTS, iommu_viommu_arm_smmuv3_invalidate,
     iommufd_hw_capabilities_IOMMU_HW_CAP_PCI_ATS_NOT_SUPPORTED,
     iommufd_hw_capabilities_IOMMU_HW_CAP_PCI_PASID_EXEC,
     iommufd_hw_capabilities_IOMMU_HW_CAP_PCI_PASID_PRIV,
 };
 use iommufd_ioctls::{
-    AttachHwpt, IommufdError, IommufdHwInfoData, IommufdHwQueue, IommufdHwptData,
+    AttachHwpt, IommuFd, IommufdError, IommufdHwInfoData, IommufdHwQueue, IommufdHwptData,
     IommufdInvalidateData, IommufdVDevice, IommufdVEvent, IommufdVEventData, IommufdVEventQ,
-    IommufdVIommu,
+    IommufdVIommu, IommufdViommuData,
 };
 use log::{error, warn};
 use pci::{PasidCap, PciBdf};
 use thiserror::Error;
-use vm_allocator::GuestMemory;
-use vm_memory::GuestMemoryAtomic;
+use vm_allocator::{GuestMemory, GuestRegion};
+use vm_memory::{FileOffset, GuestMemoryAtomic};
 use vmm_sys_util::epoll::{ControlOperation, Epoll, EpollEvent, EventSet};
 use vmm_sys_util::eventfd::{EFD_NONBLOCK, EventFd};
 
@@ -33,6 +34,7 @@ use crate::iommu::{
     TableEntry,
 };
 use crate::smmuv3::{Error as Smmuv3Error, EventRecord, IDR0_COHACC, Smmuv3, Smmuv3Interrupts};
+use crate::tegra241_cmdqv::{Tegra241Cmdqv, Tegra241CmdqvConfig, VCMDQ_PAGE0_SIZE};
 
 const VEVENTQ_DEPTH: u32 = 64;
 
@@ -79,6 +81,10 @@ pub enum Error {
     SpawnFaultForwarder(#[source] io::Error),
     #[error("Failed to initialize the emulated SMMUv3 from host information")]
     DeviceInit(#[source] Smmuv3Error),
+    #[error("Unexpected VINTF page size {0:#x}")]
+    VintfPageSize(u64),
+    #[error("Failed to duplicate the iommufd")]
+    DupIommufd(#[source] io::Error),
     #[error("Failed to allocate a hardware queue")]
     AllocateHwQueue(#[source] IommufdError),
 }
@@ -274,6 +280,12 @@ impl PhysicalIommu for IommufdIommu {
 
 impl HwQueueHandle for IommufdHwQueue {}
 
+#[cfg(target_arch = "aarch64")]
+pub struct HostCmdqv {
+    pub num_vcmdqs_log2: u8,
+    pub num_sids_log2: u8,
+}
+
 /// Emulated SMMUv3 backed by iommufd.
 #[cfg(target_arch = "aarch64")]
 pub struct Smmuv3Iommufd {
@@ -281,10 +293,45 @@ pub struct Smmuv3Iommufd {
     backend: Arc<IommufdIommu>,
     acpi_info: Smmuv3AcpiInfo,
     _fault_forwarder: FaultForwarder,
+
+    // cmdqv
+    vintf_page: Option<FileOffset>,
+    // VINTF page mappings, dropped before `cmdqv`, whose backend holds the
+    // vIOMMU they pin
+    vintf_regions: Vec<GuestRegion>,
+    cmdqv: Option<Arc<Mutex<Tegra241Cmdqv>>>,
 }
 
 #[cfg(target_arch = "aarch64")]
 impl Smmuv3Iommufd {
+    pub fn host_cmdqv(iommufd: &IommuFd, dev_id: u32) -> Option<HostCmdqv> {
+        let mut hw_info_data =
+            IommufdHwInfoData::Tegra241Cmdqv(iommu_hw_info_tegra241_cmdqv::default());
+        match iommufd.device_hw_info(dev_id, &mut hw_info_data) {
+            Ok(_) => {}
+            Err(IommufdError::IommuGetHwInfo(e)) if e.errno() == libc::EOPNOTSUPP => return None,
+            Err(e) => {
+                warn!("Failed to query the host Tegra241 CMDQV: {e}");
+                return None;
+            }
+        }
+
+        match hw_info_data {
+            IommufdHwInfoData::Tegra241Cmdqv(hw_info) if hw_info.version == 1 => Some(HostCmdqv {
+                num_vcmdqs_log2: hw_info.log2vcmdqs,
+                num_sids_log2: hw_info.log2vsids,
+            }),
+            IommufdHwInfoData::Tegra241Cmdqv(hw_info) => {
+                warn!("Unsupported Tegra241 CMDQV version {}", hw_info.version);
+                None
+            }
+            _ => {
+                warn!("The host reported unexpected Tegra241 CMDQV information");
+                None
+            }
+        }
+    }
+
     pub fn new(
         id: String,
         mem: GuestMemoryAtomic<GuestMemory>,
@@ -292,8 +339,17 @@ impl Smmuv3Iommufd {
         acpi_info: Smmuv3AcpiInfo,
         viommu: Arc<IommufdVIommu>,
         dev_id: u32,
+        cmdqv: Option<Tegra241CmdqvConfig>,
     ) -> Result<Self, Error> {
+        let vintf_page = match viommu.data() {
+            IommufdViommuData::Smmuv3 => None,
+            IommufdViommuData::Tegra241Cmdqv {
+                mmap_offset,
+                mmap_length,
+            } => Some(Self::vintf_page_file(&viommu, mmap_offset, mmap_length)?),
+        };
         let backend = Arc::new(IommufdIommu::new(viommu, dev_id)?);
+        let cmdqv_id = format!("{id}_cmdqv");
         let host_info = backend.hw_info_data;
         let acpi_info = Smmuv3AcpiInfo {
             coherent: host_info.idr[0] & IDR0_COHACC != 0,
@@ -308,12 +364,27 @@ impl Smmuv3Iommufd {
             None,
         );
         device.initialize().map_err(Error::DeviceInit)?;
+        let cmdqv = cmdqv.map(|config| {
+            Arc::new(Mutex::new(Tegra241Cmdqv::new(
+                cmdqv_id,
+                config,
+                Arc::clone(&backend) as Arc<dyn PhysicalIommu>,
+            )))
+        });
+        // The guest sizes its VCMDQs from CMDQS, and the host takes none
+        // larger than its own CMDQS allows.
+        if cmdqv.is_some() {
+            device.clamp_max_cmdq_size(Smmuv3::max_cmdq_size(host_info.idr[1]));
+        }
         let device = Arc::new(Mutex::new(device));
         let fault_forwarder =
             FaultForwarder::new(backend.allocate_veventq()?, Arc::clone(&device))?;
 
         Ok(Self {
+            vintf_page,
+            vintf_regions: Vec::new(),
             device,
+            cmdqv,
             backend,
             acpi_info,
             _fault_forwarder: fault_forwarder,
@@ -331,8 +402,33 @@ impl Smmuv3Iommufd {
         &self.device
     }
 
+    pub fn cmdqv(&self) -> Option<&Arc<Mutex<Tegra241Cmdqv>>> {
+        self.cmdqv.as_ref()
+    }
+
     pub fn backend(&self) -> &Arc<IommufdIommu> {
         &self.backend
+    }
+
+    /// The host VINTF page backing the guest's VCMDQ page0s, to be mmapped
+    /// with a length of `VCMDQ_PAGE0_SIZE`.
+    pub fn vintf_page(&self) -> Option<&FileOffset> {
+        self.vintf_page.as_ref()
+    }
+
+    fn vintf_page_file(viommu: &IommufdVIommu, offset: u64, len: u64) -> Result<FileOffset, Error> {
+        if len != VCMDQ_PAGE0_SIZE {
+            return Err(Error::VintfPageSize(len));
+        }
+        // SAFETY: the vIOMMU keeps the iommufd open.
+        let fd = unsafe { BorrowedFd::borrow_raw(viommu.iommufd().as_raw_fd()) };
+        let file = File::from(fd.try_clone_to_owned().map_err(Error::DupIommufd)?);
+
+        Ok(FileOffset::new(file, offset))
+    }
+
+    pub fn set_vintf_regions(&mut self, regions: Vec<GuestRegion>) {
+        self.vintf_regions = regions;
     }
 
     pub fn acpi_info(&self) -> Smmuv3AcpiInfo {
