@@ -103,7 +103,8 @@ impl Gic {
     }
 
     /// Create a GICv3 configuration. On restore, uses the distributor base
-    /// address recorded in state, falling back to default GIC_V3_DIST_START
+    /// address recorded in state, falling back to LEGACY_GIC_V3_DIST_START
+    /// when the snapshot has no recorded address.
     pub fn create_config(vcpu_count: u64, state: Option<&GicState>) -> Result<VgicConfig> {
         if vcpu_count > layout::GIC_V3_LAYOUT_MAX_VCPUS {
             return Err(Error::GicTooManyVcpus(
@@ -114,7 +115,7 @@ impl Gic {
         let dist_addr = match state {
             Some(state) => state
                 .dist_addr()
-                .unwrap_or(layout::GIC_V3_DIST_START.raw_value()),
+                .unwrap_or(layout::LEGACY_GIC_V3_DIST_START.raw_value()),
             None => layout::GIC_V3_DIST_START.raw_value(),
         };
         let redists_size = layout::GIC_V3_REDIST_SIZE * vcpu_count;
