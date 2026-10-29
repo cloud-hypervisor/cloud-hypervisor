@@ -377,11 +377,16 @@ pub enum IommuType {
     Off,
     Virtio,
     Smmuv3,
+    Smmuv3Cmdqv,
 }
 
 impl IommuType {
     pub fn attached(&self) -> bool {
         !self.is_off()
+    }
+
+    pub fn is_smmuv3(&self) -> bool {
+        matches!(self, IommuType::Smmuv3 | IommuType::Smmuv3Cmdqv)
     }
 
     fn is_off(&self) -> bool {
@@ -425,7 +430,11 @@ impl<'de> Deserialize<'de> for IommuType {
                     "Off" => Ok(IommuType::Off),
                     "Virtio" => Ok(IommuType::Virtio),
                     "Smmuv3" => Ok(IommuType::Smmuv3),
-                    _ => Err(E::unknown_variant(value, &["Off", "Virtio", "Smmuv3"])),
+                    "Smmuv3Cmdqv" => Ok(IommuType::Smmuv3Cmdqv),
+                    _ => Err(E::unknown_variant(
+                        value,
+                        &["Off", "Virtio", "Smmuv3", "Smmuv3Cmdqv"],
+                    )),
                 }
             }
         }

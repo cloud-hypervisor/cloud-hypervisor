@@ -4507,7 +4507,7 @@ impl DeviceManager {
 
         let mut needs_dma_mapping = false;
 
-        let smmuv3_attached = device_cfg.pci_common.iommu == IommuType::Smmuv3;
+        let smmuv3_attached = device_cfg.pci_common.iommu.is_smmuv3();
 
         // Here we create a new VfioOps for two reasons:
         // 1) This is the first VFIO device, meaning we need a new VfioOps
