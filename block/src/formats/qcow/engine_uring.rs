@@ -283,7 +283,7 @@ impl QcowAsync {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
+    use std::io::{ErrorKind, Write};
     use std::sync::Arc;
     use std::{mem, thread};
 
@@ -359,12 +359,12 @@ mod tests {
             if let Some(c) = async_io.next_completed_request() {
                 return c;
             }
-            // Block until the eventfd is signaled (io_uring or synthetic).
-            let fd = async_io.notifier().as_raw_fd();
-            let mut val = 0u64;
-            // SAFETY: reading 8 bytes from a valid eventfd.
-            unsafe {
-                libc::read(fd, (&raw mut val).cast(), 8);
+            // Drain the eventfd when signaled (io_uring or synthetic).
+            if let Err(err) = async_io.notifier().read() {
+                assert!(
+                    matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::Interrupted),
+                    "Failed to read completion eventfd: {err}"
+                );
             }
         }
     }
