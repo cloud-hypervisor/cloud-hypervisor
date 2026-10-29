@@ -686,15 +686,16 @@ impl DiskTopology {
 
 #[cfg(test)]
 mod tests {
-    use std::alloc::{Layout, alloc_zeroed, dealloc};
+    use std::alloc::Layout;
     use std::fs::OpenOptions;
     use std::io::Write;
+    use std::mem;
     use std::os::unix::fs::OpenOptionsExt;
-    use std::{mem, ptr, slice};
 
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
+    use crate::async_io::OwnedIoBuffer;
 
     #[test]
     fn with_block_size_raises_physical_and_min_io() {
@@ -832,43 +833,20 @@ mod tests {
         let topo = DiskTopology::probe(&f).unwrap();
         let alignment = topo.logical_block_size as usize;
 
-        let layout = Layout::from_size_align(alignment, alignment).unwrap();
-        // SAFETY: layout is valid (non-zero, power-of-two alignment).
-        let buf = unsafe { alloc_zeroed(layout) };
-        assert!(!buf.is_null());
+        let mut buf = OwnedIoBuffer::new(alignment, alignment).unwrap();
+        buf.as_mut_slice().fill(0xAB);
 
-        // SAFETY: buf is valid for `alignment` bytes.
-        unsafe { ptr::write_bytes(buf, 0xAB, alignment) };
+        let written = f.write_at(buf.as_slice(), 0).unwrap();
+        assert_eq!(written, alignment);
 
-        // SAFETY: buf is aligned and sized for O_DIRECT; fd is valid.
-        let written = unsafe { libc::pwrite(f.as_raw_fd(), buf.cast(), alignment, 0) };
-        assert_eq!(
-            written as usize,
-            alignment,
-            "O_DIRECT pwrite failed: {}",
-            io::Error::last_os_error()
-        );
+        buf.as_mut_slice().fill(0);
+        let read = f.read_at(buf.as_mut_slice(), 0).unwrap();
+        assert_eq!(read, alignment);
 
-        // SAFETY: buf is valid for `alignment` bytes.
-        unsafe { ptr::write_bytes(buf, 0x00, alignment) };
-        // SAFETY: buf is aligned and sized for O_DIRECT; fd is valid.
-        let read = unsafe { libc::pread(f.as_raw_fd(), buf.cast(), alignment, 0) };
-        assert_eq!(
-            read as usize,
-            alignment,
-            "O_DIRECT pread failed: {}",
-            io::Error::last_os_error()
-        );
-
-        // SAFETY: buf is valid for `alignment` bytes after successful pread.
-        let slice = unsafe { slice::from_raw_parts(buf, alignment) };
         assert!(
-            slice.iter().all(|&b| b == 0xAB),
+            buf.as_slice().iter().all(|&b| b == 0xAB),
             "Data mismatch after O_DIRECT roundtrip"
         );
-
-        // SAFETY: buf was allocated with this layout via alloc_zeroed.
-        unsafe { dealloc(buf, layout) };
     }
 
     #[test]
