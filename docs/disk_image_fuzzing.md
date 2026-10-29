@@ -68,7 +68,8 @@ without the format's magic are still opened, but few are kept in the corpus.
 ## Path backed targets
 
 qcow2 backing files and VMDK extents are host paths. Production only opens
-them with `backing_files=on` and treats such images as trusted, but
+them with `backing_files=on` and treats such images as trusted (see the
+[threat model](threat-model.md#disk-images)), but
 `disk_qcow2_chain` and `disk_vmdk` open fuzzed names. Both admit only plain
 names inside a scratch directory and confine the process to it with Landlock,
 refusing every input where Landlock is unavailable.
