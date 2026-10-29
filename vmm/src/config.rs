@@ -1593,7 +1593,7 @@ impl PciDeviceCommonConfig {
     }
 
     pub fn validate(&self, vm_config: &VmConfig, virtio_iommu_only: bool) -> ValidationResult<()> {
-        if virtio_iommu_only && self.iommu == IommuType::Smmuv3 {
+        if virtio_iommu_only && self.iommu.is_smmuv3() {
             return Err(ValidationError::IommuSmmuv3NotPassthrough);
         }
 
@@ -1887,6 +1887,7 @@ impl FromStr for IommuType {
             }
             "virtio" => Ok(IommuType::Virtio),
             "smmuv3" => Ok(IommuType::Smmuv3),
+            "smmuv3_cmdqv" => Ok(IommuType::Smmuv3Cmdqv),
             _ => Err(ParseIommuTypeError::InvalidValue(s.to_owned())),
         }
     }
@@ -2724,7 +2725,7 @@ impl DebugConsoleConfig {
 
 impl DeviceConfig {
     pub const SYNTAX: &'static str = "Direct device assignment parameters \
-        \"path=<device_path>,fd=<vfio_cdev_fd>,iommu=off|virtio|smmuv3,\
+        \"path=<device_path>,fd=<vfio_cdev_fd>,iommu=off|virtio|smmuv3|smmuv3_cmdqv,\
         id=<device_id>,\
         pci_segment=<segment_id>,pci_device_id=<pci_slot>,\
         x_nv_gpudirect_clique=<clique_id>,\
@@ -2775,11 +2776,11 @@ impl DeviceConfig {
         self.pci_common.validate(vm_config, false)?;
 
         #[cfg(not(all(target_arch = "aarch64", feature = "kvm")))]
-        if self.pci_common.iommu == IommuType::Smmuv3 {
+        if self.pci_common.iommu.is_smmuv3() {
             return Err(ValidationError::IommuSmmuv3NotSupported);
         }
 
-        if self.pci_common.iommu == IommuType::Smmuv3
+        if self.pci_common.iommu.is_smmuv3()
             && !vm_config.platform.as_ref().is_some_and(|p| p.iommufd)
         {
             return Err(ValidationError::IommuSmmuv3RequiresIommufd);
@@ -3507,7 +3508,7 @@ impl VmConfig {
         self.devices
             .iter()
             .flatten()
-            .any(|d| d.pci_common.iommu == IommuType::Smmuv3)
+            .any(|d| d.pci_common.iommu.is_smmuv3())
     }
 
     /// Identify if a virtio-iommu IOMMU is required based on configuration from every device
@@ -3543,7 +3544,15 @@ impl VmConfig {
     pub fn validate(&mut self) -> ValidationResult<BTreeSet<String>> {
         let mut id_list = BTreeSet::new();
 
-        if self.virtio_iommu_attached() && self.smmuv3_attached() {
+        let iommu_used = |iommu| {
+            self.devices
+                .iter()
+                .flatten()
+                .any(|d| d.pci_common.iommu == iommu)
+        };
+        if (self.virtio_iommu_attached() && self.smmuv3_attached())
+            || (iommu_used(IommuType::Smmuv3) && iommu_used(IommuType::Smmuv3Cmdqv))
+        {
             return Err(ValidationError::MixedIommuTypes);
         }
 
@@ -7204,6 +7213,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             serde_json::from_str::<IommuType>(r#""Smmuv3""#).unwrap(),
             IommuType::Smmuv3
         );
+        assert_eq!(
+            serde_json::from_str::<IommuType>(r#""Smmuv3Cmdqv""#).unwrap(),
+            IommuType::Smmuv3Cmdqv
+        );
         serde_json::from_str::<IommuType>(r#""Nope""#).unwrap_err();
 
         // "on" and "off" predate the type on the command line.
@@ -7211,6 +7224,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!("off".parse::<IommuType>().unwrap(), IommuType::Off);
         assert_eq!("virtio".parse::<IommuType>().unwrap(), IommuType::Virtio);
         assert_eq!("smmuv3".parse::<IommuType>().unwrap(), IommuType::Smmuv3);
+        assert_eq!(
+            "smmuv3_cmdqv".parse::<IommuType>().unwrap(),
+            IommuType::Smmuv3Cmdqv
+        );
         "nope".parse::<IommuType>().unwrap_err();
     }
 
@@ -9067,6 +9084,18 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
         invalid_config.disks = None;
         assert_ne!(
+            invalid_config.validate(),
+            Err(ValidationError::MixedIommuTypes)
+        );
+
+        invalid_config.devices.as_mut().unwrap().push(DeviceConfig {
+            pci_common: PciDeviceCommonConfig {
+                iommu: IommuType::Smmuv3Cmdqv,
+                ..Default::default()
+            },
+            ..device_fixture()
+        });
+        assert_eq!(
             invalid_config.validate(),
             Err(ValidationError::MixedIommuTypes)
         );
