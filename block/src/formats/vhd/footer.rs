@@ -12,6 +12,11 @@ use crate::{AlignedFile, query_device_size};
 /// A VHD footer occupies the last sector of the file.
 pub(super) const VHD_FOOTER_LEN: u64 = 512;
 
+const VHD_CHS_MAX_C: u64 = 65535;
+const VHD_CHS_MAX_H: u64 = 16;
+const VHD_CHS_MAX_S: u64 = 255;
+const VHD_MAX_GEOMETRY: u64 = VHD_CHS_MAX_C * VHD_CHS_MAX_H * VHD_CHS_MAX_S;
+
 /// "conectix", the cookie every hard disk footer begins with.
 const VHD_COOKIE: u64 = 0x636f_6e65_6374_6978;
 
@@ -55,8 +60,7 @@ pub(super) fn checksummed_footer(template: &[u8]) -> Vec<u8> {
 // Production code uses: cookie, file_format_version, data_offset,
 // current_size, disk_type. The remaining fields are parsed for VHD
 // spec completeness and exercised only by unit tests.
-#[derive(Clone, Copy)]
-#[cfg_attr(not(test), expect(dead_code))]
+#[derive(Clone, Copy, Debug)]
 pub(super) struct VhdFooter {
     cookie: u64,
     features: u32,
@@ -152,6 +156,87 @@ impl VhdFooter {
     #[cfg(test)]
     pub(super) fn disk_type(&self) -> u32 {
         self.disk_type
+    }
+
+    /// Encode the VHD CHS geometry for `size`, following the VHD spec.
+    fn geometry_for_size(size: u64) -> u32 {
+        let total_sectors = (size / 512).min(VHD_MAX_GEOMETRY);
+        let (cyls, mut heads, mut secs_per_cyl);
+        let mut cyls_times_heads;
+
+        if total_sectors >= 65535 * 16 * 63 {
+            secs_per_cyl = 255;
+            heads = 16;
+            cyls_times_heads = total_sectors / secs_per_cyl;
+        } else {
+            secs_per_cyl = 17;
+            cyls_times_heads = total_sectors / secs_per_cyl;
+            heads = cyls_times_heads.div_ceil(1024).clamp(4, 16);
+            if cyls_times_heads >= heads * 1024 || heads > 16 {
+                secs_per_cyl = 31;
+                heads = 16;
+                cyls_times_heads = total_sectors / secs_per_cyl;
+            }
+            if cyls_times_heads >= heads * 1024 {
+                secs_per_cyl = 63;
+                heads = 16;
+                cyls_times_heads = total_sectors / secs_per_cyl;
+            }
+        }
+
+        cyls = cyls_times_heads / heads;
+        ((cyls as u32) << 16) | ((heads as u32) << 8) | secs_per_cyl as u32
+    }
+
+    /// Write a fixed-image footer at the end of a grown image.
+    pub(super) fn write_fixed(&mut self, file: &File, new_size: u64) -> io::Result<()> {
+        if new_size <= self.current_size {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "fixed VHD can only grow",
+            ));
+        }
+        if !new_size.is_multiple_of(512) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "fixed VHD size must be a multiple of 512 bytes",
+            ));
+        }
+        let file_len = new_size.checked_add(VHD_FOOTER_LEN).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "fixed VHD size overflows")
+        })?;
+        let old_file_len = file.metadata()?.len();
+        if old_file_len >= VHD_FOOTER_LEN {
+            file.write_all_at(
+                &[0u8; VHD_FOOTER_LEN as usize],
+                old_file_len - VHD_FOOTER_LEN,
+            )?;
+        }
+        file.set_len(file_len)?;
+
+        let mut sector = [0u8; VHD_FOOTER_LEN as usize];
+        sector[0..8].copy_from_slice(&self.cookie.to_be_bytes());
+        sector[8..12].copy_from_slice(&self.features.to_be_bytes());
+        sector[12..16].copy_from_slice(&self.file_format_version.to_be_bytes());
+        sector[16..24].copy_from_slice(&self.data_offset.to_be_bytes());
+        sector[24..28].copy_from_slice(&self.time_stamp.to_be_bytes());
+        sector[28..32].copy_from_slice(&self.creator_application.to_be_bytes());
+        sector[32..36].copy_from_slice(&self.creator_version.to_be_bytes());
+        sector[36..40].copy_from_slice(&self.creator_host_os.to_be_bytes());
+        sector[40..48].copy_from_slice(&self.original_size.to_be_bytes());
+        sector[48..56].copy_from_slice(&new_size.to_be_bytes());
+        self.disk_geometry = Self::geometry_for_size(new_size);
+        sector[56..60].copy_from_slice(&self.disk_geometry.to_be_bytes());
+        sector[60..64].copy_from_slice(&self.disk_type.to_be_bytes());
+        sector[68..84].copy_from_slice(&self.unique_id.to_be_bytes());
+        sector[84] = self.saved_state;
+        let checksum = footer_checksum(&sector);
+        sector[VHD_CHECKSUM_RANGE].copy_from_slice(&checksum.to_be_bytes());
+
+        file.write_all_at(&sector, new_size)?;
+        file.sync_all()?;
+        self.current_size = new_size;
+        Ok(())
     }
 
     pub(super) fn validate_fixed(&self) -> io::Result<()> {

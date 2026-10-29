@@ -16,7 +16,6 @@ mod fixed;
 mod footer;
 
 use std::fs::File;
-use std::io;
 use std::os::unix::io::AsRawFd;
 
 pub use footer::is_fixed_vhd;
@@ -44,7 +43,7 @@ impl VhdDisk {
         if use_io_uring {
             return Err(BlockError::new(
                 BlockErrorKind::UnsupportedFeature,
-                DiskFileError::NewAsyncIo(io::Error::other(
+                DiskFileError::NewAsyncIo(std::io::Error::other(
                     "io_uring requested but feature is not enabled",
                 )),
             ));
@@ -95,12 +94,11 @@ impl disk_file::Geometry for VhdDisk {
 impl disk_file::SparseCapable for VhdDisk {}
 
 impl disk_file::Resizable for VhdDisk {
-    fn resize(&mut self, _size: u64) -> BlockResult<()> {
-        Err(BlockError::new(
-            BlockErrorKind::UnsupportedFeature,
-            DiskFileError::ResizeError(io::Error::other("resize not supported for fixed VHD")),
-        )
-        .with_op(ErrorOp::Resize))
+    fn resize(&mut self, size: u64) -> BlockResult<()> {
+        self.inner.resize(size).map_err(|e| {
+            BlockError::new(BlockErrorKind::Io, DiskFileError::ResizeError(e))
+                .with_op(ErrorOp::Resize)
+        })
     }
 }
 
@@ -155,6 +153,7 @@ impl disk_file::AsyncDiskFile for VhdDisk {
 mod tests {
     use std::fs::File;
     use std::io::{Seek, SeekFrom, Write};
+    use std::os::unix::fs::FileExt;
 
     use vmm_sys_util::tempfile::TempFile;
 
@@ -192,6 +191,36 @@ mod tests {
         file.write_all(&checksummed_footer(fixed_vhd_footer()))
             .unwrap();
         file
+    }
+
+    #[test]
+    fn resize_grows_fixed_vhd() {
+        let file = make_vhd_file();
+        let mut disk = VhdDisk::new(file, false, false).unwrap();
+        let old_size = disk.logical_size().unwrap();
+        let new_size = (old_size + 0x1000).div_ceil(512) * 512;
+        disk.resize(new_size).unwrap();
+        assert_eq!(disk.logical_size().unwrap(), new_size);
+        assert!(disk.resize(new_size - 0x200).is_err());
+        assert_eq!(disk.logical_size().unwrap(), new_size);
+        let reopened = VhdDisk::new(disk.inner.file().try_clone().unwrap(), false, false).unwrap();
+        assert_eq!(reopened.logical_size().unwrap(), new_size);
+        let mut old_footer = [0u8; 512];
+        reopened
+            .inner
+            .file()
+            .read_exact_at(&mut old_footer, old_size)
+            .unwrap();
+        assert_eq!(old_footer, [0u8; 512]);
+    }
+
+    #[test]
+    fn resize_rejects_shrink_and_unaligned_size() {
+        let file = make_vhd_file();
+        let mut disk = VhdDisk::new(file, false, false).unwrap();
+        let old_size = disk.logical_size().unwrap();
+        assert!(disk.resize(old_size - 0x1000).is_err());
+        assert!(disk.resize(old_size + 0x1001).is_err());
     }
 
     #[test]
@@ -336,13 +365,6 @@ mod tests {
         let err = VhdDisk::new(file, false, false)
             .expect_err("a footer larger than the file must be rejected");
         assert_eq!(err.kind(), BlockErrorKind::Io);
-    }
-
-    #[test]
-    fn resize_returns_error() {
-        let file = make_vhd_file();
-        let mut disk = VhdDisk::new(file, false, false).unwrap();
-        assert!(disk.resize(0x2000_0000).is_err());
     }
 
     #[test]

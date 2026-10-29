@@ -12,6 +12,7 @@ use super::footer::{VHD_FOOTER_LEN, VhdFooter};
 pub(super) struct FixedVhd {
     file: File,
     size: u64,
+    footer: VhdFooter,
 }
 
 impl FixedVhd {
@@ -32,7 +33,7 @@ impl FixedVhd {
             ));
         }
 
-        Ok(Self { file, size })
+        Ok(Self { file, size, footer })
     }
 
     pub(crate) fn file(&self) -> &File {
@@ -63,6 +64,13 @@ impl FixedVhd {
         Ok(Self {
             file: self.file.try_clone()?,
             size: self.size,
+            footer: self.footer,
         })
+    }
+
+    pub(super) fn resize(&mut self, new_size: u64) -> io::Result<()> {
+        self.footer.write_fixed(&self.file, new_size)?;
+        self.size = new_size;
+        Ok(())
     }
 }
