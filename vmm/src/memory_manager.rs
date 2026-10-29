@@ -3099,6 +3099,15 @@ impl MemoryManager {
         &self.memory_zones
     }
 
+    /// The smallest page backing guest RAM, within which it is host-physically contiguous.
+    pub fn min_backing_page_size(&self) -> u64 {
+        self.memory_zones
+            .values()
+            .map(|zone| zone.backing_page_size)
+            .min()
+            .unwrap_or_else(get_page_size)
+    }
+
     pub fn memory_zones_mut(&mut self) -> &mut MemoryZones {
         &mut self.memory_zones
     }
