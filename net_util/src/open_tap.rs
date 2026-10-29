@@ -45,7 +45,11 @@ fn check_mq_support(if_name: &Option<&str>, queue_pairs: usize) -> Result<()> {
         if !Path::new(&path).exists() {
             return Ok(());
         }
-        let tun_flags_str = fs::read_to_string(path).map_err(Error::ReadSysfsTunFlags)?;
+        // TUNSETIFF refuses a mismatch too, so a denied read is not fatal.
+        let tun_flags_str = match fs::read_to_string(path) {
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => return Ok(()),
+            r => r.map_err(Error::ReadSysfsTunFlags)?,
+        };
         let tun_flags = i32::from_str_radix(tun_flags_str.trim().trim_start_matches("0x"), 16)
             .map_err(Error::ConvertHexStringToInt)?;
         if (tun_flags & libc::IFF_MULTI_QUEUE != 0) && !mq {
