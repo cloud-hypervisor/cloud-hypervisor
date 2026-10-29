@@ -81,14 +81,13 @@ impl AlignedBuffer {
 
     /// The caller's logical portion of the buffer (read-only).
     pub(crate) fn as_slice(&self) -> &[u8] {
-        // SAFETY: ptr is valid for layout.size() bytes; head_pad + user_len <= layout.size().
-        unsafe { slice::from_raw_parts(self.ptr.add(self.head_pad), self.user_len) }
+        &self.full_slice()[self.head_pad..self.head_pad + self.user_len]
     }
 
     /// The caller's logical portion of the buffer (mutable).
     pub(crate) fn as_mut_slice(&mut self) -> &mut [u8] {
-        // SAFETY: ptr is valid for layout.size() bytes; head_pad + user_len <= layout.size().
-        unsafe { slice::from_raw_parts_mut(self.ptr.add(self.head_pad), self.user_len) }
+        let range = self.head_pad..self.head_pad + self.user_len;
+        &mut self.full_mut_slice()[range]
     }
 
     fn full_slice(&self) -> &[u8] {
