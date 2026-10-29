@@ -137,6 +137,9 @@ impl RefCount {
         let (table_index, block_index) = self.get_refcount_index(cluster_address);
 
         let block_addr_disk = *self.ref_table.get(table_index).ok_or(Error::InvalidIndex)?;
+        if block_addr_disk & (self.cluster_size - 1) != 0 {
+            return Err(Error::RefblockUnaligned(block_addr_disk));
+        }
 
         // Fill the cache if this block isn't yet there.
         if !self.refblock_cache.contains_key(table_index) {
@@ -245,11 +248,12 @@ impl RefCount {
 #[cfg(test)]
 mod tests {
     use std::io;
+    use std::os::unix::fs::FileExt;
 
     use vmm_sys_util::tempfile::TempFile;
 
     use super::super::qcow_raw_file::QcowRawFile;
-    use super::RefCount;
+    use super::{Error, RefCount};
     use crate::aligned_file::AlignedFile;
 
     // A refcount table whose entry count, refcounts-per-block and cluster size
@@ -283,5 +287,35 @@ mod tests {
         )
         .expect_err("an overflowing refcount geometry must be rejected");
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    // Setting a refcount through a refcount table entry that is not cluster
+    // aligned must fail like reading one does.
+    #[test]
+    fn set_cluster_refcount_rejects_unaligned_refblock() {
+        let cluster_size: u64 = 512;
+        let refcount_bits: u64 = 16;
+        let refcount_block_entries = cluster_size * 8 / refcount_bits;
+
+        let temp = TempFile::new().unwrap();
+        temp.as_file().set_len(2 * cluster_size).unwrap();
+        temp.as_file().write_all_at(&8u64.to_be_bytes(), 0).unwrap();
+        let file = AlignedFile::new(temp.into_file(), false);
+        let mut raw_file = QcowRawFile::from(file, cluster_size, refcount_bits)
+            .expect("cluster size and refcount width are valid");
+        let mut refcount = RefCount::new(
+            &mut raw_file,
+            0,
+            1,
+            refcount_block_entries,
+            cluster_size,
+            refcount_bits,
+        )
+        .unwrap();
+
+        let err = refcount
+            .set_cluster_refcount(&mut raw_file, cluster_size, 1, None)
+            .expect_err("an unaligned refcount block must be rejected");
+        assert!(matches!(err, Error::RefblockUnaligned(8)), "{err:?}");
     }
 }
