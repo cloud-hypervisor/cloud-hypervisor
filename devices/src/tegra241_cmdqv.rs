@@ -5,16 +5,21 @@
 // NVIDIA Tegra241 CMDQV, following QEMU's hw/arm/tegra241-cmdqv.c.
 
 use std::io;
-use std::os::fd::AsRawFd;
+use std::mem;
+use std::os::fd::{AsRawFd, BorrowedFd};
 use std::ptr;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread::{self, JoinHandle};
 
 use acpi_tables::{Aml, AmlSink, aml};
 use anyhow::anyhow;
-use iommufd_ioctls::{IommufdHwQueue, IommufdVEventData, IommufdVEventQ, IommufdVIommu};
+use iommufd_ioctls::{
+    IommuFd, IommufdError, IommufdHwQueue, IommufdVEventData, IommufdVEventQ, IommufdVIommu,
+    IommufdViommuData,
+};
 use log::{debug, error, info, trace, warn};
 use pci::mmap::MmapRegion;
+use thiserror::Error;
 use vm_allocator::page_size::get_page_size;
 use vm_device::BusDevice;
 use vm_device::interrupt::InterruptSourceGroup;
@@ -719,6 +724,164 @@ impl Drop for EventForwarder {
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }
+    }
+}
+
+/// The Tegra241 CMDQV of the host SMMU behind a device.
+#[derive(Debug)]
+pub enum HostCmdqv {
+    Compatible,
+    Incompatible,
+    Absent,
+}
+
+/// Queries the host SMMU's Tegra241 CMDQV for iommufd device `dev_id`.
+pub fn probe_host_cmdqv(iommufd: &IommuFd, dev_id: u32) -> Result<HostCmdqv, IommufdError> {
+    use iommufd_bindings::{
+        iommu_hw_info, iommu_hw_info__bindgen_ty_1, iommu_hw_info_tegra241_cmdqv,
+        iommu_hw_info_type_IOMMU_HW_INFO_TYPE_TEGRA241_CMDQV,
+        iommufd_hw_info_flags_IOMMU_HW_INFO_FLAG_INPUT_TYPE,
+    };
+
+    let mut data = iommu_hw_info_tegra241_cmdqv::default();
+    let mut hw_info = iommu_hw_info {
+        size: size_of::<iommu_hw_info>() as u32,
+        flags: iommufd_hw_info_flags_IOMMU_HW_INFO_FLAG_INPUT_TYPE,
+        dev_id,
+        data_len: size_of::<iommu_hw_info_tegra241_cmdqv>() as u32,
+        data_uptr: &mut data as *mut iommu_hw_info_tegra241_cmdqv as u64,
+        __bindgen_anon_1: iommu_hw_info__bindgen_ty_1 {
+            in_data_type: iommu_hw_info_type_IOMMU_HW_INFO_TYPE_TEGRA241_CMDQV,
+        },
+        ..Default::default()
+    };
+    match iommufd.get_hw_info(&mut hw_info) {
+        Ok(()) => {}
+        // The SMMU has no CMDQV.
+        Err(IommufdError::IommuGetHwInfo(e)) if e.errno() == libc::EOPNOTSUPP => {
+            return Ok(HostCmdqv::Absent);
+        }
+        Err(e) => return Err(e),
+    }
+    // SAFETY: the union holds one __u32 under either name.
+    let out_data_type = unsafe { hw_info.__bindgen_anon_1.out_data_type };
+    Ok(
+        if out_data_type != iommu_hw_info_type_IOMMU_HW_INFO_TYPE_TEGRA241_CMDQV {
+            HostCmdqv::Absent
+        } else if data.version != 1 || data.log2vcmdqs < 1 || data.log2vsids < 4 {
+            // The guest is given 2 VCMDQs and 16 SIDs.
+            HostCmdqv::Incompatible
+        } else {
+            HostCmdqv::Compatible
+        },
+    )
+}
+
+/// The host VINTF page0 the VCMDQ page0s map to.
+pub const VINTF_PAGE_SIZE: u64 = 0x1_0000;
+const VEVENTQ_DEPTH: u32 = 64;
+
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("The vIOMMU reports no VINTF page0 mapping")]
+    VintfPageMissing,
+    #[error("Host VINTF page0 size {0:#x} is not 64 KiB")]
+    VintfPageSize(u64),
+    #[error("Failed to mmap the host VINTF page0")]
+    MmapVintfPage(#[source] io::Error),
+    #[error("Failed to allocate the vEVENTQ")]
+    AllocateVeventq(#[source] IommufdError),
+    #[error("Failed to start the vEVENTQ reader")]
+    StartEventForwarder(#[source] io::Error),
+}
+
+/// A Tegra241 CMDQV backed by an iommufd vIOMMU; see `release`.
+pub struct Tegra241CmdqvIommufd {
+    device: Arc<Mutex<Tegra241Cmdqv>>,
+    events: Option<EventForwarder>,
+    /// (slot, guest address) of the memslots mapping the VINTF page.
+    memslots: Vec<(u32, u64)>,
+}
+
+impl Tegra241CmdqvIommufd {
+    pub fn new(
+        id: String,
+        instance_id: u32,
+        irq: u32,
+        interrupt: Arc<dyn InterruptSourceGroup>,
+        viommu: Arc<IommufdVIommu>,
+        max_vcmdq_size: u64,
+    ) -> Result<Self, Error> {
+        let IommufdViommuData::Tegra241Cmdqv {
+            mmap_offset,
+            mmap_length,
+        } = viommu.data()
+        else {
+            return Err(Error::VintfPageMissing);
+        };
+        if mmap_length != VINTF_PAGE_SIZE {
+            return Err(Error::VintfPageSize(mmap_length));
+        }
+        // SAFETY: the vIOMMU keeps the iommufd open.
+        let fd = unsafe { BorrowedFd::borrow_raw(viommu.iommufd().as_raw_fd()) };
+        let mapping = MmapRegion::mmap(
+            VINTF_PAGE_SIZE,
+            libc::PROT_READ | libc::PROT_WRITE,
+            fd,
+            mmap_offset,
+            0,
+        )
+        .map_err(Error::MmapVintfPage)?;
+        let veventq = viommu
+            .allocate_cmdqv_veventq(VEVENTQ_DEPTH)
+            .map_err(Error::AllocateVeventq)?;
+
+        let mut device = Tegra241Cmdqv::new(id, instance_id, irq);
+        device.max_vcmdq_size = max_vcmdq_size;
+        device.vintf_page = Some(VintfPage { mapping });
+        device.viommu = Some(viommu);
+        device.irq_group = Some(interrupt);
+        let device = Arc::new(Mutex::new(device));
+        let events = EventForwarder::new(veventq, Arc::clone(&device))
+            .map_err(Error::StartEventForwarder)?;
+
+        Ok(Self {
+            device,
+            events: Some(events),
+            memslots: Vec::new(),
+        })
+    }
+
+    pub fn device(&self) -> &Arc<Mutex<Tegra241Cmdqv>> {
+        &self.device
+    }
+
+    /// The VINTF page's host address, valid until `release`.
+    pub fn vintf_page_addr(&self) -> *mut u8 {
+        let device = self.device.lock().unwrap();
+        let page = device.vintf_page.as_ref().expect("CMDQV already released");
+        page.mapping.addr()
+    }
+
+    /// Records the memslots mapping the VINTF page, for `release`.
+    pub fn set_memslots(&mut self, memslots: Vec<(u32, u64)>) {
+        self.memslots = memslots;
+    }
+
+    /// Stops the vEVENTQ reader, removes the memslots, then frees the queues,
+    /// page and vIOMMU. The MMIO bus keeps the device, so Drop is too late.
+    pub fn release(&mut self, mut remove_memslot: impl FnMut(u32, u64, *mut u8)) {
+        self.events = None;
+        let mut device = self.device.lock().unwrap();
+        if let Some(addr) = device.vintf_page.as_ref().map(|page| page.mapping.addr()) {
+            for (slot, guest_addr) in mem::take(&mut self.memslots) {
+                remove_memslot(slot, guest_addr, addr);
+            }
+        }
+        device.destroy_hw_queues();
+        // The mapping holds a reference on the vIOMMU, so it goes first.
+        device.vintf_page = None;
+        device.viommu = None;
     }
 }
 
