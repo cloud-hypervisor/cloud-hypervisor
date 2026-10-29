@@ -68,7 +68,9 @@ setup without storage. Same host TCP/TLS migration is also supported.
 > [!WARNING]
 > For development and testing, you can omit `tls_dir` on both sides to
 > use plain TCP. The migration is then unencrypted, with the receiver
-> accepting arbitrary connections.
+> accepting arbitrary connections. See the
+> [threat model](threat-model.md#live-migration-and-snapshots) for why
+> migration peers must be trusted.
 
 ### Preparation
 
