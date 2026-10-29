@@ -1965,13 +1965,6 @@ impl Vm {
 
         self.state.valid_transition(new_state)?;
 
-        // Wake up the DeviceManager threads so they will get terminated cleanly
-        self.device_manager
-            .lock()
-            .unwrap()
-            .resume()
-            .map_err(Error::Resume)?;
-
         self.cpu_manager
             .lock()
             .unwrap()
