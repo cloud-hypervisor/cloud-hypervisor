@@ -50,11 +50,11 @@ preparing and deploying patches. Information must be limited to those
 who need to know. This includes access to both patched source code and
 patched binaries.
 
-- Microsoft
 - Crusoe
 - Cyberus Technology
-- Meta
 - Google
+- Meta
+- Microsoft
 - UbiCloud
 
 This list may be extended by filing a PR.  It will only include:
