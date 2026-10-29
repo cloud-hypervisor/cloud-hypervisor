@@ -4350,6 +4350,7 @@ impl DeviceManager {
             acpi_info,
             viommu,
             dev_id,
+            None,
         )
         .map_err(DeviceManagerError::Smmuv3)?;
         let smmuv3_device = Arc::clone(smmu.device());
