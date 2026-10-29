@@ -192,7 +192,8 @@ commits instead of pushing `<component>: addressing review for A`-style commits.
 
 If you have a problem, please let us know. We recommend using
 [github issues](https://github.com/cloud-hypervisor/cloud-hypervisor/issues/new) for formally
-reporting and documenting them.
+reporting and documenting them. Report security vulnerabilities as described
+in [SECURITY.md](SECURITY.md) instead.
 
 To quickly and informally bring something up to us, you can also reach out on [Slack](https://cloud-hypervisor.slack.com).
 
