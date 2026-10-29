@@ -18,7 +18,6 @@ use iommufd_bindings::iommufd::{
 use iommufd_ioctls::{
     AttachHwpt, IommufdError, IommufdHwInfoData, IommufdHwptData, IommufdInvalidateData,
     IommufdVDevice, IommufdVEvent, IommufdVEventData, IommufdVEventQ, IommufdVIommu,
-    IommufdViommuData,
 };
 use log::{error, warn};
 use pci::{PasidCap, PciBdf};
@@ -58,6 +57,8 @@ fn nested_ste(words: &[u64; 8]) -> [u64; 2] {
 pub enum Error {
     #[error("Failed to query host IOMMU information")]
     QueryHwInfo(#[source] IommufdError),
+    #[error("The host reported unexpected hardware information")]
+    UnexpectedHwInfo,
     #[error("Failed to create vDevice")]
     CreateVdevice(#[source] IommufdError),
     #[error("Failed to attach device to the bypass HWPT")]
@@ -93,7 +94,7 @@ struct Endpoint {
 /// Iommufd backend of an emulated IOMMU.
 pub struct IommufdIommu {
     viommu: Arc<IommufdVIommu>,
-    hw_info_data: IommufdHwInfoData,
+    hw_info_data: iommu_hw_info_arm_smmuv3,
     ats_supported: bool,
     endpoints: Mutex<BTreeMap<u32, Endpoint>>,
 }
@@ -171,17 +172,15 @@ impl IommufdIommu {
     fn query_hw_info(
         viommu: &IommufdVIommu,
         dev_id: u32,
-    ) -> Result<(iommu_hw_info, IommufdHwInfoData), Error> {
-        // The buffer to fill depends on the IOMMU the host reports.
-        let mut hw_info_data = match viommu.data() {
-            IommufdViommuData::Smmuv3 | IommufdViommuData::Tegra241Cmdqv { .. } => {
-                IommufdHwInfoData::Smmuv3(iommu_hw_info_arm_smmuv3::default())
-            }
-        };
+    ) -> Result<(iommu_hw_info, iommu_hw_info_arm_smmuv3), Error> {
+        let mut hw_info_data = IommufdHwInfoData::Smmuv3(iommu_hw_info_arm_smmuv3::default());
         let hw_info = viommu
             .iommufd()
             .device_hw_info(dev_id, &mut hw_info_data)
             .map_err(Error::QueryHwInfo)?;
+        let IommufdHwInfoData::Smmuv3(hw_info_data) = hw_info_data else {
+            return Err(Error::UnexpectedHwInfo);
+        };
 
         Ok((hw_info, hw_info_data))
     }
@@ -202,13 +201,10 @@ impl IommufdIommu {
 
 impl PhysicalIommu for IommufdIommu {
     fn hw_info(&self) -> Result<HwInfo, IommuError> {
-        match self.hw_info_data {
-            #[cfg(target_arch = "aarch64")]
-            IommufdHwInfoData::Smmuv3(info) => Ok(HwInfo::Smmuv3 {
-                idr: info.idr,
-                ats_supported: self.ats_supported,
-            }),
-        }
+        Ok(HwInfo::Smmuv3 {
+            idr: self.hw_info_data.idr,
+            ats_supported: self.ats_supported,
+        })
     }
 
     fn install_table_entry(&self, device_id: u32, entry: TableEntry) -> Result<(), IommuError> {
@@ -278,7 +274,7 @@ impl Smmuv3Iommufd {
         dev_id: u32,
     ) -> Result<Self, Error> {
         let backend = Arc::new(IommufdIommu::new(viommu, dev_id)?);
-        let IommufdHwInfoData::Smmuv3(host_info) = backend.hw_info_data;
+        let host_info = backend.hw_info_data;
         let acpi_info = Smmuv3AcpiInfo {
             coherent: host_info.idr[0] & IDR0_COHACC != 0,
             ats_supported: backend.ats_supported,
