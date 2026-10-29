@@ -30,7 +30,7 @@ impl RawAio {
     pub(super) fn new(raw_file: File, direct: bool, queue_depth: u32) -> BlockResult<Self> {
         let data_io =
             AioDataIo::new(queue_depth).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
-        let is_block_device = is_block_device(raw_file.as_raw_fd());
+        let is_block_device = is_block_device(&raw_file);
         let alignment = if direct {
             Some(probe_direct_alignment(raw_file.as_raw_fd()).unwrap_or(SECTOR_SIZE))
         } else {

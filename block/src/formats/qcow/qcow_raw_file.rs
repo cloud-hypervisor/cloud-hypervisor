@@ -285,7 +285,7 @@ impl QcowRawFile {
         let declared_end = offset.saturating_add(total_entries.saturating_mul(entry_size));
         let tail_end = declared_end.min(self.file.metadata()?.len());
         if tail_end > tail_start {
-            let is_blkdev = is_block_device(self.file.as_raw_fd());
+            let is_blkdev = is_block_device(self.file.file());
             punch_hole(
                 self.file.file_mut(),
                 is_blkdev,

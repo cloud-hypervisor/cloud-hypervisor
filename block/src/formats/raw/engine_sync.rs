@@ -4,8 +4,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::os::unix::io::AsRawFd;
-
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{
@@ -23,7 +21,7 @@ pub(crate) struct RawSync {
 
 impl RawSync {
     pub(crate) fn new(raw_file: AlignedFile) -> Self {
-        let is_block_device = is_block_device(raw_file.as_raw_fd());
+        let is_block_device = is_block_device(raw_file.file());
         let alignment = raw_file.alignment().map(|alignment| alignment as u64);
         RawSync {
             raw_file,

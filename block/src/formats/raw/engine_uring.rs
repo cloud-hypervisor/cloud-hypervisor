@@ -28,7 +28,7 @@ impl RawAsync {
     pub(crate) fn new(raw_file: File, direct: bool, ring_depth: u32) -> BlockResult<Self> {
         let data_io =
             UringDataIo::new(ring_depth).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
-        let is_block_device = is_block_device(raw_file.as_raw_fd());
+        let is_block_device = is_block_device(&raw_file);
         let alignment = if direct {
             Some(probe_direct_alignment(raw_file.as_raw_fd()).unwrap_or(SECTOR_SIZE))
         } else {
