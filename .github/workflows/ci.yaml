@@ -543,35 +543,35 @@ jobs:
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
       - name: Build (default features)
-        run: cargo build --locked --bin cloud-hypervisor
+        run: cargo build --locked --bin cloud-hypervisor --target=${{ matrix.target }}
       - name: Build (kvm)
-        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "kvm"
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "kvm" --target=${{ matrix.target }}
       - name: Build (default features + dbus_api)
-        run: cargo build --locked --bin cloud-hypervisor --features "dbus_api"
+        run: cargo build --locked --bin cloud-hypervisor --features "dbus_api" --target=${{ matrix.target }}
       - name: Build (default features + guest_debug)
-        run: cargo build --locked --bin cloud-hypervisor --features "guest_debug"
+        run: cargo build --locked --bin cloud-hypervisor --features "guest_debug" --target=${{ matrix.target }}
       - name: Build (default features + pvmemcontrol)
-        run: cargo build --locked --bin cloud-hypervisor --features "pvmemcontrol"
+        run: cargo build --locked --bin cloud-hypervisor --features "pvmemcontrol" --target=${{ matrix.target }}
       - name: Build (default features + fw_cfg)
-        run: cargo build --locked --bin cloud-hypervisor --features "fw_cfg"
+        run: cargo build --locked --bin cloud-hypervisor --features "fw_cfg" --target=${{ matrix.target }}
       - name: Build (default features + ivshmem)
-        run: cargo build --locked --bin cloud-hypervisor --features "ivshmem"
+        run: cargo build --locked --bin cloud-hypervisor --features "ivshmem" --target=${{ matrix.target }}
       - name: Build (mshv)
-        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "mshv"
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "mshv" --target=${{ matrix.target }}
       - name: Build (mshv + igvm)
-        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "mshv,igvm"
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "mshv,igvm" --target=${{ matrix.target }}
       - name: Build (mshv + sev_snp)
-        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "mshv,sev_snp"
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "mshv,sev_snp" --target=${{ matrix.target }}
       - name: Build (mshv + igvm + sev_snp)
-        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "mshv,igvm,sev_snp"
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "mshv,igvm,sev_snp" --target=${{ matrix.target }}
       - name: Build (kvm + sev_snp)
-        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "kvm,sev_snp"
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "kvm,sev_snp" --target=${{ matrix.target }}
       - name: Build (kvm + igvm + sev_snp + fw_cfg)
-        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "kvm,igvm,sev_snp,fw_cfg"
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "kvm,igvm,sev_snp,fw_cfg" --target=${{ matrix.target }}
       - name: Build (kvm + igvm)
-        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "kvm,igvm"
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "kvm,igvm" --target=${{ matrix.target }}
       - name: Build (mshv + kvm)
-        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "mshv,kvm"
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "mshv,kvm" --target=${{ matrix.target }}
       - name: Release Build (default features)
         run: cargo build --locked --all --release --target=${{ matrix.target }}
       - name: Check build did not modify any files
