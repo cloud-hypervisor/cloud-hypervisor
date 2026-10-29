@@ -4,7 +4,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::io;
 use std::os::unix::io::AsRawFd;
 
 use vmm_sys_util::eventfd::EventFd;
@@ -67,15 +66,11 @@ impl AsyncIo for RawSync {
     }
 
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
-        // SAFETY: FFI call
-        let result = unsafe { libc::fsync(self.raw_file.as_raw_fd() as libc::c_int) };
-        if result < 0 {
-            return Err(AsyncIoError::Fsync(io::Error::last_os_error()));
-        }
+        self.raw_file.sync_all().map_err(AsyncIoError::Fsync)?;
 
         if let Some(user_data) = user_data {
             self.completions
-                .complete(AsyncIoCompletion::new(user_data, result, None));
+                .complete(AsyncIoCompletion::new(user_data, 0, None));
         }
 
         Ok(())
