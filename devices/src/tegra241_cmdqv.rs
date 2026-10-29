@@ -4,17 +4,23 @@
 //
 // NVIDIA Tegra241 CMDQV, following QEMU's hw/arm/tegra241-cmdqv.c.
 
+use std::io;
+use std::os::fd::AsRawFd;
 use std::ptr;
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, Mutex};
+use std::thread::{self, JoinHandle};
 
 use acpi_tables::{Aml, AmlSink, aml};
 use anyhow::anyhow;
-use iommufd_ioctls::{IommufdHwQueue, IommufdVIommu};
-use log::{debug, info, trace, warn};
+use iommufd_ioctls::{IommufdHwQueue, IommufdVEventData, IommufdVEventQ, IommufdVIommu};
+use log::{debug, error, info, trace, warn};
 use pci::mmap::MmapRegion;
 use vm_allocator::page_size::get_page_size;
 use vm_device::BusDevice;
+use vm_device::interrupt::InterruptSourceGroup;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
+use vmm_sys_util::epoll::{ControlOperation, Epoll, EpollEvent, EventSet};
+use vmm_sys_util::eventfd::{EFD_NONBLOCK, EventFd};
 
 use crate::{read_le_u32, read_le_u64, write_le_u32, write_le_u64};
 
@@ -81,6 +87,7 @@ const STATUS_RESET: u32 = 0x1;
 
 const CONFIG_CMDQV_EN_MASK: u32 = 1 << 0;
 const STATUS_CMDQV_ENABLED_MASK: u32 = 1 << 0;
+const VI_ERR_MAP_VINTF0: u32 = 1 << 0;
 const VINTF_ENABLE_MASK: u32 = 1 << 0;
 const VINTF_HYP_OWN_MASK: u32 = 1 << 17;
 const VINTF_STATUS_ENABLE_OK_MASK: u32 = 1 << 0;
@@ -200,6 +207,7 @@ pub struct Tegra241Cmdqv {
     irq: u32,
     /// The host VINTF page0, once the vIOMMU provides it.
     vintf_page: Option<VintfPage>,
+    irq_group: Option<Arc<dyn InterruptSourceGroup>>,
 
     config: u32,
     param: u32,
@@ -233,6 +241,7 @@ impl Tegra241Cmdqv {
             instance_id,
             irq,
             vintf_page: None,
+            irq_group: None,
             config: CONFIG_RESET,
             param: PARAM_RESET,
             status: STATUS_RESET,
@@ -263,6 +272,37 @@ impl Tegra241Cmdqv {
 
     pub fn irq(&self) -> u32 {
         self.irq
+    }
+
+    /// Reflects host-reported VCMDQ errors, as QEMU does.
+    fn report_vcmdq_errors(&mut self, lvcmdq_err_map: [u64; 2]) {
+        if lvcmdq_err_map == [0, 0] {
+            return;
+        }
+        let words = [
+            lvcmdq_err_map[0] as u32,
+            (lvcmdq_err_map[0] >> 32) as u32,
+            lvcmdq_err_map[1] as u32,
+            (lvcmdq_err_map[1] >> 32) as u32,
+        ];
+        self.vintf_lvcmdq_err_map = words;
+        self.cmdq_err_map = words;
+        self.vi_err_map[0] |= VI_ERR_MAP_VINTF0;
+        warn!(
+            "Tegra241 CMDQV {}: host reported VCMDQ errors {:#x}_{:#x}",
+            self.name, lvcmdq_err_map[1], lvcmdq_err_map[0]
+        );
+        if self.vi_int_mask[0] & VI_ERR_MAP_VINTF0 != 0 {
+            return;
+        }
+        if let Some(irq_group) = &self.irq_group
+            && let Err(e) = irq_group.trigger(0)
+        {
+            error!(
+                "Tegra241 CMDQV {}: failed to raise the error interrupt: {e}",
+                self.name
+            );
+        }
     }
 
     /// Each queue depends on the one below it, so destroy from the top.
@@ -582,6 +622,106 @@ impl BusDevice for Tegra241Cmdqv {
     }
 }
 
+/// Forwards the CMDQV vEVENTQ, which reports VCMDQ errors, to the device.
+pub struct EventForwarder {
+    kill: EventFd,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl EventForwarder {
+    pub fn new(mut veventq: IommufdVEventQ, device: Arc<Mutex<Tegra241Cmdqv>>) -> io::Result<Self> {
+        let kill = EventFd::new(EFD_NONBLOCK)?;
+        let kill_reader = kill.try_clone()?;
+        let handle = thread::Builder::new()
+            .name("cmdqv_veventq".to_string())
+            .spawn(move || Self::run(&mut veventq, &device, &kill_reader))?;
+        Ok(EventForwarder {
+            kill,
+            handle: Some(handle),
+        })
+    }
+
+    fn run(veventq: &mut IommufdVEventQ, device: &Mutex<Tegra241Cmdqv>, kill: &EventFd) {
+        const VEVENTQ_TOKEN: u64 = 0;
+        const KILL_TOKEN: u64 = 1;
+
+        let epoll = match Epoll::new() {
+            Ok(epoll) => epoll,
+            Err(e) => {
+                error!("Tegra241 CMDQV vEVENTQ reader failed to create epoll: {e}");
+                return;
+            }
+        };
+        for (fd, token) in [
+            (veventq.as_raw_fd(), VEVENTQ_TOKEN),
+            (kill.as_raw_fd(), KILL_TOKEN),
+        ] {
+            if let Err(e) = epoll.ctl(
+                ControlOperation::Add,
+                fd,
+                EpollEvent::new(EventSet::IN, token),
+            ) {
+                error!("Tegra241 CMDQV vEVENTQ reader failed to register fd {fd}: {e}");
+                return;
+            }
+        }
+
+        let mut events = [EpollEvent::default(); 2];
+        loop {
+            let count = match epoll.wait(-1, &mut events) {
+                Ok(count) => count,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) => {
+                    error!("Tegra241 CMDQV vEVENTQ reader epoll wait failed: {e}");
+                    return;
+                }
+            };
+            for event in events.iter().take(count) {
+                match event.data() {
+                    KILL_TOKEN => return,
+                    VEVENTQ_TOKEN => match veventq.read_events() {
+                        Ok(records) => {
+                            let mut device = device.lock().unwrap();
+                            for record in records {
+                                if record.lost > 0 {
+                                    warn!(
+                                        "Tegra241 CMDQV {}: vEVENTQ lost {} events",
+                                        device.name, record.lost
+                                    );
+                                }
+                                match record.data {
+                                    Some(IommufdVEventData::Tegra241Cmdqv(evt)) => {
+                                        device.report_vcmdq_errors(evt.lvcmdq_err_map);
+                                    }
+                                    Some(_) => warn!(
+                                        "Tegra241 CMDQV {}: unexpected vEVENTQ record",
+                                        device.name
+                                    ),
+                                    None => {}
+                                }
+                            }
+                        }
+                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+                        Err(e) => warn!("Tegra241 CMDQV vEVENTQ read failed: {e}"),
+                    },
+                    _ => unreachable!(),
+                }
+            }
+        }
+    }
+}
+
+impl Drop for EventForwarder {
+    fn drop(&mut self) {
+        if let Err(e) = self.kill.write(1) {
+            error!("Tegra241 CMDQV failed to signal vEVENTQ reader shutdown: {e}");
+        }
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
 impl Drop for Tegra241Cmdqv {
     fn drop(&mut self) {
         self.destroy_hw_queues();
@@ -644,6 +784,10 @@ impl Migratable for Tegra241Cmdqv {}
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};
+
     use super::*;
 
     /// # Safety
@@ -1126,6 +1270,58 @@ mod tests {
     #[test]
     fn test_drop_destroys_queues_descending() {
         drop(dev());
+    }
+
+    struct CountingIrq(AtomicUsize);
+
+    impl InterruptSourceGroup for CountingIrq {
+        fn trigger(&self, _index: InterruptIndex) -> io::Result<()> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {
+            None
+        }
+
+        fn update(
+            &self,
+            _index: InterruptIndex,
+            _config: InterruptSourceConfig,
+            _masked: bool,
+            _set_gsi: bool,
+        ) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn set_gsi(&self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_vcmdq_errors_reach_the_error_maps_and_interrupt() {
+        let mut d = dev();
+        let irq = Arc::new(CountingIrq(AtomicUsize::new(0)));
+        d.irq_group = Some(Arc::clone(&irq) as Arc<dyn InterruptSourceGroup>);
+        let triggers = || irq.0.load(Ordering::SeqCst);
+
+        d.report_vcmdq_errors([0, 0]);
+        assert_eq!(triggers(), 0);
+        assert_eq!(d.read_value(offset::VI_ERR_MAP), 0);
+
+        d.report_vcmdq_errors([(1 << 1) | (1 << 33), 0]);
+        assert_eq!(triggers(), 1);
+        assert_eq!(d.read_value(offset::VI_ERR_MAP), 1);
+        assert_eq!(d.read_value(offset::VINTF0_LVCMDQ_ERR_MAP_0), 1 << 1);
+        assert_eq!(d.read_value(offset::VINTF0_LVCMDQ_ERR_MAP_0 + 4), 1 << 1);
+        assert_eq!(d.read_value(offset::CMDQ_ERR_MAP), 1 << 1);
+        assert_eq!(d.read_value(offset::CMDQ_ERR_MAP + 4), 1 << 1);
+
+        d.write_value(offset::VI_INT_MASK, &1u32.to_le_bytes());
+        d.report_vcmdq_errors([0, 1 << 32]);
+        assert_eq!(triggers(), 1);
+        assert_eq!(d.read_value(offset::VINTF0_LVCMDQ_ERR_MAP_3), 1);
     }
 
     #[test]
