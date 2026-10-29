@@ -235,12 +235,6 @@ jobs:
     if: needs.preflight.outputs.full == 'true' || needs.preflight.outputs.fuzz == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    strategy:
-      matrix:
-        rust: [nightly]
-        target:
-          - x86_64-unknown-linux-gnu
-          - aarch64-unknown-linux-musl
     env:
       RUSTFLAGS: -D warnings
     steps:
@@ -248,14 +242,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Install Rust toolchain (${{ matrix.rust }})
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust toolchain nightly
+        uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: ${{ matrix.rust }}
-          target: ${{ matrix.target }}
+          target: x86_64-unknown-linux-gnu
           components: rustfmt
       - name: Bisectability Check (rustfmt)
-        if: ${{ github.event_name == 'pull_request' && matrix.target == 'x86_64-unknown-linux-gnu' }}
+        if: ${{ github.event_name == 'pull_request'}}
         run: |
           set -eufo pipefail
           commits=$(git rev-list origin/${{ github.base_ref }}..${{ github.sha }})
