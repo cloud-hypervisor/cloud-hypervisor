@@ -33,9 +33,7 @@ pub use aligned_file::AlignedFile;
 use formats::qcow;
 #[cfg(feature = "io_uring")]
 use io_uring::{IoUring, Probe, opcode};
-use libc::{
-    FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_ZERO_RANGE, S_IFBLK, S_IFMT, ioctl,
-};
+use libc::{FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_ZERO_RANGE, ioctl};
 use log::{debug, info, warn};
 pub use request::{ExecuteAsync, MAX_DISCARD_WRITE_ZEROES_SEG, Request, RequestType};
 use serde::{Deserialize, Serialize};
@@ -302,18 +300,14 @@ pub fn block_io_uring_is_supported() -> bool {
     }
 }
 
-/// Returns `true` iff `fd` refers to a block device.
+/// Returns `true` iff `file` refers to a block device.
 ///
-/// Returns `false` if the `fstat()` probe itself fails. Callers that need to
+/// Returns `false` if the metadata probe itself fails. Callers that need to
 /// distinguish "not a block device" from "couldn't tell" should fall back to
 /// regular-file behaviour, which is what every current caller already does.
-pub(crate) fn is_block_device(fd: RawFd) -> bool {
-    // SAFETY: `libc::stat` is POD; zero-initialization is a valid bit pattern
-    // and `fstat` overwrites every field it cares about on success.
-    let mut stat: libc::stat = unsafe { mem::zeroed() };
-    // SAFETY: FFI call with a valid fd and a valid out-pointer.
-    let ret = unsafe { libc::fstat(fd, &mut stat) };
-    ret == 0 && stat.st_mode & S_IFMT == S_IFBLK
+pub(crate) fn is_block_device(file: &File) -> bool {
+    file.metadata()
+        .is_ok_and(|metadata| metadata.file_type().is_block_device())
 }
 
 /// Returns the kernel reported direct I/O alignment for `fd`, or `None`
@@ -377,7 +371,7 @@ pub(crate) fn probe_direct_alignment(fd: RawFd) -> Option<u64> {
 pub fn probe_sparse_support(file: &File) -> bool {
     let fd = file.as_raw_fd();
 
-    if is_block_device(fd) {
+    if is_block_device(file) {
         probe_block_device_sparse_support(fd)
     } else {
         probe_file_sparse_support(fd)
@@ -675,7 +669,7 @@ impl DiskTopology {
     }
 
     pub fn probe(f: &File) -> io::Result<Self> {
-        let topology = if is_block_device(f.as_raw_fd()) {
+        let topology = if is_block_device(f) {
             DiskTopology {
                 logical_block_size: Self::query_block_size(f, BlockSize::LogicalBlock)?,
                 physical_block_size: Self::query_block_size(f, BlockSize::PhysicalBlock)?,
