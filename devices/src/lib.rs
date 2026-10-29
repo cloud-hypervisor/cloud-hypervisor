@@ -28,6 +28,8 @@ pub mod pvmemcontrol;
 pub mod pvpanic;
 #[cfg(target_arch = "aarch64")]
 pub mod smmuv3;
+#[cfg(target_arch = "aarch64")]
+pub mod tegra241_cmdqv;
 // TODO: TPM is not yet supported
 #[cfg(not(target_arch = "riscv64"))]
 pub mod tpm;
