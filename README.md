@@ -408,4 +408,5 @@ list](https://lists.cloudhypervisor.org/g/dev/).
 
 ## Security issues
 
-Please contact the maintainers listed in the MAINTAINERS.md file with security issues.
+Please report security issues as described in [SECURITY.md](SECURITY.md).
+Do not file a public issue for them.
