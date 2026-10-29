@@ -27,6 +27,8 @@ pub enum VhdxError {
     ParseVhdxRegionEntry(#[source] VhdxHeaderError),
     #[error("Failed reading metadata")]
     ReadBatEntry(#[source] VhdxBatError),
+    #[error("VHDX image has an active log that must be replayed before use")]
+    UnsupportedLogReplay,
 }
 
 pub(super) type Result<T> = result::Result<T, VhdxError>;
@@ -121,6 +123,12 @@ impl Vhdx {
         let aligned = AlignedFile::new(file, direct_io);
 
         let vhdx_header = VhdxHeader::new(&aligned).map_err(VhdxError::ParseVhdxHeader)?;
+        if vhdx_header
+            .has_active_log()
+            .map_err(VhdxError::ParseVhdxHeader)?
+        {
+            return Err(VhdxError::UnsupportedLogReplay);
+        }
 
         let collected_entries = RegionInfo::new(
             &aligned,
@@ -416,6 +424,12 @@ mod tests {
     use crate::formats::vhdx::bat::PAYLOAD_BLOCK_FULLY_PRESENT;
     use crate::formats::vhdx::test_util::create_dynamic_vhdx;
 
+    const VHDX_HEADER_1_OFFSET: u64 = 0x10000;
+    const VHDX_HEADER_2_OFFSET: u64 = 0x20000;
+    const VHDX_HEADER_SIZE: usize = 4096;
+    const VHDX_LOG_GUID_OFFSET: usize = 48;
+    const VHDX_HEADER_CHECKSUM_OFFSET: usize = 4;
+
     /// Opens an image read-write, which is what every test here needs: they
     /// all write through the handle, or check that a write is refused.
     fn open_vhdx(path: &Path) -> Vhdx {
@@ -425,6 +439,40 @@ mod tests {
             .open(path)
             .unwrap();
         Vhdx::new(file, false).unwrap()
+    }
+
+    /// A VHDX image with an active log must be rejected until replay is
+    /// supported; opening it would silently use a stale BAT.
+    #[test]
+    fn active_log_is_rejected() {
+        use crc_any::CRC;
+
+        let Some(tf) = create_dynamic_vhdx(16) else {
+            eprintln!("skipping active_log_is_rejected: qemu-img unavailable");
+            return;
+        };
+
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(tf.as_path())
+            .unwrap();
+        // VHDX header 1 and 2 live at fixed 64 KiB offsets.
+        for base in [VHDX_HEADER_1_OFFSET, VHDX_HEADER_2_OFFSET] {
+            let mut header = [0u8; VHDX_HEADER_SIZE];
+            file.read_exact_at(&mut header, base).unwrap();
+            header[VHDX_LOG_GUID_OFFSET..VHDX_LOG_GUID_OFFSET + 16].copy_from_slice(&[0x5a; 16]);
+            header[VHDX_HEADER_CHECKSUM_OFFSET..VHDX_HEADER_CHECKSUM_OFFSET + 4].fill(0);
+            let mut crc = CRC::crc32c();
+            crc.digest(&header);
+            header[VHDX_HEADER_CHECKSUM_OFFSET..VHDX_HEADER_CHECKSUM_OFFSET + 4]
+                .copy_from_slice(&(crc.get_crc() as u32).to_le_bytes());
+            file.write_all_at(&header, base).unwrap();
+        }
+        file.sync_all().unwrap();
+
+        let err = Vhdx::new(file, false).unwrap_err();
+        assert!(matches!(err, VhdxError::UnsupportedLogReplay), "{err}");
     }
 
     /// An unaligned sector write under a forced O_DIRECT alignment must go

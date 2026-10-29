@@ -50,7 +50,8 @@ impl VhdxDisk {
                 let kind = match &e {
                     VhdxError::ParseVhdxHeader(_)
                     | VhdxError::ParseVhdxMetadata(_)
-                    | VhdxError::ParseVhdxRegionEntry(_) => BlockErrorKind::InvalidFormat,
+                    | VhdxError::ParseVhdxRegionEntry(_)
+                    | VhdxError::UnsupportedLogReplay => BlockErrorKind::InvalidFormat,
                     VhdxError::ReadBatEntry(_) => BlockErrorKind::CorruptImage,
                 };
                 BlockError::new(kind, e).with_op(ErrorOp::Open)
