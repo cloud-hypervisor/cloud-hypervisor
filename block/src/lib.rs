@@ -22,6 +22,7 @@ mod sparse;
 pub(crate) mod test_util;
 use std::fmt::{self, Debug};
 use std::fs::{File, OpenOptions};
+use std::io::{Seek, SeekFrom};
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::fs::{FileExt, FileTypeExt};
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -33,7 +34,7 @@ pub use aligned_file::AlignedFile;
 use formats::qcow;
 #[cfg(feature = "io_uring")]
 use io_uring::{IoUring, Probe, opcode};
-use libc::{FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_ZERO_RANGE, ioctl};
+use libc::ioctl;
 use log::{debug, info, warn};
 pub use request::{ExecuteAsync, MAX_DISCARD_WRITE_ZEROES_SEG, Request, RequestType};
 use serde::{Deserialize, Serialize};
@@ -42,6 +43,7 @@ use thiserror::Error;
 use virtio_bindings::virtio_blk::*;
 use vm_memory::bitmap::Bitmap;
 use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryBackend, GuestMemoryError};
+use vmm_sys_util::fallocate::{FallocateMode, fallocate};
 use vmm_sys_util::{aio, ioctl_io_nr, ioctl_ior_nr};
 
 use crate::async_io::AsyncIoError;
@@ -374,49 +376,41 @@ pub fn probe_sparse_support(file: &File) -> bool {
     if is_block_device(file) {
         probe_block_device_sparse_support(fd)
     } else {
-        probe_file_sparse_support(fd)
+        probe_file_sparse_support(file)
     }
 }
 
 /// Probe sparse support for a regular file using fallocate().
-fn probe_file_sparse_support(fd: libc::c_int) -> bool {
-    // SAFETY: FFI call with valid fd
-    let file_size = unsafe { libc::lseek(fd, 0, libc::SEEK_END) };
-    if file_size < 0 {
-        let err = io::Error::last_os_error();
-        warn!("Failed to get file size for sparse probe: {err}");
-        return false;
-    }
+fn probe_file_sparse_support(mut file: &File) -> bool {
+    let file_size = match file.seek(SeekFrom::End(0)) {
+        Ok(size) => size,
+        Err(err) => {
+            warn!("Failed to get file size for sparse probe: {err}");
+            return false;
+        }
+    };
 
-    // SAFETY: FFI call with valid fd, probing past EOF is safe with KEEP_SIZE
-    let punch_hole =
-        unsafe { libc::fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, file_size, 1) }
-            == 0;
-
-    if !punch_hole {
-        let err = io::Error::last_os_error();
-        if err.raw_os_error() == Some(libc::EOPNOTSUPP) {
+    let punch_hole = fallocate(file, FallocateMode::PunchHole, true, file_size, 1);
+    if let Err(err) = &punch_hole {
+        if err.errno() == libc::EOPNOTSUPP {
             debug!("File does not support FALLOC_FL_PUNCH_HOLE: {err}");
         } else {
             debug!("PUNCH_HOLE probe returned unexpected error: {err}");
         }
     }
 
-    // SAFETY: FFI call with valid fd, probing past EOF is safe with KEEP_SIZE
-    let zero_range =
-        unsafe { libc::fallocate(fd, FALLOC_FL_ZERO_RANGE | FALLOC_FL_KEEP_SIZE, file_size, 1) }
-            == 0;
-
-    if !zero_range {
-        let err = io::Error::last_os_error();
-        if err.raw_os_error() == Some(libc::EOPNOTSUPP) {
-            debug!("File does not support FALLOC_FL_ZERO_RANGE: {err}");
-        }
+    let zero_range = fallocate(file, FallocateMode::ZeroRange, true, file_size, 1);
+    if let Err(err) = &zero_range
+        && err.errno() == libc::EOPNOTSUPP
+    {
+        debug!("File does not support FALLOC_FL_ZERO_RANGE: {err}");
     }
 
-    let supported = punch_hole || zero_range;
+    let supported = punch_hole.is_ok() || zero_range.is_ok();
     info!(
-        "Probed file sparse support: punch_hole={punch_hole}, zero_range={zero_range} => {supported}"
+        "Probed file sparse support: punch_hole={}, zero_range={} => {supported}",
+        punch_hole.is_ok(),
+        zero_range.is_ok()
     );
     supported
 }
