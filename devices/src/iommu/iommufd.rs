@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io;
-use std::os::fd::{AsRawFd, BorrowedFd};
+use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
@@ -377,8 +377,10 @@ impl Smmuv3Iommufd {
             device.set_max_cmdq_size(Smmuv3::max_cmdq_size(host_info.idr[1]));
         }
         let device = Arc::new(Mutex::new(device));
-        let fault_forwarder =
-            FaultForwarder::new(backend.allocate_veventq()?, Arc::clone(&device))?;
+        let fault_forwarder = FaultForwarder::new(vec![Veventq::Smmuv3(
+            backend.allocate_veventq()?,
+            Arc::clone(&device),
+        )])?;
 
         Ok(Self {
             vintf_page,
@@ -439,6 +441,18 @@ impl Smmuv3Iommufd {
     }
 }
 
+enum Veventq {
+    Smmuv3(IommufdVEventQ, Arc<Mutex<Smmuv3>>),
+}
+
+impl Veventq {
+    fn as_raw_fd(&self) -> RawFd {
+        match self {
+            Veventq::Smmuv3(veventq, _) => veventq.as_raw_fd(),
+        }
+    }
+}
+
 /// Thread forwarding vEVENTQ records to the emulated SMMUv3.
 struct FaultForwarder {
     kill: EventFd,
@@ -446,13 +460,13 @@ struct FaultForwarder {
 }
 
 impl FaultForwarder {
-    fn new(mut veventq: IommufdVEventQ, device: Arc<Mutex<Smmuv3>>) -> Result<Self, Error> {
+    fn new(mut veventqs: Vec<Veventq>) -> Result<Self, Error> {
         let kill = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateEventFd)?;
         let kill_reader = kill.try_clone().map_err(Error::CreateEventFd)?;
 
         let handle = thread::Builder::new()
             .name("smmuv3_veventq".to_string())
-            .spawn(move || Self::epoll_event_queue(&mut veventq, &device, &kill_reader))
+            .spawn(move || Self::epoll_event_queue(&mut veventqs, &kill_reader))
             .map_err(Error::SpawnFaultForwarder)?;
 
         Ok(FaultForwarder {
@@ -461,9 +475,9 @@ impl FaultForwarder {
         })
     }
 
-    fn epoll_event_queue(veventq: &mut IommufdVEventQ, device: &Mutex<Smmuv3>, kill: &EventFd) {
-        const VEVENTQ_TOKEN: u64 = 0;
-        const KILL_TOKEN: u64 = 1;
+    fn epoll_event_queue(veventqs: &mut [Veventq], kill: &EventFd) {
+        // vEVENTQ i has token i.
+        const KILL_TOKEN: u64 = u64::MAX;
 
         let epoll = match Epoll::new() {
             Ok(epoll) => epoll,
@@ -472,10 +486,12 @@ impl FaultForwarder {
                 return;
             }
         };
-        for (fd, token) in [
-            (veventq.as_raw_fd(), VEVENTQ_TOKEN),
-            (kill.as_raw_fd(), KILL_TOKEN),
-        ] {
+        let fds = veventqs
+            .iter()
+            .enumerate()
+            .map(|(token, veventq)| (veventq.as_raw_fd(), token as u64))
+            .chain([(kill.as_raw_fd(), KILL_TOKEN)]);
+        for (fd, token) in fds {
             if let Err(e) = epoll.ctl(
                 ControlOperation::Add,
                 fd,
@@ -486,7 +502,7 @@ impl FaultForwarder {
             }
         }
 
-        let mut events = [EpollEvent::default(); 2];
+        let mut events = vec![EpollEvent::default(); veventqs.len() + 1];
         loop {
             let count = match epoll.wait(-1, &mut events) {
                 Ok(count) => count,
@@ -498,9 +514,11 @@ impl FaultForwarder {
             };
 
             for event in events.iter().take(count) {
-                match event.data() {
-                    KILL_TOKEN => return,
-                    VEVENTQ_TOKEN => match veventq.read_events() {
+                if event.data() == KILL_TOKEN {
+                    return;
+                }
+                match &mut veventqs[event.data() as usize] {
+                    Veventq::Smmuv3(veventq, device) => match veventq.read_events() {
                         Ok(records) => {
                             let mut device = device.lock().unwrap();
                             for record in records {
@@ -510,7 +528,6 @@ impl FaultForwarder {
                         Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
                         Err(e) => warn!("SMMUv3 vEVENTQ read failed: {e}"),
                     },
-                    _ => unreachable!(),
                 }
             }
         }
