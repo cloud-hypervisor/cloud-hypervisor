@@ -75,8 +75,7 @@ impl AsyncIo for RawAio {
                 .submit_fsync(fd, user_data)
                 .map_err(AsyncIoError::Fsync)?;
         } else {
-            // SAFETY: FFI call with a valid fd
-            unsafe { libc::fsync(fd) };
+            self.raw_file.sync_all().map_err(AsyncIoError::Fsync)?;
         }
 
         Ok(())
