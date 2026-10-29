@@ -8,7 +8,9 @@ use std::sync::{Arc, Barrier};
 
 use acpi_tables::{Aml, AmlSink, aml};
 use anyhow::anyhow;
-use log::{trace, warn};
+use iommufd_ioctls::{IommufdHwQueue, IommufdVIommu};
+use log::{debug, info, trace, warn};
+use vm_allocator::page_size::get_page_size;
 use vm_device::BusDevice;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 
@@ -79,6 +81,7 @@ const VINTF_HYP_OWN_MASK: u32 = 1 << 17;
 const VINTF_STATUS_ENABLE_OK_MASK: u32 = 1 << 0;
 const VCMDQ_CONFIG_CMDQ_EN_MASK: u32 = 1 << 0;
 const VCMDQ_STATUS_CMDQ_EN_OK_MASK: u32 = 1 << 0;
+const CMDQ_ALLOC_MAP_ALLOC_MASK: u32 = 1 << 0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Reg {
@@ -145,6 +148,12 @@ fn decode(raw_offset: u64) -> Option<Reg> {
     }
 }
 
+/// A hardware queue and the BASE it was allocated from.
+struct HwQueue {
+    base: u64,
+    _queue: IommufdHwQueue,
+}
+
 pub struct Tegra241Cmdqv {
     name: String,
     instance_id: u32,
@@ -168,6 +177,11 @@ pub struct Tegra241Cmdqv {
     vcmdq_gerrorn: [u32; NUM_VCMDQ],
     vcmdq_base: [u64; NUM_VCMDQ],
     vcmdq_cons_indx_base: [u64; NUM_VCMDQ],
+
+    viommu: Option<Arc<IommufdVIommu>>,
+    vcmdq: [Option<HwQueue>; NUM_VCMDQ],
+    /// Largest VCMDQ, in bytes: VCMDQs must be physically contiguous.
+    max_vcmdq_size: u64,
 }
 
 impl Tegra241Cmdqv {
@@ -194,6 +208,9 @@ impl Tegra241Cmdqv {
             vcmdq_gerrorn: [0; NUM_VCMDQ],
             vcmdq_base: [0; NUM_VCMDQ],
             vcmdq_cons_indx_base: [0; NUM_VCMDQ],
+            viommu: None,
+            vcmdq: [const { None }; NUM_VCMDQ],
+            max_vcmdq_size: get_page_size(),
         }
     }
 
@@ -203,6 +220,100 @@ impl Tegra241Cmdqv {
 
     pub fn irq(&self) -> u32 {
         self.irq
+    }
+
+    /// Each queue depends on the one below it, so destroy from the top.
+    fn destroy_hw_queues(&mut self) {
+        for index in (0..self.vcmdq.len()).rev() {
+            self.vcmdq[index] = None;
+        }
+    }
+
+    /// Whether VCMDQ `index` is ready for a hardware queue, as in QEMU.
+    fn vcmdq_ready(&self, index: usize) -> bool {
+        self.vcmdq_base[index] != 0
+            && self.cmdq_alloc_map[index] & CMDQ_ALLOC_MAP_ALLOC_MASK != 0
+            && self.config & CONFIG_CMDQV_EN_MASK != 0
+            && self.vintf_config & VINTF_ENABLE_MASK != 0
+    }
+
+    /// Whether VCMDQ `index` and all below it are ready: queues map in order.
+    fn vcmdq_wanted(&self, index: usize) -> bool {
+        (0..=index).all(|i| self.vcmdq_ready(i))
+    }
+
+    /// The lowest VCMDQ whose hardware queue must change.
+    fn first_vcmdq_to_update(&self) -> Option<usize> {
+        (0..NUM_VCMDQ).find(|&index| match &self.vcmdq[index] {
+            Some(queue) => !self.vcmdq_wanted(index) || queue.base != self.vcmdq_base[index],
+            None => self.vcmdq_wanted(index),
+        })
+    }
+
+    /// Each queue depends on the one below it: release from the top, then
+    /// allocate from the bottom.
+    fn update_vcmdqs(&mut self) {
+        let Some(first) = self.first_vcmdq_to_update() else {
+            return;
+        };
+        for index in (first..NUM_VCMDQ).rev() {
+            if self.vcmdq[index].take().is_some() {
+                debug!("Tegra241 CMDQV {}: released VCMDQ{index}", self.name);
+            }
+        }
+        for index in first..NUM_VCMDQ {
+            if !self.vcmdq_wanted(index) {
+                break;
+            }
+            self.setup_vcmdq(index);
+            if self.vcmdq[index].is_none() {
+                break;
+            }
+        }
+    }
+
+    /// Allocates a hardware queue for VCMDQ `index` from its BASE.
+    fn setup_vcmdq(&mut self, index: usize) {
+        const BASE_ADDR_MASK: u64 = 0x0000_ffff_ffff_ffe0;
+        const BASE_LOG2SIZE_MASK: u64 = 0x1f;
+        let base = self.vcmdq_base[index];
+        let addr = base & BASE_ADDR_MASK;
+        let size = 1u64 << ((base & BASE_LOG2SIZE_MASK) + 4);
+
+        let Some(viommu) = self.viommu.clone() else {
+            debug!(
+                "Tegra241 CMDQV {}: VCMDQ{index} (addr={addr:#x}, size={size:#x}) ready, \
+                 no vIOMMU attached",
+                self.name
+            );
+            return;
+        };
+
+        if size > self.max_vcmdq_size {
+            warn!(
+                "Tegra241 CMDQV {}: VCMDQ{index} size {size:#x} exceeds {:#x}; not allocating",
+                self.name, self.max_vcmdq_size
+            );
+            return;
+        }
+
+        match viommu.allocate_hw_queue(index as u32, addr, size) {
+            Ok(hw_queue) => {
+                info!(
+                    "Tegra241 CMDQV {}: allocated VCMDQ{index} (addr={addr:#x}, size={size:#x})",
+                    self.name
+                );
+                self.vcmdq[index] = Some(HwQueue {
+                    base,
+                    _queue: hw_queue,
+                });
+            }
+            Err(e) => warn!(
+                "Tegra241 CMDQV {}: failed to allocate VCMDQ{index} \
+                 (addr={addr:#x}, size={size:#x}): {e:?}",
+                self.name
+            ),
+        }
     }
 
     fn read_vcmdq_page0(&mut self, index: usize, reg: u64) -> u64 {
@@ -278,10 +389,12 @@ impl Tegra241Cmdqv {
                     self.vcmdq_base[index] =
                         (self.vcmdq_base[index] & 0xffff_ffff_0000_0000) | read_le_u32(data) as u64;
                 }
+                self.update_vcmdqs();
             }
             offset::VCMDQ_BASE_H => {
                 self.vcmdq_base[index] = (self.vcmdq_base[index] & 0x0000_0000_ffff_ffff)
                     | ((read_le_u32(data) as u64) << 32);
+                self.update_vcmdqs();
             }
             offset::VCMDQ_CONS_INDX_BASE_DRAM_L => {
                 if data.len() == 8 {
@@ -335,12 +448,16 @@ impl Tegra241Cmdqv {
                 } else {
                     self.status &= !STATUS_CMDQV_ENABLED_MASK;
                 }
+                self.update_vcmdqs();
             }
             Some(Reg::Param | Reg::Status | Reg::ViErrMap(_) | Reg::CmdqErrMap(_)) => {
                 self.log_unhandled(offset, "write");
             }
             Some(Reg::ViIntMask(i)) => self.vi_int_mask[i] = read_le_u32(data),
-            Some(Reg::CmdqAllocMap(i)) => self.cmdq_alloc_map[i] = read_le_u32(data),
+            Some(Reg::CmdqAllocMap(i)) => {
+                self.cmdq_alloc_map[i] = read_le_u32(data);
+                self.update_vcmdqs();
+            }
             Some(Reg::Vintf0Config) => {
                 // The VMM owns the VINTF, never the guest.
                 let value = read_le_u32(data) & !VINTF_HYP_OWN_MASK;
@@ -350,6 +467,7 @@ impl Tegra241Cmdqv {
                 } else {
                     self.vintf_status &= !VINTF_STATUS_ENABLE_OK_MASK;
                 }
+                self.update_vcmdqs();
             }
             Some(Reg::Vintf0Status | Reg::Vintf0LvcmdqErrMap(_)) => {
                 self.log_unhandled(offset, "write");
@@ -398,6 +516,12 @@ impl BusDevice for Tegra241Cmdqv {
             ),
         }
         None
+    }
+}
+
+impl Drop for Tegra241Cmdqv {
+    fn drop(&mut self) {
+        self.destroy_hw_queues();
     }
 }
 
@@ -722,6 +846,72 @@ mod tests {
         d.read(0, offset::CONFIG, &mut data);
         d.write(0, offset::CONFIG, &data);
         assert_eq!(d.config, CONFIG_RESET);
+    }
+
+    #[test]
+    fn test_setup_vcmdq_without_viommu_only_latches() {
+        let mut d = dev();
+        let base_l_off = offset::VCMDQ_PAGE1_BASE + offset::VCMDQ_BASE_L;
+
+        d.write(0, base_l_off, &0x1000_0000_u64.to_le_bytes());
+        assert!(d.vcmdq[0].is_none());
+        assert_eq!(d.vcmdq_base[0], 0x1000_0000);
+    }
+
+    #[test]
+    fn test_vcmdq_is_ready_only_when_allocated_and_enabled() {
+        let mut d = dev();
+        let write = |d: &mut Tegra241Cmdqv, offset: u64, value: u32| {
+            d.write(0, offset, &value.to_le_bytes());
+        };
+        let base_l = offset::VCMDQ_PAGE1_BASE + offset::VCMDQ_BASE_L;
+
+        write(&mut d, base_l, 0x1000_0000);
+        assert!(!d.vcmdq_ready(0), "not allocated to the VINTF");
+        write(&mut d, offset::CMDQ_ALLOC_MAP_0, CMDQ_ALLOC_MAP_ALLOC_MASK);
+        assert!(!d.vcmdq_ready(0), "VINTF disabled");
+        write(&mut d, offset::VINTF0_CONFIG, VINTF_ENABLE_MASK);
+        assert!(d.vcmdq_ready(0));
+        assert!(!d.vcmdq_ready(1), "VCMDQ1 has no BASE");
+
+        write(&mut d, offset::CONFIG, 0);
+        assert!(!d.vcmdq_ready(0), "CMDQV disabled");
+        write(&mut d, offset::CONFIG, CONFIG_CMDQV_EN_MASK);
+        assert!(d.vcmdq_ready(0));
+        write(&mut d, offset::CMDQ_ALLOC_MAP_0, 0);
+        assert!(!d.vcmdq_ready(0), "unmapped from the VINTF");
+        write(&mut d, offset::CMDQ_ALLOC_MAP_0, CMDQ_ALLOC_MAP_ALLOC_MASK);
+        write(&mut d, base_l, 0);
+        assert!(!d.vcmdq_ready(0), "BASE cleared");
+    }
+
+    #[test]
+    fn test_vcmdq_waits_for_the_queues_below_it() {
+        let mut d = dev();
+        assert_eq!(d.first_vcmdq_to_update(), None);
+        d.vintf_config = VINTF_ENABLE_MASK;
+        d.vcmdq_base[1] = 0x1000_0000;
+        d.cmdq_alloc_map[1] = CMDQ_ALLOC_MAP_ALLOC_MASK;
+        assert!(d.vcmdq_ready(1));
+        assert!(!d.vcmdq_wanted(1), "the hardware maps VCMDQ1 after VCMDQ0");
+        assert_eq!(d.first_vcmdq_to_update(), None);
+        d.vcmdq_base[0] = 0x2000_0000;
+        d.cmdq_alloc_map[0] = CMDQ_ALLOC_MAP_ALLOC_MASK;
+        assert!(d.vcmdq_wanted(1));
+        assert_eq!(d.first_vcmdq_to_update(), Some(0));
+    }
+
+    #[test]
+    fn test_max_vcmdq_size_defaults_to_the_host_page() {
+        let mut d = Tegra241Cmdqv::new("cmdqv".to_string(), 0, 0);
+        assert_eq!(d.max_vcmdq_size, get_page_size());
+        d.max_vcmdq_size = 512 << 20;
+        assert_eq!(d.max_vcmdq_size, 512 << 20);
+    }
+
+    #[test]
+    fn test_drop_destroys_queues_descending() {
+        drop(dev());
     }
 
     #[test]
