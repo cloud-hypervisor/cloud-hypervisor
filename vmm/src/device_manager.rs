@@ -6801,12 +6801,6 @@ impl Drop for DeviceManager {
             }
         }
 
-        // Wake up the DeviceManager threads (mainly virtio device workers),
-        // to avoid deadlock on waiting for paused/parked worker threads.
-        if let Err(e) = self.resume() {
-            error!("Error resuming DeviceManager: {e:?}");
-        }
-
         for handle in self.virtio_devices.drain(..) {
             handle.virtio_device.lock().unwrap().shutdown();
         }
