@@ -4,12 +4,14 @@
 //
 // NVIDIA Tegra241 CMDQV, following QEMU's hw/arm/tegra241-cmdqv.c.
 
+use std::ptr;
 use std::sync::{Arc, Barrier};
 
 use acpi_tables::{Aml, AmlSink, aml};
 use anyhow::anyhow;
 use iommufd_ioctls::{IommufdHwQueue, IommufdVIommu};
 use log::{debug, info, trace, warn};
+use pci::mmap::MmapRegion;
 use vm_allocator::page_size::get_page_size;
 use vm_device::BusDevice;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -18,6 +20,9 @@ use crate::{read_le_u32, read_le_u64, write_le_u32, write_le_u64};
 
 /// MMIO span the device decodes.
 pub const MMIO_SIZE: u64 = 0x50000;
+/// Offsets of the VCMDQ and VI_VCMDQ page0s, where the host VINTF page0 may be mapped.
+pub const VCMDQ_PAGE0_OFFSET: u64 = offset::VCMDQ_PAGE0_BASE;
+pub const VI_VCMDQ_PAGE0_OFFSET: u64 = offset::VI_VCMDQ_PAGE0_BASE;
 
 /// The guest is given two VCMDQs, as in QEMU.
 const NUM_VCMDQ_LOG2: u32 = 1;
@@ -148,6 +153,41 @@ fn decode(raw_offset: u64) -> Option<Reg> {
     }
 }
 
+/// The host VINTF page0, whose registers are little-endian. Trapped page0
+/// accesses reach it when memslots cannot map it into the guest.
+struct VintfPage {
+    mapping: MmapRegion,
+}
+
+impl VintfPage {
+    #[allow(
+        clippy::cast_ptr_alignment,
+        reason = "the mapping is page-aligned and the offset a multiple of 4, as asserted"
+    )]
+    fn read_u32(&self, byte_offset: usize) -> u32 {
+        assert!(byte_offset.is_multiple_of(4) && byte_offset + 4 <= self.mapping.len());
+        // SAFETY: in bounds of the mapping, checked above.
+        let value =
+            unsafe { ptr::read_volatile(self.mapping.addr().add(byte_offset).cast::<u32>()) };
+        u32::from_le(value)
+    }
+
+    #[allow(
+        clippy::cast_ptr_alignment,
+        reason = "the mapping is page-aligned and the offset a multiple of 4, as asserted"
+    )]
+    fn write_u32(&self, byte_offset: usize, value: u32) {
+        assert!(byte_offset.is_multiple_of(4) && byte_offset + 4 <= self.mapping.len());
+        // SAFETY: see `read_u32`.
+        unsafe {
+            ptr::write_volatile(
+                self.mapping.addr().add(byte_offset).cast::<u32>(),
+                value.to_le(),
+            );
+        }
+    }
+}
+
 /// A hardware queue and the BASE it was allocated from.
 struct HwQueue {
     base: u64,
@@ -158,6 +198,8 @@ pub struct Tegra241Cmdqv {
     name: String,
     instance_id: u32,
     irq: u32,
+    /// The host VINTF page0, once the vIOMMU provides it.
+    vintf_page: Option<VintfPage>,
 
     config: u32,
     param: u32,
@@ -190,6 +232,7 @@ impl Tegra241Cmdqv {
             name,
             instance_id,
             irq,
+            vintf_page: None,
             config: CONFIG_RESET,
             param: PARAM_RESET,
             status: STATUS_RESET,
@@ -316,6 +359,10 @@ impl Tegra241Cmdqv {
         }
     }
 
+    fn vintf_page_offset(index: usize, reg: u64) -> usize {
+        (index as u64 * offset::VCMDQ_STRIDE + reg) as usize
+    }
+
     fn read_vcmdq_page0(&mut self, index: usize, reg: u64) -> u64 {
         let cached = match reg {
             offset::VCMDQ_CONS_INDX => &mut self.vcmdq_cons_indx[index],
@@ -332,20 +379,35 @@ impl Tegra241Cmdqv {
                 return 0;
             }
         };
+        // With the VINTF page mapped, the hardware is the source of truth.
+        if let Some(page) = &self.vintf_page {
+            *cached = page.read_u32(Self::vintf_page_offset(index, reg));
+        }
         *cached as u64
+    }
+
+    fn mirror_vcmdq_page0_write(&self, index: usize, reg: u64, value: u32) {
+        if let Some(page) = &self.vintf_page {
+            page.write_u32(Self::vintf_page_offset(index, reg), value);
+        }
     }
 
     fn write_vcmdq_page0(&mut self, index: usize, reg: u64, data: &[u8]) {
         let value = read_le_u32(data);
         match reg {
             offset::VCMDQ_CONS_INDX => {
+                self.mirror_vcmdq_page0_write(index, reg, value);
                 self.vcmdq_cons_indx[index] = value;
             }
             offset::VCMDQ_PROD_INDX => {
+                self.mirror_vcmdq_page0_write(index, reg, value);
                 self.vcmdq_prod_indx[index] = value;
             }
             offset::VCMDQ_CONFIG => {
-                if value & VCMDQ_CONFIG_CMDQ_EN_MASK != 0 {
+                if self.vintf_page.is_some() {
+                    // The hardware derives STATUS itself.
+                    self.mirror_vcmdq_page0_write(index, reg, value);
+                } else if value & VCMDQ_CONFIG_CMDQ_EN_MASK != 0 {
                     self.vcmdq_status[index] |= VCMDQ_STATUS_CMDQ_EN_OK_MASK;
                 } else {
                     self.vcmdq_status[index] &= !VCMDQ_STATUS_CMDQ_EN_OK_MASK;
@@ -353,6 +415,7 @@ impl Tegra241Cmdqv {
                 self.vcmdq_config[index] = value;
             }
             offset::VCMDQ_GERRORN => {
+                self.mirror_vcmdq_page0_write(index, reg, value);
                 self.vcmdq_gerrorn[index] = value;
             }
             // GERROR and STATUS are read-only.
@@ -583,8 +646,43 @@ impl Migratable for Tegra241Cmdqv {}
 mod tests {
     use super::*;
 
+    /// # Safety
+    ///
+    /// `base + byte_offset` must be a valid, 4-byte aligned address.
+    #[allow(
+        clippy::cast_ptr_alignment,
+        reason = "the page is page-aligned and the offset a multiple of 4"
+    )]
+    unsafe fn poke_u32(base: *mut u8, byte_offset: usize, value: u32) {
+        assert!(byte_offset.is_multiple_of(4));
+        // SAFETY: the caller's contract.
+        unsafe { ptr::write_volatile(base.add(byte_offset).cast::<u32>(), value) }
+    }
+
     fn dev() -> Tegra241Cmdqv {
         Tegra241Cmdqv::new("vcmdqv_0".to_string(), 0, 100)
+    }
+
+    /// A memfd standing in for the VINTF page.
+    fn test_vintf_mapping(len: u64) -> MmapRegion {
+        use std::ffi::CString;
+        use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
+
+        // SAFETY: FFI call with a valid name.
+        let raw_fd = unsafe {
+            libc::syscall(
+                libc::SYS_memfd_create,
+                CString::new("cmdqv-test-vintf").unwrap().as_ptr(),
+                0,
+            )
+        };
+        assert!(raw_fd >= 0, "memfd_create failed");
+        // SAFETY: a new fd we own.
+        let fd = unsafe { OwnedFd::from_raw_fd(raw_fd as i32) };
+        // SAFETY: FFI call with a valid, owned fd.
+        let ret = unsafe { libc::ftruncate(fd.as_raw_fd(), len as libc::off_t) };
+        assert_eq!(ret, 0, "ftruncate failed");
+        MmapRegion::mmap(len, libc::PROT_READ | libc::PROT_WRITE, fd.as_fd(), 0, 0).unwrap()
     }
 
     #[test]
@@ -846,6 +944,122 @@ mod tests {
         d.read(0, offset::CONFIG, &mut data);
         d.write(0, offset::CONFIG, &data);
         assert_eq!(d.config, CONFIG_RESET);
+    }
+
+    #[test]
+    fn test_vintf_page_mirrors_writes() {
+        let mut d = dev();
+        d.vintf_page = Some(VintfPage {
+            mapping: test_vintf_mapping(0x10000),
+        });
+
+        let cons_off = offset::VCMDQ_PAGE0_BASE + offset::VCMDQ_CONS_INDX;
+        d.write(0, cons_off, &0x1234u32.to_le_bytes());
+
+        assert_eq!(
+            d.vintf_page.as_ref().unwrap().read_u32(0),
+            0x1234,
+            "write must reach the mapped page, not just the register cache"
+        );
+
+        let mut data = [0u8; 4];
+        d.read(0, cons_off, &mut data);
+        assert_eq!(u32::from_le_bytes(data), 0x1234);
+    }
+
+    #[test]
+    fn test_vintf_page_read_refreshes_cache_from_hardware() {
+        let mut d = dev();
+        let mapping = test_vintf_mapping(0x10000);
+        let base = mapping.addr();
+        d.vintf_page = Some(VintfPage { mapping });
+
+        // The hardware advances PROD_INDX behind the VMM's back.
+        // SAFETY: within the mapping `d` owns.
+        unsafe { poke_u32(base, offset::VCMDQ_PROD_INDX as usize, 0xabcd) };
+
+        let mut data = [0u8; 4];
+        d.read(
+            0,
+            offset::VCMDQ_PAGE0_BASE + offset::VCMDQ_PROD_INDX,
+            &mut data,
+        );
+        assert_eq!(
+            u32::from_le_bytes(data),
+            0xabcd,
+            "a read must refresh the cache from the mapped page"
+        );
+    }
+
+    #[test]
+    fn test_vintf_page_shared_between_native_and_vi_alias() {
+        let mut d = dev();
+        d.vintf_page = Some(VintfPage {
+            mapping: test_vintf_mapping(0x10000),
+        });
+
+        let native_off = offset::VCMDQ_PAGE0_BASE + offset::VCMDQ_CONS_INDX;
+        let alias_off = offset::VI_VCMDQ_PAGE0_BASE + offset::VCMDQ_CONS_INDX;
+
+        d.write(0, native_off, &0x55aa_u32.to_le_bytes());
+
+        let mut data = [0u8; 4];
+        d.read(0, alias_off, &mut data);
+        assert_eq!(
+            u32::from_le_bytes(data),
+            0x55aa,
+            "the VI_VCMDQ alias must observe a write through the native VCMDQ page \
+             (both fold to the same mapped page)"
+        );
+    }
+
+    #[test]
+    fn test_vintf_page_config_write_skips_local_status_derivation() {
+        let mut d = dev();
+        d.vintf_page = Some(VintfPage {
+            mapping: test_vintf_mapping(0x10000),
+        });
+
+        let config_off = offset::VCMDQ_PAGE0_BASE + offset::VCMDQ_CONFIG;
+        d.write(0, config_off, &VCMDQ_CONFIG_CMDQ_EN_MASK.to_le_bytes());
+
+        assert_eq!(
+            d.vintf_page
+                .as_ref()
+                .unwrap()
+                .read_u32(offset::VCMDQ_CONFIG as usize),
+            VCMDQ_CONFIG_CMDQ_EN_MASK
+        );
+
+        // STATUS comes from the page, which the memfd leaves 0.
+        let mut status = [0u8; 4];
+        d.read(
+            0,
+            offset::VCMDQ_PAGE0_BASE + offset::VCMDQ_STATUS,
+            &mut status,
+        );
+        assert_eq!(u32::from_le_bytes(status), 0);
+    }
+
+    #[test]
+    fn test_vintf_page_read_of_undefined_reg_skips_device_access() {
+        let mut d = dev();
+        let mapping = test_vintf_mapping(0x10000);
+        let base = mapping.addr();
+        d.vintf_page = Some(VintfPage { mapping });
+
+        let undefined_reg = 0x18u64;
+        // SAFETY: within the mapping `d` owns.
+        unsafe { poke_u32(base, undefined_reg as usize, 0xdead_beef) };
+
+        let mut data = [0u8; 4];
+        d.read(0, offset::VCMDQ_PAGE0_BASE + undefined_reg, &mut data);
+        assert_eq!(
+            u32::from_le_bytes(data),
+            0,
+            "an undefined VCMDQ page0 register must return the shadow (0), not the \
+             live hardware value - proving the read never touched the mapped page"
+        );
     }
 
     #[test]
