@@ -79,6 +79,10 @@ use devices::legacy::{
 use devices::pvmemcontrol::{self, PvmemcontrolBusDevice, PvmemcontrolPciDevice};
 #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
 use devices::smmuv3::{SMMU_V3_MMIO_PAGE_SIZE, SMMU_V3_MMIO_SIZE, Smmuv3Interrupts};
+#[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+use devices::tegra241_cmdqv::{
+    TEGRA241_CMDQV_MMIO_SIZE, Tegra241CmdqvConfig, VCMDQ_PAGE0, VCMDQ_PAGE0_SIZE, VI_VCMDQ_PAGE0,
+};
 #[cfg(not(target_arch = "riscv64"))]
 use devices::tpm;
 use devices::{AcpiNotificationFlags, acpi, interrupt_controller, legacy, pvpanic};
@@ -371,6 +375,11 @@ pub enum DeviceManagerError {
     /// The operation requires the iommufd VFIO backend
     #[error("The VFIO backend in use is not iommufd")]
     ExpectedIommufdBackend,
+
+    /// The host SMMU has no usable Tegra241 CMDQV
+    #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+    #[error("The host SMMU has no usable Tegra241 CMDQV")]
+    Tegra241CmdqvMissing,
 
     /// Emulated SMMUv3 operation failed
     #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
@@ -4276,17 +4285,116 @@ impl DeviceManager {
     }
 
     #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+    fn tegra241_cmdqv_config(
+        &mut self,
+        smmu_id: u32,
+        num_vcmdqs_log2: u8,
+        num_sids_log2: u8,
+    ) -> DeviceManagerResult<Tegra241CmdqvConfig> {
+        let irq = self
+            .address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_irq()?;
+        let interrupt = self
+            .legacy_interrupt_manager
+            .as_ref()
+            .expect("Legacy interrupt manager available before PCI devices are added")
+            .create_group(LegacyIrqGroupConfig {
+                irq: irq as InterruptIndex,
+            })
+            .map_err(DeviceManagerError::CreateInterruptGroup)?;
+        let base = self
+            .address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_platform_mmio_addresses(
+                None,
+                TEGRA241_CMDQV_MMIO_SIZE,
+                Some(VCMDQ_PAGE0_SIZE),
+            )
+            .ok_or(DeviceManagerError::AllocateMmioAddress)?;
+
+        Ok(Tegra241CmdqvConfig {
+            base: base.0,
+            irq,
+            interrupt,
+            smmu_id,
+            num_vcmdqs_log2,
+            num_sids_log2,
+        })
+    }
+
+    #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+    fn add_tegra241_cmdqv(
+        &mut self,
+        smmu: &mut Smmuv3Iommufd,
+        base: u64,
+    ) -> DeviceManagerResult<()> {
+        let cmdqv = Arc::clone(smmu.cmdqv().expect("SMMUv3 has a CMDQV"));
+        let vintf_page = smmu.vintf_page().expect("CMDQV vIOMMU has a VINTF page");
+
+        let mut regions = Vec::new();
+        for offset in [VCMDQ_PAGE0, VI_VCMDQ_PAGE0] {
+            let region = GuestRegion::from_file(
+                vintf_page.clone(),
+                VCMDQ_PAGE0_SIZE as usize,
+                VCMDQ_PAGE0_SIZE as usize,
+                GuestAddress(base + offset),
+                libc::PROT_READ | libc::PROT_WRITE,
+                Arc::clone(&self.address_manager.vm),
+                Arc::clone(self.memory_manager.lock().unwrap().memory_slot_allocator()),
+            )
+            .map_err(DeviceManagerError::RegisterGuestRegion)?;
+            region
+                .register()
+                .map_err(DeviceManagerError::RegisterGuestRegion)?;
+            regions.push(region);
+        }
+
+        let id = cmdqv.lock().unwrap().id().to_string();
+        self.address_manager
+            .mmio_bus
+            .insert(
+                Arc::clone(&cmdqv) as Arc<dyn BusDeviceSync>,
+                base,
+                TEGRA241_CMDQV_MMIO_SIZE,
+            )
+            .map_err(DeviceManagerError::BusError)?;
+        self.bus_devices
+            .push(Arc::clone(&cmdqv) as Arc<dyn BusDeviceSync>);
+        self.device_tree
+            .lock()
+            .unwrap()
+            .insert(id.clone(), device_node!(id, cmdqv));
+        smmu.set_vintf_regions(regions);
+
+        Ok(())
+    }
+
+    #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
     fn add_smmuv3(
         &mut self,
         key: &str,
         vfio_context: &Arc<VfioContext>,
         dev_id: u32,
+        cmdqv: bool,
     ) -> DeviceManagerResult<&Smmuv3Iommufd> {
         let vfio_iommufd = (Arc::clone(&vfio_context.ops) as Arc<dyn Any + Send + Sync>)
             .downcast::<VfioIommufd>()
             .map_err(|_| DeviceManagerError::ExpectedIommufdBackend)?;
+        let host_cmdqv = if cmdqv {
+            Some(
+                Smmuv3Iommufd::host_cmdqv(vfio_iommufd.iommufd(), dev_id)
+                    .ok_or(DeviceManagerError::Tegra241CmdqvMissing)?,
+            )
+        } else {
+            None
+        };
         let viommu = Arc::new(
-            IommufdVIommu::new(Arc::clone(vfio_iommufd.ioas()), dev_id, false)
+            IommufdVIommu::new(Arc::clone(vfio_iommufd.ioas()), dev_id, cmdqv)
                 .map_err(DeviceManagerError::IommufdCreate)?,
         );
 
@@ -4344,17 +4452,34 @@ impl DeviceManager {
             ..Default::default()
         };
 
-        let smmu = Smmuv3Iommufd::new(
+        let cmdqv_config = host_cmdqv
+            .map(|host| {
+                self.tegra241_cmdqv_config(
+                    acpi_info.iort_node_id,
+                    host.num_vcmdqs_log2,
+                    host.num_sids_log2,
+                )
+            })
+            .transpose()?;
+        let cmdqv_base = cmdqv_config.as_ref().map(|config| config.base);
+
+        let mut smmu = Smmuv3Iommufd::new(
             smmuv3_id.clone(),
             guest_memory,
             interrupts,
             acpi_info,
             viommu,
             dev_id,
-            None,
+            cmdqv_config,
         )
         .map_err(DeviceManagerError::Smmuv3)?;
         let smmuv3_device = Arc::clone(smmu.device());
+        if cmdqv {
+            smmuv3_device
+                .lock()
+                .unwrap()
+                .set_max_cmdq_size(self.memory_manager.lock().unwrap().min_backing_page_size());
+        }
 
         self.address_manager
             .mmio_bus
@@ -4371,6 +4496,10 @@ impl DeviceManager {
             .lock()
             .unwrap()
             .insert(smmuv3_id.clone(), device_node!(smmuv3_id, smmuv3_device));
+
+        if let Some(base) = cmdqv_base {
+            self.add_tegra241_cmdqv(&mut smmu, base)?;
+        }
 
         Ok(&self
             .smmuv3s
@@ -4449,7 +4578,12 @@ impl DeviceManager {
             .ok_or(DeviceManagerError::IommufdDevIdMissing)?;
         let smmuv3 = match self.smmuv3s.get(&key) {
             Some((smmuv3, _)) => smmuv3,
-            None => self.add_smmuv3(&key, vfio_context, dev_id)?,
+            None => self.add_smmuv3(
+                &key,
+                vfio_context,
+                dev_id,
+                device_cfg.pci_common.iommu == IommuType::Smmuv3Cmdqv,
+            )?,
         };
         let viommu = Arc::clone(smmuv3.backend());
         let endpoint = Arc::clone(device) as Arc<dyn AttachHwpt>;
@@ -6465,6 +6599,11 @@ impl Aml for DeviceManager {
         #[cfg(not(target_arch = "riscv64"))]
         if let Some(vmgenid_device) = self.vmgenid_device.as_ref() {
             vmgenid_device.lock().unwrap().to_aml_bytes(sink);
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        for cmdqv in self.smmuv3s.values().filter_map(|(smmu, _)| smmu.cmdqv()) {
+            cmdqv.lock().unwrap().to_aml_bytes(sink);
         }
 
         self.ged_notification_device
