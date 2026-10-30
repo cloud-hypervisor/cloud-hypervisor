@@ -124,7 +124,11 @@ epoll = "4.4.0"
 flume = "0.12.0"
 getrandom = { version = "0.4.3", features = ["std"] }
 itertools = "0.15.0"
-jiff = { version = "0.2", default-features = false, features = ["std"] }
+jiff = { version = "0.2", default-features = false, features = [
+  "std",
+  "tz-system",
+  "tzdb-zoneinfo",
+] }
 libc = "0.2.186"
 log = "0.4.30"
 rustls = { version = "0.23.46", default-features = false, features = [
