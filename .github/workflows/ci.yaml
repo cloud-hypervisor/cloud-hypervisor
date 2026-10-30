@@ -892,10 +892,6 @@ jobs:
           echo "Checking hypervisor device nodes..."
           test -e /dev/kvm || { echo "::error::/dev/kvm missing"; exit 1; }
           test -e /dev/sev || { echo "::error::/dev/sev missing"; exit 1; }
-          echo "Checking staged IGVM/kernel artifacts..."
-          test -d /usr/share/cloud-hypervisor/cvm \
-            || { echo "::error::/usr/share/cloud-hypervisor/cvm missing"; exit 1; }
-          ls -l /usr/share/cloud-hypervisor/cvm
       - name: Run CVM (SEV-SNP) integration tests
         timeout-minutes: 20
         run: scripts/dev_cli.sh tests --integration-cvm --hypervisor kvm

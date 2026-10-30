@@ -25,6 +25,13 @@ assets:
     arch: [aarch64]
     test: [integration, windows]
 
+  # Oak stage0
+  - filename: stage0_bin
+    url: https://storage.googleapis.com/oak-files/sha2-256:8cbdac566f22b71d2209bba951f5679b22155e25599f81053be5e5bbae9b2ed5
+    sha256: 8cbdac566f22b71d2209bba951f5679b22155e25599f81053be5e5bbae9b2ed5
+    arch: [x86_64]
+    test: [cvm]
+
   # Guest images
   - filename: jammy-server-cloudimg-amd64-custom-20241017-0.qcow2
     url: https://ch-images.azureedge.net/jammy-server-cloudimg-amd64-custom-20241017-0.qcow2
@@ -68,7 +75,7 @@ assets:
     url: https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v7.2.8-20261009/bzImage-x86_64
     sha256: 40f5ac32a703528a850dd2cedb3de5cb5bfc383c5abbff1424a135d7a85bec35
     arch: [x86_64]
-    test: [integration]
+    test: [integration, cvm]
 
   - filename: Image-arm64
     url: https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v7.2.8-20261009/Image-arm64
