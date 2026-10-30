@@ -11,7 +11,7 @@ use std::io::{self, Write};
 use std::net::IpAddr;
 use std::num::Wrapping;
 use std::ops::Deref;
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd};
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
@@ -704,7 +704,7 @@ impl Net {
     #[expect(clippy::too_many_arguments)]
     pub fn from_tap_fds(
         id: String,
-        fds: &[RawFd],
+        fds: &[BorrowedFd<'_>],
         guest_mac: MacAddr,
         mtu: Option<u16>,
         access_platform_enabled: bool,
@@ -727,7 +727,7 @@ impl Net {
         for fd in fds.iter() {
             // Duplicate so that it can survive reboots
             // SAFETY: FFI call to dup. Trivially safe.
-            let fd = unsafe { libc::dup(*fd) };
+            let fd = unsafe { libc::dup(fd.as_raw_fd()) };
             if fd < 0 {
                 return Err(Error::DuplicateTapFd(io::Error::last_os_error()));
             }
