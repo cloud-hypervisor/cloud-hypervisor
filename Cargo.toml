@@ -86,7 +86,7 @@ iommufd-bindings = "0.2.0"
 iommufd-ioctls = "0.4.0"
 kvm-bindings = "0.14.2"
 kvm-ioctls = "0.25.1"
-linux-loader = "0.14.0"
+linux-loader = { version = "0.14.0", default-features = false }
 mshv-bindings = "0.7.1"
 mshv-ioctls = "0.7.1"
 seccompiler = "0.5.0"
@@ -97,8 +97,8 @@ vhost = { version = "0.17.0", default-features = false }
 vhost-user-backend = { version = "0.23.0", default-features = false }
 virtio-bindings = "0.2.6"
 virtio-queue = "0.18.0"
-vm-fdt = "0.3.0"
-vm-memory = "0.18.0"
+vm-fdt = { version = "0.3.0", default-features = false }
+vm-memory = { version = "0.18.0", default-features = false }
 vmm-sys-util = "0.15.0"
 
 # igvm crates
@@ -106,25 +106,28 @@ igvm = "0.5.0"
 igvm_defs = "0.5.0"
 
 # serde crates
-serde = "1.0.228"
+serde = { version = "1.0.228", default-features = false }
 serde_json = "1.0.150"
 serde_with = { version = "3.19.0", default-features = false }
 
 # other crates
-anyhow = "1.0.102"
-base64 = "0.23.0"
+anyhow = { version = "1.0.102", default-features = false }
+base64 = { version = "0.23.0", default-features = false }
+bitfield-struct = "0.13.0"
 bitflags = "2.11.1"
-byteorder = "1.5.0"
 cfg-if = "1.0.4"
-clap = "4.6.1"
+clap = { version = "4.6.1", default-features = false }
+crc-any = { version = "3.0.0", default-features = false }
 dhat = "0.3.3"
 dirs = "7.0.0"
-env_logger = "0.11.10"
+env_logger = { version = "0.11.10", default-features = false }
 epoll = "4.4.0"
-flume = "0.12.0"
 getrandom = { version = "0.4.3", features = ["std"] }
-itertools = "0.15.0"
-jiff = { version = "0.2", default-features = false, features = ["std"] }
+jiff = { version = "0.2", default-features = false, features = [
+  "std",
+  "tz-system",
+  "tzdb-zoneinfo",
+] }
 libc = "0.2.186"
 log = "0.4.30"
 rustls = { version = "0.23.46", default-features = false, features = [
@@ -132,13 +135,13 @@ rustls = { version = "0.23.46", default-features = false, features = [
   "ring",
   "std",
 ] }
-sha2 = "0.11.0"
-signal-hook = "0.4.4"
-signal-hook-registry = "1.4.8"
+sha2 = { version = "0.11.0", default-features = false }
+signal-hook = { version = "0.4.4", default-features = false }
 smallvec = "1.15.1"
 thiserror = "2.0.18"
-uuid = { version = "1.23.2" }
+uuid = { version = "1.23.2", default-features = false }
 wait-timeout = "0.2.1"
+zbus = { version = "5.15.0", default-features = false }
 zerocopy = { version = "0.8.50", default-features = false }
 
 [workspace.lints.clippy]

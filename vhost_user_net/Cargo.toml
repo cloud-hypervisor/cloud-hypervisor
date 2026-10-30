@@ -5,8 +5,15 @@ name = "vhost_user_net"
 version = "0.1.0"
 
 [dependencies]
-clap = { workspace = true, features = ["cargo", "wrap_help"] }
-env_logger = { workspace = true }
+clap = { workspace = true, features = [
+  "color",
+  "error-context",
+  "help",
+  "std",
+  "suggestions",
+  "usage",
+] }
+env_logger = { workspace = true, features = ["auto-color", "humantime"] }
 epoll = { workspace = true }
 libc = { workspace = true }
 log = { workspace = true }
@@ -16,7 +23,7 @@ thiserror = { workspace = true }
 vhost = { workspace = true, features = ["vhost-user-backend"] }
 vhost-user-backend = { workspace = true }
 virtio-bindings = { workspace = true }
-vm-memory = { workspace = true }
+vm-memory = { workspace = true, features = ["backend-atomic", "backend-mmap"] }
 vmm-sys-util = { workspace = true }
 
 [lints]

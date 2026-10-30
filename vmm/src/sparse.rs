@@ -176,6 +176,7 @@ mod tests {
     use std::{fs, io};
 
     use vm_allocator::page_size::get_page_size;
+    use vmm_sys_util::tempfile::TempFile;
 
     use super::{clone_file_range, next_data_extent, write_region_sparse};
 
@@ -288,9 +289,9 @@ mod tests {
 
     #[test]
     fn dense_file_yields_single_extent() {
-        let mut tmp = tempfile::NamedTempFile::new().unwrap();
-        tmp.write_all(&vec![0xEEu8; 4096 * 8]).unwrap();
-        let f = tmp.reopen().unwrap();
+        let tmp = TempFile::new().unwrap();
+        let mut f = tmp.as_file();
+        f.write_all(&vec![0xEEu8; 4096 * 8]).unwrap();
         let extents = collect_extents(f.as_fd(), 0, 4096 * 8).unwrap();
         assert_eq!(extents, vec![(0, 4096 * 8)]);
     }
@@ -298,9 +299,9 @@ mod tests {
     #[test]
     fn sparse_file_yields_extents_at_written_positions() {
         let page_size = get_page_size();
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let f = tmp.reopen().unwrap();
-        sparse_layout(&f, page_size * 16, &[(page_size * 4, page_size * 2, 0x55)]);
+        let tmp = TempFile::new().unwrap();
+        let f = tmp.as_file();
+        sparse_layout(f, page_size * 16, &[(page_size * 4, page_size * 2, 0x55)]);
         let extents = collect_extents(f.as_fd(), 0, page_size * 16).unwrap();
         assert_eq!(extents, vec![(page_size * 4, page_size * 2)]);
     }
@@ -320,15 +321,15 @@ mod tests {
         // byte outside the source-data extent must remain the sentinel.
         // This is FS-independent (does not depend on whether the dst
         // filesystem reports holes after a partial write).
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let dst = tmp.reopen().unwrap();
+        let tmp = TempFile::new().unwrap();
+        let dst = tmp.as_file();
         dst.write_all_at(&vec![0xFE; (page_size * 16) as usize], 0)
             .unwrap();
 
-        let used = write_region_sparse(&src, 0, &dst, 0, page_size * 16).unwrap();
+        let used = write_region_sparse(&src, 0, dst, 0, page_size * 16).unwrap();
         assert!(used);
 
-        let buf = fs::read(tmp.path()).unwrap();
+        let buf = fs::read(tmp.as_path()).unwrap();
         assert!(buf[..(page_size * 3) as usize].iter().all(|&b| b == 0xFE));
         assert!(
             buf[(page_size * 3) as usize..(page_size * 5) as usize]
@@ -345,14 +346,14 @@ mod tests {
         let src_b = make_memfd(0);
         sparse_layout(&src_b, 4096 * 16, &[(4096 * 5, 4096 * 3, 0xBB)]);
 
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let dst = tmp.reopen().unwrap();
-        sparse_layout(&dst, 4096 * 32, &[]);
+        let tmp = TempFile::new().unwrap();
+        let dst = tmp.as_file();
+        sparse_layout(dst, 4096 * 32, &[]);
 
-        let _ = write_region_sparse(&src_a, 0, &dst, 0, 4096 * 16).unwrap();
-        let _ = write_region_sparse(&src_b, 0, &dst, 4096 * 16, 4096 * 16).unwrap();
+        let _ = write_region_sparse(&src_a, 0, dst, 0, 4096 * 16).unwrap();
+        let _ = write_region_sparse(&src_b, 0, dst, 4096 * 16, 4096 * 16).unwrap();
 
-        let buf = fs::read(tmp.path()).unwrap();
+        let buf = fs::read(tmp.as_path()).unwrap();
         assert!(buf[..4096].iter().all(|&b| b == 0));
         assert!(buf[4096..4096 * 3].iter().all(|&b| b == 0xAA));
         assert!(buf[4096 * 3..4096 * 16].iter().all(|&b| b == 0));
@@ -366,14 +367,14 @@ mod tests {
         let src = make_memfd(0);
         sparse_layout(&src, 4096 * 32, &[(4096 * 20, 4096 * 2, 0x77)]);
 
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let dst = tmp.reopen().unwrap();
-        sparse_layout(&dst, 4096 * 16, &[]);
+        let tmp = TempFile::new().unwrap();
+        let dst = tmp.as_file();
+        sparse_layout(dst, 4096 * 16, &[]);
 
-        let used = write_region_sparse(&src, 4096 * 16, &dst, 0, 4096 * 16).unwrap();
+        let used = write_region_sparse(&src, 4096 * 16, dst, 0, 4096 * 16).unwrap();
         assert!(used);
 
-        let buf = fs::read(tmp.path()).unwrap();
+        let buf = fs::read(tmp.as_path()).unwrap();
         assert!(buf[..4096 * 4].iter().all(|&b| b == 0));
         assert!(buf[4096 * 4..4096 * 6].iter().all(|&b| b == 0x77));
         assert!(buf[4096 * 6..].iter().all(|&b| b == 0));
@@ -391,17 +392,17 @@ mod tests {
         let src_b = make_memfd(0);
         sparse_layout(&src_b, 4096 * 16, &[(4096 * 10, 4096 * 4, 0xBB)]);
 
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let dst = tmp.reopen().unwrap();
+        let tmp = TempFile::new().unwrap();
+        let dst = tmp.as_file();
         let total = 4096u64 * 32;
-        sparse_layout(&dst, total, &[]);
+        sparse_layout(dst, total, &[]);
 
-        write_region_sparse(&src_a, 0, &dst, 0, 4096 * 16).unwrap();
-        write_region_sparse(&src_b, 0, &dst, 4096 * 16, 4096 * 16).unwrap();
+        write_region_sparse(&src_a, 0, dst, 0, 4096 * 16).unwrap();
+        write_region_sparse(&src_b, 0, dst, 4096 * 16, 4096 * 16).unwrap();
 
         // Read back using next_data_extent + read_at, mirroring
         // fill_saved_regions's sparse restore path.
-        let snap = tmp.reopen().unwrap();
+        let snap = tmp.as_file();
         let regions: Vec<(u64, u64)> = vec![(0, 4096 * 16), (4096 * 16, 4096 * 16)];
         let mut restored = vec![0u8; total as usize];
 
@@ -423,7 +424,7 @@ mod tests {
         }
 
         // Verify content matches a dense read.
-        let dense = fs::read(tmp.path()).unwrap();
+        let dense = fs::read(tmp.as_path()).unwrap();
         assert_eq!(restored, dense);
 
         // Verify the actual data landed in the right places.
@@ -436,9 +437,9 @@ mod tests {
 
     #[test]
     fn clone_file_range_copies_content_where_reflink_exists() {
-        let mut src = tempfile::tempfile().unwrap();
+        let mut src = TempFile::new().unwrap().into_file();
         src.write_all(&[0xab; 8192]).unwrap();
-        let dst = tempfile::tempfile().unwrap();
+        let dst = TempFile::new().unwrap().into_file();
         match clone_file_range(&src, &dst, 4096) {
             Ok(()) => {
                 assert_eq!(dst.metadata().unwrap().len(), 4096);

@@ -6,14 +6,13 @@ rust-version.workspace = true
 version = "0.1.0"
 
 [dependencies]
-anyhow = { workspace = true }
-itertools = { workspace = true }
+anyhow = { workspace = true, features = ["std"] }
 log = { workspace = true }
 rustls = { workspace = true }
-serde = { workspace = true, features = ["derive", "rc"] }
+serde = { workspace = true, features = ["derive", "rc", "std"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-vm-memory = { workspace = true, features = ["backend-atomic", "backend-mmap"] }
+vm-memory = { workspace = true }
 zerocopy = { workspace = true, features = ["alloc", "derive"] }
 
 [lints]

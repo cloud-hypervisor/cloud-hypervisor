@@ -13,7 +13,7 @@ mshv_emulator = ["iced-x86", "mshv-bindings"]
 sev_snp = ["dep:bitfield-struct", "igvm", "igvm_defs"]
 
 [dependencies]
-anyhow = { workspace = true }
+anyhow = { workspace = true, features = ["std"] }
 arc-swap = "1.9.1"
 concat-idents = "1.1.5"
 igvm = { workspace = true, optional = true }
@@ -27,18 +27,12 @@ mshv-bindings = { workspace = true, features = [
   "with-serde",
 ], optional = true }
 mshv-ioctls = { workspace = true, optional = true }
-serde = { workspace = true, features = ["derive", "rc"] }
-serde_with = { workspace = true, default-features = false, features = [
-  "macros",
-] }
+serde = { workspace = true, features = ["derive", "rc", "std"] }
+serde_with = { workspace = true, features = ["macros"] }
 thiserror = { workspace = true }
-vfio-ioctls = { workspace = true, default-features = false }
-vm-memory = { workspace = true, features = [
-  "backend-atomic",
-  "backend-bitmap",
-  "backend-mmap",
-] }
-vmm-sys-util = { workspace = true, features = ["with-serde"] }
+vfio-ioctls = { workspace = true }
+vm-memory = { workspace = true, features = ["backend-bitmap"] }
+vmm-sys-util = { workspace = true }
 zerocopy = { workspace = true, features = ["derive"] }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies.iced-x86]
@@ -57,12 +51,11 @@ optional = true
 version = "1.21.0"
 
 [target.'cfg(target_arch = "aarch64")'.dependencies]
-bitfield-struct = "0.13.0"
-open-enum = "0.5.2"
+bitfield-struct = { workspace = true }
 serde_json = { workspace = true }
 
 [target.'cfg(not(target_arch = "aarch64"))'.dependencies]
-bitfield-struct = { version = "0.13.0", optional = true }
+bitfield-struct = { workspace = true, optional = true }
 
 [dev-dependencies]
 cfg-if = { workspace = true }

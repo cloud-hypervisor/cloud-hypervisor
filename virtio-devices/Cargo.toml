@@ -12,9 +12,8 @@ mshv = ["pci/mshv"]
 sev_snp = ["mshv-ioctls"]
 
 [dependencies]
-anyhow = { workspace = true }
+anyhow = { workspace = true, features = ["std"] }
 block = { path = "../block" }
-byteorder = { workspace = true }
 epoll = { workspace = true }
 event_monitor = { path = "../event_monitor" }
 hypervisor = { path = "../hypervisor" }
@@ -25,10 +24,8 @@ net_util = { path = "../net_util" }
 pci = { path = "../pci" }
 rate_limiter = { path = "../rate_limiter" }
 seccompiler = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
-serde_with = { workspace = true, default-features = false, features = [
-  "macros",
-] }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_with = { workspace = true, features = ["macros"] }
 serial_buffer = { path = "../serial_buffer" }
 smallvec = { workspace = true }
 thiserror = { workspace = true }
@@ -46,6 +43,7 @@ vm-memory = { workspace = true, features = [
   "backend-atomic",
   "backend-bitmap",
   "backend-mmap",
+  "rawfd",
 ] }
 vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }

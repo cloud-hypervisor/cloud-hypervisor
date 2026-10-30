@@ -6,8 +6,6 @@ use std::collections::btree_map::BTreeMap;
 use std::os::unix::fs::FileExt;
 use std::{io, result};
 
-use byteorder::{ByteOrder, LittleEndian};
-use remain::sorted;
 use thiserror::Error;
 use uuid::Uuid;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
@@ -37,7 +35,6 @@ const MDR_GUID: [u8; 16] = [
     0x06, 0xa2, 0x7c, 0x8b, 0x90, 0x47, 0x9a, 0x4b, 0xb8, 0xfe, 0x57, 0x5f, 0x05, 0x0f, 0x88, 0x6e,
 ];
 
-#[sorted]
 #[derive(Error, Debug)]
 pub enum VhdxHeaderError {
     #[error("BAT entry is not unique")]
@@ -93,7 +90,7 @@ impl FileTypeIdentifier {
         let mut buf = [0u8; size_of::<u64>()];
         f.read_exact_at(&mut buf, FILE_START)
             .map_err(VhdxHeaderError::ReadFileTypeIdentifier)?;
-        let _signature = LittleEndian::read_u64(&buf);
+        let _signature = u64::from_le_bytes(buf);
         if _signature != VHDX_SIGN {
             return Err(VhdxHeaderError::InvalidVHDXSign);
         }
@@ -443,17 +440,19 @@ impl VhdxHeader {
 /// corresponding field is made zero. After the calculation, the existing checksum
 /// is put back to the buffer.
 fn calculate_checksum(buffer: &mut [u8], csum_offset: usize) -> u32 {
+    let csum_range = csum_offset..csum_offset + size_of::<u32>();
     // Read the original checksum from the buffer
-    let orig_csum = LittleEndian::read_u32(&buffer[csum_offset..csum_offset + 4]);
+    let mut orig_csum = [0u8; size_of::<u32>()];
+    orig_csum.copy_from_slice(&buffer[csum_range.clone()]);
     // Zero the checksum in the buffer
-    LittleEndian::write_u32(&mut buffer[csum_offset..csum_offset + 4], 0);
+    buffer[csum_range.clone()].fill(0);
     // Calculate the checksum on the resulting buffer
     let mut crc = crc_any::CRC::crc32c();
     crc.digest(&buffer);
     let new_csum = crc.get_crc() as u32;
 
     // Put back the original checksum in the buffer
-    LittleEndian::write_u32(&mut buffer[csum_offset..csum_offset + 4], orig_csum);
+    buffer[csum_range].copy_from_slice(&orig_csum);
 
     new_csum
 }

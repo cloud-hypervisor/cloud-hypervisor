@@ -45,7 +45,7 @@ use vmm::vm_config::{
 };
 use vmm::{GuestResetAction, GuestShutdownAction, vm_config};
 use vmm_sys_util::eventfd::EventFd;
-use vmm_sys_util::signal::block_signal;
+use vmm_sys_util::signal::{block_signal, register_signal_handler};
 
 use crate::logger::Logger;
 
@@ -120,8 +120,10 @@ impl SeccompSiginfo {
     }
 }
 
-fn handle_sigsys(info: &libc::siginfo_t) {
-    let info = SeccompSiginfo::from_siginfo(info);
+extern "C" fn handle_sigsys(_: libc::c_int, info: *mut libc::siginfo_t, _: *mut libc::c_void) {
+    // SAFETY: The handler is installed with SA_SIGINFO, so the kernel passes
+    // a valid siginfo_t.
+    let info = SeccompSiginfo::from_siginfo(unsafe { &*info });
     let mut buffer = [0; SeccompSiginfo::OUTPUT_LEN];
     let message = info.format_into(&mut buffer);
     // SAFETY: message points to initialized memory for message.len() bytes.
@@ -709,12 +711,10 @@ fn start_vmm(
     let api_request_sender_clone = api_request_sender.clone();
 
     if seccomp_action == SeccompAction::Trap {
-        // SAFETY: handle_sigsys only performs async signal safe operations.
-        unsafe {
-            signal_hook_registry::register_sigaction(SIGSYS, handle_sigsys)
-                .map_err(|e| error!("Error adding SIGSYS signal handler: {e}"))
-                .ok();
-        }
+        // handle_sigsys only performs async signal safe operations.
+        register_signal_handler(SIGSYS, handle_sigsys)
+            .map_err(|e| error!("Error adding SIGSYS signal handler: {e}"))
+            .ok();
     }
 
     // SAFETY: Trivially safe.

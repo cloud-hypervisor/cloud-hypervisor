@@ -5,17 +5,11 @@ name = "vm-device"
 rust-version.workspace = true
 version = "0.1.0"
 
-[features]
-default = []
-kvm = ["vfio-ioctls/kvm"]
-mshv = ["vfio-ioctls/mshv"]
-
 [dependencies]
 hypervisor = { path = "../hypervisor" }
-serde = { workspace = true, features = ["derive", "rc"] }
+serde = { workspace = true, features = ["derive", "rc", "std"] }
 thiserror = { workspace = true }
-vfio-ioctls = { workspace = true, default-features = false }
-vm-memory = { workspace = true, features = ["backend-mmap"] }
+vm-memory = { workspace = true, features = ["backend-bitmap", "backend-mmap"] }
 vmm-sys-util = { workspace = true }
 
 [lints]

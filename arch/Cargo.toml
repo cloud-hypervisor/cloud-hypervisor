@@ -12,28 +12,31 @@ kvm = ["hypervisor/kvm"]
 sev_snp = []
 
 [dependencies]
-anyhow = { workspace = true }
-byteorder = { workspace = true }
 hypervisor = { path = "../hypervisor" }
 libc = { workspace = true }
-linux-loader = { workspace = true, features = ["bzimage", "elf", "pe"] }
+linux-loader = { workspace = true, features = ["elf"] }
 log = { workspace = true }
-serde = { workspace = true, features = ["derive", "rc"] }
+serde = { workspace = true, features = ["derive", "rc", "std"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
-vm-memory = { workspace = true, features = ["backend-bitmap", "backend-mmap"] }
-vmm-sys-util = { workspace = true, features = ["with-serde"] }
+vm-memory = { workspace = true, features = [
+  "backend-atomic",
+  "backend-bitmap",
+  "backend-mmap",
+  "rawfd",
+] }
 
 [dev-dependencies]
-proptest = "1.0.0"
+proptest = { version = "1.0.0", default-features = false, features = ["std"] }
+vmm-sys-util = { workspace = true }
 
 [target.'cfg(target_arch = "aarch64")'.dependencies]
-crc-any = "3.0.0"
+crc-any = { workspace = true, features = ["std"] }
 
 [target.'cfg(any(target_arch = "aarch64", target_arch = "riscv64"))'.dependencies]
 fdt_parser = { version = "0.1.5", package = "fdt" }
-vm-fdt = { workspace = true }
+vm-fdt = { workspace = true, features = ["std"] }
 
 [lints]
 workspace = true

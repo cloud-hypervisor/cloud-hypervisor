@@ -4,7 +4,6 @@
 //
 
 use bitfield_struct::bitfield;
-use open_enum::open_enum;
 use zerocopy::{FromBytes, IntoBytes};
 
 /// ESR_EL2, exception syndrome register.
@@ -22,55 +21,55 @@ pub struct EsrEl2 {
     _rsvd: u32,
 }
 
-#[open_enum]
-#[derive(Debug)]
-#[repr(u8)]
-pub enum FaultStatusCode {
-    ADDRESS_SIZE_FAULT_LEVEL0 = 0b000000,
-    ADDRESS_SIZE_FAULT_LEVEL1 = 0b000001,
-    ADDRESS_SIZE_FAULT_LEVEL2 = 0b000010,
-    ADDRESS_SIZE_FAULT_LEVEL3 = 0b000011,
-    TRANSLATION_FAULT_LEVEL0 = 0b000100,
-    TRANSLATION_FAULT_LEVEL1 = 0b000101,
-    TRANSLATION_FAULT_LEVEL2 = 0b000110,
-    TRANSLATION_FAULT_LEVEL3 = 0b000111,
-    ACCESS_FLAG_FAULT_LEVEL0 = 0b001000,
-    ACCESS_FLAG_FAULT_LEVEL1 = 0b001001,
-    ACCESS_FLAG_FAULT_LEVEL2 = 0b001010,
-    ACCESS_FLAG_FAULT_LEVEL3 = 0b001011,
-    PERMISSION_FAULT_LEVEL0 = 0b001100,
-    PERMISSION_FAULT_LEVEL1 = 0b001101,
-    PERMISSION_FAULT_LEVEL2 = 0b001110,
-    PERMISSION_FAULT_LEVEL3 = 0b001111,
-    SYNCHRONOUS_EXTERNAL_ABORT = 0b010000,
-    SYNC_TAG_CHECK_FAULT = 0b010001,
-    SEA_TTW_LEVEL_NEG1 = 0b010011,
-    SEA_TTW_LEVEL0 = 0b010100,
-    SEA_TTW_LEVEL1 = 0b010101,
-    SEA_TTW_LEVEL2 = 0b010110,
-    SEA_TTW_LEVEL3 = 0b010111,
-    ECC_PARITY = 0b011000,
-    ECC_PARITY_TTW_LEVEL_NEG1 = 0b011011,
-    ECC_PARITY_TTW_LEVEL0 = 0b011100,
-    ECC_PARITY_TTW_LEVEL1 = 0b011101,
-    ECC_PARITY_TTW_LEVEL2 = 0b011110,
-    ECC_PARITY_TTW_LEVEL3 = 0b011111,
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct FaultStatusCode(pub u8);
+
+impl FaultStatusCode {
+    pub const ADDRESS_SIZE_FAULT_LEVEL0: Self = Self(0b000000);
+    pub const ADDRESS_SIZE_FAULT_LEVEL1: Self = Self(0b000001);
+    pub const ADDRESS_SIZE_FAULT_LEVEL2: Self = Self(0b000010);
+    pub const ADDRESS_SIZE_FAULT_LEVEL3: Self = Self(0b000011);
+    pub const TRANSLATION_FAULT_LEVEL0: Self = Self(0b000100);
+    pub const TRANSLATION_FAULT_LEVEL1: Self = Self(0b000101);
+    pub const TRANSLATION_FAULT_LEVEL2: Self = Self(0b000110);
+    pub const TRANSLATION_FAULT_LEVEL3: Self = Self(0b000111);
+    pub const ACCESS_FLAG_FAULT_LEVEL0: Self = Self(0b001000);
+    pub const ACCESS_FLAG_FAULT_LEVEL1: Self = Self(0b001001);
+    pub const ACCESS_FLAG_FAULT_LEVEL2: Self = Self(0b001010);
+    pub const ACCESS_FLAG_FAULT_LEVEL3: Self = Self(0b001011);
+    pub const PERMISSION_FAULT_LEVEL0: Self = Self(0b001100);
+    pub const PERMISSION_FAULT_LEVEL1: Self = Self(0b001101);
+    pub const PERMISSION_FAULT_LEVEL2: Self = Self(0b001110);
+    pub const PERMISSION_FAULT_LEVEL3: Self = Self(0b001111);
+    pub const SYNCHRONOUS_EXTERNAL_ABORT: Self = Self(0b010000);
+    pub const SYNC_TAG_CHECK_FAULT: Self = Self(0b010001);
+    pub const SEA_TTW_LEVEL_NEG1: Self = Self(0b010011);
+    pub const SEA_TTW_LEVEL0: Self = Self(0b010100);
+    pub const SEA_TTW_LEVEL1: Self = Self(0b010101);
+    pub const SEA_TTW_LEVEL2: Self = Self(0b010110);
+    pub const SEA_TTW_LEVEL3: Self = Self(0b010111);
+    pub const ECC_PARITY: Self = Self(0b011000);
+    pub const ECC_PARITY_TTW_LEVEL_NEG1: Self = Self(0b011011);
+    pub const ECC_PARITY_TTW_LEVEL0: Self = Self(0b011100);
+    pub const ECC_PARITY_TTW_LEVEL1: Self = Self(0b011101);
+    pub const ECC_PARITY_TTW_LEVEL2: Self = Self(0b011110);
+    pub const ECC_PARITY_TTW_LEVEL3: Self = Self(0b011111);
     /// Valid only for data fault.
-    ALIGNMENT_FAULT = 0b100001,
+    pub const ALIGNMENT_FAULT: Self = Self(0b100001);
     /// Valid only for instruction fault.
-    GRANULE_PROTECTION_FAULT_LEVEL_NEG = 0b100011,
+    pub const GRANULE_PROTECTION_FAULT_LEVEL_NEG: Self = Self(0b100011);
     /// Valid only for instruction fault.
-    GRANULE_PROTECTION_FAULT_LEVEL0 = 0b100100,
+    pub const GRANULE_PROTECTION_FAULT_LEVEL0: Self = Self(0b100100);
     /// Valid only for instruction fault.
-    GRANULE_PROTECTION_FAULT_LEVEL1 = 0b100101,
+    pub const GRANULE_PROTECTION_FAULT_LEVEL1: Self = Self(0b100101);
     /// Valid only for instruction fault.
-    GRANULE_PROTECTION_FAULT_LEVEL2 = 0b100110,
+    pub const GRANULE_PROTECTION_FAULT_LEVEL2: Self = Self(0b100110);
     /// Valid only for instruction fault.
-    GRANULE_PROTECTION_FAULT_LEVEL3 = 0b100111,
-    ADDRESS_SIZE_FAULT_LEVEL_NEG1 = 0b101001,
-    TRANSLATION_FAULT_LEVEL_NEG1 = 0b101011,
-    TLB_CONFLICT_ABORT = 0b110000,
-    UNSUPPORTED_HW_UPDATE_FAULT = 0b110001,
+    pub const GRANULE_PROTECTION_FAULT_LEVEL3: Self = Self(0b100111);
+    pub const ADDRESS_SIZE_FAULT_LEVEL_NEG1: Self = Self(0b101001);
+    pub const TRANSLATION_FAULT_LEVEL_NEG1: Self = Self(0b101011);
+    pub const TLB_CONFLICT_ABORT: Self = Self(0b110000);
+    pub const UNSUPPORTED_HW_UPDATE_FAULT: Self = Self(0b110001);
 }
 
 /// Support for embedding within IssDataAbort/IssInstructionAbort
@@ -116,53 +115,54 @@ pub struct IssDataAbort {
     _unused: u8,
 }
 
-#[open_enum]
-#[repr(u8)]
-pub enum ExceptionClass {
-    UNKNOWN = 0b000000,
-    WFI = 0b000001,
-    MCR_MRC_COPROC_15 = 0b000011,
-    MCRR_MRRC_COPROC_15 = 0b000100,
-    MCR_MRC_COPROC_14 = 0b000101,
-    LDC_STC = 0b000110,
-    FP_OR_SIMD = 0b000111,
-    VMRS = 0b001000,
-    POINTER_AUTH_HCR_OR_SCR = 0b001001,
-    LS64 = 0b001010,
-    MRRC_COPROC_14 = 0b001100,
-    BRANCH_TARGET = 0b001101,
-    ILLEGAL_STATE = 0b001110,
-    SVC32 = 0b010001,
-    HVC32 = 0b010010,
-    SMC32 = 0b010011,
-    SVC = 0b010101,
-    HVC = 0b010110,
-    SMC = 0b010111,
-    SYSTEM = 0b011000,
-    SVE = 0b011001,
-    ERET = 0b011010,
-    TSTART = 0b011011,
-    POINTER_AUTH = 0b011100,
-    SME = 0b011101,
-    INSTRUCTION_ABORT_LOWER = 0b100000,
-    INSTRUCTION_ABORT = 0b100001,
-    PC_ALIGNMENT = 0b100010,
-    DATA_ABORT_LOWER = 0b100100,
-    DATA_ABORT = 0b100101,
-    SP_ALIGNMENT_FAULT = 0b100110,
-    MEMORY_OP = 0b100111,
-    FP_EXCEPTION_32 = 0b101000,
-    FP_EXCEPTION_64 = 0b101100,
-    SERROR = 0b101111,
-    BREAKPOINT_LOWER = 0b110000,
-    BREAKPOINT = 0b110001,
-    STEP_LOWER = 0b110010,
-    STEP = 0b110011,
-    WATCHPOINT_LOWER = 0b110100,
-    WATCHPOINT = 0b110101,
-    BRK32 = 0b111000,
-    VECTOR_CATCH_32 = 0b111010,
-    BRK = 0b111100,
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ExceptionClass(pub u8);
+
+impl ExceptionClass {
+    pub const UNKNOWN: Self = Self(0b000000);
+    pub const WFI: Self = Self(0b000001);
+    pub const MCR_MRC_COPROC_15: Self = Self(0b000011);
+    pub const MCRR_MRRC_COPROC_15: Self = Self(0b000100);
+    pub const MCR_MRC_COPROC_14: Self = Self(0b000101);
+    pub const LDC_STC: Self = Self(0b000110);
+    pub const FP_OR_SIMD: Self = Self(0b000111);
+    pub const VMRS: Self = Self(0b001000);
+    pub const POINTER_AUTH_HCR_OR_SCR: Self = Self(0b001001);
+    pub const LS64: Self = Self(0b001010);
+    pub const MRRC_COPROC_14: Self = Self(0b001100);
+    pub const BRANCH_TARGET: Self = Self(0b001101);
+    pub const ILLEGAL_STATE: Self = Self(0b001110);
+    pub const SVC32: Self = Self(0b010001);
+    pub const HVC32: Self = Self(0b010010);
+    pub const SMC32: Self = Self(0b010011);
+    pub const SVC: Self = Self(0b010101);
+    pub const HVC: Self = Self(0b010110);
+    pub const SMC: Self = Self(0b010111);
+    pub const SYSTEM: Self = Self(0b011000);
+    pub const SVE: Self = Self(0b011001);
+    pub const ERET: Self = Self(0b011010);
+    pub const TSTART: Self = Self(0b011011);
+    pub const POINTER_AUTH: Self = Self(0b011100);
+    pub const SME: Self = Self(0b011101);
+    pub const INSTRUCTION_ABORT_LOWER: Self = Self(0b100000);
+    pub const INSTRUCTION_ABORT: Self = Self(0b100001);
+    pub const PC_ALIGNMENT: Self = Self(0b100010);
+    pub const DATA_ABORT_LOWER: Self = Self(0b100100);
+    pub const DATA_ABORT: Self = Self(0b100101);
+    pub const SP_ALIGNMENT_FAULT: Self = Self(0b100110);
+    pub const MEMORY_OP: Self = Self(0b100111);
+    pub const FP_EXCEPTION_32: Self = Self(0b101000);
+    pub const FP_EXCEPTION_64: Self = Self(0b101100);
+    pub const SERROR: Self = Self(0b101111);
+    pub const BREAKPOINT_LOWER: Self = Self(0b110000);
+    pub const BREAKPOINT: Self = Self(0b110001);
+    pub const STEP_LOWER: Self = Self(0b110010);
+    pub const STEP: Self = Self(0b110011);
+    pub const WATCHPOINT_LOWER: Self = Self(0b110100);
+    pub const WATCHPOINT: Self = Self(0b110101);
+    pub const BRK32: Self = Self(0b111000);
+    pub const VECTOR_CATCH_32: Self = Self(0b111010);
+    pub const BRK: Self = Self(0b111100);
 }
 
 // PSR (Processor State Register) bits.

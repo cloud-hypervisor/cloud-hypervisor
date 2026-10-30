@@ -19,7 +19,6 @@ use std::cmp;
 use std::io::{self, ErrorKind, Read, Write};
 use std::ops::Deref;
 
-use byteorder::{ByteOrder, LittleEndian};
 use virtio_queue::DescriptorChain;
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestMemoryBackend, ReadVolatile, VolatileMemoryError,
@@ -95,6 +94,18 @@ const HDROFF_BUF_ALLOC: usize = 36;
 // belongs). For instance, for our Unix backend, this counter would be the total number of bytes
 // we have successfully written to a backing Unix socket.
 const HDROFF_FWD_CNT: usize = 40;
+
+/// Returns the `N` bytes of the header field at `offset`.
+fn hdr_field<const N: usize>(hdr: &[u8], offset: usize) -> [u8; N] {
+    let mut field = [0; N];
+    field.copy_from_slice(&hdr[offset..offset + N]);
+    field
+}
+
+/// Overwrites the header field at `offset` with `field`.
+fn set_hdr_field<const N: usize>(hdr: &mut [u8], offset: usize, field: [u8; N]) {
+    hdr[offset..offset + N].copy_from_slice(&field);
+}
 
 /// The packet data buffer, which may be either:
 /// - a contiguous range of guest memory, if the packet data is stored in one contiguous buffer
@@ -573,43 +584,43 @@ impl VsockPacket {
     }
 
     pub fn src_cid(&self) -> u64 {
-        LittleEndian::read_u64(&self.hdr()[HDROFF_SRC_CID..])
+        u64::from_le_bytes(hdr_field(self.hdr(), HDROFF_SRC_CID))
     }
 
     pub fn set_src_cid(&mut self, cid: u64) -> &mut Self {
-        LittleEndian::write_u64(&mut self.hdr_mut()[HDROFF_SRC_CID..], cid);
+        set_hdr_field(self.hdr_mut(), HDROFF_SRC_CID, cid.to_le_bytes());
         self
     }
 
     pub fn dst_cid(&self) -> u64 {
-        LittleEndian::read_u64(&self.hdr()[HDROFF_DST_CID..])
+        u64::from_le_bytes(hdr_field(self.hdr(), HDROFF_DST_CID))
     }
 
     pub fn set_dst_cid(&mut self, cid: u64) -> &mut Self {
-        LittleEndian::write_u64(&mut self.hdr_mut()[HDROFF_DST_CID..], cid);
+        set_hdr_field(self.hdr_mut(), HDROFF_DST_CID, cid.to_le_bytes());
         self
     }
 
     pub fn src_port(&self) -> u32 {
-        LittleEndian::read_u32(&self.hdr()[HDROFF_SRC_PORT..])
+        u32::from_le_bytes(hdr_field(self.hdr(), HDROFF_SRC_PORT))
     }
 
     pub fn set_src_port(&mut self, port: u32) -> &mut Self {
-        LittleEndian::write_u32(&mut self.hdr_mut()[HDROFF_SRC_PORT..], port);
+        set_hdr_field(self.hdr_mut(), HDROFF_SRC_PORT, port.to_le_bytes());
         self
     }
 
     pub fn dst_port(&self) -> u32 {
-        LittleEndian::read_u32(&self.hdr()[HDROFF_DST_PORT..])
+        u32::from_le_bytes(hdr_field(self.hdr(), HDROFF_DST_PORT))
     }
 
     pub fn set_dst_port(&mut self, port: u32) -> &mut Self {
-        LittleEndian::write_u32(&mut self.hdr_mut()[HDROFF_DST_PORT..], port);
+        set_hdr_field(self.hdr_mut(), HDROFF_DST_PORT, port.to_le_bytes());
         self
     }
 
     pub fn len(&self) -> u32 {
-        LittleEndian::read_u32(&self.hdr()[HDROFF_LEN..])
+        u32::from_le_bytes(hdr_field(self.hdr(), HDROFF_LEN))
     }
 
     pub fn is_empty(&self) -> bool {
@@ -617,34 +628,34 @@ impl VsockPacket {
     }
 
     pub fn set_len(&mut self, len: u32) -> &mut Self {
-        LittleEndian::write_u32(&mut self.hdr_mut()[HDROFF_LEN..], len);
+        set_hdr_field(self.hdr_mut(), HDROFF_LEN, len.to_le_bytes());
         self
     }
 
     pub fn type_(&self) -> u16 {
-        LittleEndian::read_u16(&self.hdr()[HDROFF_TYPE..])
+        u16::from_le_bytes(hdr_field(self.hdr(), HDROFF_TYPE))
     }
 
     pub fn set_type(&mut self, type_: u16) -> &mut Self {
-        LittleEndian::write_u16(&mut self.hdr_mut()[HDROFF_TYPE..], type_);
+        set_hdr_field(self.hdr_mut(), HDROFF_TYPE, type_.to_le_bytes());
         self
     }
 
     pub fn op(&self) -> u16 {
-        LittleEndian::read_u16(&self.hdr()[HDROFF_OP..])
+        u16::from_le_bytes(hdr_field(self.hdr(), HDROFF_OP))
     }
 
     pub fn set_op(&mut self, op: u16) -> &mut Self {
-        LittleEndian::write_u16(&mut self.hdr_mut()[HDROFF_OP..], op);
+        set_hdr_field(self.hdr_mut(), HDROFF_OP, op.to_le_bytes());
         self
     }
 
     pub fn flags(&self) -> u32 {
-        LittleEndian::read_u32(&self.hdr()[HDROFF_FLAGS..])
+        u32::from_le_bytes(hdr_field(self.hdr(), HDROFF_FLAGS))
     }
 
     pub fn set_flags(&mut self, flags: u32) -> &mut Self {
-        LittleEndian::write_u32(&mut self.hdr_mut()[HDROFF_FLAGS..], flags);
+        set_hdr_field(self.hdr_mut(), HDROFF_FLAGS, flags.to_le_bytes());
         self
     }
 
@@ -654,20 +665,20 @@ impl VsockPacket {
     }
 
     pub fn buf_alloc(&self) -> u32 {
-        LittleEndian::read_u32(&self.hdr()[HDROFF_BUF_ALLOC..])
+        u32::from_le_bytes(hdr_field(self.hdr(), HDROFF_BUF_ALLOC))
     }
 
     pub fn set_buf_alloc(&mut self, buf_alloc: u32) -> &mut Self {
-        LittleEndian::write_u32(&mut self.hdr_mut()[HDROFF_BUF_ALLOC..], buf_alloc);
+        set_hdr_field(self.hdr_mut(), HDROFF_BUF_ALLOC, buf_alloc.to_le_bytes());
         self
     }
 
     pub fn fwd_cnt(&self) -> u32 {
-        LittleEndian::read_u32(&self.hdr()[HDROFF_FWD_CNT..])
+        u32::from_le_bytes(hdr_field(self.hdr(), HDROFF_FWD_CNT))
     }
 
     pub fn set_fwd_cnt(&mut self, fwd_cnt: u32) -> &mut Self {
-        LittleEndian::write_u32(&mut self.hdr_mut()[HDROFF_FWD_CNT..], fwd_cnt);
+        set_hdr_field(self.hdr_mut(), HDROFF_FWD_CNT, fwd_cnt.to_le_bytes());
         self
     }
 }
@@ -963,31 +974,34 @@ mod tests {
 
         assert_eq!(
             SRC_CID,
-            LittleEndian::read_u64(&pkt.hdr()[HDROFF_SRC_CID..])
+            u64::from_le_bytes(hdr_field(pkt.hdr(), HDROFF_SRC_CID))
         );
         assert_eq!(
             DST_CID,
-            LittleEndian::read_u64(&pkt.hdr()[HDROFF_DST_CID..])
+            u64::from_le_bytes(hdr_field(pkt.hdr(), HDROFF_DST_CID))
         );
         assert_eq!(
             SRC_PORT,
-            LittleEndian::read_u32(&pkt.hdr()[HDROFF_SRC_PORT..])
+            u32::from_le_bytes(hdr_field(pkt.hdr(), HDROFF_SRC_PORT))
         );
         assert_eq!(
             DST_PORT,
-            LittleEndian::read_u32(&pkt.hdr()[HDROFF_DST_PORT..])
+            u32::from_le_bytes(hdr_field(pkt.hdr(), HDROFF_DST_PORT))
         );
-        assert_eq!(LEN, LittleEndian::read_u32(&pkt.hdr()[HDROFF_LEN..]));
-        assert_eq!(TYPE, LittleEndian::read_u16(&pkt.hdr()[HDROFF_TYPE..]));
-        assert_eq!(OP, LittleEndian::read_u16(&pkt.hdr()[HDROFF_OP..]));
-        assert_eq!(FLAGS, LittleEndian::read_u32(&pkt.hdr()[HDROFF_FLAGS..]));
+        assert_eq!(LEN, u32::from_le_bytes(hdr_field(pkt.hdr(), HDROFF_LEN)));
+        assert_eq!(TYPE, u16::from_le_bytes(hdr_field(pkt.hdr(), HDROFF_TYPE)));
+        assert_eq!(OP, u16::from_le_bytes(hdr_field(pkt.hdr(), HDROFF_OP)));
+        assert_eq!(
+            FLAGS,
+            u32::from_le_bytes(hdr_field(pkt.hdr(), HDROFF_FLAGS))
+        );
         assert_eq!(
             BUF_ALLOC,
-            LittleEndian::read_u32(&pkt.hdr()[HDROFF_BUF_ALLOC..])
+            u32::from_le_bytes(hdr_field(pkt.hdr(), HDROFF_BUF_ALLOC))
         );
         assert_eq!(
             FWD_CNT,
-            LittleEndian::read_u32(&pkt.hdr()[HDROFF_FWD_CNT..])
+            u32::from_le_bytes(hdr_field(pkt.hdr(), HDROFF_FWD_CNT))
         );
 
         assert_eq!(pkt.hdr_mut().len(), VSOCK_PKT_HDR_SIZE);

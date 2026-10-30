@@ -6,9 +6,9 @@ rust-version.workspace = true
 version = "0.1.0"
 
 [features]
-dbus_api = ["blocking", "futures", "zbus"]
+dbus_api = ["async-channel", "blocking", "futures-lite", "zbus"]
 default = []
-dhat-heap = ["dhat"] # For heap profiling
+dhat-heap = [] # For heap profiling
 fw_cfg = ["devices/fw_cfg"]
 guest_debug = ["gdbstub", "gdbstub_arch", "kvm"]
 igvm = ["dep:igvm", "hex", "igvm_defs", "mshv-bindings", "range_map_vec"]
@@ -17,20 +17,17 @@ ivshmem = ["devices/ivshmem"]
 kvm = [
   "arch/kvm",
   "hypervisor/kvm",
-  "iommufd-bindings",
   "iommufd-ioctls",
   "pci/kvm",
   "vfio-ioctls/kvm",
   "vfio-ioctls/vfio_cdev",
   "virtio-devices/kvm",
-  "vm-device/kvm",
 ]
 mshv = [
   "hypervisor/mshv",
   "pci/mshv",
   "vfio-ioctls/mshv",
   "virtio-devices/mshv",
-  "vm-device/mshv",
 ]
 pvmemcontrol = ["devices/pvmemcontrol"]
 sev_snp = [
@@ -44,26 +41,28 @@ tracing = ["tracer/tracing"]
 
 [dependencies]
 acpi_tables = { workspace = true }
-anyhow = { workspace = true }
+anyhow = { workspace = true, features = ["std"] }
 arch = { path = "../arch" }
+async-channel = { version = "2.5.0", optional = true }
 bitflags = { workspace = true }
 block = { path = "../block" }
 blocking = { version = "1.6.2", optional = true }
 cfg-if = { workspace = true }
-clap = { workspace = true }
+clap = { workspace = true, features = ["std"] }
 devices = { path = "../devices" }
-dhat = { workspace = true, optional = true }
 epoll = { workspace = true }
 event_monitor = { path = "../event_monitor" }
-flume = { workspace = true }
-futures = { version = "0.3.32", optional = true }
-gdbstub = { version = "0.7.10", optional = true }
+futures-lite = { version = "2.6.1", optional = true }
+gdbstub = { version = "0.7.10", default-features = false, features = [
+  "std",
+], optional = true }
 gdbstub_arch = { version = "0.3.3", optional = true }
-hex = { version = "0.4.3", optional = true }
+hex = { version = "0.4.3", default-features = false, features = [
+  "std",
+], optional = true }
 hypervisor = { path = "../hypervisor" }
 igvm = { workspace = true, optional = true }
 igvm_defs = { workspace = true, optional = true }
-iommufd-bindings = { workspace = true, optional = true }
 iommufd-ioctls = { workspace = true, optional = true }
 landlock = "0.4.5"
 libc = { workspace = true }
@@ -80,17 +79,17 @@ pci = { path = "../pci" }
 range_map_vec = { version = "0.2.0", optional = true }
 rate_limiter = { path = "../rate_limiter" }
 seccompiler = { workspace = true }
-serde = { workspace = true, features = ["derive", "rc"] }
+serde = { workspace = true, features = ["derive", "rc", "std"] }
 serde_json = { workspace = true }
 serde_with = { workspace = true, features = ["macros"] }
 serial_buffer = { path = "../serial_buffer" }
 sha2 = { workspace = true, optional = true }
-signal-hook = { workspace = true }
+signal-hook = { workspace = true, features = ["iterator"] }
 socket2 = { version = "0.6.5", features = ["all"] }
 thiserror = { workspace = true }
 tracer = { path = "../tracer" }
 uuid = { workspace = true }
-vfio-ioctls = { workspace = true, default-features = false }
+vfio-ioctls = { workspace = true }
 vfio_user = { workspace = true }
 vhost = { workspace = true }
 virtio-bindings = { workspace = true }
@@ -101,15 +100,13 @@ vm-memory = { workspace = true, features = [
   "backend-atomic",
   "backend-bitmap",
   "backend-mmap",
+  "rawfd",
 ] }
 vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }
-vmm-sys-util = { workspace = true, features = ["with-serde"] }
-zbus = { version = "5.15.0", optional = true }
+vmm-sys-util = { workspace = true }
+zbus = { workspace = true, features = ["async-io"], optional = true }
 zerocopy = { workspace = true, features = ["alloc", "derive"] }
-
-[dev-dependencies]
-tempfile = "3"
 
 [lints]
 workspace = true

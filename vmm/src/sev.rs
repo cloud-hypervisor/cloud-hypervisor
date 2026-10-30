@@ -387,10 +387,12 @@ mod tests {
     use std::cmp;
     use std::io::Write;
 
+    use vmm_sys_util::tempfile::TempFile;
+
     use super::*;
 
     fn make_tempfile(data: &[u8]) -> File {
-        let mut f = tempfile::tempfile().unwrap();
+        let mut f = TempFile::new().unwrap().into_file();
         f.write_all(data).unwrap();
         f
     }

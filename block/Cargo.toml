@@ -12,14 +12,14 @@ test-utils = []
 
 [dependencies]
 bitflags = { workspace = true }
-byteorder = { workspace = true }
-crc-any = "3.0.0"
-flate2 = "1.1"
+crc-any = { workspace = true, features = ["std"] }
+flate2 = { version = "1.1", default-features = false, features = [
+  "rust_backend",
+] }
 io-uring = { version = "0.7.12", optional = true }
 libc = { workspace = true }
 log = { workspace = true }
-remain = "0.2.15"
-serde = { workspace = true, features = ["derive"] }
+serde = { workspace = true, features = ["derive", "std"] }
 smallvec = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
@@ -33,7 +33,7 @@ vm-memory = { workspace = true, features = [
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { workspace = true }
 zerocopy = { workspace = true, features = ["derive"] }
-zstd = "0.14"
+zstd = { version = "0.14", default-features = false }
 
 [dev-dependencies]
 cfg-if = { workspace = true }
