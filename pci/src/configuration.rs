@@ -635,10 +635,6 @@ pub enum Error {
     CapabilityEmpty,
     #[error("Capability of size {0} doesn't fit")]
     CapabilitySpaceFull(usize),
-    #[error("Failed to decode 32-bit BAR size")]
-    Decode32BarSize,
-    #[error("Failed to decode 64-bit BAR size")]
-    Decode64BarSize,
     #[error("Failed to encode 32-bit BAR size")]
     Encode32BarSize,
     #[error("Failed to encode 64-bit BAR size")]
