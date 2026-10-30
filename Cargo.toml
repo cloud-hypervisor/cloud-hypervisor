@@ -120,7 +120,7 @@ clap = "4.6.1"
 crc-any = "3.0.0"
 dhat = "0.3.3"
 dirs = "7.0.0"
-env_logger = "0.11.10"
+env_logger = { version = "0.11.10", default-features = false }
 epoll = "4.4.0"
 getrandom = { version = "0.4.3", features = ["std"] }
 jiff = { version = "0.2", default-features = false, features = [
