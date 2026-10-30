@@ -135,7 +135,7 @@ rustls = { version = "0.23.46", default-features = false, features = [
   "ring",
   "std",
 ] }
-sha2 = "0.11.0"
+sha2 = { version = "0.11.0", default-features = false }
 signal-hook = { version = "0.4.4", default-features = false }
 smallvec = "1.15.1"
 thiserror = "2.0.18"
