@@ -346,9 +346,8 @@ guest images and a prebuilt kernel.
 scripts/dev_cli.sh tests --integration-cvm
 ```
 
-Runs `scripts/run_integration_tests_cvm.sh`. Builds with `--features
-mshv,igvm,sev_snp` and requires IGVM files to be present at
-`/usr/share/cloud-hypervisor/cvm` on the host.
+Runs `scripts/run_integration_tests_cvm.sh`. MSHV requires prebuilt
+IGVM files in `/usr/share/cloud-hypervisor/cvm` on the host.
 
 **Test group:** `common_cvm` (`nproc / 4` threads, retries 3).
 
@@ -359,18 +358,15 @@ scripts/dev_cli.sh tests --integration-cvm --hypervisor kvm
 ```
 
 With `--hypervisor kvm` the script builds with `--features
-kvm,igvm,sev_snp,fw_cfg`. On KVM the IGVM is an Oak stage0 firmware image
-and the guest kernel is supplied separately (read by stage0 over fw_cfg);
-the harness selects this boot model when a guest kernel is present at
-`/igvm_files/bzImage`. When no `--test-filter`
-is given it runs the full `common_cvm` set.
+kvm,igvm,sev_snp,fw_cfg`.
 
-Prerequisites:
+The command downloads the pinned Oak stage0 and guest kernel listed in
+[`scripts/test_assets.yaml`](../scripts/test_assets.yaml), builds
+[buildigvm](https://gitlab.com/qemu-project/buildigvm) to convert stage0
+to IGVM, and supplies the kernel separately through `fw_cfg`.
 
-- An AMD SEV-SNP-capable KVM host with `/dev/kvm` and `/dev/sev` present
-  and SNP enabled.
-- A KVM-bootable stage0 IGVM file at `/usr/share/cloud-hypervisor/cvm` and
-  a guest kernel at `/igvm_files/bzImage`.
+Requires an AMD SEV-SNP-capable host with SNP enabled and `/dev/kvm`
+and `/dev/sev` present.
 
 To scope the run to a single test explicitly:
 

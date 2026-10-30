@@ -16,6 +16,23 @@ if [ "$hypervisor" = "mshv" ]; then
     build_features="mshv,igvm,sev_snp"
 else # kvm
     build_features="kvm,igvm,sev_snp,fw_cfg"
+    BUILDIGVM_DIR="/tmp/buildigvm"
+    BUILDIGVM_TARGET_DIR="$WORKLOADS_DIR/buildigvm/target"
+    BUILDIGVM_COMMIT="58264592c62ca8828de4874870de0fd2e8ae3dbf"
+    git clone https://gitlab.com/qemu-project/buildigvm.git "$BUILDIGVM_DIR" || exit 1
+    git -C "$BUILDIGVM_DIR" checkout "$BUILDIGVM_COMMIT" || exit 1
+    cargo build --release --locked --manifest-path="$BUILDIGVM_DIR/Cargo.toml" \
+        --target-dir="$BUILDIGVM_TARGET_DIR" || exit 1
+
+    CVM_TMP=$(mktemp -d /igvm_files/.prepare.XXXXXX) || exit 1
+    # Remove the staging directory and any partial files when the script exits.
+    trap 'rm -rf -- "$CVM_TMP"' EXIT
+    cp "$WORKLOADS_DIR/bzImage-x86_64" "$CVM_TMP/bzImage" || exit 1
+    "$BUILDIGVM_TARGET_DIR/release/buildigvm" \
+        --firmware="$WORKLOADS_DIR/stage0_bin" --output="$CVM_TMP/stage0.igvm" \
+        --cpucount=4 sev-snp || exit 1
+    mv -f -- "$CVM_TMP/bzImage" /igvm_files/bzImage || exit 1
+    mv -f -- "$CVM_TMP/stage0.igvm" /igvm_files/stage0.igvm || exit 1
 fi
 test_features="--features $build_features"
 
