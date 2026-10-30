@@ -7,7 +7,7 @@ version = "0.1.0"
 
 [dependencies]
 epoll = { workspace = true }
-getrandom = "0.4.2"
+getrandom = { workspace = true }
 libc = { workspace = true }
 log = { workspace = true }
 rate_limiter = { path = "../rate_limiter" }
