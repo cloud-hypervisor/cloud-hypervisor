@@ -4,10 +4,12 @@
 //
 use std::collections::HashSet;
 use std::net::{IpAddr, SocketAddr};
-use std::os::fd::RawFd;
+use std::ops::{Deref, DerefMut};
+use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use std::path::{Path, PathBuf};
 #[cfg(feature = "fw_cfg")]
 use std::str::FromStr;
+use std::sync::Arc;
 use std::{fmt, fs, io, result};
 
 use arch::CpuProfileConfig;
@@ -506,6 +508,60 @@ pub fn default_diskconfig_queue_size() -> u16 {
 
 pub fn default_diskconfig_sparse() -> bool {
     true
+}
+
+/// A descriptor shared by config clones. Deserialization leaves it empty.
+#[derive(Clone, Debug, Default)]
+pub struct ExternalFd(Option<Arc<OwnedFd>>);
+
+impl Deref for ExternalFd {
+    type Target = Option<Arc<OwnedFd>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for ExternalFd {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl PartialEq for ExternalFd {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.as_ref().map(|fd| fd.as_raw_fd()) == other.0.as_ref().map(|fd| fd.as_raw_fd())
+    }
+}
+
+impl Eq for ExternalFd {}
+
+impl Serialize for ExternalFd {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0
+            .as_ref()
+            .map_or(-1, |fd| fd.as_raw_fd())
+            .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ExternalFd {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let _ = Option::<RawFd>::deserialize(deserializer)?;
+        Ok(Self::default())
+    }
+}
+
+impl From<OwnedFd> for ExternalFd {
+    fn from(fd: OwnedFd) -> Self {
+        Self(Some(Arc::new(fd)))
+    }
+}
+
+impl From<fs::File> for ExternalFd {
+    fn from(file: fs::File) -> Self {
+        Self::from(OwnedFd::from(file))
+    }
 }
 
 #[serde_with::skip_serializing_none]
