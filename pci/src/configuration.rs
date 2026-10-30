@@ -7,7 +7,6 @@
 use std::sync::{Arc, Mutex};
 use std::{mem, result};
 
-use byteorder::{ByteOrder, LittleEndian};
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -1069,16 +1068,22 @@ impl PciConfiguration {
         if let Some(msix_cap_reg_idx) = self.msix_cap_reg_idx
             && let Some(msix_config) = &self.msix_config
         {
-            if msix_cap_reg_idx == reg_idx && offset == 2 && data.len() == 2 {
+            if msix_cap_reg_idx == reg_idx
+                && offset == 2
+                && let Ok(data) = <[u8; 2]>::try_from(data)
+            {
                 msix_config
                     .lock()
                     .unwrap()
-                    .set_msg_ctl(LittleEndian::read_u16(data));
-            } else if msix_cap_reg_idx == reg_idx && offset == 0 && data.len() == 4 {
+                    .set_msg_ctl(u16::from_le_bytes(data));
+            } else if msix_cap_reg_idx == reg_idx
+                && offset == 0
+                && let Ok(data) = <[u8; 4]>::try_from(data)
+            {
                 msix_config
                     .lock()
                     .unwrap()
-                    .set_msg_ctl((LittleEndian::read_u32(data) >> 16) as u16);
+                    .set_msg_ctl((u32::from_le_bytes(data) >> 16) as u16);
             }
         }
 
@@ -1088,7 +1093,10 @@ impl PciConfiguration {
                 reg_idx * 4 + offset as usize,
                 u16::from(data[0]) | (u16::from(data[1]) << 8),
             ),
-            4 => self.write_reg(reg_idx, LittleEndian::read_u32(data)),
+            4 => self.write_reg(
+                reg_idx,
+                u32::from_le_bytes(data.try_into().expect("data should be 4 bytes")),
+            ),
             _ => (),
         }
 
@@ -1125,11 +1133,11 @@ impl PciConfiguration {
         reg_idx: usize,
         data: &[u8],
     ) -> Option<BarReprogrammingParams> {
-        if data.len() != 4 {
+        let Ok(data) = <[u8; 4]>::try_from(data) else {
             return None;
-        }
+        };
 
-        let value = LittleEndian::read_u32(data);
+        let value = u32::from_le_bytes(data);
 
         // Ignore the case where the BAR size is being asked for.
         if self.is_bar_size_probe(reg_idx, value) {

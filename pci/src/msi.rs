@@ -6,7 +6,6 @@
 use std::sync::Arc;
 use std::{io, result};
 
-use byteorder::{ByteOrder, LittleEndian};
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -140,7 +139,7 @@ impl MsiCap {
         // Update cache without overriding the read-only bits.
         match data.len() {
             2 => {
-                let value = LittleEndian::read_u16(data);
+                let value = u16::from_le_bytes(data.try_into().expect("data should be 2 bytes"));
                 match offset {
                     MSI_MSG_CTL_OFFSET => {
                         self.msg_ctl = (self.msg_ctl
@@ -152,7 +151,7 @@ impl MsiCap {
                 }
             }
             4 => {
-                let value = LittleEndian::read_u32(data);
+                let value = u32::from_le_bytes(data.try_into().expect("data should be 4 bytes"));
                 match offset {
                     0x0 => {
                         self.msg_ctl = (self.msg_ctl
