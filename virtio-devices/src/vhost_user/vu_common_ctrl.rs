@@ -117,7 +117,9 @@ impl VhostUserHandle {
 
         self.vu
             .add_mem_region(&region)
-            .map_err(Error::VhostUserAddMemReg)
+            .map_err(Error::VhostUserAddMemReg)?;
+
+        Ok(())
     }
 
     pub fn negotiate_features_vhost_user(
