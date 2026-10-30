@@ -13,7 +13,7 @@ mshv_emulator = ["iced-x86", "mshv-bindings"]
 sev_snp = ["dep:bitfield-struct", "igvm", "igvm_defs"]
 
 [dependencies]
-anyhow = { workspace = true }
+anyhow = { workspace = true, features = ["std"] }
 arc-swap = "1.9.1"
 concat-idents = "1.1.5"
 igvm = { workspace = true, optional = true }

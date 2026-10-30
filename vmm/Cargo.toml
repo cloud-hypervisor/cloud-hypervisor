@@ -41,7 +41,7 @@ tracing = ["tracer/tracing"]
 
 [dependencies]
 acpi_tables = { workspace = true }
-anyhow = { workspace = true }
+anyhow = { workspace = true, features = ["std"] }
 arch = { path = "../arch" }
 async-channel = { version = "2.5.0", optional = true }
 bitflags = { workspace = true }

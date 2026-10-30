@@ -16,7 +16,7 @@ kvm = [
 mshv = ["hypervisor/mshv", "vfio-ioctls/mshv"]
 
 [dependencies]
-anyhow = { workspace = true }
+anyhow = { workspace = true, features = ["std"] }
 base64 = { workspace = true }
 hypervisor = { path = "../hypervisor" }
 iommufd-ioctls = { workspace = true, optional = true }
