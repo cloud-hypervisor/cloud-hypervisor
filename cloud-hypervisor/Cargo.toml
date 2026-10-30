@@ -28,7 +28,7 @@ signal-hook-registry = { workspace = true }
 thiserror = { workspace = true }
 vmm = { path = "../vmm" }
 vmm-sys-util = { workspace = true }
-zbus = { version = "5.15.0", optional = true }
+zbus = { workspace = true, optional = true }
 
 [dev-dependencies]
 block = { path = "../block" }

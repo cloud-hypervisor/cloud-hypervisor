@@ -113,10 +113,12 @@ serde_with = { version = "3.19.0", default-features = false }
 # other crates
 anyhow = "1.0.102"
 base64 = "0.23.0"
+bitfield-struct = "0.13.0"
 bitflags = "2.11.1"
 byteorder = "1.5.0"
 cfg-if = "1.0.4"
 clap = "4.6.1"
+crc-any = "3.0.0"
 dhat = "0.3.3"
 dirs = "7.0.0"
 env_logger = "0.11.10"
@@ -143,6 +145,7 @@ smallvec = "1.15.1"
 thiserror = "2.0.18"
 uuid = { version = "1.23.2" }
 wait-timeout = "0.2.1"
+zbus = "5.15.0"
 zerocopy = { version = "0.8.50", default-features = false }
 
 [workspace.lints.clippy]
