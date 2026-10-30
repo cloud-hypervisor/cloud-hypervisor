@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
@@ -61,7 +61,7 @@ pub enum Error {
     #[error("Could not initialize emulator's backend")]
     InitializeEmulator(#[source] anyhow::Error),
     #[error("Failed to create data fd to pass to swtpm")]
-    PrepareDataFd(#[source] anyhow::Error),
+    PrepareDataFd(#[source] io::Error),
     #[error("Failed to run Control Cmd")]
     RunControlCmd(#[source] anyhow::Error),
     #[error("Emulator doesn't implement min required capabilities")]
@@ -143,11 +143,7 @@ impl Emulator {
     fn prepare_data_fd(&mut self) -> Result<()> {
         let mut res: PtmResult = 0;
 
-        let (data_socket, swtpm_socket) = UnixStream::pair().map_err(|e| {
-            Error::PrepareDataFd(anyhow!(
-                "Failed to prepare data fd for tpm emulator. Error Code {e:?}"
-            ))
-        })?;
+        let (data_socket, swtpm_socket) = UnixStream::pair().map_err(Error::PrepareDataFd)?;
         self.control_socket.set_msgfd(swtpm_socket.as_raw_fd());
         debug!(
             "data fd to be configured in swtpm = {:?}",
@@ -162,11 +158,7 @@ impl Emulator {
 
         data_socket
             .set_read_timeout(Some(TPM_DATA_SOCKET_READ_TIMEOUT))
-            .map_err(|e| {
-                Error::PrepareDataFd(anyhow!(
-                    "Failed to set receive timeout on data fd socket. Error Code {e:?}"
-                ))
-            })?;
+            .map_err(Error::PrepareDataFd)?;
         self.control_socket.set_datafd(data_socket.as_raw_fd());
         self.data_socket = Some(data_socket);
         Ok(())
