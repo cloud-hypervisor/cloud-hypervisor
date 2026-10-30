@@ -15,7 +15,6 @@ use std::sync::{Arc, Barrier, RwLock};
 use std::{fs, io, result};
 
 use anyhow::anyhow;
-use byteorder::{ByteOrder, LittleEndian};
 use event_monitor::event;
 use log::{debug, error, info, warn};
 use seccompiler::SeccompAction;
@@ -444,10 +443,12 @@ where
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
         match offset {
-            0 if data.len() == 8 => LittleEndian::write_u64(data, self.cid),
-            0 if data.len() == 4 => LittleEndian::write_u32(data, (self.cid & 0xffff_ffff) as u32),
+            0 if data.len() == 8 => data.copy_from_slice(&self.cid.to_le_bytes()),
+            0 if data.len() == 4 => {
+                data.copy_from_slice(&((self.cid & 0xffff_ffff) as u32).to_le_bytes());
+            }
             4 if data.len() == 4 => {
-                LittleEndian::write_u32(data, ((self.cid >> 32) & 0xffff_ffff) as u32);
+                data.copy_from_slice(&(((self.cid >> 32) & 0xffff_ffff) as u32).to_le_bytes());
             }
             _ => warn!(
                 "vsock: virtio-vsock received invalid read request of {} bytes at offset {}",
@@ -590,22 +591,19 @@ mod tests {
         );
 
         // Test reading 32-bit chunks.
-        let mut data = [0u8; 8];
-        ctx.device.read_config(0, &mut data[..4]);
+        let mut data = [0u8; 4];
+        ctx.device.read_config(0, &mut data);
+        assert_eq!(u64::from(u32::from_le_bytes(data)), ctx.cid & 0xffff_ffff);
+        ctx.device.read_config(4, &mut data);
         assert_eq!(
-            u64::from(LittleEndian::read_u32(&data)),
-            ctx.cid & 0xffff_ffff
-        );
-        ctx.device.read_config(4, &mut data[4..]);
-        assert_eq!(
-            u64::from(LittleEndian::read_u32(&data[4..])),
+            u64::from(u32::from_le_bytes(data)),
             (ctx.cid >> 32) & 0xffff_ffff
         );
 
         // Test reading 64-bit.
         let mut data = [0u8; 8];
         ctx.device.read_config(0, &mut data);
-        assert_eq!(LittleEndian::read_u64(&data), ctx.cid);
+        assert_eq!(u64::from_le_bytes(data), ctx.cid);
 
         // Check that out-of-bounds reading doesn't mutate the destination buffer.
         let mut data = [0u8, 1, 2, 3, 4, 5, 6, 7];
