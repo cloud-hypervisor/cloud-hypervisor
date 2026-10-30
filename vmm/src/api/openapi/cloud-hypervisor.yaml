@@ -972,6 +972,10 @@ components:
         kvm_hyperv:
           type: boolean
           default: false
+        kvm_hint_realtime:
+          description: Advertise KVM_HINTS_REALTIME to the guest (x86-64 with KVM only)
+          type: boolean
+          default: false
         max_phys_bits:
           type: integer
         nested:

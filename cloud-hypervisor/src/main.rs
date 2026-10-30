@@ -269,7 +269,8 @@ fn get_cli_options_sorted(
             .help(
                 "boot=<boot_vcpus>,max=<max_vcpus>,\
                     topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,\
-                    kvm_hyperv=on|off,max_phys_bits=<maximum_number_of_physical_bits>,\
+                    kvm_hyperv=on|off,kvm_hint_realtime=on|off,\
+                    max_phys_bits=<maximum_number_of_physical_bits>,\
                     affinity=<list_of_vcpus_with_their_associated_cpuset>,\
                     features=<list_of_features_to_enable>,\
                     nested=on|off,core_scheduling=vm|vcpu|off,\
@@ -1303,6 +1304,8 @@ mod tests {
                 max_vcpus: 1,
                 topology: None,
                 kvm_hyperv: false,
+                #[cfg(target_arch = "x86_64")]
+                kvm_hint_realtime: false,
                 max_phys_bits: 46,
                 affinity: None,
                 features: CpuFeatures::default(),
