@@ -6,6 +6,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 #[cfg(feature = "ivshmem")]
 use std::fs;
+use std::os::fd::RawFd;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::LazyLock;
@@ -288,7 +289,7 @@ pub enum ValidationError {
     VnetQueueFdMismatch(u16 /* num of queues */, usize /* FD num */),
     /// Using reserved fd
     #[error("Reserved fd number (<= 2): {0}")]
-    VnetReservedFd(i32),
+    VnetReservedFd(RawFd),
     /// Hardware checksum offload is disabled.
     #[error("\"offload_tso\" and \"offload_ufo\" depend on \"offload_csum\"")]
     NoHardwareChecksumOffload,
@@ -1144,7 +1145,7 @@ impl PlatformConfig {
             .map_err(Error::ParsePlatform)?
             .map(|v| v.0.into_boxed_slice());
         let iommufd_fd = parser
-            .convert::<i32>("iommufd_fd")
+            .convert::<RawFd>("iommufd_fd")
             .map_err(Error::ParsePlatform)?;
         // `iommufd_fd=<n>` implies `iommufd=on` unless the user explicitly set the value.
         let iommufd = parser
@@ -1983,7 +1984,7 @@ impl NetConfig {
         let fds = parser
             .convert::<IntegerList>("fd")
             .map_err(Error::ParseNetwork)?
-            .map(|v| v.0.iter().map(|e| *e as i32).collect());
+            .map(|v| v.0.iter().map(|e| *e as RawFd).collect());
         let bw_size = parser
             .convert("bw_size")
             .map_err(Error::ParseNetwork)?
@@ -2750,7 +2751,7 @@ impl DeviceConfig {
 
         let pci_common = PciDeviceCommonConfig::parse(device)?;
         let path = parser.get("path").map(PathBuf::from);
-        let fd = parser.convert::<i32>("fd").map_err(Error::ParseDevice)?;
+        let fd = parser.convert::<RawFd>("fd").map_err(Error::ParseDevice)?;
         let x_nv_gpudirect_clique = parser
             .convert::<u8>("x_nv_gpudirect_clique")
             .map_err(Error::ParseDevice)?;
@@ -3046,14 +3047,14 @@ pub struct RestoredNetConfig {
     // Valid FDs are transmitted via a different channel (SCM_RIGHTS message)
     // and will be populated into this struct on the destination VMM eventually.
     #[serde(default, deserialize_with = "deserialize_restorednetconfig_fds")]
-    pub fds: Option<Vec<i32>>,
+    pub fds: Option<Vec<RawFd>>,
 }
 
-fn deserialize_restorednetconfig_fds<'de, D>(d: D) -> result::Result<Option<Vec<i32>>, D::Error>
+fn deserialize_restorednetconfig_fds<'de, D>(d: D) -> result::Result<Option<Vec<RawFd>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    let invalid_fds: Option<Vec<i32>> = Option::deserialize(d)?;
+    let invalid_fds: Option<Vec<RawFd>> = Option::deserialize(d)?;
     if let Some(invalid_fds) = invalid_fds {
         // If the live-migration path is used properly, new FDs are passed as
         // SCM_RIGHTS message. So, we don't get them from the serialized JSON
@@ -3113,14 +3114,14 @@ pub struct RestoredVfioConfig {
     pub id: String,
     // FDs are not serialized and any deserialized value is invalid; see NetConfig::fds.
     #[serde(default, deserialize_with = "deserialize_restored_fd")]
-    pub fd: Option<i32>,
+    pub fd: Option<RawFd>,
 }
 
-pub(crate) fn deserialize_restored_fd<'de, D>(d: D) -> result::Result<Option<i32>, D::Error>
+pub(crate) fn deserialize_restored_fd<'de, D>(d: D) -> result::Result<Option<RawFd>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    let invalid_fd: Option<i32> = Option::deserialize(d)?;
+    let invalid_fd: Option<RawFd> = Option::deserialize(d)?;
     if invalid_fd.is_some() {
         Ok(Some(-1))
     } else {
@@ -3142,7 +3143,7 @@ pub struct RestoreConfig {
     pub vfio_fds: Option<Vec<RestoredVfioConfig>>,
     // FDs are not serialized and any deserialized value is invalid; see NetConfig::fds.
     #[serde(default, deserialize_with = "deserialize_restored_fd")]
-    pub iommufd_fd: Option<i32>,
+    pub iommufd_fd: Option<RawFd>,
     #[serde(default)]
     pub resume: bool,
     #[serde(default)]
@@ -3202,7 +3203,7 @@ impl RestoreConfig {
                     .map(|Tuple(id, fds)| RestoredNetConfig {
                         id: id.clone(),
                         num_fds: fds.len(),
-                        fds: Some(fds.iter().map(|e| *e as i32).collect()),
+                        fds: Some(fds.iter().map(|e| *e as RawFd).collect()),
                     })
                     .collect()
             });
@@ -3213,12 +3214,12 @@ impl RestoreConfig {
                 v.0.iter()
                     .map(|Tuple(id, fd)| RestoredVfioConfig {
                         id: id.clone(),
-                        fd: Some(*fd as i32),
+                        fd: Some(*fd as RawFd),
                     })
                     .collect()
             });
         let iommufd_fd = parser
-            .convert::<i32>("iommufd_fd")
+            .convert::<RawFd>("iommufd_fd")
             .map_err(Error::ParseRestore)?;
         let resume = parser
             .convert::<Toggle>("resume")
@@ -4349,7 +4350,7 @@ impl VmConfig {
     /// # Safety
     /// To use this safely, the caller must guarantee that the input
     /// fds are all valid.
-    pub unsafe fn add_preserved_fds(&mut self, fds: Vec<i32>) {
+    pub unsafe fn add_preserved_fds(&mut self, fds: Vec<RawFd>) {
         if fds.is_empty() {
             return;
         }

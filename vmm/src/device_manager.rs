@@ -21,6 +21,8 @@ use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{self, IsTerminal, Seek, SeekFrom, stdout};
 use std::num::Wrapping;
+#[cfg(feature = "kvm")]
+use std::os::fd::RawFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 #[cfg(not(target_arch = "riscv64"))]
@@ -4099,7 +4101,7 @@ impl DeviceManager {
     #[cfg(feature = "kvm")]
     fn create_vfio_device_from_fd(
         &self,
-        fd: i32,
+        fd: RawFd,
         vfio_ops: &Arc<dyn VfioOps>,
         attach_ioas: bool,
     ) -> DeviceManagerResult<(VfioDevice, PathBuf)> {

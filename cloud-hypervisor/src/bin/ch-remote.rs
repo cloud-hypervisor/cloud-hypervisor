@@ -9,6 +9,7 @@ mod test_util;
 
 use std::io::{self, Read};
 use std::marker::PhantomData;
+use std::os::fd::RawFd;
 use std::os::unix::net::UnixStream;
 use std::{error, fs, iter, num, process};
 
@@ -856,7 +857,7 @@ fn resize_zone_config(id: &str, size: &str) -> Result<String, Error> {
     Ok(serde_json::to_string(&resize_zone).unwrap())
 }
 
-fn add_device_config(config: &str) -> Result<(String, Vec<i32>), Error> {
+fn add_device_config(config: &str) -> Result<(String, Vec<RawFd>), Error> {
     let mut device_config = DeviceConfig::parse(config).map_err(Error::AddDeviceConfig)?;
 
     // DeviceConfig is modified on purpose here by taking the file
@@ -915,7 +916,7 @@ fn add_pmem_config(config: &str) -> Result<String, Error> {
     Ok(pmem_config)
 }
 
-fn add_net_config(config: &str) -> Result<(String, Vec<i32>), Error> {
+fn add_net_config(config: &str) -> Result<(String, Vec<RawFd>), Error> {
     let mut net_config = NetConfig::parse(config).map_err(Error::AddNetConfig)?;
 
     // NetConfig is modified on purpose here by taking the list of file
@@ -950,13 +951,13 @@ fn snapshot_config(url: &str) -> String {
     serde_json::to_string(&snapshot_config).unwrap()
 }
 
-fn restore_config(config: &str) -> Result<(String, Vec<i32>), Error> {
+fn restore_config(config: &str) -> Result<(String, Vec<RawFd>), Error> {
     let mut restore_config = RestoreConfig::parse(config).map_err(Error::Restore)?;
     // RestoreConfig is modified on purpose to take out the file descriptors.
     // These fds are passed to the server side process via SCM_RIGHTS, in the
     // order net_fds, then vfio_fds, then the iommufd FD, matching the
     // server's split.
-    let mut fds: Vec<i32> = match &mut restore_config.net_fds {
+    let mut fds: Vec<RawFd> = match &mut restore_config.net_fds {
         Some(net_fds) => net_fds
             .iter_mut()
             .flat_map(|net| net.fds.take().unwrap_or_default())
@@ -982,13 +983,13 @@ fn coredump_config(destination_url: &str) -> String {
     serde_json::to_string(&coredump_config).unwrap()
 }
 
-fn receive_migration_data(config: &str) -> Result<(String, Vec<i32>), Error> {
+fn receive_migration_data(config: &str) -> Result<(String, Vec<RawFd>), Error> {
     let mut data =
         api::VmReceiveMigrationData::parse(config).map_err(Error::ReceiveMigrationConfig)?;
 
     // The FDs are passed to the server side process via SCM_RIGHTS, in the
     // order vfio_fds then the iommufd FD, matching the server's split.
-    let mut fds: Vec<i32> = match data.vfio_fds.as_mut() {
+    let mut fds: Vec<RawFd> = match data.vfio_fds.as_mut() {
         Some(vfio_fds) => vfio_fds.iter_mut().filter_map(|v| v.fd.take()).collect(),
         None => Vec::new(),
     };

@@ -819,11 +819,13 @@ impl EndpointHandler for VmmShutdown {
 
 #[cfg(test)]
 mod external_fds_tests {
+    use std::os::fd::RawFd;
+
     use super::*;
     use crate::api::http::http_endpoint::fds_helper::{ConfigWithFDs, ConfigWithVariableFDs};
 
     struct DummyNewDeviceCfg {
-        http_fds: Option<Vec<i32>>,
+        http_fds: Option<Vec<RawFd>>,
     }
 
     impl ConfigWithFDs for DummyNewDeviceCfg {
@@ -831,17 +833,17 @@ mod external_fds_tests {
             Some("dummy")
         }
 
-        fn fds_from_http_body(&self) -> Option<&[i32]> {
+        fn fds_from_http_body(&self) -> Option<&[RawFd]> {
             self.http_fds.as_deref()
         }
 
-        fn set_fds(&mut self, fds: Option<Vec<i32>>) {
+        fn set_fds(&mut self, fds: Option<Vec<RawFd>>) {
             self.http_fds = fds;
         }
     }
 
     struct DummyRestoreDeviceCfg {
-        http_fds: Option<Vec<i32>>,
+        http_fds: Option<Vec<RawFd>>,
         num_fds: usize,
     }
 
@@ -850,11 +852,11 @@ mod external_fds_tests {
             Some("dummy")
         }
 
-        fn fds_from_http_body(&self) -> Option<&[i32]> {
+        fn fds_from_http_body(&self) -> Option<&[RawFd]> {
             self.http_fds.as_deref()
         }
 
-        fn set_fds(&mut self, fds: Option<Vec<i32>>) {
+        fn set_fds(&mut self, fds: Option<Vec<RawFd>>) {
             self.http_fds = fds;
         }
     }

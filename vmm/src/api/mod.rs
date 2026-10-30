@@ -36,6 +36,7 @@ pub mod http;
 use std::collections::HashSet;
 use std::io;
 use std::num::{NonZeroU32, NonZeroU64};
+use std::os::fd::RawFd;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::mpsc::{RecvError, SendError, Sender, channel};
@@ -327,7 +328,7 @@ pub struct VmReceiveMigrationData {
     pub vfio_fds: Option<Vec<RestoredVfioConfig>>,
     // FDs are not serialized and any deserialized value is invalid; see NetConfig::fds.
     #[serde(default, deserialize_with = "deserialize_restored_fd")]
-    pub iommufd_fd: Option<i32>,
+    pub iommufd_fd: Option<RawFd>,
     /// Optional memory zone update data
     #[serde(default)]
     pub zone_updates: Vec<VmMemoryZoneUpdateData>,
@@ -420,12 +421,12 @@ impl VmReceiveMigrationData {
                 v.0.iter()
                     .map(|Tuple(id, fd)| RestoredVfioConfig {
                         id: id.clone(),
-                        fd: Some(*fd as i32),
+                        fd: Some(*fd as RawFd),
                     })
                     .collect()
             });
         let iommufd_fd = parser
-            .convert::<i32>("iommufd_fd")
+            .convert::<RawFd>("iommufd_fd")
             .map_err(VmReceiveMigrationConfigError::ParseError)?;
 
         let zone_updates: Vec<VmMemoryZoneUpdateData> = parser
