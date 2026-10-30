@@ -396,16 +396,16 @@ impl VmOps for VmOpsHandler {
     }
 
     fn mmio_read(&self, gpa: u64, data: &mut [u8]) -> result::Result<(), HypervisorVmError> {
-        if let Err(vm_device::BusError::UnassignedAddressRange(_)) = self.mmio_bus.read(gpa, data) {
-            debug!("Guest MMIO read from unregistered address 0x{gpa:x}");
+        if let Err(error) = self.mmio_bus.read(gpa, data) {
+            debug!("Guest MMIO read failed: {error}");
         }
         Ok(())
     }
 
     fn mmio_write(&self, gpa: u64, data: &[u8]) -> result::Result<(), HypervisorVmError> {
         match self.mmio_bus.write(gpa, data) {
-            Err(vm_device::BusError::UnassignedAddressRange(_)) => {
-                debug!("Guest MMIO write to unregistered address 0x{gpa:x}");
+            Err(error) => {
+                debug!("Guest MMIO write failed: {error}");
             }
             Ok(Some(barrier)) => {
                 info!("Waiting for barrier");
@@ -419,8 +419,8 @@ impl VmOps for VmOpsHandler {
 
     #[cfg(target_arch = "x86_64")]
     fn pio_read(&self, port: u64, data: &mut [u8]) -> result::Result<(), HypervisorVmError> {
-        if let Err(vm_device::BusError::UnassignedAddressRange(_)) = self.io_bus.read(port, data) {
-            debug!("Guest PIO read from unregistered address 0x{port:x}");
+        if let Err(error) = self.io_bus.read(port, data) {
+            debug!("Guest PIO read failed: {error}");
         }
         Ok(())
     }
@@ -428,8 +428,8 @@ impl VmOps for VmOpsHandler {
     #[cfg(target_arch = "x86_64")]
     fn pio_write(&self, port: u64, data: &[u8]) -> result::Result<(), HypervisorVmError> {
         match self.io_bus.write(port, data) {
-            Err(vm_device::BusError::UnassignedAddressRange(_)) => {
-                debug!("Guest PIO write to unregistered address 0x{port:x}");
+            Err(error) => {
+                debug!("Guest PIO write failed: {error}");
             }
             Ok(Some(barrier)) => {
                 info!("Waiting for barrier");
