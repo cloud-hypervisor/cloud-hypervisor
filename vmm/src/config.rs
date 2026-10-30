@@ -4301,7 +4301,6 @@ impl VmConfig {
             pci_segments,
             platform,
             tpm,
-            preserved_fds: None,
             landlock_enable: vm_params.landlock_enable,
             landlock_rules,
             #[cfg(feature = "ivshmem")]
@@ -4379,85 +4378,15 @@ impl VmConfig {
         removed
     }
 
-    /// # Safety
-    /// To use this safely, the caller must guarantee that the input
-    /// fds are all valid.
-    pub unsafe fn add_preserved_fds(&mut self, fds: Vec<RawFd>) {
-        if fds.is_empty() {
-            return;
-        }
-
-        self.preserved_fds.get_or_insert_default().extend(fds);
-    }
-
     #[cfg(feature = "sev_snp")]
     pub fn is_sev_snp_enabled(&self) -> bool {
         self.platform.as_ref().is_some_and(|p| p.sev_snp)
     }
 }
 
-impl Clone for VmConfig {
-    fn clone(&self) -> Self {
-        VmConfig {
-            cpus: self.cpus.clone(),
-            memory: self.memory.clone(),
-            payload: self.payload.clone(),
-            rate_limit_groups: self.rate_limit_groups.clone(),
-            disks: self.disks.clone(),
-            net: self.net.clone(),
-            rng: self.rng.clone(),
-            rtc: self.rtc.clone(),
-            balloon: self.balloon.clone(),
-            #[cfg(feature = "pvmemcontrol")]
-            pvmemcontrol: self.pvmemcontrol.clone(),
-            fs: self.fs.clone(),
-            generic_vhost_user: self.generic_vhost_user.clone(),
-            pmem: self.pmem.clone(),
-            serial: self.serial.clone(),
-            console: self.console.clone(),
-            #[cfg(target_arch = "x86_64")]
-            debug_console: self.debug_console.clone(),
-            devices: self.devices.clone(),
-            user_devices: self.user_devices.clone(),
-            vdpa: self.vdpa.clone(),
-            vsock: self.vsock.clone(),
-            numa: self.numa.clone(),
-            pci_segments: self.pci_segments.clone(),
-            platform: self.platform.clone(),
-            tpm: self.tpm.clone(),
-            preserved_fds: self
-                .preserved_fds
-                .as_ref()
-                // SAFETY: FFI call with valid FDs
-                .map(|fds| fds.iter().map(|fd| unsafe { libc::dup(*fd) }).collect()),
-            landlock_rules: self.landlock_rules.clone(),
-            #[cfg(feature = "ivshmem")]
-            ivshmem: self.ivshmem.clone(),
-            ..*self
-        }
-    }
-}
-
-impl Drop for VmConfig {
-    fn drop(&mut self) {
-        if let Some(mut fds) = self.preserved_fds.take() {
-            for fd in fds.drain() {
-                // SAFETY: FFI call with valid FDs
-                unsafe { libc::close(fd) };
-            }
-        }
-    }
-}
-
 /// # Safety
 /// A live fd must be exclusively owned by the caller, which transfers it here.
 pub(crate) unsafe fn take_inherited_fd(fd: impl TryInto<RawFd>) -> Result<ExternalFd> {
-    let fd = parse_inherited_fd(fd)?;
-    // SAFETY: The caller transfers exclusive ownership of the validated FD.
-    Ok(unsafe { OwnedFd::from_raw_fd(fd) }.into())
-}
-
-pub(crate) fn parse_inherited_fd(fd: impl TryInto<RawFd>) -> Result<RawFd> {
     let fd = fd
         .try_into()
         .map_err(|_| Error::InheritedFd(io::Error::from_raw_os_error(libc::EBADF)))?;
@@ -4467,7 +4396,8 @@ pub(crate) fn parse_inherited_fd(fd: impl TryInto<RawFd>) -> Result<RawFd> {
             libc::EBADF,
         )));
     }
-    Ok(fd)
+    // SAFETY: The caller transfers exclusive ownership of the validated FD.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) }.into())
 }
 
 // Check all references before taking ownership so repeated CLI FDs cannot
@@ -4539,29 +4469,6 @@ mod tests {
     use crate::tests::test_fd;
 
     #[test]
-    fn test_parse_inherited_fd() {
-        parse_inherited_fd(-1).unwrap_err();
-        parse_inherited_fd(u64::MAX).unwrap_err();
-        let file = test_fd();
-        assert_eq!(
-            parse_inherited_fd(file.as_raw_fd()).unwrap(),
-            file.as_raw_fd()
-        );
-        for input in [
-            vec!["fd=[3,3]"],
-            vec!["fd=3", "iommufd_fd=3"],
-            vec!["net_fds=[net0@[3,4]],vfio_fds=[vfio0@4]"],
-            vec!["fd= [3,3]"],
-        ] {
-            assert!(matches!(
-                validate_inherited_fds(input),
-                Err(Error::DuplicateInheritedFd(_))
-            ));
-        }
-        validate_inherited_fds(["fd=[3,4]", "fd=5", "iommufd_fd=6"]).unwrap();
-    }
-
-    #[test]
     fn test_vfio_binding_state_is_runtime_only() {
         let fd: ExternalFd = test_fd().into();
 
@@ -4584,6 +4491,39 @@ mod tests {
                 .iommufd_dev_id
                 .is_none()
         );
+    }
+
+    #[test]
+    fn test_take_inherited_fd() {
+        use std::os::fd::IntoRawFd;
+
+        // SAFETY: These values cannot name live descriptors.
+        unsafe {
+            take_inherited_fd(-1).unwrap_err();
+            take_inherited_fd(u64::MAX).unwrap_err();
+        }
+        let fd = test_fd().into_raw_fd();
+        assert_eq!(
+            // SAFETY: into_raw_fd transferred exclusive ownership of the descriptor.
+            unsafe { take_inherited_fd(fd) }
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .as_raw_fd(),
+            fd
+        );
+        for input in [
+            vec!["fd=[3,3]"],
+            vec!["fd=3", "iommufd_fd=3"],
+            vec!["net_fds=[net0@[3,4]],vfio_fds=[vfio0@4]"],
+            vec!["fd= [3,3]"],
+        ] {
+            assert!(matches!(
+                validate_inherited_fds(input),
+                Err(Error::DuplicateInheritedFd(_))
+            ));
+        }
+        validate_inherited_fds(["fd=[3,4]", "fd=5", "iommufd_fd=6"]).unwrap();
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -6416,7 +6356,6 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             pci_segments: None,
             platform: None,
             tpm: None,
-            preserved_fds: None,
             net: Some(vec![
                 NetConfig {
                     pci_common: PciDeviceCommonConfig {
@@ -6652,7 +6591,6 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 ..platform_fixture()
             }),
             tpm: None,
-            preserved_fds: None,
             net: None,
             landlock_enable: false,
             landlock_rules: None,
@@ -6893,7 +6831,6 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             pci_segments: None,
             platform: None,
             tpm: None,
-            preserved_fds: None,
             landlock_enable: false,
             landlock_rules: None,
             #[cfg(feature = "ivshmem")]
@@ -8220,17 +8157,6 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             invalid_config.validate(),
             Err(ValidationError::InvalidDeviceExcludeMmapBar(6))
         );
-
-        let mut still_valid_config = valid_config.clone();
-        // SAFETY: Safe as the file was just opened
-        let fd1 = unsafe { libc::dup(test_fd().as_raw_fd()) };
-        // SAFETY: Safe as the file was just opened
-        let fd2 = unsafe { libc::dup(test_fd().as_raw_fd()) };
-        // SAFETY: safe as both FDs are valid
-        unsafe {
-            still_valid_config.add_preserved_fds(vec![fd1, fd2]);
-        }
-        let _still_valid_config = still_valid_config.clone();
 
         // Valid BDF test
         let mut still_valid_config = valid_config.clone();
