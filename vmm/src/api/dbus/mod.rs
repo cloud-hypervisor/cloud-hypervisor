@@ -4,11 +4,11 @@
 //
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{self, Sender};
 use std::{fmt, panic, thread};
 
 use futures::channel::oneshot;
-use futures::{FutureExt, executor, future, lock};
+use futures::{FutureExt, StreamExt, executor, future, lock};
 use log::{error, warn};
 use seccompiler::{SeccompAction, apply_filter};
 use vmm_sys_util::eventfd::EventFd;
@@ -36,7 +36,7 @@ pub struct DBusApiOptions {
     pub service_name: String,
     pub object_path: String,
     pub system_bus: bool,
-    pub event_monitor_rx: flume::Receiver<Arc<String>>,
+    pub event_monitor_rx: mpsc::Receiver<Arc<String>>,
 }
 
 pub struct DBusApi {
@@ -386,6 +386,10 @@ pub fn start_dbus_thread(
 
             panic::catch_unwind(AssertUnwindSafe(move || {
                 executor::block_on(async move {
+                    // std channels have no async API, so receive the events
+                    // on a blocking thread.
+                    let mut events =
+                        blocking::Unblock::new(dbus_options.event_monitor_rx.into_iter());
                     let recv_shutdown = recv_shutdown.fuse();
                     let executor_tick = future::Fuse::terminated();
                     futures::pin_mut!(recv_shutdown, executor_tick);
@@ -398,8 +402,8 @@ pub fn start_dbus_thread(
                                 send_done.send(()).ok();
                                 break;
                             },
-                            ret = dbus_options.event_monitor_rx.recv_async() => {
-                                if let Ok(event) = ret {
+                            ret = events.next().fuse() => {
+                                if let Some(event) = ret {
                                     DBusApi::event(iface_ref.signal_emitter(), event).await.ok();
                                 }
                             }
