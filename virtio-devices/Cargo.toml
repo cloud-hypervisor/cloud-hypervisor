@@ -14,7 +14,6 @@ sev_snp = ["mshv-ioctls"]
 [dependencies]
 anyhow = { workspace = true }
 block = { path = "../block" }
-byteorder = { workspace = true }
 epoll = { workspace = true }
 event_monitor = { path = "../event_monitor" }
 hypervisor = { path = "../hypervisor" }

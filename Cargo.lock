@@ -2709,7 +2709,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "block",
- "byteorder",
  "epoll",
  "event_monitor",
  "hypervisor",
