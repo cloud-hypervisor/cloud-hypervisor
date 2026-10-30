@@ -2762,7 +2762,6 @@ dependencies = [
  "hypervisor",
  "serde",
  "thiserror",
- "vfio-ioctls",
  "vm-memory",
  "vmm-sys-util",
 ]
