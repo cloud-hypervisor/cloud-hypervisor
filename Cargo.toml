@@ -97,7 +97,7 @@ vhost = { version = "0.17.0", default-features = false }
 vhost-user-backend = { version = "0.23.0", default-features = false }
 virtio-bindings = "0.2.6"
 virtio-queue = "0.18.0"
-vm-fdt = "0.3.0"
+vm-fdt = { version = "0.3.0", default-features = false }
 vm-memory = { version = "0.18.0", default-features = false }
 vmm-sys-util = "0.15.0"
 
