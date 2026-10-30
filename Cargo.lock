@@ -340,7 +340,6 @@ name = "block"
 version = "0.1.0"
 dependencies = [
  "bitflags 2.13.2",
- "byteorder",
  "cfg-if",
  "crc-any",
  "flate2",
