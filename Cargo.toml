@@ -136,7 +136,7 @@ rustls = { version = "0.23.46", default-features = false, features = [
   "std",
 ] }
 sha2 = "0.11.0"
-signal-hook = "0.4.4"
+signal-hook = { version = "0.4.4", default-features = false }
 smallvec = "1.15.1"
 thiserror = "2.0.18"
 uuid = { version = "1.23.2", default-features = false }
