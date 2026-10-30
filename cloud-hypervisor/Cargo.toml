@@ -26,8 +26,6 @@ serde_json = { workspace = true }
 signal-hook = { workspace = true }
 signal-hook-registry = { workspace = true }
 thiserror = { workspace = true }
-tracer = { path = "../tracer" }
-vm-migration = { path = "../vm-migration" }
 vmm = { path = "../vmm" }
 vmm-sys-util = { workspace = true }
 zbus = { version = "5.15.0", optional = true }
@@ -36,7 +34,6 @@ zbus = { version = "5.15.0", optional = true }
 block = { path = "../block" }
 dirs = { workspace = true }
 net_util = { path = "../net_util" }
-serde_json = { workspace = true }
 test_infra = { path = "../test_infra" }
 wait-timeout = { workspace = true }
 
@@ -45,7 +42,7 @@ wait-timeout = { workspace = true }
 [features]
 dbus_api = ["vmm/dbus_api", "zbus"]
 default = ["io_uring", "kvm"]
-dhat-heap = ["dhat", "vmm/dhat-heap"]       # For heap profiling
+dhat-heap = ["dhat", "vmm/dhat-heap"] # For heap profiling
 fw_cfg = ["vmm/fw_cfg"]
 guest_debug = ["vmm/guest_debug"]
 igvm = ["vmm/igvm"]
@@ -55,7 +52,7 @@ kvm = ["vmm/kvm"]
 mshv = ["vmm/mshv"]
 pvmemcontrol = ["vmm/pvmemcontrol"]
 sev_snp = ["igvm", "vmm/sev_snp"]
-tracing = ["tracer/tracing", "vmm/tracing"]
+tracing = ["vmm/tracing"]
 
 [lints]
 workspace = true
