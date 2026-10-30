@@ -7,8 +7,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{self, Sender};
 use std::{fmt, panic, thread};
 
-use futures::channel::oneshot;
-use futures::{FutureExt, StreamExt, executor, future, lock};
+use futures_lite::{StreamExt, future};
 use log::{error, warn};
 use seccompiler::{SeccompAction, apply_filter};
 use vmm_sys_util::eventfd::EventFd;
@@ -30,7 +29,7 @@ use crate::api::{
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::{Error as VmmError, NetConfig, Result as VmmResult, VmConfig};
 
-pub type DBusApiShutdownChannels = (oneshot::Sender<()>, oneshot::Receiver<()>);
+pub type DBusApiShutdownChannels = (async_channel::Sender<()>, mpsc::Receiver<()>);
 
 pub struct DBusApiOptions {
     pub service_name: String,
@@ -41,7 +40,7 @@ pub struct DBusApiOptions {
 
 pub struct DBusApi {
     api_notifier: EventFd,
-    api_sender: lock::Mutex<Sender<ApiRequest>>,
+    api_sender: Sender<ApiRequest>,
 }
 
 fn api_error(error: impl fmt::Debug + fmt::Display) -> fdo::Error {
@@ -54,33 +53,24 @@ fn api_error(error: impl fmt::Debug + fmt::Display) -> fdo::Error {
 // response, resulting in an error message stating that the message recipient
 // disconnected from the message bus without providing a reply.
 pub fn dbus_api_graceful_shutdown(ch: DBusApiShutdownChannels) {
-    let (send_shutdown, mut recv_done) = ch;
+    let (send_shutdown, recv_done) = ch;
 
     // send the shutdown signal and return
     // if it errors out
-    if send_shutdown.send(()).is_err() {
+    if send_shutdown.try_send(()).is_err() {
         return;
     }
 
-    // loop until `recv_err` errors out
-    // or as long as the return value indicates
-    // "immediately stale" (None)
-    while let Ok(None) = recv_done.try_recv() {}
+    // wait until the D-Bus thread is done or gone
+    recv_done.recv().ok();
 }
 
 impl DBusApi {
     pub fn new(api_notifier: EventFd, api_sender: Sender<ApiRequest>) -> Self {
         Self {
             api_notifier,
-            api_sender: lock::Mutex::new(api_sender),
+            api_sender,
         }
-    }
-
-    async fn clone_api_sender(&self) -> Sender<ApiRequest> {
-        // lock the async mutex, clone the `Sender` and then immediately
-        // drop the MutexGuard so that other tasks can clone the
-        // `Sender` as well
-        self.api_sender.lock().await.clone()
     }
 
     fn clone_api_notifier(&self) -> Result<EventFd> {
@@ -94,7 +84,7 @@ impl DBusApi {
         action: &'static Action,
         body: Action::RequestBody,
     ) -> Result<Optional<String>> {
-        let api_sender = self.clone_api_sender().await;
+        let api_sender = self.api_sender.clone();
         let api_notifier = self.clone_api_notifier()?;
 
         let result = blocking::unblock(move || action.send(api_notifier, api_sender, body))
@@ -111,7 +101,7 @@ impl DBusApi {
 #[interface(name = "org.cloudhypervisor.DBusApi1")]
 impl DBusApi {
     async fn vmm_ping(&self) -> Result<String> {
-        let api_sender = self.clone_api_sender().await;
+        let api_sender = self.api_sender.clone();
         let api_notifier = self.clone_api_notifier()?;
 
         let result = blocking::unblock(move || VmmPing.send(api_notifier, api_sender, ()))
@@ -121,7 +111,7 @@ impl DBusApi {
     }
 
     async fn vmm_shutdown(&self) -> Result<()> {
-        let api_sender = self.clone_api_sender().await;
+        let api_sender = self.api_sender.clone();
         let api_notifier = self.clone_api_notifier()?;
 
         blocking::unblock(move || VmmShutdown.send(api_notifier, api_sender, ()))
@@ -184,7 +174,7 @@ impl DBusApi {
     }
 
     async fn vm_balloon_stats(&self) -> Result<String> {
-        let api_sender = self.clone_api_sender().await;
+        let api_sender = self.api_sender.clone();
         let api_notifier = self.clone_api_notifier()?;
 
         let result = blocking::unblock(move || VmBalloonStats.send(api_notifier, api_sender, ()))
@@ -221,7 +211,7 @@ impl DBusApi {
     }
 
     async fn vm_create(&self, vm_config: String) -> Result<()> {
-        let api_sender = self.clone_api_sender().await;
+        let api_sender = self.api_sender.clone();
         let api_notifier = self.clone_api_notifier()?;
 
         let mut vm_config: Box<VmConfig> = serde_json::from_str(&vm_config).map_err(api_error)?;
@@ -247,7 +237,7 @@ impl DBusApi {
     }
 
     async fn vm_info(&self) -> Result<String> {
-        let api_sender = self.clone_api_sender().await;
+        let api_sender = self.api_sender.clone();
         let api_notifier = self.clone_api_notifier()?;
 
         let result = blocking::unblock(move || VmInfo.send(api_notifier, api_sender, ()))
@@ -340,7 +330,7 @@ pub fn start_dbus_thread(
     exit_evt: EventFd,
 ) -> VmmResult<(thread::JoinHandle<VmmResult<()>>, DBusApiShutdownChannels)> {
     let dbus_iface = DBusApi::new(api_notifier, api_sender);
-    let (connection, iface_ref) = executor::block_on(async move {
+    let (connection, iface_ref) = future::block_on(async move {
         let conn_builder = if dbus_options.system_bus {
             Builder::system()?
         } else {
@@ -363,8 +353,8 @@ pub fn start_dbus_thread(
     })
     .map_err(VmmError::CreateDBusSession)?;
 
-    let (send_shutdown, recv_shutdown) = oneshot::channel::<()>();
-    let (send_done, recv_done) = oneshot::channel::<()>();
+    let (send_shutdown, recv_shutdown) = async_channel::bounded::<()>(1);
+    let (send_done, recv_done) = mpsc::channel::<()>();
 
     // Retrieve seccomp filter for API thread
     let api_seccomp_filter = get_seccomp_filter(seccomp_action, Thread::DBusApi, None)
@@ -385,30 +375,35 @@ pub fn start_dbus_thread(
             }
 
             panic::catch_unwind(AssertUnwindSafe(move || {
-                executor::block_on(async move {
+                future::block_on(async move {
                     // std channels have no async API, so receive the events
                     // on a blocking thread.
                     let mut events =
                         blocking::Unblock::new(dbus_options.event_monitor_rx.into_iter());
-                    let recv_shutdown = recv_shutdown.fuse();
-                    let executor_tick = future::Fuse::terminated();
-                    futures::pin_mut!(recv_shutdown, executor_tick);
-                    executor_tick.set(connection.executor().tick().fuse());
-
-                    loop {
-                        futures::select! {
-                            _ = executor_tick => executor_tick.set(connection.executor().tick().fuse()),
-                            _ = recv_shutdown => {
-                                send_done.send(()).ok();
-                                break;
-                            },
-                            ret = events.next().fuse() => {
-                                if let Some(event) = ret {
-                                    DBusApi::event(iface_ref.signal_emitter(), event).await.ok();
-                                }
-                            }
+                    // The connection has no internal executor, so run its
+                    // tasks here. Yield after each task so that a busy
+                    // executor does not starve the shutdown and the events.
+                    let executor = connection.executor();
+                    let run_executor = async {
+                        loop {
+                            executor.tick().await;
+                            future::yield_now().await;
                         }
-                    }
+                    };
+                    let forward_events = async {
+                        while let Some(event) = events.next().await {
+                            DBusApi::event(iface_ref.signal_emitter(), event).await.ok();
+                        }
+                        // Keep serving the API if the event monitor is gone.
+                        future::pending::<()>().await;
+                    };
+
+                    let shutdown = async {
+                        recv_shutdown.recv().await.ok();
+                    };
+
+                    future::or(shutdown, future::or(run_executor, forward_events)).await;
+                    send_done.send(()).ok();
                 });
             }))
             .map_err(|_| {
