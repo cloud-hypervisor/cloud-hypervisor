@@ -9,7 +9,6 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{io, result};
 
-use anyhow::anyhow;
 use log::{debug, error};
 use pci::{
     BarReprogrammingParams, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable,
@@ -39,10 +38,10 @@ type MmapRegion = vm_memory::MmapRegion<AtomicBitmap>;
 
 #[derive(Debug, Error)]
 pub enum IvshmemError {
-    #[error("Failed to retrieve PciConfigurationState: {0}")]
-    RetrievePciConfigurationState(#[source] anyhow::Error),
-    #[error("Failed to retrieve IvshmemDeviceState: {0}")]
-    RetrieveIvshmemDeviceStateState(#[source] anyhow::Error),
+    #[error("Failed to retrieve PciConfigurationState")]
+    RetrievePciConfigurationState(#[source] MigratableError),
+    #[error("Failed to retrieve IvshmemDeviceState")]
+    RetrieveIvshmemDeviceStateState(#[source] MigratableError),
     #[error("Failed to create user memory region.")]
     CreateUserMemoryRegion(#[source] anyhow::Error),
     #[error("Failed to create userspace mapping.")]
@@ -124,21 +123,13 @@ impl IvshmemDevice {
         snapshot: Option<&Snapshot>,
     ) -> Result<Self, IvshmemError> {
         let pci_configuration_state = vm_migration::state_from_id(snapshot, PCI_CONFIGURATION_ID)
-            .map_err(|e| {
-            IvshmemError::RetrievePciConfigurationState(anyhow!(
-                "Failed to get PciConfigurationState from Snapshot: {e}",
-            ))
-        })?;
+            .map_err(IvshmemError::RetrievePciConfigurationState)?;
 
         let state: Option<IvshmemDeviceState> = snapshot
             .as_ref()
             .map(|s| s.to_state())
             .transpose()
-            .map_err(|e| {
-                IvshmemError::RetrieveIvshmemDeviceStateState(anyhow!(
-                    "Failed to get IvshmemDeviceState from Snapshot: {e}",
-                ))
-            })?;
+            .map_err(IvshmemError::RetrieveIvshmemDeviceStateState)?;
 
         let configuration = PciConfiguration::new(
             IVSHMEM_VENDOR_ID,
