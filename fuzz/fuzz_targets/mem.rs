@@ -10,6 +10,7 @@ use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::sync::atomic::AtomicU8;
 use std::sync::{Arc, Mutex};
 
+use cloud_hypervisor_fuzz::FuzzCursor;
 use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
 use virtio_devices::mem::{MemState, VirtioMemConfig};
@@ -138,40 +139,6 @@ impl ExternalDmaMapping for FuzzDmaMapping {
     }
 }
 
-struct ByteStream<'a> {
-    bytes: &'a [u8],
-    cursor: usize,
-}
-
-impl<'a> ByteStream<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, cursor: 0 }
-    }
-
-    fn next_u8(&mut self) -> u8 {
-        let value = self.bytes[self.cursor % self.bytes.len()];
-        self.cursor = self.cursor.wrapping_add(1);
-        value
-    }
-
-    fn next_u64(&mut self) -> u64 {
-        u64::from_le_bytes([
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-        ])
-    }
-
-    fn next_bool(&mut self) -> bool {
-        self.next_u8() & 1 != 0
-    }
-}
-
 #[derive(Clone)]
 struct ChainSpec {
     req_type: u16,
@@ -217,7 +184,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
         return Corpus::Reject;
     }
 
-    let mut stream = ByteStream::new(bytes);
+    let mut stream = FuzzCursor::new(bytes);
     exercise_constructor_paths(&mut stream);
 
     let mut success = false;
@@ -234,7 +201,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     }
 });
 
-fn exercise_constructor_paths(stream: &mut ByteStream) {
+fn exercise_constructor_paths(stream: &mut FuzzCursor) {
     if let Some(region) = create_region(MEM_SIZE / 2, None) {
         let blocks_state = Arc::new(Mutex::new(BlocksState::new(region.size() as u64)));
         let _ = Mem::new(
@@ -347,7 +314,7 @@ fn exercise_constructor_paths(stream: &mut ByteStream) {
     let _ = blocks.memory_ranges(0, false);
 }
 
-fn run_device_scenario(stream: &mut ByteStream, kind: ScenarioKind) -> Result<(), ()> {
+fn run_device_scenario(stream: &mut FuzzCursor, kind: ScenarioKind) -> Result<(), ()> {
     let (mut virtio_mem, virtio_mem_region) = create_mem_device_with_options(
         REQUESTED_SIZE,
         stream.next_bool(),
@@ -488,7 +455,7 @@ fn create_mem_device_with_options(
     .map(|mem| (mem, region))
 }
 
-fn setup_virt_queue(stream: &mut ByteStream) -> Option<Queue> {
+fn setup_virt_queue(stream: &mut FuzzCursor) -> Option<Queue> {
     let mut queue = Queue::new(QUEUE_SIZE).ok()?;
     queue.set_size(QUEUE_SIZE);
     queue.set_next_avail(0);
@@ -509,7 +476,7 @@ fn setup_virt_queue(stream: &mut ByteStream) -> Option<Queue> {
     Some(queue)
 }
 
-fn build_chains(kind: ScenarioKind, stream: &mut ByteStream) -> Vec<ChainSpec> {
+fn build_chains(kind: ScenarioKind, stream: &mut FuzzCursor) -> Vec<ChainSpec> {
     match kind {
         ScenarioKind::Nominal => {
             let mut chains = vec![

@@ -8,6 +8,7 @@ use std::io;
 use std::mem::size_of;
 use std::sync::Arc;
 
+use cloud_hypervisor_fuzz::FuzzCursor;
 use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
 use virtio_devices::{
@@ -160,7 +161,7 @@ struct FuzzPlan {
 
 impl FuzzPlan {
     fn new(bytes: &[u8]) -> Self {
-        let mut stream = ByteStream::new(bytes);
+        let mut stream = FuzzCursor::new(bytes);
         let address_width_bits = if (stream.next_u8() & 1) == 0 {
             IOMMU_ADDR_WIDTH_BITS
         } else {
@@ -206,45 +207,6 @@ impl FuzzPlan {
             overflow_domain: 432 + (stream.next_u32() % 16),
             overflow_virt_start: u64::MAX - (overflow_pages * PAGE_SIZE) + 1,
         }
-    }
-}
-
-struct ByteStream<'a> {
-    bytes: &'a [u8],
-    cursor: usize,
-}
-
-impl<'a> ByteStream<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, cursor: 0 }
-    }
-
-    fn next_u8(&mut self) -> u8 {
-        let value = self.bytes[self.cursor % self.bytes.len()];
-        self.cursor = self.cursor.wrapping_add(1);
-        value
-    }
-
-    fn next_u32(&mut self) -> u32 {
-        u32::from_le_bytes([
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-        ])
-    }
-
-    fn next_u64(&mut self) -> u64 {
-        u64::from_le_bytes([
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-        ])
     }
 }
 
@@ -664,7 +626,7 @@ fn baseline_chains() -> Vec<ChainSpec> {
 }
 
 fn append_fuzz_chains(chains: &mut Vec<ChainSpec>, bytes: &[u8], plan: &FuzzPlan) {
-    let mut stream = ByteStream::new(bytes);
+    let mut stream = FuzzCursor::new(bytes);
     append_guided_chains(chains, plan);
     let extra_chains = 1 + (stream.next_u8() as usize % 24);
     for _ in 0..extra_chains {
@@ -856,7 +818,7 @@ fn append_guided_chains(chains: &mut Vec<ChainSpec>, plan: &FuzzPlan) {
     ]);
 }
 
-fn next_fuzz_chain(stream: &mut ByteStream) -> ChainSpec {
+fn next_fuzz_chain(stream: &mut FuzzCursor) -> ChainSpec {
     let domain = stream.next_u32() % 64;
     let endpoint = stream.next_u32() % 128;
     let virt_start = pick_guest_page(stream.next_u64());
