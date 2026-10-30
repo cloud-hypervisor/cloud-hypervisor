@@ -4421,11 +4421,15 @@ mod tests {
     use net_util::MacAddr;
 
     use super::*;
+    use crate::tests::test_fd;
 
     #[test]
     fn test_vfio_binding_state_is_runtime_only() {
+        let fd = test_fd();
+
         let mut config: VmConfig = serde_json::from_str("{}").unwrap();
-        let mut device = DeviceConfig::parse("fd=3").unwrap();
+        let mut device = device_fixture();
+        device.fd = Some(fd.as_raw_fd());
         assert!(device.iommufd_dev_id.is_none());
         device.iommufd_dev_id = Some(7);
         config.devices = Some(vec![device]);
@@ -5134,7 +5138,7 @@ mod tests {
 
         assert_eq!(
             NetConfig::parse(
-                "mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,tap=tap0,ip=192.168.100.1,mask=255.255.255.128"
+                "mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,tap=tap0,ip=192.168.100.1,mask=255.255.255.128",
             )?,
             NetConfig {
                 tap: Some("tap0".to_owned()),
@@ -5146,7 +5150,7 @@ mod tests {
 
         assert_eq!(
             NetConfig::parse(
-                "mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,vhost_user=true,socket=/tmp/sock"
+                "mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,vhost_user=true,socket=/tmp/sock",
             )?,
             NetConfig {
                 vhost_user: true,
@@ -5157,7 +5161,7 @@ mod tests {
 
         assert_eq!(
             NetConfig::parse(
-                "mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,num_queues=4,queue_size=1024,iommu=on"
+                "mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,num_queues=4,queue_size=1024,iommu=on",
             )?,
             NetConfig {
                 pci_common: PciDeviceCommonConfig {
@@ -5170,11 +5174,17 @@ mod tests {
             }
         );
 
+        let files = [test_fd(), test_fd()];
+        let [fd0, fd1] = files.each_ref().map(AsRawFd::as_raw_fd);
+
+        let config = NetConfig::parse(&format!(
+            "mac=de:ad:be:ef:12:34,fd=[{fd0},{fd1}],num_queues=4"
+        ))?;
         assert_eq!(
-            NetConfig::parse("mac=de:ad:be:ef:12:34,fd=[3,7],num_queues=4")?,
+            config,
             NetConfig {
                 host_mac: None,
-                fds: Some(vec![3, 7]),
+                fds: Some(vec![fd0, fd1]),
                 num_queues: 4,
                 ..net_fixture()
             }
@@ -5650,8 +5660,8 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
     #[test]
     fn test_device_parsing() -> Result<()> {
-        // The parser itself is purely syntactic; the "path or fd is
-        // required" rule is enforced by VmConfig::validate instead.
+        // The "path or fd is
+        // required" rule is enforced by VmConfig::validate.
         assert_eq!(
             DeviceConfig::parse("")?,
             DeviceConfig {
@@ -5713,22 +5723,33 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
         // `fd=` is accepted alongside or in place of `path=`; exclusivity
         // is enforced by DeviceConfig::validate, not by the parser.
+        let file = test_fd();
+        let fd = file.as_raw_fd();
+
+        let config = DeviceConfig::parse(&format!("fd={fd}"))?;
+        assert_eq!(config.fd.as_ref().unwrap().as_raw_fd(), fd);
         assert_eq!(
-            DeviceConfig::parse("fd=7")?,
+            config,
             DeviceConfig {
                 path: None,
-                fd: Some(7),
+                fd: config.fd,
                 ..device_fixture()
             }
         );
+        let file = test_fd();
+        let fd = file.as_raw_fd();
+
+        let config = DeviceConfig::parse(&format!("path=/path/to/device,fd={fd}"))?;
+        assert_eq!(config.fd.as_ref().unwrap().as_raw_fd(), fd);
         assert_eq!(
-            DeviceConfig::parse("path=/path/to/device,fd=7")?,
+            config,
             DeviceConfig {
-                fd: Some(7),
+                fd: config.fd,
                 ..device_fixture()
             }
         );
         // Non-integer fd fails at parse time.
+
         DeviceConfig::parse("fd=notanint").unwrap_err();
 
         Ok(())
@@ -5809,21 +5830,18 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
     #[test]
     fn test_platform_iommufd_fd_parsing() -> Result<()> {
-        // `iommufd_fd=N` alone implies `iommufd=on`.
-        let p = PlatformConfig::parse("iommufd_fd=42")?;
-        assert!(p.iommufd);
-        assert_eq!(p.iommufd_fd, Some(42));
+        let platform = PlatformConfig::parse("")?;
+        assert!(!platform.iommufd);
+        assert!(platform.iommufd_fd.is_none());
 
-        // Explicit `iommufd=on,iommufd_fd=N` is the same.
-        let p = PlatformConfig::parse("iommufd=on,iommufd_fd=42")?;
-        assert!(p.iommufd);
-        assert_eq!(p.iommufd_fd, Some(42));
-
-        // No flags → both default to off.
-        let p = PlatformConfig::parse("")?;
-        assert!(!p.iommufd);
-        assert_eq!(p.iommufd_fd, None);
-
+        for prefix in ["", "iommufd=on,"] {
+            let file = test_fd();
+            let fd = file.as_raw_fd();
+            let platform = PlatformConfig::parse(&format!("{prefix}iommufd_fd={fd}"))?;
+            assert!(platform.iommufd);
+            assert_eq!(platform.iommufd_fd.as_ref().unwrap().as_raw_fd(), fd);
+            platform.validate().unwrap();
+        }
         Ok(())
     }
 
@@ -5990,135 +6008,113 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
     #[test]
     fn test_restore_parsing() -> Result<()> {
+        use std::array;
+
         assert_eq!(
             RestoreConfig::parse("source_url=/path/to/snapshot")?,
             RestoreConfig {
                 source_url: PathBuf::from("/path/to/snapshot"),
-                prefault: false,
-                memory_restore_mode: MemoryRestoreMode::Copy,
-                net_fds: None,
-                vfio_fds: None,
-                iommufd_fd: None,
-                resume: false,
-                zone_updates: vec![],
+                ..Default::default()
             }
         );
+        let files: [File; 6] = array::from_fn(|_| test_fd());
+        let [fd0, fd1, fd2, fd3, fd4, fd5] = files.each_ref().map(AsRawFd::as_raw_fd);
+
+        let config = RestoreConfig::parse(&format!(
+            "source_url=/path/to/snapshot,prefault=off,net_fds=[net0@[{fd0},{fd1}],net1@[{fd2},{fd3},{fd4},{fd5}]]"
+        ))?;
         assert_eq!(
-            RestoreConfig::parse(
-                "source_url=/path/to/snapshot,prefault=off,net_fds=[net0@[3,4],net1@[5,6,7,8]]"
-            )?,
+            config,
             RestoreConfig {
                 source_url: PathBuf::from("/path/to/snapshot"),
-                prefault: false,
-                memory_restore_mode: MemoryRestoreMode::Copy,
                 net_fds: Some(vec![
                     RestoredNetConfig {
                         id: "net0".to_string(),
                         num_fds: 2,
-                        fds: Some(vec![3, 4]),
+                        fds: Some(vec![fd0, fd1]),
                     },
                     RestoredNetConfig {
                         id: "net1".to_string(),
                         num_fds: 4,
-                        fds: Some(vec![5, 6, 7, 8]),
+                        fds: Some(vec![fd2, fd3, fd4, fd5]),
                     }
                 ]),
-                vfio_fds: None,
-                iommufd_fd: None,
-                resume: false,
-                zone_updates: vec![],
+                ..Default::default()
             }
         );
         assert_eq!(
             RestoreConfig::parse("source_url=/path/to/snapshot,memory_restore_mode=ondemand")?,
             RestoreConfig {
                 source_url: PathBuf::from("/path/to/snapshot"),
-                prefault: false,
                 memory_restore_mode: MemoryRestoreMode::OnDemand,
-                net_fds: None,
-                vfio_fds: None,
-                iommufd_fd: None,
-                resume: false,
-                zone_updates: vec![],
+                ..Default::default()
             }
         );
         assert_eq!(
-            RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[zone1@1]")?,
+            RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[zone1@1]",)?,
             RestoreConfig {
                 source_url: PathBuf::from("/path/to/snapshot"),
-                prefault: false,
-                memory_restore_mode: MemoryRestoreMode::Copy,
-                net_fds: None,
-                vfio_fds: None,
-                iommufd_fd: None,
                 resume: true,
                 zone_updates: vec![VmMemoryZoneUpdateData {
                     host_numa_node: 1,
                     id: "zone1".to_string(),
                 }],
+                ..Default::default()
             }
         );
+        let vfio0 = test_fd();
+        let vfio1 = test_fd();
+        let iommu = test_fd();
+        let fd0 = vfio0.as_raw_fd();
+        let fd1 = vfio1.as_raw_fd();
+        let fd2 = iommu.as_raw_fd();
+
+        let config = RestoreConfig::parse(&format!(
+            "source_url=/path/to/snapshot,vfio_fds=[vfio0@{fd0},vfio1@{fd1}],iommufd_fd={fd2}"
+        ))?;
+        let vfio_fds = config.vfio_fds.as_ref().unwrap();
+        assert_eq!(vfio_fds[0].fd.as_ref().unwrap().as_raw_fd(), fd0);
+        assert_eq!(vfio_fds[1].fd.as_ref().unwrap().as_raw_fd(), fd1);
+        assert_eq!(config.iommufd_fd.as_ref().unwrap().as_raw_fd(), fd2);
         assert_eq!(
-            RestoreConfig::parse(
-                "source_url=/path/to/snapshot,vfio_fds=[vfio0@5,vfio1@6],iommufd_fd=7"
-            )?,
+            config,
             RestoreConfig {
                 source_url: PathBuf::from("/path/to/snapshot"),
-                prefault: false,
-                memory_restore_mode: MemoryRestoreMode::Copy,
-                net_fds: None,
                 vfio_fds: Some(vec![
                     RestoredVfioConfig {
                         id: "vfio0".to_string(),
-                        fd: Some(5),
+                        fd: vfio_fds[0].fd,
                     },
                     RestoredVfioConfig {
                         id: "vfio1".to_string(),
-                        fd: Some(6),
+                        fd: vfio_fds[1].fd,
                     },
                 ]),
-                iommufd_fd: Some(7),
-                resume: false,
-                zone_updates: vec![],
-            }
-        );
-        assert_eq!(
-            RestoreConfig::parse(
-                "source_url=/path/to/snapshot,vfio_fds=[vfio0@5,vfio1@6],iommufd_fd=7"
-            )?,
-            RestoreConfig {
-                source_url: PathBuf::from("/path/to/snapshot"),
-                prefault: false,
-                memory_restore_mode: MemoryRestoreMode::Copy,
-                net_fds: None,
-                vfio_fds: Some(vec![
-                    RestoredVfioConfig {
-                        id: "vfio0".to_string(),
-                        fd: Some(5),
-                    },
-                    RestoredVfioConfig {
-                        id: "vfio1".to_string(),
-                        fd: Some(6),
-                    },
-                ]),
-                iommufd_fd: Some(7),
-                resume: false,
-                zone_updates: vec![],
+                iommufd_fd: config.iommufd_fd,
+                ..Default::default()
             }
         );
         // Parsing should fail as source_url is a required field
+
         RestoreConfig::parse("prefault=off").unwrap_err();
+
         RestoreConfig::parse("source_url=/path/to/snapshot,memory_restore_mode=bogus").unwrap_err();
+
         RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[@1]")
             .unwrap_err();
+
         RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[@]")
             .unwrap_err();
+
         RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[id1@]")
             .unwrap_err();
+
         RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[id1 1]")
             .unwrap_err();
+
         RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[[id1@1]]")
             .unwrap_err();
+
         RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=id1@1")
             .unwrap_err();
         Ok(())
@@ -6184,6 +6180,8 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
     #[test]
     fn test_restore_config_validation() {
+        let fd = test_fd();
+
         // interested in only VmConfig.net, so set rest to default values
         let mut snapshot_vm_config = VmConfig {
             cpus: CpusConfig::default(),
@@ -6259,18 +6257,17 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 RestoredNetConfig {
                     id: "net0".to_string(),
                     num_fds: 4,
-                    fds: Some(vec![3, 4, 5, 6]),
+                    fds: Some(vec![fd.as_raw_fd(); 4]),
                 },
                 RestoredNetConfig {
                     id: "net1".to_string(),
                     num_fds: 2,
-                    fds: Some(vec![7, 8]),
+                    fds: Some(vec![fd.as_raw_fd(); 2]),
                 },
             ]),
-            vfio_fds: None,
-            iommufd_fd: None,
             resume: false,
             zone_updates: vec![],
+            ..Default::default()
         };
         valid_config.validate(&snapshot_vm_config).unwrap();
 
@@ -6278,7 +6275,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         invalid_config.net_fds = Some(vec![RestoredNetConfig {
             id: "netx".to_string(),
             num_fds: 4,
-            fds: Some(vec![3, 4, 5, 6]),
+            fds: Some(vec![fd.as_raw_fd(); 4]),
         }]);
         assert_eq!(
             invalid_config.validate(&snapshot_vm_config),
@@ -6291,12 +6288,12 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             RestoredNetConfig {
                 id: "net0".to_string(),
                 num_fds: 4,
-                fds: Some(vec![3, 4, 5, 6]),
+                fds: Some(vec![fd.as_raw_fd(); 4]),
             },
             RestoredNetConfig {
                 id: "net0".to_string(),
                 num_fds: 4,
-                fds: Some(vec![3, 4, 5, 6]),
+                fds: Some(vec![fd.as_raw_fd(); 4]),
             },
         ]);
         assert_eq!(
@@ -6307,7 +6304,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         invalid_config.net_fds = Some(vec![RestoredNetConfig {
             id: "net0".to_string(),
             num_fds: 4,
-            fds: Some(vec![3, 4, 5, 6]),
+            fds: Some(vec![fd.as_raw_fd(); 4]),
         }]);
         assert_eq!(
             invalid_config.validate(&snapshot_vm_config),
@@ -6319,7 +6316,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         invalid_config.net_fds = Some(vec![RestoredNetConfig {
             id: "net0".to_string(),
             num_fds: 2,
-            fds: Some(vec![3, 4]),
+            fds: Some(vec![fd.as_raw_fd(); 2]),
         }]);
         assert_eq!(
             invalid_config.validate(&snapshot_vm_config),
@@ -6334,11 +6331,9 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             source_url: PathBuf::from("/path/to/snapshot"),
             prefault: false,
             memory_restore_mode: MemoryRestoreMode::Copy,
-            net_fds: None,
-            vfio_fds: None,
-            iommufd_fd: None,
             resume: false,
             zone_updates: vec![],
+            ..Default::default()
         };
         snapshot_vm_config.net = Some(vec![NetConfig {
             pci_common: PciDeviceCommonConfig {
@@ -6354,11 +6349,9 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             source_url: PathBuf::from("/path/to/snapshot"),
             prefault: true,
             memory_restore_mode: MemoryRestoreMode::OnDemand,
-            net_fds: None,
-            vfio_fds: None,
-            iommufd_fd: None,
             resume: false,
             zone_updates: vec![],
+            ..Default::default()
         };
         assert_eq!(
             invalid_restore_mode.validate(&snapshot_vm_config),
@@ -6397,11 +6390,9 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             source_url: PathBuf::from("/path/to/snapshot"),
             prefault: true,
             memory_restore_mode: MemoryRestoreMode::CopyOnWrite,
-            net_fds: None,
-            vfio_fds: None,
-            iommufd_fd: None,
             resume: false,
             zone_updates: vec![],
+            ..Default::default()
         };
         assert_eq!(
             invalid_cow_prefault.validate(&snapshot_vm_config),
@@ -6411,6 +6402,8 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
     #[test]
     fn test_restore_config_vfio_fds_validation() {
+        let fd = test_fd();
+
         // interested in only VmConfig.devices and platform, so set rest to
         // default values
         let mut snapshot_vm_config = VmConfig {
@@ -6469,14 +6462,14 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             source_url: PathBuf::from("/path/to/snapshot"),
             prefault: false,
             memory_restore_mode: MemoryRestoreMode::Copy,
-            net_fds: None,
             vfio_fds: Some(vec![RestoredVfioConfig {
                 id: "vfio0".to_string(),
-                fd: Some(5),
+                fd: Some(fd.as_raw_fd()),
             }]),
-            iommufd_fd: Some(6),
+            iommufd_fd: Some(fd.as_raw_fd()),
             resume: false,
             zone_updates: vec![],
+            ..Default::default()
         };
         valid_config.validate(&snapshot_vm_config).unwrap();
 
@@ -6492,7 +6485,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let unknown_id = RestoreConfig {
             vfio_fds: Some(vec![RestoredVfioConfig {
                 id: "missing".to_string(),
-                fd: Some(5),
+                fd: Some(fd.as_raw_fd()),
             }]),
             ..valid_config.clone()
         };
@@ -6505,11 +6498,11 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             vfio_fds: Some(vec![
                 RestoredVfioConfig {
                     id: "vfio0".to_string(),
-                    fd: Some(5),
+                    fd: Some(fd.as_raw_fd()),
                 },
                 RestoredVfioConfig {
                     id: "vfio0".to_string(),
-                    fd: Some(6),
+                    fd: Some(fd.as_raw_fd()),
                 },
             ]),
             ..valid_config.clone()
@@ -6616,6 +6609,8 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
     #[test]
     fn test_config_validation() {
+        let fd = test_fd();
+
         let mut valid_config = VmConfig {
             cpus: CpusConfig {
                 boot_vcpus: 1,
@@ -7729,12 +7724,12 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let mut fd_valid_config = valid_config.clone();
         fd_valid_config.platform = Some(PlatformConfig {
             iommufd: true,
-            iommufd_fd: Some(8),
+            iommufd_fd: Some(fd.as_raw_fd()),
             ..platform_fixture()
         });
         fd_valid_config.devices = Some(vec![DeviceConfig {
             path: None,
-            fd: Some(7),
+            fd: Some(fd.as_raw_fd()),
             ..device_fixture()
         }]);
         fd_valid_config.validate().unwrap();
@@ -7754,7 +7749,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let mut iommufd_fd_without_iommufd = valid_config.clone();
         iommufd_fd_without_iommufd.platform = Some(PlatformConfig {
             iommufd: false,
-            iommufd_fd: Some(8),
+            iommufd_fd: Some(fd.as_raw_fd()),
             ..platform_fixture()
         });
         assert!(matches!(
@@ -7766,7 +7761,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let mut both_path_and_fd = fd_valid_config.clone();
         both_path_and_fd.devices = Some(vec![DeviceConfig {
             path: Some("/device1".into()),
-            fd: Some(7),
+            fd: Some(fd.as_raw_fd()),
             ..device_fixture()
         }]);
         assert!(matches!(
@@ -8026,9 +8021,9 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
         let mut still_valid_config = valid_config.clone();
         // SAFETY: Safe as the file was just opened
-        let fd1 = unsafe { libc::dup(File::open("/dev/null").unwrap().as_raw_fd()) };
+        let fd1 = unsafe { libc::dup(test_fd().as_raw_fd()) };
         // SAFETY: Safe as the file was just opened
-        let fd2 = unsafe { libc::dup(File::open("/dev/null").unwrap().as_raw_fd()) };
+        let fd2 = unsafe { libc::dup(test_fd().as_raw_fd()) };
         // SAFETY: safe as both FDs are valid
         unsafe {
             still_valid_config.add_preserved_fds(vec![fd1, fd2]);

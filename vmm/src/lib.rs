@@ -3804,6 +3804,10 @@ mod tests {
         })
     }
 
+    pub(crate) fn test_fd() -> File {
+        File::open("/dev/null").unwrap()
+    }
+
     #[test]
     fn test_vmm_vm_create() {
         let mut vmm = create_dummy_vmm();
@@ -4359,11 +4363,11 @@ mod tests {
     ) -> VmReceiveMigrationData {
         VmReceiveMigrationData {
             receiver_url: "tcp:127.0.0.1:4321".to_string(),
-            tls_dir: None,
             vfio_fds,
             iommufd_fd,
             zone_updates: vec![],
             background_fetch_pages: true,
+            ..Default::default()
         }
     }
 
@@ -4386,34 +4390,61 @@ mod tests {
 
     #[test]
     fn test_apply_vfio_fds_swaps_path_for_fd() {
+        let vfio = test_fd();
+        let iommu = test_fd();
+
         let vm_config = vm_config_with_vfio_devices(&["vfio0", "vfio1"], true);
-        let data = receive_data(Some(vec![vfio_fd("vfio1", 5)]), Some(6));
+        let data = receive_data(
+            Some(vec![vfio_fd("vfio1", vfio.as_raw_fd())]),
+            Some(iommu.as_raw_fd()),
+        );
         apply_vfio_fds_to_vm_config(&data, &vm_config);
         let config = vm_config.lock().unwrap();
         let devices = config.devices.as_ref().unwrap();
         assert!(devices[0].path.is_some());
         assert!(devices[0].fd.is_none());
         assert!(devices[1].path.is_none());
-        assert_eq!(devices[1].fd, Some(5));
-        assert_eq!(config.platform.as_ref().unwrap().iommufd_fd, Some(6));
+        assert_eq!(
+            devices[1].fd.as_ref().unwrap().as_raw_fd(),
+            vfio.as_raw_fd()
+        );
+        assert_eq!(
+            config
+                .platform
+                .as_ref()
+                .unwrap()
+                .iommufd_fd
+                .as_ref()
+                .unwrap()
+                .as_raw_fd(),
+            iommu.as_raw_fd()
+        );
     }
 
     #[test]
     fn test_validate_vfio_fds_requires_iommufd_fd() {
+        let vfio = test_fd();
+
         let vm_config = vm_config_with_vfio_devices(&["vfio0"], true);
-        let data = receive_data(Some(vec![vfio_fd("vfio0", 5)]), None);
+        let data = receive_data(Some(vec![vfio_fd("vfio0", vfio.as_raw_fd())]), None);
         data.validate_vfio_fds(&vm_config.lock().unwrap())
             .unwrap_err();
     }
 
     #[test]
     fn test_validate_vfio_fds_unknown_id_fails() {
+        let vfio = test_fd();
+        let iommu = test_fd();
+
         // vfio0 is covered so coverage passes, the extra bogus id is what the
         // id match must reject.
         let vm_config = vm_config_with_vfio_devices(&["vfio0"], true);
         let data = receive_data(
-            Some(vec![vfio_fd("vfio0", 5), vfio_fd("missing", 6)]),
-            Some(7),
+            Some(vec![
+                vfio_fd("vfio0", vfio.as_raw_fd()),
+                vfio_fd("missing", vfio.as_raw_fd()),
+            ]),
+            Some(iommu.as_raw_fd()),
         );
         data.validate_vfio_fds(&vm_config.lock().unwrap())
             .unwrap_err();
@@ -4421,10 +4452,16 @@ mod tests {
 
     #[test]
     fn test_validate_vfio_fds_duplicate_id_fails() {
+        let vfio = test_fd();
+        let iommu = test_fd();
+
         let vm_config = vm_config_with_vfio_devices(&["vfio0"], true);
         let data = receive_data(
-            Some(vec![vfio_fd("vfio0", 5), vfio_fd("vfio0", 6)]),
-            Some(7),
+            Some(vec![
+                vfio_fd("vfio0", vfio.as_raw_fd()),
+                vfio_fd("vfio0", vfio.as_raw_fd()),
+            ]),
+            Some(iommu.as_raw_fd()),
         );
         data.validate_vfio_fds(&vm_config.lock().unwrap())
             .unwrap_err();
@@ -4432,8 +4469,14 @@ mod tests {
 
     #[test]
     fn test_validate_vfio_fds_requires_iommufd_backend() {
+        let vfio = test_fd();
+        let iommu = test_fd();
+
         let vm_config = vm_config_with_vfio_devices(&["vfio0"], false);
-        let data = receive_data(Some(vec![vfio_fd("vfio0", 5)]), Some(6));
+        let data = receive_data(
+            Some(vec![vfio_fd("vfio0", vfio.as_raw_fd())]),
+            Some(iommu.as_raw_fd()),
+        );
         data.validate_vfio_fds(&vm_config.lock().unwrap())
             .unwrap_err();
     }
@@ -4464,8 +4507,14 @@ mod tests {
 
     #[test]
     fn test_validate_vfio_fds_all_substituted_ok() {
+        let vfio = test_fd();
+        let iommu = test_fd();
+
         let vm_config = vm_config_with_vfio_devices(&["vfio0"], true);
-        let data = receive_data(Some(vec![vfio_fd("vfio0", 5)]), Some(6));
+        let data = receive_data(
+            Some(vec![vfio_fd("vfio0", vfio.as_raw_fd())]),
+            Some(iommu.as_raw_fd()),
+        );
         data.validate_vfio_fds(&vm_config.lock().unwrap()).unwrap();
     }
 
