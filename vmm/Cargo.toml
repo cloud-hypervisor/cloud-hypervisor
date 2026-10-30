@@ -8,7 +8,7 @@ version = "0.1.0"
 [features]
 dbus_api = ["blocking", "futures", "zbus"]
 default = []
-dhat-heap = ["dhat"] # For heap profiling
+dhat-heap = [] # For heap profiling
 fw_cfg = ["devices/fw_cfg"]
 guest_debug = ["gdbstub", "gdbstub_arch", "kvm"]
 igvm = ["dep:igvm", "hex", "igvm_defs", "mshv-bindings", "range_map_vec"]
@@ -17,7 +17,6 @@ ivshmem = ["devices/ivshmem"]
 kvm = [
   "arch/kvm",
   "hypervisor/kvm",
-  "iommufd-bindings",
   "iommufd-ioctls",
   "pci/kvm",
   "vfio-ioctls/kvm",
@@ -50,7 +49,6 @@ blocking = { version = "1.6.2", optional = true }
 cfg-if = { workspace = true }
 clap = { workspace = true }
 devices = { path = "../devices" }
-dhat = { workspace = true, optional = true }
 epoll = { workspace = true }
 event_monitor = { path = "../event_monitor" }
 flume = { workspace = true }
@@ -61,7 +59,6 @@ hex = { version = "0.4.3", optional = true }
 hypervisor = { path = "../hypervisor" }
 igvm = { workspace = true, optional = true }
 igvm_defs = { workspace = true, optional = true }
-iommufd-bindings = { workspace = true, optional = true }
 iommufd-ioctls = { workspace = true, optional = true }
 landlock = "0.4.5"
 libc = { workspace = true }
