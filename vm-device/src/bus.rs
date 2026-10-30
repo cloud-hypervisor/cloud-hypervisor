@@ -64,9 +64,9 @@ pub enum Error {
     /// Failed to operate on zero sized range.
     #[error("Failed to operate on zero sized range")]
     ZeroSizedRange,
-    /// Failed to find address range.
-    #[error("Failed to find address range")]
-    MissingAddressRange,
+    /// Failed to find unassigned address range.
+    #[error("No device assigned to address {0:#x}")]
+    UnassignedAddressRange(u64),
 }
 
 pub(crate) type Result<T> = result::Result<T, Error>;
@@ -197,7 +197,7 @@ impl Bus {
         let bus_range = BusRange { base, len };
 
         if self.devices.write().unwrap().remove(&bus_range).is_none() {
-            return Err(Error::MissingAddressRange);
+            return Err(Error::UnassignedAddressRange(base));
         }
 
         Ok(())
@@ -234,7 +234,7 @@ impl Bus {
         let device = if let Some((_, _, dev)) = self.resolve(old_base) {
             Arc::clone(&dev)
         } else {
-            return Err(Error::MissingAddressRange);
+            return Err(Error::UnassignedAddressRange(old_base));
         };
 
         // Remove the old address range
@@ -257,7 +257,7 @@ impl Bus {
             Ok(())
         } else {
             data.fill(BUS_UNASSIGNED_READ_VALUE);
-            Err(Error::MissingAddressRange)
+            Err(Error::UnassignedAddressRange(addr))
         }
     }
 
@@ -269,7 +269,7 @@ impl Bus {
             // OK to unwrap as lock() failing is a serious error condition and should panic.
             Ok(dev.write(base, offset, data))
         } else {
-            Err(Error::MissingAddressRange)
+            Err(Error::UnassignedAddressRange(addr))
         }
     }
 }
@@ -409,7 +409,7 @@ mod tests {
         let mut values = [0, 1, 2, 3];
         assert!(matches!(
             bus.read(0x10, &mut values).unwrap_err(),
-            Error::MissingAddressRange
+            Error::UnassignedAddressRange(addr) if addr == 0x10
         ));
         assert_eq!(values, [BUS_UNASSIGNED_READ_VALUE; 4]);
     }
