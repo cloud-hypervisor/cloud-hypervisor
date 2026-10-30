@@ -15,8 +15,8 @@ use thiserror::Error;
 
 use crate::socket::SocketDev;
 use crate::{
-    Commands, MemberType, Ptm, PtmCap, PtmEst, PtmInit, PtmResult, PtmSetBufferSize,
-    TPM_CRB_BUFFER_MAX, TPM_SUCCESS,
+    Commands, Ptm, PtmCap, PtmEst, PtmInit, PtmResult, PtmSetBufferSize, TPM_CRB_BUFFER_MAX,
+    TPM_SUCCESS,
 };
 
 const TPM_REQ_HDR_SIZE: usize = 10;
@@ -268,7 +268,6 @@ impl Emulator {
             // swtpm returns only the 4-byte result code on error. Propagate
             // the failure without attempting to read or parse a payload that
             // will never arrive.
-            msg.set_member_type(MemberType::Response);
             msg.set_result_code(result_code);
             return Err(Error::RunControlCmd(anyhow!(
                 "Control Cmd {cmd:02X?} returned error code : {result_code:#X}"
@@ -295,9 +294,6 @@ impl Emulator {
                         "Failed while converting response of Control Cmd: {cmd:02X?} to PTM. Error: {e:?}"
                     ))
                 })?;
-        } else {
-            // No response expected, only handle return code
-            msg.set_member_type(MemberType::Response);
         }
 
         if msg.get_result_code() != TPM_SUCCESS {
