@@ -141,7 +141,7 @@ smallvec = "1.15.1"
 thiserror = "2.0.18"
 uuid = { version = "1.23.2" }
 wait-timeout = "0.2.1"
-zbus = "5.15.0"
+zbus = { version = "5.15.0", default-features = false }
 zerocopy = { version = "0.8.50", default-features = false }
 
 [workspace.lints.clippy]
