@@ -6,7 +6,7 @@ rust-version.workspace = true
 version = "0.1.0"
 
 [dependencies]
-anyhow = { workspace = true }
+anyhow = { workspace = true, features = ["std"] }
 log = { workspace = true }
 rustls = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc", "std"] }

@@ -12,7 +12,7 @@ mshv = ["pci/mshv"]
 sev_snp = ["mshv-ioctls"]
 
 [dependencies]
-anyhow = { workspace = true }
+anyhow = { workspace = true, features = ["std"] }
 block = { path = "../block" }
 epoll = { workspace = true }
 event_monitor = { path = "../event_monitor" }

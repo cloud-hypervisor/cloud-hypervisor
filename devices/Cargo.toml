@@ -7,7 +7,7 @@ version = "0.1.0"
 
 [dependencies]
 acpi_tables = { workspace = true }
-anyhow = { workspace = true }
+anyhow = { workspace = true, features = ["std"] }
 arch = { path = "../arch" }
 bitfield-struct = { workspace = true, optional = true }
 bitflags = { workspace = true }
