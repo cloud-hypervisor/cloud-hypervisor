@@ -22,7 +22,7 @@ hypervisor = { path = "../hypervisor" }
 iommufd-ioctls = { workspace = true, optional = true }
 libc = { workspace = true }
 log = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
+serde = { workspace = true, features = ["derive", "std"] }
 thiserror = { workspace = true }
 vfio-bindings = { workspace = true, features = ["fam-wrappers"] }
 vfio-ioctls = { workspace = true, default-features = false }

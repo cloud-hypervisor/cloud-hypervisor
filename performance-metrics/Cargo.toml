@@ -16,7 +16,7 @@ clap = { workspace = true, features = [
   "wrap_help",
 ] }
 libc = { workspace = true }
-serde = { workspace = true, features = ["derive", "rc"] }
+serde = { workspace = true, features = ["derive", "rc", "std"] }
 serde_json = { workspace = true }
 test_infra = { path = "../test_infra" }
 thiserror = { workspace = true }
