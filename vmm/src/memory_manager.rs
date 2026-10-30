@@ -120,14 +120,21 @@ impl UffdRegistry {
 
     fn done(&self) -> Result<(), io::Error> {
         let uffds = self.uffds.lock().unwrap();
-        // Every page is present, so the faults still queued on the
-        // userfaultfds only need waking up.
+        // Every page is present and the uffd handlers are shutting down, so
+        // any new faults should be handled by the kernel.
         for (_, uffd) in uffds.iter() {
             for range in uffd.ranges() {
-                uffd::wake(uffd.fd(), range.host_addr, range.length)?;
+                match uffd::unregister(uffd.fd(), range.host_addr, range.length) {
+                    // The process is gone, (eg. a vhost-user backend that died)
+                    Err(e) if e.raw_os_error() == Some(libc::ENOMEM) => {}
+                    result => result?,
+                }
             }
             for hole in uffd.holes() {
-                uffd::unregister(uffd.fd(), hole.host_addr, hole.length)?;
+                match uffd::unregister(uffd.fd(), hole.host_addr, hole.length) {
+                    Err(e) if e.raw_os_error() == Some(libc::ENOMEM) => {}
+                    result => result?,
+                }
             }
         }
         self.done.write(1)
