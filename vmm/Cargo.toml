@@ -104,7 +104,7 @@ vm-memory = { workspace = true, features = [
 ] }
 vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }
-vmm-sys-util = { workspace = true, features = ["with-serde"] }
+vmm-sys-util = { workspace = true }
 zbus = { workspace = true, features = ["async-io"], optional = true }
 zerocopy = { workspace = true, features = ["alloc", "derive"] }
 
