@@ -57,7 +57,7 @@ pub use self::http::{start_http_fd_thread, start_http_path_thread};
 use crate::Error as VmmError;
 use crate::config::{
     Error as ConfigError, RestoreConfig, RestoredVfioConfig, Result as ConfigResult,
-    VmMemoryZoneUpdateData, parse_inherited_fd, take_inherited_fd, validate_inherited_fds,
+    VmMemoryZoneUpdateData, take_inherited_fd, validate_inherited_fds,
 };
 use crate::device_tree::DeviceTree;
 use crate::migration::transport::{
@@ -429,7 +429,8 @@ impl VmReceiveMigrationData {
                     .map(|Tuple(id, fd)| {
                         Ok(RestoredVfioConfig {
                             id,
-                            fd: Some(parse_inherited_fd(fd)?),
+                            // SAFETY: The caller transfers the inherited descriptor.
+                            fd: unsafe { take_inherited_fd(fd) }?,
                         })
                     })
                     .collect::<ConfigResult<Vec<_>>>()
@@ -2453,20 +2454,25 @@ mod tests {
         );
 
         use std::os::fd::{AsRawFd, IntoRawFd};
-        let cdev0 = test_fd();
-        let cdev1 = test_fd();
-        let iommu = test_fd();
-        // SAFETY: The VFIO descriptor is borrowed at this stage.
+        let cdev = test_fd();
+        let fd = cdev.into_raw_fd();
+        // SAFETY: The file transferred exclusive ownership to us.
         let data = unsafe {
             VmReceiveMigrationData::parse(&format!(
-                "receiver_url=tcp:127.0.0.1:1234,vfio_fds=[vfio0@{}]",
-                cdev0.as_raw_fd()
+                "receiver_url=tcp:127.0.0.1:1234,vfio_fds=[vfio0@{fd}]"
             ))
         }
         .unwrap();
         assert!(data.iommufd_fd.is_none());
 
-        let raw_fds = [cdev0.as_raw_fd(), cdev1.as_raw_fd(), iommu.into_raw_fd()];
+        let cdev0 = test_fd();
+        let cdev1 = test_fd();
+        let iommu = test_fd();
+        let raw_fds = [
+            cdev0.into_raw_fd(),
+            cdev1.into_raw_fd(),
+            iommu.into_raw_fd(),
+        ];
         // SAFETY: Owned config fields receive exclusively transferred descriptors.
         let data = unsafe {
             VmReceiveMigrationData::parse(&format!(

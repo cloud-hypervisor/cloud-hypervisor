@@ -4089,7 +4089,7 @@ impl DeviceManager {
     // Build a VfioDevice from an externally-opened vfio cdev FD:
     // The caller's FD is dup'd so the dup can be owned (and closed
     // on drop) by the VfioDevice, while the original FD is kept alive
-    // for the lifetime of the VM via VmConfig::preserved_fds. This
+    // for the lifetime of the device config. This
     // lets the cdev FD survive a VM reboot.
     //
     // Returns the built VfioDevice together with a diagnostic path
@@ -4256,11 +4256,12 @@ impl DeviceManager {
 
     #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
     fn find_physical_iommu(device_cfg: &DeviceConfig) -> DeviceManagerResult<String> {
-        let pci_dir: PathBuf = match (&device_cfg.path, device_cfg.fd) {
+        let pci_dir: PathBuf = match (&device_cfg.path, device_cfg.fd.as_ref()) {
             (Some(path), None) => path.clone(),
             (None, Some(fd)) => {
                 use std::mem::zeroed;
 
+                let fd = fd.as_raw_fd();
                 // SAFETY: `libc::stat` is plain-old-data, so an all-zero value is valid.
                 let mut st: libc::stat = unsafe { zeroed() };
                 // SAFETY: `fstat` only writes into `st`; `fd` is a valid open cdev fd.
@@ -4419,7 +4420,7 @@ impl DeviceManager {
         };
 
         // Devices behind an emulated SMMUv3 are attached to its vIOMMU, not the IOAS.
-        let (vfio_device, device_path) = match (&device_cfg.path, device_cfg.fd) {
+        let (vfio_device, device_path) = match (&device_cfg.path, device_cfg.fd.as_ref()) {
             (Some(path), None) => {
                 let vfio_device = VfioDevice::new(
                     path,
@@ -4432,18 +4433,12 @@ impl DeviceManager {
             (None, Some(fd)) => {
                 #[cfg(feature = "kvm")]
                 {
-                    let device = self.create_vfio_device_from_fd(
-                        // SAFETY: The CLI or SCM_RIGHTS supplied this live descriptor.
-                        unsafe { BorrowedFd::borrow_raw(fd) },
+                    self.create_vfio_device_from_fd(
+                        fd.as_fd(),
                         device_cfg.iommufd_dev_id.is_some(),
                         &(Arc::clone(&vfio_ops) as Arc<dyn VfioOps>),
                         !smmuv3_attached,
-                    )?;
-                    // SAFETY: The device owns a duplicate; preserve the original for reboot.
-                    unsafe {
-                        self.config.lock().unwrap().add_preserved_fds(vec![fd]);
-                    }
-                    device
+                    )?
                 }
                 #[cfg(not(feature = "kvm"))]
                 {
@@ -5502,31 +5497,6 @@ impl DeviceManager {
                 | VirtioDeviceType::Fs
                 | VirtioDeviceType::Vsock => {}
                 _ => return Err(DeviceManagerError::RemovalNotAllowed(device_type)),
-            }
-        } else if matches!(pci_device_handle, PciDeviceHandle::Vfio(_)) {
-            // Cleanup externally-provided VFIO cdev FDs: remove the preserved
-            // original from VmConfig and close it.
-            let mut config = self.config.lock().unwrap();
-            if let Some(fd) = config
-                .devices
-                .as_deref_mut()
-                .and_then(|devices| {
-                    devices
-                        .iter_mut()
-                        .find(|d| d.pci_common.id.as_deref() == Some(id))
-                })
-                .and_then(|device_cfg| device_cfg.fd.take())
-            {
-                debug!("Closing preserved FD from VFIO device: id={id}, fd={fd}");
-                let fd_removed = config.preserved_fds.as_mut().unwrap().remove(&fd);
-                assert!(
-                    fd_removed,
-                    "FD {fd} for device id={id} was not in preserved_fds"
-                );
-                // SAFETY: We are closing the only remaining instance of this FD.
-                unsafe {
-                    libc::close(fd);
-                }
             }
         }
 
