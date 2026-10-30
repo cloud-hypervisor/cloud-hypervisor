@@ -51,7 +51,6 @@ clap = { workspace = true }
 devices = { path = "../devices" }
 epoll = { workspace = true }
 event_monitor = { path = "../event_monitor" }
-flume = { workspace = true }
 futures = { version = "0.3.32", optional = true }
 gdbstub = { version = "0.7.10", optional = true }
 gdbstub_arch = { version = "0.3.3", optional = true }

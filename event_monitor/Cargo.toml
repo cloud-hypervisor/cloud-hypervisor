@@ -6,7 +6,6 @@ rust-version.workspace = true
 version = "0.1.0"
 
 [dependencies]
-flume = { workspace = true }
 libc = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
