@@ -25,7 +25,7 @@ log = { workspace = true }
 serde = { workspace = true, features = ["derive", "std"] }
 thiserror = { workspace = true }
 vfio-bindings = { workspace = true, features = ["fam-wrappers"] }
-vfio-ioctls = { workspace = true, default-features = false }
+vfio-ioctls = { workspace = true }
 vfio_user = { workspace = true }
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
