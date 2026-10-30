@@ -3130,21 +3130,9 @@ pub struct VmMemoryZoneUpdateData {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct RestoredVfioConfig {
     pub id: String,
-    // FDs are not serialized and any deserialized value is invalid; see NetConfig::fds.
-    #[serde(default, deserialize_with = "deserialize_restored_fd")]
+    // Deserialized FD numbers carry no ownership and are discarded.
+    #[serde(skip_deserializing)]
     pub fd: Option<RawFd>,
-}
-
-pub(crate) fn deserialize_restored_fd<'de, D>(d: D) -> result::Result<Option<RawFd>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let invalid_fd: Option<RawFd> = Option::deserialize(d)?;
-    if invalid_fd.is_some() {
-        Ok(Some(-1))
-    } else {
-        Ok(None)
-    }
 }
 
 #[serde_with::skip_serializing_none]
@@ -3159,8 +3147,8 @@ pub struct RestoreConfig {
     pub net_fds: Option<Vec<RestoredNetConfig>>,
     #[serde(default)]
     pub vfio_fds: Option<Vec<RestoredVfioConfig>>,
-    // FDs are not serialized and any deserialized value is invalid; see NetConfig::fds.
-    #[serde(default, deserialize_with = "deserialize_restored_fd")]
+    // Deserialized FD numbers carry no ownership and are discarded.
+    #[serde(skip_deserializing)]
     pub iommufd_fd: Option<RawFd>,
     #[serde(default)]
     pub resume: bool,
@@ -3377,7 +3365,7 @@ impl RestoreConfig {
         // live descriptor. Each one needs a replacement in vfio_fds.
         let substituted: HashSet<&str> = vfio_fds.iter().map(|v| v.id.as_str()).collect();
         for d in vm_config.devices.iter().flatten() {
-            if d.fd.is_some()
+            if (d.fd.is_some() || d.path.is_none())
                 && !d
                     .pci_common
                     .id
@@ -6646,7 +6634,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
         // A device saved with an FD must get a replacement FD.
         snapshot_vm_config.devices.as_mut().unwrap()[0].path = None;
-        snapshot_vm_config.devices.as_mut().unwrap()[0].fd = Some(-1);
+        snapshot_vm_config.devices.as_mut().unwrap()[0].fd = None;
         let no_substitution = RestoreConfig {
             vfio_fds: None,
             iommufd_fd: None,
