@@ -76,7 +76,6 @@ use crate::vm::Error as VmError;
 /// providing the exact amount of FDs.
 mod fds_helper {
     use std::fs::File;
-    use std::os::fd::{IntoRawFd, RawFd};
 
     use log::{debug, error, warn};
 
@@ -90,10 +89,8 @@ mod fds_helper {
         /// Used for logging.
         fn id(&self) -> Option<&str>;
 
-        /// Returns any FDs provided in the HTTP body.
-        ///
-        /// They will always be invalid and are used for user-facing logging.
-        fn fds_from_http_body(&self) -> Option<&[RawFd]>;
+        /// Whether this config contains FD slots that need replacement.
+        fn has_fds(&self) -> bool;
 
         /// Assigns the provided file descriptors (`fds`) to this configuration
         /// object.
@@ -105,7 +102,7 @@ mod fds_helper {
         /// # Arguments
         /// - `fds`: Either a non-empty Vector with corresponding FDs or `None`
         ///   indicating that no valid FDs were supplied.
-        fn set_fds(&mut self, fds: Option<Vec<RawFd>>);
+        fn set_fds(&mut self, fds: Option<Vec<File>>);
     }
 
     /// Extension of [`ConfigWithFDs`] for config objects that know how many
@@ -118,8 +115,8 @@ mod fds_helper {
     }
 
     mod config_with_fds_impls {
-        use std::os::fd::RawFd;
-        use std::slice::from_ref;
+        use std::fs::File;
+        use std::os::fd::IntoRawFd;
 
         use super::{ConfigWithFDs, ConfigWithVariableFDs};
         use crate::config::{RestoredNetConfig, RestoredVfioConfig};
@@ -130,12 +127,12 @@ mod fds_helper {
                 self.pci_common.id.as_deref()
             }
 
-            fn fds_from_http_body(&self) -> Option<&[RawFd]> {
-                self.fds.as_deref()
+            fn has_fds(&self) -> bool {
+                self.fds.is_some()
             }
 
-            fn set_fds(&mut self, fds: Option<Vec<RawFd>>) {
-                self.fds = fds;
+            fn set_fds(&mut self, fds: Option<Vec<File>>) {
+                self.fds = fds.map(|files| files.into_iter().map(IntoRawFd::into_raw_fd).collect());
             }
         }
 
@@ -144,16 +141,15 @@ mod fds_helper {
                 self.pci_common.id.as_deref()
             }
 
-            fn fds_from_http_body(&self) -> Option<&[RawFd]> {
-                // A DeviceConfig carries at most one FD.
-                self.fd.as_ref().map(from_ref)
+            fn has_fds(&self) -> bool {
+                self.fd.is_some()
             }
 
-            fn set_fds(&mut self, fds: Option<Vec<RawFd>>) {
+            fn set_fds(&mut self, fds: Option<Vec<File>>) {
                 // The VmAddDevice PutHandler enforces `fds.len() <= 1`
                 // before calling into this trait, so `pop()` yields the
                 // single FD when present.
-                self.fd = fds.and_then(|mut v| v.pop());
+                self.fd = fds.and_then(|mut v| v.pop()).map(IntoRawFd::into_raw_fd);
             }
         }
 
@@ -162,12 +158,12 @@ mod fds_helper {
                 Some(self.id.as_str())
             }
 
-            fn fds_from_http_body(&self) -> Option<&[RawFd]> {
-                self.fds.as_deref()
+            fn has_fds(&self) -> bool {
+                self.fds.is_some()
             }
 
-            fn set_fds(&mut self, fds: Option<Vec<RawFd>>) {
-                self.fds = fds;
+            fn set_fds(&mut self, fds: Option<Vec<File>>) {
+                self.fds = fds.map(|files| files.into_iter().map(IntoRawFd::into_raw_fd).collect());
             }
         }
 
@@ -182,12 +178,12 @@ mod fds_helper {
                 Some(self.id.as_str())
             }
 
-            fn fds_from_http_body(&self) -> Option<&[RawFd]> {
-                self.fd.as_ref().map(from_ref)
+            fn has_fds(&self) -> bool {
+                self.fd.is_some()
             }
 
-            fn set_fds(&mut self, fds: Option<Vec<RawFd>>) {
-                self.fd = fds.and_then(|mut v| v.pop());
+            fn set_fds(&mut self, fds: Option<Vec<File>>) {
+                self.fd = fds.and_then(|mut v| v.pop()).map(IntoRawFd::into_raw_fd);
             }
         }
 
@@ -199,14 +195,13 @@ mod fds_helper {
     }
 
     fn attach_fds_to_cfg_inner<T: ConfigWithFDs>(
-        fds: &mut Vec<RawFd>,
+        fds: &mut Vec<File>,
         fds_amount: usize,
         cfg: &mut T,
     ) {
-        if cfg.fds_from_http_body().is_some() {
-            // Only FDs transmitted via an SCM_RIGHTS UNIX Domain Socket message
-            // are valid. Any provided over the HTTP API are set to `-1` in our
-            // specialized serializer callbacks.
+        if cfg.has_fds() {
+            // Only FDs transmitted via SCM_RIGHTS are valid. Descriptor numbers
+            // in the HTTP request body are discarded.
             warn!(
                 "FD numbers were present in HTTP request body for device {:?} but will be ignored",
                 cfg.id()
@@ -254,12 +249,7 @@ mod fds_helper {
             return Err(HttpError::BadRequest);
         }
 
-        // We are only interested in the raw FDs. After this operation, we are
-        // responsible for manually closing the FDs eventually.
-        let mut fds = device_fds
-            .into_iter()
-            .map(|f| f.into_raw_fd())
-            .collect::<Vec<_>>();
+        let mut fds = device_fds;
 
         // For each config: We drain the FDs vector by the amount of FDs the config expects.
         for cfg in cfgs {
@@ -287,11 +277,7 @@ mod fds_helper {
         device_fds: Vec<File>,
         cfg: &mut T,
     ) -> Result<(), HttpError> {
-        // We are only interested in the raw FDs.
-        let mut fds = device_fds
-            .into_iter()
-            .map(|f| f.into_raw_fd())
-            .collect::<Vec<_>>();
+        let mut fds = device_fds;
 
         let len = fds.len();
         attach_fds_to_cfg_inner(&mut fds, len, cfg);
@@ -818,115 +804,44 @@ impl EndpointHandler for VmmShutdown {
 }
 
 #[cfg(test)]
-mod external_fds_tests {
-    use std::os::fd::RawFd;
+mod tests {
+    use std::os::fd::AsRawFd;
 
     use super::*;
-    use crate::api::http::http_endpoint::fds_helper::{ConfigWithFDs, ConfigWithVariableFDs};
-
-    struct DummyNewDeviceCfg {
-        http_fds: Option<Vec<RawFd>>,
-    }
-
-    impl ConfigWithFDs for DummyNewDeviceCfg {
-        fn id(&self) -> Option<&str> {
-            Some("dummy")
-        }
-
-        fn fds_from_http_body(&self) -> Option<&[RawFd]> {
-            self.http_fds.as_deref()
-        }
-
-        fn set_fds(&mut self, fds: Option<Vec<RawFd>>) {
-            self.http_fds = fds;
-        }
-    }
-
-    struct DummyRestoreDeviceCfg {
-        http_fds: Option<Vec<RawFd>>,
-        num_fds: usize,
-    }
-
-    impl ConfigWithFDs for DummyRestoreDeviceCfg {
-        fn id(&self) -> Option<&str> {
-            Some("dummy")
-        }
-
-        fn fds_from_http_body(&self) -> Option<&[RawFd]> {
-            self.http_fds.as_deref()
-        }
-
-        fn set_fds(&mut self, fds: Option<Vec<RawFd>>) {
-            self.http_fds = fds;
-        }
-    }
-
-    impl ConfigWithVariableFDs for DummyRestoreDeviceCfg {
-        fn expected_num_fds(&self) -> usize {
-            self.num_fds
-        }
-    }
+    use crate::config::RestoredNetConfig;
+    use crate::tests::test_fd;
 
     #[test]
     fn test_fds_provided_via_http_api_are_reset() {
-        let mut config = DummyNewDeviceCfg {
-            http_fds: Some(vec![1, 2, 3]),
-        };
-
+        let mut config: NetConfig = serde_json::from_str(r#"{"fds":[1,2,3]}"#).unwrap();
         attach_fds_to_cfg(vec![], &mut config).unwrap();
-        assert_eq!(config.http_fds, None);
+        assert!(config.fds.is_none());
     }
 
     #[test]
     fn test_new_device_cfg_takes_all_fds() {
-        let path = "/dev/null";
-
-        let new_fds = vec![
-            File::open(path).unwrap(),
-            File::open(path).unwrap(),
-            File::open(path).unwrap(),
-        ];
-        let mut config = DummyNewDeviceCfg {
-            http_fds: Some(vec![1, 2, 3]),
-        };
-
-        attach_fds_to_cfg(new_fds, &mut config).unwrap();
-        assert_eq!(config.http_fds.unwrap().len(), 3);
+        let files: Vec<_> = (0..3).map(|_| test_fd()).collect();
+        let fds = files.iter().map(AsRawFd::as_raw_fd).collect();
+        let mut config: NetConfig = serde_json::from_str("{}").unwrap();
+        attach_fds_to_cfg(files, &mut config).unwrap();
+        assert_eq!(config.fds, Some(fds));
     }
 
     #[test]
     fn test_restore_cfgs_take_only_their_fds() {
-        let path = "/dev/null";
-        let new_fds = vec![
-            File::open(path).unwrap(),
-            File::open(path).unwrap(),
-            File::open(path).unwrap(),
-            File::open(path).unwrap(),
-            File::open(path).unwrap(),
-            File::open(path).unwrap(),
-        ];
-        let mut config1 = DummyRestoreDeviceCfg {
-            http_fds: None,
-            num_fds: 3,
-        };
-        let mut config2 = DummyRestoreDeviceCfg {
-            http_fds: None,
-            num_fds: 1,
-        };
-        let mut config3 = DummyRestoreDeviceCfg {
-            http_fds: None,
-            num_fds: 0,
-        };
-        let mut config4 = DummyRestoreDeviceCfg {
-            http_fds: None,
-            num_fds: 2,
-        };
-        let mut configs = [&mut config1, &mut config2, &mut config3, &mut config4];
-
-        attach_fds_to_cfgs(new_fds, &mut configs).unwrap();
-        assert_eq!(config1.http_fds.unwrap().len(), 3);
-        assert_eq!(config2.http_fds.unwrap().len(), 1);
-        assert!(config3.http_fds.is_none());
-        assert_eq!(config4.http_fds.unwrap().len(), 2);
+        let files: Vec<_> = (0..6).map(|_| test_fd()).collect();
+        let fds: Vec<_> = files.iter().map(AsRawFd::as_raw_fd).collect();
+        let mut configs: Vec<_> = [3, 1, 0, 2]
+            .into_iter()
+            .map(|num_fds| RestoredNetConfig {
+                num_fds,
+                ..Default::default()
+            })
+            .collect();
+        attach_fds_to_cfgs(files, &mut configs.iter_mut().collect::<Vec<_>>()).unwrap();
+        let expected = [Some(&fds[..3]), Some(&fds[3..4]), None, Some(&fds[4..])];
+        for (config, expected) in configs.iter().zip(expected) {
+            assert_eq!(config.fds.as_deref(), expected);
+        }
     }
 }
