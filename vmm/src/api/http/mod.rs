@@ -167,11 +167,10 @@ pub trait EndpointHandler {
         api_notifier: EventFd,
         api_sender: Sender<ApiRequest>,
     ) -> Response {
-        // Cloning the files here is very important as it dup() the file
-        // descriptors, leaving open the one that was received. This way,
-        // rebooting the VM will work since the VM will be created from the
-        // original file descriptors.
-        let files = req.files.iter().map(|f| f.try_clone().unwrap()).collect();
+        // Obtain ownership independently of the borrowed HTTP request.
+        let Ok(files) = req.files.iter().map(File::try_clone).collect() else {
+            return error_response(HttpError::InternalServerError);
+        };
         let res = match req.method() {
             Method::Put => self.put_handler(api_notifier, api_sender, &req.body, files),
             Method::Get => self.get_handler(api_notifier, api_sender, &req.body),
