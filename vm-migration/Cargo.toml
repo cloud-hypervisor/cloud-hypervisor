@@ -7,7 +7,6 @@ version = "0.1.0"
 
 [dependencies]
 anyhow = { workspace = true }
-itertools = { workspace = true }
 log = { workspace = true }
 rustls = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
