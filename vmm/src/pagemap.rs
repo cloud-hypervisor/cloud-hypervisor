@@ -77,13 +77,14 @@ mod tests {
 
     use vm_memory::guest_memory::FileOffset;
     use vm_memory::{Bytes, MmapRegion, VolatileMemory};
+    use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
 
     #[test]
     fn private_ranges_reports_written_pages_only() {
         let page = get_page_size() as usize;
-        let mut file = tempfile::tempfile().unwrap();
+        let mut file = TempFile::new().unwrap().into_file();
         file.write_all(&vec![1u8; 32 * page]).unwrap();
         let region = MmapRegion::<()>::build(
             Some(FileOffset::new(file, 0)),

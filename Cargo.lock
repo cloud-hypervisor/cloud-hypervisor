@@ -2739,7 +2739,6 @@ dependencies = [
  "sha2",
  "signal-hook",
  "socket2",
- "tempfile",
  "thiserror",
  "tracer",
  "uuid",

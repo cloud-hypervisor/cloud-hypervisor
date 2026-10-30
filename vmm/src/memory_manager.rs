@@ -4071,6 +4071,7 @@ mod tests {
     use std::os::unix::fs::FileExt;
 
     use vm_migration::protocol::{MemoryRange, MemoryRangeTable};
+    use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
 
@@ -4147,7 +4148,7 @@ mod tests {
             attempts: Arc::clone(&attempts),
             fail_next: false,
         });
-        let uffd_file = tempfile::tempfile().unwrap();
+        let uffd_file = TempFile::new().unwrap().into_file();
         let mut range_idx = 0;
         let mut page_idx = 0;
 
@@ -4217,7 +4218,7 @@ mod tests {
             attempts: Arc::clone(&attempts),
             fail_next: true,
         });
-        let uffd_file = tempfile::tempfile().unwrap();
+        let uffd_file = TempFile::new().unwrap().into_file();
         let mut range_idx = 0;
         let mut page_idx = 0;
 
@@ -4263,7 +4264,7 @@ mod tests {
         let page = page_size();
         let gm = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), (2 * page) as usize)]).unwrap();
 
-        let mut file = tempfile::tempfile().unwrap();
+        let mut file = TempFile::new().unwrap().into_file();
         file.write_all(&vec![0xabu8; page as usize]).unwrap();
         file.set_len(2 * page).unwrap();
         file.seek(SeekFrom::Start(0)).unwrap();
@@ -4294,7 +4295,7 @@ mod tests {
     fn cow_snapshot_writes_private_pages_over_the_source() {
         let page = page_size();
         let gm = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), (16 * page) as usize)]).unwrap();
-        let mut file = tempfile::tempfile().unwrap();
+        let mut file = TempFile::new().unwrap().into_file();
         for i in 0..16u8 {
             file.write_all(&vec![i + 1; page as usize]).unwrap();
         }
@@ -4313,7 +4314,7 @@ mod tests {
         gm.write_obj::<u8>(0x77, GuestAddress(12 * page + 9))
             .unwrap();
 
-        let mut snapshot = tempfile::tempfile().unwrap();
+        let mut snapshot = TempFile::new().unwrap().into_file();
         let mut content = vec![0u8; (16 * page) as usize];
         source.file.read_exact_at(&mut content, 0).unwrap();
         snapshot.write_all(&content).unwrap();
@@ -4351,7 +4352,7 @@ mod tests {
     #[test]
     fn cow_restore_rejects_file_backed_region() {
         let page = page_size();
-        let backing = tempfile::tempfile().unwrap();
+        let backing = TempFile::new().unwrap().into_file();
         backing.set_len(page).unwrap();
         let region = MmapRegion::build(
             Some(FileOffset::new(backing, 0)),
@@ -4376,7 +4377,7 @@ mod tests {
     #[test]
     fn cow_restore_honors_region_reserve_and_thp() {
         let page = page_size();
-        let mut file = tempfile::tempfile().unwrap();
+        let mut file = TempFile::new().unwrap().into_file();
         file.write_all(&vec![0xcdu8; page as usize]).unwrap();
 
         for extra_flags in [0, libc::MAP_NORESERVE] {
