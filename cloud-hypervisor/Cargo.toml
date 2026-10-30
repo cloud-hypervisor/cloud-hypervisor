@@ -12,7 +12,7 @@ version = "55.0.0"
 
 [dependencies]
 api_client = { path = "../api_client" }
-clap = { workspace = true, features = ["string"] }
+clap = { workspace = true, features = ["string", "wrap_help"] }
 dhat = { workspace = true, optional = true }
 env_logger = { workspace = true, features = ["auto-color", "humantime"] }
 event_monitor = { path = "../event_monitor" }
