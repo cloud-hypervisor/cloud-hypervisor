@@ -98,10 +98,10 @@
 
 use std::cmp::max;
 use std::io::{Read, Write};
+use std::iter;
 use std::ops::RangeInclusive;
 
 use anyhow::anyhow;
-use itertools::Itertools;
 use log::error;
 use serde::{Deserialize, Serialize};
 use zerocopy::{FromBytes, Immutable, IntoBytes, TryFromBytes};
@@ -292,7 +292,10 @@ impl Request {
         // The protocol version is stored in the first two header bytes, the remaining bytes are ignored.
         let sender_version = u16::from_le_bytes([self.command_headers[0], self.command_headers[1]]);
         if !supported_protocol_versions().any(|version| version == sender_version) {
-            let supported_versions = supported_protocol_versions().join(", ");
+            let supported_versions = supported_protocol_versions()
+                .map(|version| version.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
             return Err(MigratableError::MigrateReceive(anyhow!(
                 "Migration protocol version {sender_version} of sender doesn't match any supported version: {supported_versions}"
             )));
@@ -448,23 +451,19 @@ impl MemoryRangeTable {
         start_addr: u64,
         page_size: u64,
     ) -> impl Iterator<Item = MemoryRange> {
-        bitmap
-            .into_iter()
-            .bit_positions()
-            // Turn them into single-element ranges for coalesce.
-            .map(|b| b..(b + 1))
-            // Merge adjacent ranges.
-            .coalesce(|prev, curr| {
-                if prev.end == curr.start {
-                    Ok(prev.start..curr.end)
-                } else {
-                    Err((prev, curr))
-                }
+        let mut pages = bitmap.into_iter().bit_positions().peekable();
+        iter::from_fn(move || {
+            let first = pages.next()?;
+            // Merge adjacent dirty pages.
+            let mut end = first + 1;
+            while pages.next_if_eq(&end).is_some() {
+                end += 1;
+            }
+            Some(MemoryRange {
+                gpa: start_addr + first * page_size,
+                length: (end - first) * page_size,
             })
-            .map(move |r| MemoryRange {
-                gpa: start_addr + r.start * page_size,
-                length: (r.end - r.start) * page_size,
-            })
+        })
     }
 
     /// Creates a new [`MemoryRangeTable`] from a bitmap (represented as
@@ -769,6 +768,37 @@ mod tests {
                 ]
             );
         }
+    }
+
+    #[test]
+    fn test_memory_range_table_from_dirty_bitmap_edge_cases() {
+        let page_size = 0x1000;
+        let start_gpa = 0x10000;
+
+        // Without dirty pages there must be no range, not even an empty one.
+        assert!(MemoryRangeTable::from_dirty_bitmap([], start_gpa, page_size).is_empty());
+        assert!(MemoryRangeTable::from_dirty_bitmap([0, 0], start_gpa, page_size).is_empty());
+
+        // The run only ends with the bitmap, so the last range must still be
+        // emitted, and as one range across the u64 boundary.
+        let full = MemoryRangeTable::from_dirty_bitmap([u64::MAX, u64::MAX], start_gpa, page_size);
+        assert_eq!(
+            full.ranges(),
+            &[MemoryRange {
+                gpa: start_gpa,
+                length: 128 * page_size,
+            }]
+        );
+        // The last bit of the first u64 and the first bit of the second are
+        // the adjacent pages 63 and 64, so they form one range.
+        let straddling = MemoryRangeTable::from_dirty_bitmap([1 << 63, 1], start_gpa, page_size);
+        assert_eq!(
+            straddling.ranges(),
+            &[MemoryRange {
+                gpa: start_gpa + 63 * page_size,
+                length: 2 * page_size,
+            }]
+        );
     }
 
     /// Appending multiple bitmaps must yield the same table as merging the
