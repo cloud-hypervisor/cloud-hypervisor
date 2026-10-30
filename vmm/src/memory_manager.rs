@@ -1435,10 +1435,6 @@ impl MemoryManager {
             uffd.ranges().len()
         );
 
-        let thread_exit_evt = exit_evt.try_clone().map_err(Error::EventFdFail)?;
-        let panic_exit_evt = exit_evt.try_clone().map_err(Error::EventFdFail)?;
-        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
-        let (result_tx, result_rx) = mpsc::sync_channel(1);
         let ranges = Box::from(uffd.ranges());
         let uffd_registry = Arc::new(UffdRegistry {
             uffds: Mutex::new(vec![(VMM_UFFD_ID.to_string(), Arc::new(uffd))]),
@@ -1446,7 +1442,37 @@ impl MemoryManager {
             stopped: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
             ranges,
         });
-        let thread_uffd_registry = Arc::clone(&uffd_registry);
+        let worker = Self::spawn_uffd_worker(
+            &uffd_registry,
+            pages,
+            source,
+            fault_socket_fd,
+            exit_evt,
+            background_fetch_pages,
+        )?;
+
+        self.uffd_handler = Some(UffdHandler {
+            workers: Box::new([worker]),
+            uffd_registry,
+        });
+
+        Ok(())
+    }
+
+    /// Spawn a UFFD handler thread and wait until it serves faults.
+    fn spawn_uffd_worker(
+        uffd_registry: &Arc<UffdRegistry>,
+        pages: UffdPages,
+        source: Box<dyn UffdMemorySource>,
+        fault_socket_fd: Option<OwnedFd>,
+        exit_evt: &EventFd,
+        background_fetch_pages: bool,
+    ) -> Result<UffdWorker, Error> {
+        let thread_exit_evt = exit_evt.try_clone().map_err(Error::EventFdFail)?;
+        let panic_exit_evt = exit_evt.try_clone().map_err(Error::EventFdFail)?;
+        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        let (result_tx, result_rx) = mpsc::sync_channel(1);
+        let thread_uffd_registry = Arc::clone(uffd_registry);
         let handle = thread::Builder::new()
             .name("uffd-handler".to_string())
             .spawn(move || {
@@ -1490,16 +1516,11 @@ impl MemoryManager {
             return Err(UffdError::HandlerFailed(e).into());
         }
 
-        self.uffd_handler = Some(UffdHandler {
-            workers: Box::new([UffdWorker {
-                result_rx,
-                handle,
-                fault_socket_fd,
-            }]),
-            uffd_registry,
-        });
-
-        Ok(())
+        Ok(UffdWorker {
+            result_rx,
+            handle,
+            fault_socket_fd,
+        })
     }
 
     fn required_uffd_features(&self, uffd_requires_minor_mode: bool) -> u64 {
