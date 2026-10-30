@@ -6,7 +6,7 @@ rust-version.workspace = true
 version = "0.1.0"
 
 [features]
-dbus_api = ["blocking", "futures", "zbus"]
+dbus_api = ["async-channel", "blocking", "futures-lite", "zbus"]
 default = []
 dhat-heap = [] # For heap profiling
 fw_cfg = ["devices/fw_cfg"]
@@ -43,6 +43,7 @@ tracing = ["tracer/tracing"]
 acpi_tables = { workspace = true }
 anyhow = { workspace = true }
 arch = { path = "../arch" }
+async-channel = { version = "2.5.0", optional = true }
 bitflags = { workspace = true }
 block = { path = "../block" }
 blocking = { version = "1.6.2", optional = true }
@@ -51,7 +52,7 @@ clap = { workspace = true }
 devices = { path = "../devices" }
 epoll = { workspace = true }
 event_monitor = { path = "../event_monitor" }
-futures = { version = "0.3.32", optional = true }
+futures-lite = { version = "2.6.1", optional = true }
 gdbstub = { version = "0.7.10", optional = true }
 gdbstub_arch = { version = "0.3.3", optional = true }
 hex = { version = "0.4.3", optional = true }
