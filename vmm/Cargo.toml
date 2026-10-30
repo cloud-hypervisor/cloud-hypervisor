@@ -57,7 +57,9 @@ gdbstub = { version = "0.7.10", default-features = false, features = [
   "std",
 ], optional = true }
 gdbstub_arch = { version = "0.3.3", optional = true }
-hex = { version = "0.4.3", optional = true }
+hex = { version = "0.4.3", default-features = false, features = [
+  "std",
+], optional = true }
 hypervisor = { path = "../hypervisor" }
 igvm = { workspace = true, optional = true }
 igvm_defs = { workspace = true, optional = true }
