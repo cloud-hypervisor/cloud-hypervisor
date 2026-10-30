@@ -7,7 +7,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs::File;
 use std::os::unix::io::AsRawFd;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, mpsc};
 use std::time::{Duration, Instant};
 use std::{fmt, io};
 
@@ -25,13 +25,13 @@ struct Event<'a> {
 }
 
 pub struct Monitor {
-    pub rx: flume::Receiver<String>,
+    pub rx: mpsc::Receiver<String>,
     pub file: Option<File>,
-    pub broadcast: Vec<flume::Sender<Arc<String>>>,
+    pub broadcast: Vec<mpsc::Sender<Arc<String>>>,
 }
 
 impl Monitor {
-    pub fn new(rx: flume::Receiver<String>, file: Option<File>) -> Self {
+    pub fn new(rx: mpsc::Receiver<String>, file: Option<File>) -> Self {
         Self {
             rx,
             file,
@@ -39,15 +39,15 @@ impl Monitor {
         }
     }
 
-    pub fn subscribe(&mut self) -> flume::Receiver<Arc<String>> {
-        let (tx, rx) = flume::unbounded();
+    pub fn subscribe(&mut self) -> mpsc::Receiver<Arc<String>> {
+        let (tx, rx) = mpsc::channel();
         self.broadcast.push(tx);
         rx
     }
 }
 
 struct MonitorHandle {
-    tx: flume::Sender<String>,
+    tx: mpsc::Sender<String>,
     start: Instant,
 }
 
@@ -78,7 +78,7 @@ pub fn set_monitor(file: Option<File>) -> io::Result<Monitor> {
         set_file_nonblocking(file)?;
     }
 
-    let (tx, rx) = flume::unbounded();
+    let (tx, rx) = mpsc::channel();
     let monitor = Monitor::new(rx, file);
 
     MONITOR.get_or_init(|| MonitorHandle {
