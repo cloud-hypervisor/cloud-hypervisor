@@ -1748,10 +1748,6 @@ mod tests {
                 event_fd: EventFd::new(0).unwrap(),
             }))
         }
-
-        fn destroy_group(&self, _group: Arc<dyn InterruptSourceGroup>) -> io::Result<()> {
-            Ok(())
-        }
     }
 
     fn make_virtio_pci_device() -> VirtioPciDevice {
