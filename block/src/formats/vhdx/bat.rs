@@ -5,7 +5,6 @@
 use std::os::unix::fs::FileExt;
 use std::{io, result};
 
-use remain::sorted;
 use thiserror::Error;
 
 use super::header::RegionTableEntry;
@@ -25,7 +24,6 @@ pub(super) const BAT_STATE_BIT_MASK: u64 = 0x07;
 // Mask for the offset within the file in units of 1 MB
 pub(super) const BAT_FILE_OFF_MASK: u64 = 0xFFFFFFFFFFF00000;
 
-#[sorted]
 #[derive(Error, Debug)]
 pub enum VhdxBatError {
     #[error("Invalid BAT entry")]

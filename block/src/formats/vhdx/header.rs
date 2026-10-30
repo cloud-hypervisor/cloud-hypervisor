@@ -6,7 +6,6 @@ use std::collections::btree_map::BTreeMap;
 use std::os::unix::fs::FileExt;
 use std::{io, result};
 
-use remain::sorted;
 use thiserror::Error;
 use uuid::Uuid;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
@@ -36,7 +35,6 @@ const MDR_GUID: [u8; 16] = [
     0x06, 0xa2, 0x7c, 0x8b, 0x90, 0x47, 0x9a, 0x4b, 0xb8, 0xfe, 0x57, 0x5f, 0x05, 0x0f, 0x88, 0x6e,
 ];
 
-#[sorted]
 #[derive(Error, Debug)]
 pub enum VhdxHeaderError {
     #[error("BAT entry is not unique")]

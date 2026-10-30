@@ -17,7 +17,6 @@ flate2 = "1.1"
 io-uring = { version = "0.7.12", optional = true }
 libc = { workspace = true }
 log = { workspace = true }
-remain = "0.2.15"
 serde = { workspace = true, features = ["derive"] }
 smallvec = { workspace = true }
 thiserror = { workspace = true }
