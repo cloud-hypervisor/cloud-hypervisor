@@ -253,16 +253,6 @@ pub enum TokenType {
     Ops,
 }
 
-/// Enum that describes the type of token bucket update.
-pub enum BucketUpdate {
-    /// No Update - same as before.
-    None,
-    /// Rate Limiting is disabled on this bucket.
-    Disabled,
-    /// Rate Limiting enabled with updated bucket.
-    Update(TokenBucket),
-}
-
 /// Rate Limiter that works on both bandwidth and ops/s limiting.
 ///
 /// Bandwidth (bytes/s) and ops/s limiting can be used at the same time or individually.
@@ -346,8 +336,7 @@ impl RateLimiter {
         );
 
         // We'll need a timer_fd, even if our current config effectively disables rate limiting,
-        // because `Self::update_buckets()` might re-enable it later, and we might be
-        // seccomp-blocked from creating the timer_fd at that time.
+        // because users always register it for polling.
         let timer_fd = TimerFd::new()?;
         // Note: vmm_sys_util::TimerFd::new() open the fd w/o O_NONBLOCK. We manually add this flag
         // so that `Self::event_handler` won't be blocked with `vmm_sys_util::TimerFd::wait()`.
@@ -481,22 +470,6 @@ impl RateLimiter {
             }
         }
     }
-
-    /// Updates the parameters of the token buckets associated with this RateLimiter.
-    // TODO: Please note that, right now, the buckets become full after being updated.
-    pub fn update_buckets(&mut self, bytes: BucketUpdate, ops: BucketUpdate) {
-        let guard = self.inner.get_mut().unwrap();
-        match bytes {
-            BucketUpdate::Disabled => guard.bandwidth = None,
-            BucketUpdate::Update(tb) => guard.bandwidth = Some(tb),
-            BucketUpdate::None => (),
-        }
-        match ops {
-            BucketUpdate::Disabled => guard.ops = None,
-            BucketUpdate::Update(tb) => guard.ops = Some(tb),
-            BucketUpdate::None => (),
-        }
-    }
 }
 
 impl AsRawFd for RateLimiter {
@@ -543,15 +516,6 @@ pub(crate) mod tests {
 
         fn get_processed_refill_time(&self) -> u64 {
             self.processed_refill_time
-        }
-
-        // After a restore, we cannot be certain that the last_update field has the same value.
-        #[expect(dead_code)]
-        fn partial_eq(&self, other: &TokenBucket) -> bool {
-            (other.capacity() == self.capacity())
-                && (other.one_time_burst() == self.one_time_burst())
-                && (other.refill_time_ms() == self.refill_time_ms())
-                && (other.budget() == self.budget())
         }
     }
 
@@ -884,41 +848,6 @@ pub(crate) mod tests {
         thread::sleep(Duration::from_millis(10));
         l.event_handler().unwrap();
         assert!(!l.is_blocked());
-    }
-
-    #[test]
-    fn test_update_buckets() {
-        let mut x = RateLimiter::new(1000, 2000, 1000, 10, 20, 1000).unwrap();
-
-        let initial_bw = x.bandwidth();
-        let initial_ops = x.ops();
-
-        x.update_buckets(BucketUpdate::None, BucketUpdate::None);
-        assert_eq!(x.bandwidth(), initial_bw);
-        assert_eq!(x.ops(), initial_ops);
-
-        let new_bw = TokenBucket::new(123, 0, 57).unwrap();
-        let new_ops = TokenBucket::new(321, 12346, 89).unwrap();
-        x.update_buckets(
-            BucketUpdate::Update(new_bw.clone()),
-            BucketUpdate::Update(new_ops.clone()),
-        );
-
-        {
-            let mut guard = x.inner.lock().unwrap();
-            // We have manually adjust the last_update field, because it changes when update_buckets()
-            // constructs new buckets (and thus gets a different value for last_update). We do this so
-            // it makes sense to test the following assertions.
-            guard.bandwidth.as_mut().unwrap().last_update = new_bw.last_update;
-            guard.ops.as_mut().unwrap().last_update = new_ops.last_update;
-        }
-
-        assert_eq!(x.bandwidth(), Some(new_bw));
-        assert_eq!(x.ops(), Some(new_ops));
-
-        x.update_buckets(BucketUpdate::Disabled, BucketUpdate::Disabled);
-        assert_eq!(x.bandwidth(), None);
-        assert_eq!(x.ops(), None);
     }
 
     #[test]
