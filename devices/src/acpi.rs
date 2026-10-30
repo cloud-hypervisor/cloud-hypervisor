@@ -355,12 +355,13 @@ impl BusDevice for AcpiPmTimerDevice {
 
 #[cfg(all(test, not(target_arch = "riscv64")))]
 mod tests {
+    use vm_allocator::page_size::get_page_size;
+
     use super::*;
 
     #[test]
     fn test_vmgenid_regenerate() {
-        // SAFETY: sysconf(_SC_PAGESIZE) has no failure mode relevant here.
-        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
+        let page_size = get_page_size() as usize;
         let region: Arc<MmapRegion<AtomicBitmap>> = Arc::new(MmapRegion::new(page_size).unwrap());
         let device = VmGenIdDevice::new(GuestAddress(0xa_0028), Arc::clone(&region)).unwrap();
 
