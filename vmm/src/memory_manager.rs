@@ -522,8 +522,7 @@ fn statfs_get_bsize(path: &str) -> Result<u64, Error> {
 }
 
 fn memory_zone_get_align_size(zone: &MemoryZoneConfig) -> Result<u64, Error> {
-    // SAFETY: FFI call. Trivially safe.
-    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) as u64 };
+    let page_size = get_page_size();
 
     // There is no backend file and the `hugepages` is disabled, just use system page size.
     if zone.file.is_none() && !zone.hugepages {
@@ -1198,8 +1197,7 @@ impl MemoryManager {
         let guest_memory = self.guest_memory.memory();
         let required_uffd_features = self.required_uffd_features(uffd_requires_minor_mode);
 
-        // SAFETY: FFI call. Trivially safe.
-        let base_page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u64;
+        let base_page_size = get_page_size();
 
         info!(
             "UFFD: registering {} region(s) for demand paging",
@@ -2599,8 +2597,7 @@ impl MemoryManager {
         hugepages: bool,
         hugepage_size: Option<u64>,
     ) -> Result<u64, Error> {
-        // SAFETY: FFI call. Trivially safe.
-        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) as u64 };
+        let page_size = get_page_size();
         match (hugepages, hugepage_size, backing_file) {
             (false, _, _) => Ok(page_size),
             (true, Some(hugepage_size), _) => Ok(hugepage_size),
@@ -3944,8 +3941,7 @@ fn is_restore_cow_compatible(
     guest_memory: &GuestMemoryMmap,
     saved_regions: &MemoryRangeTable,
 ) -> bool {
-    // SAFETY: sysconf(_SC_PAGESIZE) has no failure mode relevant here.
-    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u64;
+    let page_size = get_page_size();
     let mut file_offset: u64 = 0;
     for range in saved_regions.ranges() {
         if !file_offset.is_multiple_of(page_size)
@@ -4104,11 +4100,6 @@ mod tests {
         }
     }
 
-    fn page_size() -> u64 {
-        // SAFETY: sysconf(_SC_PAGESIZE) has no failure mode relevant here.
-        unsafe { libc::sysconf(libc::_SC_PAGESIZE) as u64 }
-    }
-
     fn new_served_bitmap(ranges: &[UffdRange]) -> Vec<AtomicBitmap> {
         ranges
             .iter()
@@ -4123,7 +4114,7 @@ mod tests {
 
     #[test]
     fn uffd_prefault_skips_present_pages_and_crosses_ranges() {
-        let page = page_size();
+        let page = get_page_size();
         let ranges = [
             UffdRange {
                 host_addr: 0x10_0000,
@@ -4203,7 +4194,7 @@ mod tests {
 
     #[test]
     fn uffd_prefault_retries_page_after_source_failure() {
-        let page = page_size();
+        let page = get_page_size();
         let ranges = [UffdRange {
             host_addr: 0x10_0000,
             length: page,
@@ -4260,7 +4251,7 @@ mod tests {
 
     #[test]
     fn cow_restore_maps_data_and_reads_holes_as_zero() {
-        let page = page_size();
+        let page = get_page_size();
         let gm = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), (2 * page) as usize)]).unwrap();
 
         let mut file = tempfile::tempfile().unwrap();
@@ -4292,7 +4283,7 @@ mod tests {
 
     #[test]
     fn cow_snapshot_writes_private_pages_over_the_source() {
-        let page = page_size();
+        let page = get_page_size();
         let gm = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), (16 * page) as usize)]).unwrap();
         let mut file = tempfile::tempfile().unwrap();
         for i in 0..16u8 {
@@ -4330,7 +4321,7 @@ mod tests {
 
     #[test]
     fn cow_restore_rejects_unaligned_or_out_of_region_ranges() {
-        let page = page_size();
+        let page = get_page_size();
         let gm = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), page as usize)]).unwrap();
 
         let mut unaligned = MemoryRangeTable::default();
@@ -4350,7 +4341,7 @@ mod tests {
 
     #[test]
     fn cow_restore_rejects_file_backed_region() {
-        let page = page_size();
+        let page = get_page_size();
         let backing = tempfile::tempfile().unwrap();
         backing.set_len(page).unwrap();
         let region = MmapRegion::build(
@@ -4375,7 +4366,7 @@ mod tests {
 
     #[test]
     fn cow_restore_honors_region_reserve_and_thp() {
-        let page = page_size();
+        let page = get_page_size();
         let mut file = tempfile::tempfile().unwrap();
         file.write_all(&vec![0xcdu8; page as usize]).unwrap();
 
