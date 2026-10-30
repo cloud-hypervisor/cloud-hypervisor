@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::io::{ErrorKind, Read};
+use std::io::{self, ErrorKind, Read};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
@@ -16,7 +16,7 @@ use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Cannot connect to tpm Socket")]
-    ConnectToSocket(#[source] anyhow::Error),
+    ConnectToSocket(#[source] io::Error),
     #[error("Failed to read from socket")]
     ReadFromSocket(#[source] anyhow::Error),
     #[error("Failed to write to socket")]
@@ -69,9 +69,7 @@ impl SocketDev {
         self.state = SocketDevState::Connecting;
 
         let socket_path_s = socket_path.to_str().unwrap();
-        let s = UnixStream::connect(socket_path).map_err(|e| {
-            Error::ConnectToSocket(anyhow!("Failed to connect to tpm Socket. Error: {e:?}"))
-        })?;
+        let s = UnixStream::connect(socket_path).map_err(Error::ConnectToSocket)?;
         self.control_fd = s.as_raw_fd();
         self.stream = Some(s);
         self.state = SocketDevState::Connected;
