@@ -215,6 +215,33 @@ mod tests {
     }
 
     #[test]
+    fn extent_filename_with_spaces_is_supported() {
+        let dir = TempDir::new_with_prefix("/tmp/vmdk-space-test").unwrap();
+        let path = write_flat_vmdk_allocated(
+            dir.as_path(),
+            "monolithicFlat",
+            &[("disk with space-flat.vmdk", "RW", 2048)],
+        );
+        let disk = VmdkDisk::new(open_descriptor(&path), &path, false, false).unwrap();
+        assert_eq!(disk.logical_size().unwrap(), 2048 * SECTOR);
+    }
+
+    #[test]
+    fn multiple_extents_with_spaces_are_supported() {
+        let dir = TempDir::new_with_prefix("/tmp/vmdk-space-multi-test").unwrap();
+        let path = write_flat_vmdk_allocated(
+            dir.as_path(),
+            "twoGbMaxExtentFlat",
+            &[
+                ("disk with space-s001.vmdk", "RW", 2048),
+                ("disk with space-s002.vmdk", "RW", 1024),
+            ],
+        );
+        let disk = VmdkDisk::new(open_descriptor(&path), &path, false, false).unwrap();
+        assert_eq!(disk.logical_size().unwrap(), (2048 + 1024) * SECTOR);
+    }
+
+    #[test]
     fn logical_size_sums_multiple_extents() {
         let dir = TempDir::new_with_prefix("/tmp/vmdk-test").unwrap();
         let path = write_flat_vmdk(
