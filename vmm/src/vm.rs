@@ -385,14 +385,14 @@ impl VmOps for VmOpsHandler {
         self.memory
             .memory()
             .write(buf, GuestAddress(gpa))
-            .map_err(|e| HypervisorVmError::GuestMemWrite(e.into()))
+            .map_err(HypervisorVmError::GuestMemWrite)
     }
 
     fn guest_mem_read(&self, gpa: u64, buf: &mut [u8]) -> result::Result<usize, HypervisorVmError> {
         self.memory
             .memory()
             .read(buf, GuestAddress(gpa))
-            .map_err(|e| HypervisorVmError::GuestMemRead(e.into()))
+            .map_err(HypervisorVmError::GuestMemRead)
     }
 
     fn mmio_read(&self, gpa: u64, data: &mut [u8]) -> result::Result<(), HypervisorVmError> {
