@@ -86,7 +86,7 @@ iommufd-bindings = "0.2.0"
 iommufd-ioctls = "0.4.0"
 kvm-bindings = "0.14.2"
 kvm-ioctls = "0.25.1"
-linux-loader = "0.14.0"
+linux-loader = { version = "0.14.0", default-features = false }
 mshv-bindings = "0.7.1"
 mshv-ioctls = "0.7.1"
 seccompiler = "0.5.0"

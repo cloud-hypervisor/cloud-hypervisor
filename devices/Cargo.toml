@@ -15,11 +15,7 @@ event_monitor = { path = "../event_monitor" }
 getrandom = { workspace = true }
 hypervisor = { path = "../hypervisor" }
 libc = { workspace = true }
-linux-loader = { workspace = true, features = [
-  "bzimage",
-  "elf",
-  "pe",
-], optional = true }
+linux-loader = { workspace = true, optional = true }
 log = { workspace = true }
 pci = { path = "../pci" }
 serde = { workspace = true, features = ["derive"] }
