@@ -136,7 +136,7 @@ pub enum Error {
     VcpuCreate(#[source] anyhow::Error),
 
     #[error("Error running vCPU")]
-    VcpuRun(#[source] anyhow::Error),
+    VcpuRun(#[source] hypervisor::HypervisorCpuError),
 
     #[error("Error spawning vCPU thread")]
     VcpuSpawn(#[source] io::Error),
@@ -216,7 +216,7 @@ pub enum Error {
 
     #[cfg(target_arch = "x86_64")]
     #[error("Error setting up AMX")]
-    AmxEnable(#[source] anyhow::Error),
+    AmxEnable(#[source] hypervisor::HypervisorError),
 
     #[error("Maximum number of vCPUs {0} exceeds host limit {1}")]
     MaximumVcpusExceeded(u32, u32),
@@ -957,7 +957,7 @@ impl CpuManager {
         if config.features.amx {
             hypervisor
                 .enable_amx_state_components()
-                .map_err(|e| Error::AmxEnable(e.into()))?;
+                .map_err(Error::AmxEnable)?;
         }
 
         let proximity_domain_per_cpu: BTreeMap<u32, u32> = {
@@ -1517,7 +1517,7 @@ impl CpuManager {
                                 },
 
                                 Err(e) => {
-                                    error!("VCPU generated error: {:?}", Error::VcpuRun(e.into()));
+                                    error!("VCPU generated error: {:?}", Error::VcpuRun(e));
                                     vcpu_run_interrupted.store(true, Ordering::SeqCst);
                                     exit_evt.write(1).unwrap();
                                     break;
