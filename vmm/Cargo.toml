@@ -89,7 +89,7 @@ socket2 = { version = "0.6.5", features = ["all"] }
 thiserror = { workspace = true }
 tracer = { path = "../tracer" }
 uuid = { workspace = true }
-vfio-ioctls = { workspace = true, default-features = false }
+vfio-ioctls = { workspace = true }
 vfio_user = { workspace = true }
 vhost = { workspace = true }
 virtio-bindings = { workspace = true }
