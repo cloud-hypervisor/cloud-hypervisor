@@ -18,7 +18,7 @@ libc = { workspace = true }
 linux-loader = { workspace = true, optional = true }
 log = { workspace = true }
 pci = { path = "../pci" }
-serde = { workspace = true, features = ["derive"] }
+serde = { workspace = true, features = ["derive", "std"] }
 thiserror = { workspace = true }
 tpm = { path = "../tpm" }
 vm-allocator = { path = "../vm-allocator" }

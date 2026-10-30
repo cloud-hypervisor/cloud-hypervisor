@@ -7,7 +7,7 @@ version = "0.1.0"
 
 [dependencies]
 hypervisor = { path = "../hypervisor" }
-serde = { workspace = true, features = ["derive", "rc"] }
+serde = { workspace = true, features = ["derive", "rc", "std"] }
 thiserror = { workspace = true }
 vm-memory = { workspace = true, features = ["backend-bitmap", "backend-mmap"] }
 vmm-sys-util = { workspace = true }

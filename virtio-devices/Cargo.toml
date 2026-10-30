@@ -24,7 +24,7 @@ net_util = { path = "../net_util" }
 pci = { path = "../pci" }
 rate_limiter = { path = "../rate_limiter" }
 seccompiler = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
+serde = { workspace = true, features = ["derive", "std"] }
 serde_with = { workspace = true, default-features = false, features = [
   "macros",
 ] }

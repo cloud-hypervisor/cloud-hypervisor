@@ -11,7 +11,7 @@ getrandom = { workspace = true }
 libc = { workspace = true }
 log = { workspace = true }
 rate_limiter = { path = "../rate_limiter" }
-serde = { workspace = true, features = ["derive"] }
+serde = { workspace = true, features = ["derive", "std"] }
 smallvec = { workspace = true }
 thiserror = { workspace = true }
 virtio-bindings = { workspace = true }

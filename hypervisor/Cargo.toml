@@ -27,7 +27,7 @@ mshv-bindings = { workspace = true, features = [
   "with-serde",
 ], optional = true }
 mshv-ioctls = { workspace = true, optional = true }
-serde = { workspace = true, features = ["derive", "rc"] }
+serde = { workspace = true, features = ["derive", "rc", "std"] }
 serde_with = { workspace = true, default-features = false, features = [
   "macros",
 ] }
