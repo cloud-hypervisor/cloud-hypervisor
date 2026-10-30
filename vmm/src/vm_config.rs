@@ -4,6 +4,7 @@
 //
 use std::collections::HashSet;
 use std::net::{IpAddr, SocketAddr};
+use std::os::fd::RawFd;
 use std::path::{Path, PathBuf};
 #[cfg(feature = "fw_cfg")]
 use std::str::FromStr;
@@ -172,7 +173,7 @@ pub struct PlatformConfig {
     pub iommufd: bool,
     // FDs are not serialized and any deserialized value is invalid; see NetConfig::fds.
     #[serde(default, deserialize_with = "deserialize_platformconfig_iommufd_fd")]
-    pub iommufd_fd: Option<i32>,
+    pub iommufd_fd: Option<RawFd>,
     #[serde(default = "default_platformconfig_vfio_p2p_dma")]
     pub vfio_p2p_dma: bool,
 }
@@ -221,11 +222,11 @@ impl PlatformConfig {
     }
 }
 
-fn deserialize_platformconfig_iommufd_fd<'de, D>(d: D) -> Result<Option<i32>, D::Error>
+fn deserialize_platformconfig_iommufd_fd<'de, D>(d: D) -> Result<Option<RawFd>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    let invalid_fd: Option<i32> = Option::deserialize(d)?;
+    let invalid_fd: Option<RawFd> = Option::deserialize(d)?;
     if invalid_fd.is_some() {
         debug!(
             "FD in 'PlatformConfig::iommufd_fd' won't be deserialized as it is most likely invalid now. Deserializing it as -1."
@@ -552,7 +553,7 @@ pub struct NetConfig {
     // Valid FDs are transmitted via a different channel (SCM_RIGHTS message)
     // and will be populated into this struct on the destination VMM eventually.
     #[serde(default, deserialize_with = "deserialize_netconfig_fds")]
-    pub fds: Option<Vec<i32>>,
+    pub fds: Option<Vec<RawFd>>,
     #[serde(default)]
     pub rate_limiter_config: Option<RateLimiterConfig>,
     #[serde(default)]
@@ -579,11 +580,11 @@ pub fn default_netconfig_queue_size() -> u16 {
     DEFAULT_NET_QUEUE_SIZE
 }
 
-fn deserialize_netconfig_fds<'de, D>(d: D) -> Result<Option<Vec<i32>>, D::Error>
+fn deserialize_netconfig_fds<'de, D>(d: D) -> Result<Option<Vec<RawFd>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    let invalid_fds: Option<Vec<i32>> = Option::deserialize(d)?;
+    let invalid_fds: Option<Vec<RawFd>> = Option::deserialize(d)?;
     if let Some(invalid_fds) = invalid_fds {
         debug!(
             "FDs in 'NetConfig' won't be deserialized as they are most likely invalid now. Deserializing them as -1."
@@ -886,7 +887,7 @@ pub struct DeviceConfig {
     pub path: Option<PathBuf>,
     // FDs are not serialized and any deserialized value is invalid; see NetConfig::fds.
     #[serde(default, deserialize_with = "deserialize_deviceconfig_fd")]
-    pub fd: Option<i32>,
+    pub fd: Option<RawFd>,
     #[serde(default)]
     pub x_nv_gpudirect_clique: Option<u8>,
     #[serde(default)]
@@ -895,11 +896,11 @@ pub struct DeviceConfig {
     pub iommufd_dev_id: Option<u32>,
 }
 
-fn deserialize_deviceconfig_fd<'de, D>(d: D) -> Result<Option<i32>, D::Error>
+fn deserialize_deviceconfig_fd<'de, D>(d: D) -> Result<Option<RawFd>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    let invalid_fd: Option<i32> = Option::deserialize(d)?;
+    let invalid_fd: Option<RawFd> = Option::deserialize(d)?;
     if invalid_fd.is_some() {
         debug!(
             "FD in 'DeviceConfig' won't be deserialized as it is most likely invalid now. Deserializing it as -1."
@@ -1330,7 +1331,7 @@ pub struct VmConfig {
     // causes the FDs to be closed early. This allows management software to
     // gracefully clean up resources (e.g., libvirt closes tap devices).
     #[serde(skip)]
-    pub preserved_fds: Option<HashSet<i32>>,
+    pub preserved_fds: Option<HashSet<RawFd>>,
     #[serde(default)]
     pub landlock_enable: bool,
     pub landlock_rules: Option<Box<[LandlockConfig]>>,

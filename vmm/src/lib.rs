@@ -4245,7 +4245,7 @@ mod tests {
 
     fn receive_data(
         vfio_fds: Option<Vec<RestoredVfioConfig>>,
-        iommufd_fd: Option<i32>,
+        iommufd_fd: Option<RawFd>,
     ) -> VmReceiveMigrationData {
         VmReceiveMigrationData {
             receiver_url: "tcp:127.0.0.1:4321".to_string(),
@@ -4257,7 +4257,7 @@ mod tests {
         }
     }
 
-    fn vfio_fd(id: &str, fd: i32) -> RestoredVfioConfig {
+    fn vfio_fd(id: &str, fd: RawFd) -> RestoredVfioConfig {
         RestoredVfioConfig {
             id: id.to_owned(),
             fd: Some(fd),
