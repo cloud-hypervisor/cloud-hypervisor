@@ -66,7 +66,6 @@ use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
 use crate::{GuestMemory, GuestRegion, MEMORY_MANAGER_SNAPSHOT_ID, prefault, userfaultfd};
 
 struct UffdHandler {
-    stop_event: EventFd,
     result_rx: Receiver<Result<(), io::Error>>,
     handle: thread::JoinHandle<()>,
     fault_socket_fd: Option<OwnedFd>,
@@ -103,14 +102,14 @@ impl UffdPages {
 pub(crate) struct UffdRegistry {
     uffds: Mutex<Vec<(String /* device identifier */, Arc<Uffd>)>>,
     added_uffd_evt: EventFd,
-    done: EventFd,
+    stopped: EventFd,
     ranges: Box<[UffdRange]>,
 }
 
 impl UffdRegistry {
-    fn is_done(&self) -> bool {
+    fn is_stopped(&self) -> bool {
         let mut pollfd = libc::pollfd {
-            fd: self.done.as_raw_fd(),
+            fd: self.stopped.as_raw_fd(),
             events: libc::POLLIN,
             revents: 0,
         };
@@ -118,10 +117,11 @@ impl UffdRegistry {
         unsafe { libc::poll(&mut pollfd, 1, 0) == 1 }
     }
 
-    fn done(&self) -> Result<(), io::Error> {
+    fn stop(&self) -> Result<(), io::Error> {
         let uffds = self.uffds.lock().unwrap();
-        // Every page is present and the uffd handlers are shutting down, so
-        // any new faults should be handled by the kernel.
+        self.stopped.write(1)?;
+        // uffd handlers are shutting down, so any new faults should be handled
+        // by the kernel.
         for (_, uffd) in uffds.iter() {
             for range in uffd.ranges() {
                 match uffd::unregister(uffd.fd(), range.host_addr, range.length) {
@@ -137,7 +137,7 @@ impl UffdRegistry {
                 }
             }
         }
-        self.done.write(1)
+        Ok(())
     }
 }
 
@@ -166,7 +166,7 @@ impl PostcopyHandler for UffdRegistry {
         regions: &[PostcopyRegion],
     ) -> Result<(), io::Error> {
         let mut uffds = self.uffds.lock().unwrap();
-        if self.is_done() {
+        if self.is_stopped() {
             return Ok(());
         }
 
@@ -226,7 +226,7 @@ impl PostcopyHandler for UffdRegistry {
     }
 
     fn postcopy_done_event(&self) -> &EventFd {
-        &self.done
+        &self.stopped
     }
 }
 
@@ -1431,8 +1431,6 @@ impl MemoryManager {
             uffd.ranges().len()
         );
 
-        let stop_event = EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?;
-        let thread_stop_event = stop_event.try_clone().map_err(Error::EventFdFail)?;
         let thread_exit_evt = exit_evt.try_clone().map_err(Error::EventFdFail)?;
         let panic_exit_evt = exit_evt.try_clone().map_err(Error::EventFdFail)?;
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
@@ -1441,7 +1439,7 @@ impl MemoryManager {
         let uffd_registry = Arc::new(UffdRegistry {
             uffds: Mutex::new(vec![(VMM_UFFD_ID.to_string(), Arc::new(uffd))]),
             added_uffd_evt: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
-            done: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
+            stopped: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
             ranges,
         });
         let thread_uffd_registry = Arc::clone(&uffd_registry);
@@ -1451,7 +1449,6 @@ impl MemoryManager {
                 panic::catch_unwind(panic::AssertUnwindSafe(move || {
                     let mut result = Self::uffd_handler_loop(
                         &thread_uffd_registry,
-                        &thread_stop_event,
                         &thread_exit_evt,
                         source,
                         &pages,
@@ -1459,7 +1456,7 @@ impl MemoryManager {
                         background_fetch_pages,
                     );
 
-                    if result.is_err() && thread_stop_event.read().is_ok() {
+                    if result.is_err() && thread_uffd_registry.is_stopped() {
                         // Error during shutdown is expected
                         result = Ok(());
                     }
@@ -1490,7 +1487,6 @@ impl MemoryManager {
         }
 
         self.uffd_handler = Some(UffdHandler {
-            stop_event,
             result_rx,
             handle,
             fault_socket_fd,
@@ -1519,7 +1515,9 @@ impl MemoryManager {
 
     fn stop_uffd_handler(&mut self) {
         if let Some(uffd_handler) = self.uffd_handler.take() {
-            uffd_handler.stop_event.write(1).ok();
+            if let Err(e) = uffd_handler.uffd_registry.stop() {
+                error!("UFFD registry stop failed: {e}");
+            }
             if let Some(fd) = &uffd_handler.fault_socket_fd {
                 // SAFETY: fd is a valid owned fd for the duration of this call.
                 unsafe { libc::shutdown(fd.as_raw_fd(), libc::SHUT_RDWR) };
@@ -1545,7 +1543,7 @@ impl MemoryManager {
     pub fn restoring(&self) -> bool {
         self.uffd_handler
             .as_ref()
-            .is_some_and(|h| !h.uffd_registry.is_done())
+            .is_some_and(|h| !h.uffd_registry.is_stopped())
     }
 
     /// Poison a page that can no longer be restored. Exits if that's not
@@ -1576,10 +1574,9 @@ impl MemoryManager {
     /// `source` fails, poison each faulted page instead.
     ///
     /// A userfaultfd received with the id of an earlier one replaces it. Once
-    /// all pages are present, `uffd_registry.done` is written.
+    /// all pages are present, `uffd_registry.stopped` is written.
     fn uffd_handler_loop(
         uffd_registry: &UffdRegistry,
-        stop_event: &EventFd,
         exit_evt: &EventFd,
         mut source: Box<dyn UffdMemorySource>,
         pages: &UffdPages,
@@ -1615,7 +1612,7 @@ impl MemoryManager {
         epoll::ctl(
             epoll_fd,
             epoll::ControlOptions::EPOLL_CTL_ADD,
-            stop_event.as_raw_fd(),
+            uffd_registry.stopped.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, EVENT_STOP),
         )
         .map_err(io::Error::other)?;
@@ -1658,7 +1655,6 @@ impl MemoryManager {
                 .take(num_events)
                 .any(|event| event.data == EVENT_STOP)
             {
-                stop_event.read().ok();
                 info!("UFFD handler: received stop event, exiting");
                 return Ok(());
             }
@@ -1861,7 +1857,7 @@ impl MemoryManager {
                 }
 
                 match result {
-                    Err(_) if stop_event.read().is_ok() => {
+                    Err(_) if uffd_registry.is_stopped() => {
                         info!("UFFD handler: stop received after source error, exiting");
                         return Ok(());
                     }
@@ -1916,7 +1912,7 @@ impl MemoryManager {
                 &pages.loading,
             ) {
                 Ok(0) => {
-                    uffd_registry.done()?;
+                    uffd_registry.stop()?;
 
                     let elapsed = prefault_start.elapsed();
                     info!(
