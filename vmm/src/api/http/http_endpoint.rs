@@ -120,7 +120,7 @@ mod fds_helper {
 
         use super::{ConfigWithFDs, ConfigWithVariableFDs};
         use crate::config::{RestoredNetConfig, RestoredVfioConfig};
-        use crate::vm_config::{DeviceConfig, NetConfig};
+        use crate::vm_config::{DeviceConfig, ExternalFd, NetConfig};
 
         impl ConfigWithFDs for NetConfig {
             fn id(&self) -> Option<&str> {
@@ -132,7 +132,7 @@ mod fds_helper {
             }
 
             fn set_fds(&mut self, fds: Option<Vec<File>>) {
-                self.fds = fds.map(|files| files.into_iter().map(IntoRawFd::into_raw_fd).collect());
+                self.fds = fds.map(|files| files.into_iter().map(ExternalFd::from).collect());
             }
         }
 
@@ -163,7 +163,7 @@ mod fds_helper {
             }
 
             fn set_fds(&mut self, fds: Option<Vec<File>>) {
-                self.fds = fds.map(|files| files.into_iter().map(IntoRawFd::into_raw_fd).collect());
+                self.fds = fds.map(|files| files.into_iter().map(ExternalFd::from).collect());
             }
         }
 
@@ -203,7 +203,7 @@ mod fds_helper {
             // Only FDs transmitted via SCM_RIGHTS are valid. Descriptor numbers
             // in the HTTP request body are discarded.
             warn!(
-                "FD numbers were present in HTTP request body for device {:?} but will be ignored",
+                "FDs were present in HTTP request body for device {:?} but will be ignored",
                 cfg.id()
             );
 
@@ -821,10 +821,16 @@ mod tests {
     #[test]
     fn test_new_device_cfg_takes_all_fds() {
         let files: Vec<_> = (0..3).map(|_| test_fd()).collect();
-        let fds = files.iter().map(AsRawFd::as_raw_fd).collect();
+        let fds: Vec<_> = files.iter().map(AsRawFd::as_raw_fd).collect();
         let mut config: NetConfig = serde_json::from_str("{}").unwrap();
         attach_fds_to_cfg(files, &mut config).unwrap();
-        assert_eq!(config.fds, Some(fds));
+        let actual: Vec<_> = config
+            .fds
+            .unwrap()
+            .iter()
+            .map(|fd| fd.as_ref().unwrap().as_raw_fd())
+            .collect();
+        assert_eq!(actual, fds);
     }
 
     #[test]
@@ -841,7 +847,12 @@ mod tests {
         attach_fds_to_cfgs(files, &mut configs.iter_mut().collect::<Vec<_>>()).unwrap();
         let expected = [Some(&fds[..3]), Some(&fds[3..4]), None, Some(&fds[4..])];
         for (config, expected) in configs.iter().zip(expected) {
-            assert_eq!(config.fds.as_deref(), expected);
+            let actual: Option<Vec<_>> = config.fds.as_ref().map(|fds| {
+                fds.iter()
+                    .map(|fd| fd.as_ref().unwrap().as_raw_fd())
+                    .collect()
+            });
+            assert_eq!(actual.as_deref(), expected);
         }
     }
 }

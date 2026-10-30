@@ -691,14 +691,16 @@ fn start_vmm(
 
     let vm_config = if payload_present {
         let vm_params = VmParams::from_arg_matches(cmd_arguments);
-        Some(VmConfig::parse(vm_params).map_err(Error::ParsingConfig)?)
+        // SAFETY: The CLI transfers inherited FDs before the VMM opens new FDs.
+        Some(unsafe { VmConfig::parse(vm_params) }.map_err(Error::ParsingConfig)?)
     } else {
         None
     };
     let restore_config = if vm_config.is_none() {
         cmd_arguments
             .get_one::<String>("restore")
-            .map(|restore| RestoreConfig::parse(restore))
+            // SAFETY: The CLI transfers inherited FDs before the VMM opens new FDs.
+            .map(|restore| unsafe { RestoreConfig::parse(restore) })
             .transpose()
             .map_err(Error::ParsingRestore)?
     } else {
@@ -1257,7 +1259,8 @@ mod tests {
             create_app(default_vcpus, default_memory, default_rng).get_matches_from(args);
         let vm_params = VmParams::from_arg_matches(&cmd_arguments);
 
-        VmConfig::parse(vm_params).unwrap()
+        // SAFETY: These CLI test cases supply no inherited descriptors.
+        unsafe { VmConfig::parse(vm_params) }.unwrap()
     }
 
     fn compare_vm_config_cli_vs_json(

@@ -9,8 +9,9 @@ mod test_util;
 
 use std::io::{self, Read};
 use std::marker::PhantomData;
-use std::os::fd::RawFd;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::net::UnixStream;
+use std::sync::Arc;
 use std::{error, fs, iter, num, process};
 
 use api_client::{
@@ -33,7 +34,7 @@ use vmm::vm_config::{
 use zbus::{blocking::Connection, proxy, zvariant::Optional};
 
 type ApiResult = Result<(), Error>;
-type FdCommand = (String, Vec<RawFd>);
+type FdCommand = (String, Vec<Arc<OwnedFd>>);
 
 #[derive(Error, Debug)]
 enum Error {
@@ -300,18 +301,36 @@ impl TargetApi<'_> {
 
 fn prepare_fd_command(matches: &ArgMatches) -> Result<Option<FdCommand>, Error> {
     let fd_command = match matches.subcommand() {
-        Some(("add-device", args)) => Some(add_device_config(
-            args.get_one::<String>("device_config").unwrap(),
-        )?),
+        Some(("add-device", args)) => {
+            let (body, fds) = add_device_config(args.get_one::<String>("device_config").unwrap())?;
+            let fds = fds
+                .into_iter()
+                .map(|fd| {
+                    // SAFETY: The CLI transfers these validated inherited FDs.
+                    Arc::new(unsafe { OwnedFd::from_raw_fd(fd) })
+                })
+                .collect();
+            Some((body, fds))
+        }
         Some(("add-net", args)) => Some(add_net_config(
             args.get_one::<String>("net_config").unwrap(),
         )?),
         Some(("restore", args)) => Some(restore_config(
             args.get_one::<String>("restore_config").unwrap(),
         )?),
-        Some(("receive-migration", args)) => Some(receive_migration_data(
-            args.get_one::<String>("receive_migration_config").unwrap(),
-        )?),
+        Some(("receive-migration", args)) => {
+            let (body, fds) = receive_migration_data(
+                args.get_one::<String>("receive_migration_config").unwrap(),
+            )?;
+            let fds = fds
+                .into_iter()
+                .map(|fd| {
+                    // SAFETY: The CLI transfers these validated inherited FDs.
+                    Arc::new(unsafe { OwnedFd::from_raw_fd(fd) })
+                })
+                .collect();
+            Some((body, fds))
+        }
         _ => None,
     };
     Ok(fd_command)
@@ -419,7 +438,7 @@ fn rest_api_do_command(
             "PUT",
             "add-device",
             fd_request_body.as_deref(),
-            &fds,
+            &fds.iter().map(|fd| fd.as_raw_fd()).collect::<Vec<_>>(),
         )
         .map_err(Error::HttpApiClient),
         Some("remove-device") => {
@@ -482,10 +501,14 @@ fn rest_api_do_command(
             simple_api_command(socket, "PUT", "add-pmem", Some(&pmem_config))
                 .map_err(Error::HttpApiClient)
         }
-        Some("add-net") => {
-            simple_api_command_with_fds(socket, "PUT", "add-net", fd_request_body.as_deref(), &fds)
-                .map_err(Error::HttpApiClient)
-        }
+        Some("add-net") => simple_api_command_with_fds(
+            socket,
+            "PUT",
+            "add-net",
+            fd_request_body.as_deref(),
+            &fds.iter().map(|fd| fd.as_raw_fd()).collect::<Vec<_>>(),
+        )
+        .map_err(Error::HttpApiClient),
         Some("add-user-device") => {
             let device_config = add_user_device_config(
                 matches
@@ -530,10 +553,14 @@ fn rest_api_do_command(
             simple_api_command(socket, "PUT", "snapshot", Some(&snapshot_config))
                 .map_err(Error::HttpApiClient)
         }
-        Some("restore") => {
-            simple_api_command_with_fds(socket, "PUT", "restore", fd_request_body.as_deref(), &fds)
-                .map_err(Error::HttpApiClient)
-        }
+        Some("restore") => simple_api_command_with_fds(
+            socket,
+            "PUT",
+            "restore",
+            fd_request_body.as_deref(),
+            &fds.iter().map(|fd| fd.as_raw_fd()).collect::<Vec<_>>(),
+        )
+        .map_err(Error::HttpApiClient),
         Some("coredump") => {
             let coredump_config = coredump_config(
                 matches
@@ -561,7 +588,7 @@ fn rest_api_do_command(
             "PUT",
             "receive-migration",
             fd_request_body.as_deref(),
-            &fds,
+            &fds.iter().map(|fd| fd.as_raw_fd()).collect::<Vec<_>>(),
         )
         .map_err(Error::HttpApiClient),
         Some("create") => {
@@ -831,7 +858,7 @@ fn resize_zone_config(id: &str, size: &str) -> Result<String, Error> {
     Ok(serde_json::to_string(&resize_zone).unwrap())
 }
 
-fn add_device_config(config: &str) -> Result<FdCommand, Error> {
+fn add_device_config(config: &str) -> Result<(String, Vec<RawFd>), Error> {
     let mut device_config = DeviceConfig::parse(config).map_err(Error::AddDeviceConfig)?;
 
     // DeviceConfig is modified on purpose here by taking the file
@@ -891,13 +918,20 @@ fn add_pmem_config(config: &str) -> Result<String, Error> {
 }
 
 fn add_net_config(config: &str) -> Result<FdCommand, Error> {
-    let mut net_config = NetConfig::parse(config).map_err(Error::AddNetConfig)?;
+    // SAFETY: The CLI transfers ownership of the inherited descriptors.
+    let mut net_config = unsafe { NetConfig::parse(config) }.map_err(Error::AddNetConfig)?;
 
     // NetConfig is modified on purpose here by taking the list of file
     // descriptors out. Keeping the list and send it to the server side
     // process would not make any sense since the file descriptor may be
     // represented with different values.
-    let fds = net_config.fds.take().unwrap_or_default();
+    let fds = net_config
+        .fds
+        .take()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|mut fd| fd.take())
+        .collect();
     let net_config = serde_json::to_string(&net_config).unwrap();
 
     Ok((net_config, fds))
@@ -926,23 +960,30 @@ fn snapshot_config(url: &str) -> String {
 }
 
 fn restore_config(config: &str) -> Result<FdCommand, Error> {
-    let mut restore_config = RestoreConfig::parse(config).map_err(Error::Restore)?;
+    // SAFETY: The CLI transfers ownership of the inherited descriptors.
+    let mut restore_config = unsafe { RestoreConfig::parse(config) }.map_err(Error::Restore)?;
     // RestoreConfig is modified on purpose to take out the file descriptors.
     // These fds are passed to the server side process via SCM_RIGHTS, in the
     // order net_fds, then vfio_fds, then the iommufd FD, matching the
     // server's split.
-    let mut fds: Vec<RawFd> = match &mut restore_config.net_fds {
+    let mut fds: Vec<Arc<OwnedFd>> = match &mut restore_config.net_fds {
         Some(net_fds) => net_fds
             .iter_mut()
             .flat_map(|net| net.fds.take().unwrap_or_default())
+            .filter_map(|mut fd| fd.take())
             .collect(),
         None => Vec::new(),
     };
     if let Some(vfio_fds) = restore_config.vfio_fds.as_mut() {
-        fds.extend(vfio_fds.iter_mut().filter_map(|v| v.fd.take()));
+        fds.extend(vfio_fds.iter_mut().filter_map(|v| v.fd.take()).map(|fd| {
+            // SAFETY: The CLI transfers these inherited FDs. They have been
+            // removed from the config.
+            Arc::new(unsafe { OwnedFd::from_raw_fd(fd) })
+        }));
     }
     if let Some(iommufd_fd) = restore_config.iommufd_fd.take() {
-        fds.push(iommufd_fd);
+        // SAFETY: The CLI transfers this inherited FD, removed from the raw config above.
+        fds.push(Arc::new(unsafe { OwnedFd::from_raw_fd(iommufd_fd) }));
     }
     let restore_config = serde_json::to_string(&restore_config).unwrap();
 
@@ -957,7 +998,7 @@ fn coredump_config(destination_url: &str) -> String {
     serde_json::to_string(&coredump_config).unwrap()
 }
 
-fn receive_migration_data(config: &str) -> Result<FdCommand, Error> {
+fn receive_migration_data(config: &str) -> Result<(String, Vec<RawFd>), Error> {
     let mut data =
         api::VmReceiveMigrationData::parse(config).map_err(Error::ReceiveMigrationConfig)?;
 

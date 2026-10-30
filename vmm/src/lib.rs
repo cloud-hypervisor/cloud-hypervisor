@@ -4206,9 +4206,12 @@ mod tests {
     #[test]
     fn test_vmm_vm_cold_add_net() {
         let mut vmm = create_dummy_vmm();
-        let net_config = NetConfig::parse(
-            "mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,vhost_user=true,socket=/tmp/sock",
-        )
+        // SAFETY: This test input contains no inherited descriptors.
+        let net_config = unsafe {
+            NetConfig::parse(
+                "mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,vhost_user=true,socket=/tmp/sock",
+            )
+        }
         .unwrap();
 
         assert!(matches!(

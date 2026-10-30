@@ -6,7 +6,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 #[cfg(feature = "ivshmem")]
 use std::fs;
-use std::os::fd::RawFd;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::LazyLock;
@@ -17,7 +17,7 @@ use arch::CpuProfileConfig;
 use arch::CpuidOverride;
 use block::ImageType;
 use clap::ArgMatches;
-use log::{debug, warn};
+use log::warn;
 #[cfg(target_arch = "x86_64")]
 use option_parser::split_commas;
 use option_parser::{
@@ -1920,7 +1920,10 @@ impl NetConfig {
     pci_segment=<segment_id>,pci_device_id=<pci_slot>,\
     offload_tso=on|off,offload_ufo=on|off,offload_csum=on|off\"";
 
-    pub fn parse(net: &str) -> Result<Self> {
+    /// # Safety
+    /// Live FDs named in the input must be exclusively owned by the caller.
+    /// Referenced descriptors may be consumed even if parsing fails.
+    pub unsafe fn parse(net: &str) -> Result<Self> {
         validate_inherited_fds([net])?;
         let mut parser = OptionParser::new();
 
@@ -1994,7 +1997,8 @@ impl NetConfig {
             .map_err(Error::ParseNetwork)?
             .map(|v| {
                 v.0.into_iter()
-                    .map(parse_inherited_fd)
+                    // SAFETY: The caller transfers ownership of the inherited CLI descriptors.
+                    .map(|fd| unsafe { take_inherited_fd(fd) })
                     .collect::<Result<Vec<_>>>()
             })
             .transpose()?;
@@ -2093,7 +2097,8 @@ impl NetConfig {
                 ));
             }
 
-            for &fd in fds {
+            for fd in fds {
+                let fd = fd.as_ref().map_or(-1, |fd| fd.as_raw_fd());
                 if fd <= 2 {
                     return Err(ValidationError::VnetReservedFd(fd));
                 }
@@ -3057,33 +3062,9 @@ pub struct RestoredNetConfig {
     pub id: String,
     #[serde(default)]
     pub num_fds: usize,
-    // Special deserialize handling:
-    // A serialize-deserialize cycle typically happens across processes.
-    // Therefore, we don't serialize FDs, and whatever value is here after
-    // deserialization is invalid.
-    //
-    // Valid FDs are transmitted via a different channel (SCM_RIGHTS message)
-    // and will be populated into this struct on the destination VMM eventually.
-    #[serde(default, deserialize_with = "deserialize_restorednetconfig_fds")]
-    pub fds: Option<Vec<RawFd>>,
-}
-
-fn deserialize_restorednetconfig_fds<'de, D>(d: D) -> result::Result<Option<Vec<RawFd>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let invalid_fds: Option<Vec<RawFd>> = Option::deserialize(d)?;
-    if let Some(invalid_fds) = invalid_fds {
-        // If the live-migration path is used properly, new FDs are passed as
-        // SCM_RIGHTS message. So, we don't get them from the serialized JSON
-        // anyway.
-        debug!(
-            "FDs in 'RestoredNetConfig' won't be deserialized as they are most likely invalid now. Deserializing them as -1."
-        );
-        Ok(Some(vec![-1; invalid_fds.len()]))
-    } else {
-        Ok(None)
-    }
+    // Deserialization keeps the FD count for restore.
+    #[serde(default)]
+    pub fds: Option<Vec<ExternalFd>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
@@ -3175,7 +3156,10 @@ impl RestoreConfig {
         \n `resume` controls whether the VM will be directly resumed after restore \
         \n `zone_updates` can be used to update NUMA memory zones. Expects a list of elements in the form `id@host_numa_node`";
 
-    pub fn parse(restore: &str) -> Result<Self> {
+    /// # Safety
+    /// Live FDs named in the input must be exclusively owned by the caller.
+    /// Referenced descriptors may be consumed even if parsing fails.
+    pub unsafe fn parse(restore: &str) -> Result<Self> {
         validate_inherited_fds([restore])?;
         let mut parser = OptionParser::new();
         parser
@@ -3213,7 +3197,10 @@ impl RestoreConfig {
                             num_fds: fds.len(),
                             fds: Some(
                                 fds.into_iter()
-                                    .map(parse_inherited_fd)
+                                    .map(|fd| {
+                                        // SAFETY: The caller transfers the inherited descriptors.
+                                        unsafe { take_inherited_fd(fd) }
+                                    })
                                     .collect::<Result<Vec<_>>>()?,
                             ),
                         })
@@ -4049,7 +4036,10 @@ impl VmConfig {
         Ok(id_list)
     }
 
-    pub fn parse(vm_params: VmParams) -> Result<Self> {
+    /// # Safety
+    /// Live FDs named in the input must be exclusively owned by the caller.
+    /// Referenced descriptors may be consumed even if parsing fails.
+    pub unsafe fn parse(vm_params: VmParams) -> Result<Self> {
         validate_inherited_fds(
             vm_params
                 .net
@@ -4092,7 +4082,8 @@ impl VmConfig {
         if let Some(net_list) = &vm_params.net {
             let mut net_config_list = Vec::new();
             for item in net_list.iter() {
-                let net_config = NetConfig::parse(item)?;
+                // SAFETY: The caller transfers ownership of the inherited CLI descriptors.
+                let net_config = unsafe { NetConfig::parse(item) }?;
                 net_config_list.push(net_config);
             }
             net = Some(net_config_list);
@@ -4440,6 +4431,14 @@ impl Drop for VmConfig {
     }
 }
 
+/// # Safety
+/// A live fd must be exclusively owned by the caller, which transfers it here.
+pub(crate) unsafe fn take_inherited_fd(fd: impl TryInto<RawFd>) -> Result<ExternalFd> {
+    let fd = parse_inherited_fd(fd)?;
+    // SAFETY: The caller transfers exclusive ownership of the validated FD.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) }.into())
+}
+
 pub(crate) fn parse_inherited_fd(fd: impl TryInto<RawFd>) -> Result<RawFd> {
     let fd = fd
         .try_into()
@@ -4453,7 +4452,8 @@ pub(crate) fn parse_inherited_fd(fd: impl TryInto<RawFd>) -> Result<RawFd> {
     Ok(fd)
 }
 
-// Reject repeated CLI numbers before constructing configs that will own them.
+// Check all references before taking ownership so repeated CLI FDs cannot
+// create two owners for the same FD.
 pub(crate) fn validate_inherited_fds<'a>(configs: impl IntoIterator<Item = &'a str>) -> Result<()> {
     let mut seen = HashSet::new();
     for config in configs {
@@ -5240,13 +5240,19 @@ mod tests {
 
     #[test]
     fn test_net_parsing() -> Result<()> {
+        use std::os::fd::IntoRawFd;
+
         assert_eq!(
-            NetConfig::parse("mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef")?,
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe { NetConfig::parse("mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef") }?,
             net_fixture(),
         );
 
         assert_eq!(
-            NetConfig::parse("mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,id=mynet0")?,
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe {
+                NetConfig::parse("mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,id=mynet0")
+            }?,
             NetConfig {
                 pci_common: PciDeviceCommonConfig {
                     id: Some("mynet0".to_owned()),
@@ -5257,9 +5263,12 @@ mod tests {
         );
 
         assert_eq!(
-            NetConfig::parse(
-                "mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,tap=tap0,ip=192.168.100.1,mask=255.255.255.128",
-            )?,
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe {
+                NetConfig::parse(
+                    "mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,tap=tap0,ip=192.168.100.1,mask=255.255.255.128",
+                )
+            }?,
             NetConfig {
                 tap: Some("tap0".to_owned()),
                 ip: Some("192.168.100.1".parse().unwrap()),
@@ -5269,9 +5278,12 @@ mod tests {
         );
 
         assert_eq!(
-            NetConfig::parse(
-                "mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,vhost_user=true,socket=/tmp/sock",
-            )?,
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe {
+                NetConfig::parse(
+                    "mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,vhost_user=true,socket=/tmp/sock",
+                )
+            }?,
             NetConfig {
                 vhost_user: true,
                 vhost_socket: Some("/tmp/sock".to_owned()),
@@ -5280,9 +5292,12 @@ mod tests {
         );
 
         assert_eq!(
-            NetConfig::parse(
-                "mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,num_queues=4,queue_size=1024,iommu=on",
-            )?,
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe {
+                NetConfig::parse(
+                    "mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,num_queues=4,queue_size=1024,iommu=on",
+                )
+            }?,
             NetConfig {
                 pci_common: PciDeviceCommonConfig {
                     iommu: IommuType::Virtio,
@@ -5295,23 +5310,29 @@ mod tests {
         );
 
         let files = [test_fd(), test_fd()];
-        let [fd0, fd1] = files.each_ref().map(AsRawFd::as_raw_fd);
-
-        let config = NetConfig::parse(&format!(
-            "mac=de:ad:be:ef:12:34,fd=[{fd0},{fd1}],num_queues=4"
-        ))?;
+        let [fd0, fd1] = files.map(IntoRawFd::into_raw_fd);
+        // SAFETY: The files transferred exclusive ownership to us.
+        let config = unsafe {
+            NetConfig::parse(&format!(
+                "mac=de:ad:be:ef:12:34,fd=[{fd0},{fd1}],num_queues=4"
+            ))
+        }?;
+        let fds = config.fds.as_ref().unwrap();
+        assert_eq!(fds[0].as_ref().unwrap().as_raw_fd(), fd0);
+        assert_eq!(fds[1].as_ref().unwrap().as_raw_fd(), fd1);
         assert_eq!(
             config,
             NetConfig {
                 host_mac: None,
-                fds: Some(vec![fd0, fd1]),
+                fds: config.fds.clone(),
                 num_queues: 4,
                 ..net_fixture()
             }
         );
 
         assert_eq!(
-            NetConfig::parse("mac=de:ad:be:ef:12:34,mask=255.255.255.0")?,
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe { NetConfig::parse("mac=de:ad:be:ef:12:34,mask=255.255.255.0") }?,
             NetConfig {
                 mask: Some("255.255.255.0".parse().unwrap()),
                 host_mac: None,
@@ -6129,20 +6150,31 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
     #[test]
     fn test_restore_parsing() -> Result<()> {
         use std::array;
+        use std::os::fd::IntoRawFd;
 
         assert_eq!(
-            RestoreConfig::parse("source_url=/path/to/snapshot")?,
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe { RestoreConfig::parse("source_url=/path/to/snapshot") }?,
             RestoreConfig {
                 source_url: PathBuf::from("/path/to/snapshot"),
                 ..Default::default()
             }
         );
         let files: [File; 6] = array::from_fn(|_| test_fd());
-        let [fd0, fd1, fd2, fd3, fd4, fd5] = files.each_ref().map(AsRawFd::as_raw_fd);
-
-        let config = RestoreConfig::parse(&format!(
-            "source_url=/path/to/snapshot,prefault=off,net_fds=[net0@[{fd0},{fd1}],net1@[{fd2},{fd3},{fd4},{fd5}]]"
-        ))?;
+        let [fd0, fd1, fd2, fd3, fd4, fd5] = files.map(IntoRawFd::into_raw_fd);
+        // SAFETY: The files transferred exclusive ownership to us.
+        let config = unsafe {
+            RestoreConfig::parse(&format!(
+                "source_url=/path/to/snapshot,prefault=off,net_fds=[net0@[{fd0},{fd1}],net1@[{fd2},{fd3},{fd4},{fd5}]]"
+            ))
+        }?;
+        let nets = config.net_fds.as_ref().unwrap();
+        let fds: Vec<_> = nets
+            .iter()
+            .flat_map(|net| net.fds.as_ref().unwrap())
+            .map(|fd| fd.as_ref().unwrap().as_raw_fd())
+            .collect();
+        assert_eq!(fds, [fd0, fd1, fd2, fd3, fd4, fd5]);
         assert_eq!(
             config,
             RestoreConfig {
@@ -6151,19 +6183,22 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                     RestoredNetConfig {
                         id: "net0".to_string(),
                         num_fds: 2,
-                        fds: Some(vec![fd0, fd1]),
+                        fds: nets[0].fds.clone(),
                     },
                     RestoredNetConfig {
                         id: "net1".to_string(),
                         num_fds: 4,
-                        fds: Some(vec![fd2, fd3, fd4, fd5]),
+                        fds: nets[1].fds.clone(),
                     }
                 ]),
                 ..Default::default()
             }
         );
         assert_eq!(
-            RestoreConfig::parse("source_url=/path/to/snapshot,memory_restore_mode=ondemand")?,
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe {
+                RestoreConfig::parse("source_url=/path/to/snapshot,memory_restore_mode=ondemand")
+            }?,
             RestoreConfig {
                 source_url: PathBuf::from("/path/to/snapshot"),
                 memory_restore_mode: MemoryRestoreMode::OnDemand,
@@ -6171,7 +6206,12 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             }
         );
         assert_eq!(
-            RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[zone1@1]",)?,
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe {
+                RestoreConfig::parse(
+                    "source_url=/path/to/snapshot,resume=on,zone_updates=[zone1@1]",
+                )
+            }?,
             RestoreConfig {
                 source_url: PathBuf::from("/path/to/snapshot"),
                 resume: true,
@@ -6188,10 +6228,12 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let fd0 = vfio0.as_raw_fd();
         let fd1 = vfio1.as_raw_fd();
         let fd2 = iommu.as_raw_fd();
-
-        let config = RestoreConfig::parse(&format!(
-            "source_url=/path/to/snapshot,vfio_fds=[vfio0@{fd0},vfio1@{fd1}],iommufd_fd={fd2}"
-        ))?;
+        // SAFETY: The files transferred exclusive ownership to us.
+        let config = unsafe {
+            RestoreConfig::parse(&format!(
+                "source_url=/path/to/snapshot,vfio_fds=[vfio0@{fd0},vfio1@{fd1}],iommufd_fd={fd2}"
+            ))
+        }?;
         let vfio_fds = config.vfio_fds.as_ref().unwrap();
         assert_eq!(vfio_fds[0].fd.as_ref().unwrap().as_raw_fd(), fd0);
         assert_eq!(vfio_fds[1].fd.as_ref().unwrap().as_raw_fd(), fd1);
@@ -6215,28 +6257,37 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             }
         );
         // Parsing should fail as source_url is a required field
-
-        RestoreConfig::parse("prefault=off").unwrap_err();
-
-        RestoreConfig::parse("source_url=/path/to/snapshot,memory_restore_mode=bogus").unwrap_err();
-
-        RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[@1]")
+        // SAFETY: This input contains no inherited descriptors.
+        unsafe { RestoreConfig::parse("prefault=off") }.unwrap_err();
+        // SAFETY: This input contains no inherited descriptors.
+        unsafe { RestoreConfig::parse("source_url=/path/to/snapshot,memory_restore_mode=bogus") }
             .unwrap_err();
-
-        RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[@]")
+        // SAFETY: This input contains no inherited descriptors.
+        unsafe { RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[@1]") }
             .unwrap_err();
-
-        RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[id1@]")
+        // SAFETY: This input contains no inherited descriptors.
+        unsafe { RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[@]") }
             .unwrap_err();
-
-        RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[id1 1]")
-            .unwrap_err();
-
-        RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[[id1@1]]")
-            .unwrap_err();
-
-        RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=id1@1")
-            .unwrap_err();
+        // SAFETY: This input contains no inherited descriptors.
+        unsafe {
+            RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[id1@]")
+        }
+        .unwrap_err();
+        // SAFETY: This input contains no inherited descriptors.
+        unsafe {
+            RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[id1 1]")
+        }
+        .unwrap_err();
+        // SAFETY: This input contains no inherited descriptors.
+        unsafe {
+            RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[[id1@1]]")
+        }
+        .unwrap_err();
+        // SAFETY: This input contains no inherited descriptors.
+        unsafe {
+            RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=id1@1")
+        }
+        .unwrap_err();
         Ok(())
     }
 
@@ -6300,7 +6351,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
     #[test]
     fn test_restore_config_validation() {
-        let fd = test_fd();
+        let fd: ExternalFd = test_fd().into();
 
         // interested in only VmConfig.net, so set rest to default values
         let mut snapshot_vm_config = VmConfig {
@@ -6342,7 +6393,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                         ..Default::default()
                     },
                     num_queues: 2,
-                    fds: Some(vec![-1, -1, -1, -1]),
+                    fds: Some(vec![ExternalFd::default(); 4]),
                     ..net_fixture()
                 },
                 NetConfig {
@@ -6351,7 +6402,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                         ..Default::default()
                     },
                     num_queues: 1,
-                    fds: Some(vec![-1, -1]),
+                    fds: Some(vec![ExternalFd::default(); 2]),
                     ..net_fixture()
                 },
                 NetConfig {
@@ -6377,12 +6428,12 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 RestoredNetConfig {
                     id: "net0".to_string(),
                     num_fds: 4,
-                    fds: Some(vec![fd.as_raw_fd(); 4]),
+                    fds: Some(vec![fd.clone(); 4]),
                 },
                 RestoredNetConfig {
                     id: "net1".to_string(),
                     num_fds: 2,
-                    fds: Some(vec![fd.as_raw_fd(); 2]),
+                    fds: Some(vec![fd.clone(); 2]),
                 },
             ]),
             resume: false,
@@ -6395,7 +6446,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         invalid_config.net_fds = Some(vec![RestoredNetConfig {
             id: "netx".to_string(),
             num_fds: 4,
-            fds: Some(vec![fd.as_raw_fd(); 4]),
+            fds: Some(vec![fd.clone(); 4]),
         }]);
         assert_eq!(
             invalid_config.validate(&snapshot_vm_config),
@@ -6408,12 +6459,12 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             RestoredNetConfig {
                 id: "net0".to_string(),
                 num_fds: 4,
-                fds: Some(vec![fd.as_raw_fd(); 4]),
+                fds: Some(vec![fd.clone(); 4]),
             },
             RestoredNetConfig {
                 id: "net0".to_string(),
                 num_fds: 4,
-                fds: Some(vec![fd.as_raw_fd(); 4]),
+                fds: Some(vec![fd.clone(); 4]),
             },
         ]);
         assert_eq!(
@@ -6424,7 +6475,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         invalid_config.net_fds = Some(vec![RestoredNetConfig {
             id: "net0".to_string(),
             num_fds: 4,
-            fds: Some(vec![fd.as_raw_fd(); 4]),
+            fds: Some(vec![fd.clone(); 4]),
         }]);
         assert_eq!(
             invalid_config.validate(&snapshot_vm_config),
@@ -6436,7 +6487,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         invalid_config.net_fds = Some(vec![RestoredNetConfig {
             id: "net0".to_string(),
             num_fds: 2,
-            fds: Some(vec![fd.as_raw_fd(); 2]),
+            fds: Some(vec![fd.clone(); 2]),
         }]);
         assert_eq!(
             invalid_config.validate(&snapshot_vm_config),
@@ -6729,7 +6780,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
     #[test]
     fn test_config_validation() {
-        let fd = test_fd();
+        let fd: ExternalFd = test_fd().into();
 
         let mut valid_config = VmConfig {
             cpus: CpusConfig {
@@ -7267,12 +7318,12 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
         let mut invalid_config = valid_config.clone();
         invalid_config.net = Some(vec![NetConfig {
-            fds: Some(vec![0]),
+            fds: Some(vec![ExternalFd::default(); 1]),
             ..net_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),
-            Err(ValidationError::VnetReservedFd(0))
+            Err(ValidationError::VnetReservedFd(-1))
         );
 
         let mut invalid_config = valid_config.clone();
@@ -7844,12 +7895,12 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let mut fd_valid_config = valid_config.clone();
         fd_valid_config.platform = Some(PlatformConfig {
             iommufd: true,
-            iommufd_fd: Some(fd.as_raw_fd()),
+            iommufd_fd: Some(fd.as_ref().unwrap().as_raw_fd()),
             ..platform_fixture()
         });
         fd_valid_config.devices = Some(vec![DeviceConfig {
             path: None,
-            fd: Some(fd.as_raw_fd()),
+            fd: Some(fd.as_ref().unwrap().as_raw_fd()),
             ..device_fixture()
         }]);
         fd_valid_config.validate().unwrap();
@@ -7869,7 +7920,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let mut iommufd_fd_without_iommufd = valid_config.clone();
         iommufd_fd_without_iommufd.platform = Some(PlatformConfig {
             iommufd: false,
-            iommufd_fd: Some(fd.as_raw_fd()),
+            iommufd_fd: Some(fd.as_ref().unwrap().as_raw_fd()),
             ..platform_fixture()
         });
         assert!(matches!(
@@ -7881,7 +7932,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let mut both_path_and_fd = fd_valid_config.clone();
         both_path_and_fd.devices = Some(vec![DeviceConfig {
             path: Some("/device1".into()),
-            fd: Some(fd.as_raw_fd()),
+            fd: Some(fd.as_ref().unwrap().as_raw_fd()),
             ..device_fixture()
         }]);
         assert!(matches!(

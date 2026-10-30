@@ -20,7 +20,7 @@ pub use block::fcntl::LockGranularityChoice;
 #[cfg(target_arch = "x86_64")]
 use devices::debug_console;
 use landlock::AccessFs;
-use log::{debug, warn};
+use log::warn;
 use net_util::MacAddr;
 use serde::de::{Error as DeError, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -588,14 +588,9 @@ pub struct NetConfig {
     pub vhost_socket: Option<String>,
     #[serde(default)]
     pub vhost_mode: VhostMode,
-    // Special deserialize handling:
-    // Therefore, we don't serialize FDs, and whatever value is here after
-    // deserialization is invalid.
-    //
-    // Valid FDs are transmitted via a different channel (SCM_RIGHTS message)
-    // and will be populated into this struct on the destination VMM eventually.
-    #[serde(default, deserialize_with = "deserialize_netconfig_fds")]
-    pub fds: Option<Vec<RawFd>>,
+    // Deserialization keeps the FD count for restore.
+    #[serde(default)]
+    pub fds: Option<Vec<ExternalFd>>,
     #[serde(default)]
     pub rate_limiter_config: Option<RateLimiterConfig>,
     #[serde(default)]
@@ -620,21 +615,6 @@ pub const DEFAULT_NET_QUEUE_SIZE: u16 = 256;
 
 pub fn default_netconfig_queue_size() -> u16 {
     DEFAULT_NET_QUEUE_SIZE
-}
-
-fn deserialize_netconfig_fds<'de, D>(d: D) -> Result<Option<Vec<RawFd>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let invalid_fds: Option<Vec<RawFd>> = Option::deserialize(d)?;
-    if let Some(invalid_fds) = invalid_fds {
-        debug!(
-            "FDs in 'NetConfig' won't be deserialized as they are most likely invalid now. Deserializing them as -1."
-        );
-        Ok(Some(vec![-1; invalid_fds.len()]))
-    } else {
-        Ok(None)
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
