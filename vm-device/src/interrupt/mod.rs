@@ -147,14 +147,6 @@ pub trait InterruptManager: Send + Sync {
             "setting notifiers not supported",
         ))
     }
-
-    /// Destroy an [InterruptSourceGroup](trait.InterruptSourceGroup.html) object created by
-    /// [create_group()](trait.InterruptManager.html#tymethod.create_group).
-    ///
-    /// Assume the caller takes the responsibility to disable all interrupt sources of the group
-    /// before calling destroy_group(). This assumption helps to simplify InterruptSourceGroup
-    /// implementations.
-    fn destroy_group(&self, group: Arc<dyn InterruptSourceGroup>) -> Result<()>;
 }
 
 pub trait InterruptSourceGroup: Send + Sync {

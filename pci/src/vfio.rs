@@ -3359,9 +3359,6 @@ mod tests {
         fn create_group(&self, _: MsiIrqGroupConfig) -> io::Result<Arc<dyn InterruptSourceGroup>> {
             unimplemented!("not exercised by the migration-helper tests")
         }
-        fn destroy_group(&self, _: Arc<dyn InterruptSourceGroup>) -> io::Result<()> {
-            Ok(())
-        }
     }
 
     fn test_vfio_common<V: Vfio + 'static>(

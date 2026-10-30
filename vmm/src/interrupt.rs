@@ -432,10 +432,6 @@ impl InterruptManager for LegacyUserspaceInterruptManager {
             config.irq,
         )))
     }
-
-    fn destroy_group(&self, _group: Arc<dyn InterruptSourceGroup>) -> Result<()> {
-        Ok(())
-    }
 }
 
 impl MsiInterruptManager {
@@ -488,10 +484,6 @@ impl InterruptManager for MsiInterruptManager {
     ) -> interrupt::Result<Arc<Mutex<dyn InterruptSourceGroup>>> {
         let r = self.create_group_raw(config)?;
         Ok(Arc::new(Mutex::new(r)))
-    }
-
-    fn destroy_group(&self, _group: Arc<dyn InterruptSourceGroup>) -> Result<()> {
-        Ok(())
     }
 }
 
