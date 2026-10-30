@@ -695,7 +695,6 @@ dependencies = [
  "libc",
  "linux-loader",
  "log",
- "num_enum",
  "pci",
  "serde",
  "thiserror",
@@ -1559,7 +1558,6 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
