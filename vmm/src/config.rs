@@ -4430,6 +4430,28 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn test_vfio_binding_state_is_runtime_only() {
+        let mut config: VmConfig = serde_json::from_str("{}").unwrap();
+        let mut device = DeviceConfig::parse("fd=3").unwrap();
+        assert!(device.iommufd_dev_id.is_none());
+        device.iommufd_dev_id = Some(7);
+        config.devices = Some(vec![device]);
+        assert_eq!(
+            config.clone().devices.as_ref().unwrap()[0].iommufd_dev_id,
+            Some(7)
+        );
+
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(!json.contains("iommufd_dev_id"));
+        let restored: VmConfig = serde_json::from_str(&json).unwrap();
+        assert!(
+            restored.devices.as_ref().unwrap()[0]
+                .iommufd_dev_id
+                .is_none()
+        );
+    }
+
     #[cfg(target_arch = "aarch64")]
     #[test]
     fn test_validate_gic_layout() {
