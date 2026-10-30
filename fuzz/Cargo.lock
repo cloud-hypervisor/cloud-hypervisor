@@ -907,6 +907,7 @@ dependencies = [
  "base64",
  "byteorder",
  "hypervisor",
+ "iommufd-ioctls",
  "libc",
  "log",
  "serde",
