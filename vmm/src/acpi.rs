@@ -827,10 +827,22 @@ struct RcIdMapping {
     smmu: Option<usize>,
 }
 
+/// The IORT node identifier of the `index`-th SMMUv3: the ITS group is node 0.
+#[cfg(target_arch = "aarch64")]
+pub(crate) const fn iort_smmu_node_id(index: u32) -> u32 {
+    1 + index
+}
+
 #[cfg(target_arch = "aarch64")]
 // Generate IORT table based on Spec Revision E.e:
 // https://developer.arm.com/documentation/den0049/ee/?lang=en
 fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> Sdt {
+    let segment_ids: Vec<u16> = pci_segments.iter().map(|segment| segment.id).collect();
+    create_iort_table_impl(&segment_ids, smmus)
+}
+
+#[cfg(target_arch = "aarch64")]
+fn create_iort_table_impl(segment_ids: &[u16], smmus: &[Smmuv3AcpiInfo]) -> Sdt {
     const ACPI_IORT_HEADER_SIZE: u32 = 36;
     const DEVICE_IDS_PER_SEGMENT: usize = 256;
     const ACPI_IORT_NODE_ITS_GROUP: u8 = 0x00;
@@ -870,7 +882,7 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
     // - R x RMR Node (R = number of SMMUv3s with attached devices)
     // - N x PCI Root Complex Node (N = number of pci segments)
     let num_smmu = smmus.len();
-    let num_nodes = (1 + num_smmu + pci_segments.len() + num_rmr) as u32;
+    let num_nodes = (1 + num_smmu + segment_ids.len() + num_rmr) as u32;
     // First node is the ITS Group Node located right after the IORT Body Base
     let offset_its_node = iort.len() + size_of::<IortBodyBase>();
     assert!(align_to_8_bytes(offset_its_node) == 0); // Ensure the ITS node is 8-byte aligned
@@ -904,6 +916,19 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
     iort.append(its_id_array);
     iort.append_slice(&vec![0u8; padding]); // Add padding to align to 8 bytes
 
+    // SMMUv3 nodes keep the identifiers they were created with.
+    let mut smmu_node_ids: Vec<u32> = smmus.iter().map(|smmu| smmu.iort_node_id).collect();
+    smmu_node_ids.sort_unstable();
+    assert!(
+        smmu_node_ids
+            .iter()
+            .copied()
+            .eq((0..num_smmu as u32).map(iort_smmu_node_id)),
+        "SMMUv3 IORT identifiers must come from iort_smmu_node_id()"
+    );
+    assert_eq!(next_id, iort_smmu_node_id(0));
+    next_id += num_smmu as u32;
+
     let mut smmu_node_offsets: Vec<usize> = Vec::with_capacity(smmus.len());
     for smmu in smmus {
         assert!(align_to_8_bytes(iort.len()) == 0);
@@ -926,7 +951,7 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
                 type_: ACPI_IORT_NODE_SMMU_V3,
                 length: (node_size + padding) as u16,
                 revision: 5,
-                node_id: next_node_id(&mut next_id),
+                node_id: smmu.iort_node_id,
                 num_id_mappings: num_id_mappings as u32,
                 id_mappings_array_offset: size_of::<IortSmmuV3Base>() as u32,
             },
@@ -947,7 +972,7 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
         // SMMUv3 or not.
         iort.append(IortIdMapping {
             input_base: 0,
-            num_ids: (DEVICE_IDS_PER_SEGMENT * pci_segments.len() - 1) as u32,
+            num_ids: (DEVICE_IDS_PER_SEGMENT * segment_ids.len() - 1) as u32,
             output_base: 0,
             output_reference: offset_its_node as u32,
             flags: 0,
@@ -1000,7 +1025,7 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
     }
 
     // Create PCI Root Complex Node for each PCI segment
-    for segment in pci_segments.iter() {
+    for &segment_id in segment_ids {
         assert!(align_to_8_bytes(iort.len()) == 0); // Ensure each node is 8-byte aligned
 
         // Each PCI Root Complex Node contains:
@@ -1017,7 +1042,7 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
                 [None; DEVICE_IDS_PER_SEGMENT];
             for (i, smmu) in smmus.iter().enumerate() {
                 for bdf in &smmu.attached_bdfs {
-                    if bdf.segment() == segment.id {
+                    if bdf.segment() == segment_id {
                         id_to_smmu[(u32::from(*bdf) & 0xff) as usize] = Some(i);
                     }
                 }
@@ -1040,7 +1065,7 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
                 && smmu
                     .attached_bdfs
                     .iter()
-                    .any(|bdf| bdf.segment() == segment.id)
+                    .any(|bdf| bdf.segment() == segment_id)
         }) {
             ACPI_IORT_ATS_SUPPORTED
         } else {
@@ -1068,7 +1093,7 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
                 maf: 3, // CPM = DCAS = 1
             },
             ats_attribute,
-            pci_segment_number: segment.id as u32,
+            pci_segment_number: segment_id as u32,
             memory_address_size_limit: 64u8,
             pasid_capabilities: 0,
             _reserved: 0,
@@ -1076,7 +1101,7 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
         });
         // ID Mapping for this Root Complex
         // Maps 256 device IDs (1 bus × 32 devices × 8 functions)
-        assert!(segment.id < 256, "Up to 256 PCI segments are supported.");
+        assert!(segment_id < 256, "Up to 256 PCI segments are supported.");
         for mapping in &id_mappings {
             let output_reference = match mapping.smmu {
                 Some(i) => smmu_node_offsets[i],
@@ -1090,7 +1115,7 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
                 // shares the same limitation - only 1 bus per segment and
                 // up to 256 segments.
                 // See: https://github.com/cloud-hypervisor/cloud-hypervisor/commit/c9374d87ac453d49185aa7b734df089444166484
-                output_base: (DEVICE_IDS_PER_SEGMENT * segment.id as usize) as u32
+                output_base: (DEVICE_IDS_PER_SEGMENT * segment_id as usize) as u32
                     + u32::from(mapping.input_base),
                 output_reference,
                 flags: 0,
@@ -1614,5 +1639,68 @@ mod tests {
             gi.device_handle, expected_handle,
             "Device handle must encode HID and UID correctly"
         );
+    }
+}
+
+#[cfg(all(test, target_arch = "aarch64"))]
+mod iort_tests {
+    use super::*;
+
+    const NODE_SMMU_V3: u8 = 0x04;
+    const NODE_RMR: u8 = 0x06;
+
+    fn u16_at(data: &[u8], offset: usize) -> u16 {
+        u16::from_le_bytes(data[offset..offset + 2].try_into().unwrap())
+    }
+
+    fn u32_at(data: &[u8], offset: usize) -> u32 {
+        u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
+    }
+
+    fn parse_nodes(table: &[u8]) -> Vec<(u8, u32)> {
+        let count = u32_at(table, 36) as usize;
+        let mut offset = u32_at(table, 40) as usize;
+        let mut nodes = Vec::new();
+        for _ in 0..count {
+            nodes.push((table[offset], u32_at(table, offset + 4)));
+            offset += u16_at(table, offset + 1) as usize;
+        }
+        assert_eq!(offset, table.len(), "nodes must cover the table exactly");
+        nodes
+    }
+
+    fn smmu(index: u32, attached: &[PciBdf]) -> Smmuv3AcpiInfo {
+        Smmuv3AcpiInfo {
+            attached_bdfs: attached.to_vec(),
+            iort_node_id: iort_smmu_node_id(index),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_iort_smmu_nodes_keep_their_identifiers() {
+        let a = PciBdf::new(0, 0, 4, 0);
+        let b = PciBdf::new(1, 0, 0, 0);
+        // Not in creation order, as the device manager's map may be.
+        let smmus = [smmu(2, &[a]), smmu(0, &[]), smmu(1, &[b])];
+        let nodes = parse_nodes(create_iort_table_impl(&[0, 1], &smmus).as_slice());
+        let ids_of = |type_: u8| -> Vec<u32> {
+            nodes
+                .iter()
+                .filter(|(t, _)| *t == type_)
+                .map(|(_, id)| *id)
+                .collect()
+        };
+        assert_eq!(ids_of(NODE_SMMU_V3), [3, 1, 2]);
+        assert_eq!(ids_of(NODE_RMR), [4, 5]);
+        let mut ids: Vec<u32> = nodes.iter().map(|(_, id)| *id).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, (0..nodes.len() as u32).collect::<Vec<_>>());
+    }
+
+    #[test]
+    #[should_panic(expected = "SMMUv3 IORT identifiers")]
+    fn test_iort_rejects_clashing_smmu_identifiers() {
+        create_iort_table_impl(&[0], &[smmu(0, &[]), smmu(0, &[])]);
     }
 }

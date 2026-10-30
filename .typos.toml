@@ -11,6 +11,7 @@ AER = "AER" # PCI capability Advanced Error Reporting
 CLASSE = "CLASSE"
 Dake = "Dake"
 EXTINT = "EXTINT"
+INDX = "INDX" # CONS_INDX/PROD_INDX (Tegra241 CMDQV register mnemonics)
 INOUT = "INOUT"
 MSIS = "MSIS" # MSIs (Message Signaled Interrupt)
 SME = "SME" # Secure Memory Encryption

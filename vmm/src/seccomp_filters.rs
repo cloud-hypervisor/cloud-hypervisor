@@ -952,6 +952,7 @@ fn create_vcpu_ioctl_seccomp_rule_iommufd() -> Result<Vec<SeccompRule>, BackendE
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_UNMAP)?],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_HWPT_ALLOC)?],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_HWPT_INVALIDATE)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_HW_QUEUE_ALLOC)?],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_MAP_FILE)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_DEVICE_FEATURE)?],
         and![Cond::new(

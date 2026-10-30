@@ -81,6 +81,12 @@ use devices::legacy::{
 use devices::pvmemcontrol::{self, PvmemcontrolBusDevice, PvmemcontrolPciDevice};
 #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
 use devices::smmuv3::{SMMU_V3_MMIO_PAGE_SIZE, SMMU_V3_MMIO_SIZE, Smmuv3Interrupts};
+#[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+use devices::tegra241_cmdqv::{
+    Error as Tegra241CmdqvError, HostCmdqv, MMIO_SIZE as CMDQV_MMIO_SIZE, Tegra241CmdqvAcpiDevice,
+    Tegra241CmdqvIommufd, VCMDQ_PAGE0_OFFSET, VI_VCMDQ_PAGE0_OFFSET,
+    VINTF_PAGE_SIZE as CMDQV_VINTF_PAGE_SIZE, probe_host_cmdqv,
+};
 #[cfg(not(target_arch = "riscv64"))]
 use devices::tpm;
 use devices::{AcpiNotificationFlags, acpi, interrupt_controller, legacy, pvpanic};
@@ -146,6 +152,8 @@ use vm_virtio::{AccessPlatform, VirtioDeviceType};
 use vmm_sys_util::errno;
 use vmm_sys_util::eventfd::EventFd;
 
+#[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+use crate::acpi::iort_smmu_node_id;
 use crate::console_devices::{ConsoleInfo, ConsoleTransport};
 use crate::cpu::{AcpiCpuHotplugController, CPU_MANAGER_ACPI_SIZE, CpuManager};
 use crate::device_tree::{DeviceNode, DeviceTree};
@@ -384,6 +392,11 @@ pub enum DeviceManagerError {
     #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
     #[error("The VFIO device has no iommufd device id")]
     IommufdDevIdMissing,
+
+    /// Failed to set up a Tegra241 CMDQV
+    #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+    #[error("Failed to set up a Tegra241 CMDQV")]
+    Smmuv3Cmdqv(#[source] Tegra241CmdqvError),
 
     /// Failed to find the physical IOMMU of a passthrough device
     #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
@@ -950,6 +963,31 @@ impl AccessPlatform for SevSnpPageAccessProxy {
     }
 }
 
+/// Whether emulated SMMUv3 `index` gets a CMDQV; the window bounds the count.
+#[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+fn cmdqv_wanted(
+    key: &str,
+    index: usize,
+    probe: result::Result<HostCmdqv, iommufd_ioctls::IommufdError>,
+) -> bool {
+    match probe {
+        Ok(HostCmdqv::Compatible) if index < layout::SMMUV3_CMDQV_MAX_INSTANCES as usize => true,
+        Ok(HostCmdqv::Compatible) => {
+            warn!("SMMUv3: no room for the Tegra241 CMDQV of host SMMU {key}");
+            false
+        }
+        Ok(HostCmdqv::Incompatible) => {
+            warn!("SMMUv3: host SMMU {key} has an unsupported Tegra241 CMDQV");
+            false
+        }
+        Ok(HostCmdqv::Absent) => false,
+        Err(e) => {
+            warn!("SMMUv3: failed to query the Tegra241 CMDQV of host SMMU {key}: {e}");
+            false
+        }
+    }
+}
+
 pub struct DeviceManager {
     // Manage address space related to devices
     address_manager: Arc<AddressManager>,
@@ -1053,6 +1091,10 @@ pub struct DeviceManager {
     // one is created per physical SMMUv3.
     #[cfg(target_arch = "aarch64")]
     smmuv3s: BTreeMap<String, Smmuv3Iommufd>,
+
+    // Tegra241 CMDQVs, keyed like `smmuv3s`.
+    #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+    cmdqv_devices: BTreeMap<String, Tegra241CmdqvIommufd>,
 
     // Tree of devices, representing the dependencies between devices.
     // Useful for introspection, snapshot and restore.
@@ -1423,6 +1465,8 @@ impl DeviceManager {
             iommu_attached_devices: None,
             #[cfg(target_arch = "aarch64")]
             smmuv3s: BTreeMap::new(),
+            #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+            cmdqv_devices: BTreeMap::new(),
             pci_segments: pci_segments.into_boxed_slice(),
             device_tree,
             exit_evt,
@@ -4162,6 +4206,98 @@ impl DeviceManager {
     }
 
     #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+    fn add_cmdqv(
+        &mut self,
+        key: &str,
+        smmuv3_id: &str,
+        index: u32,
+        smmu: &Smmuv3Iommufd,
+        viommu: &Arc<IommufdVIommu>,
+    ) -> DeviceManagerResult<()> {
+        // VCMDQs must fit in one page backing guest RAM.
+        let granule = self.memory_manager.lock().unwrap().min_backing_page_size();
+        smmu.device().lock().unwrap().set_max_cmdq_size(granule);
+
+        const _: () = assert!(CMDQV_MMIO_SIZE == layout::SMMUV3_CMDQV_MMIO_SIZE);
+        let irq = self
+            .address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_irq()?;
+        let interrupt = self
+            .legacy_interrupt_manager
+            .as_ref()
+            .expect("Legacy interrupt manager available before PCI devices are added")
+            .create_group(LegacyIrqGroupConfig {
+                irq: irq as InterruptIndex,
+            })
+            .map_err(DeviceManagerError::CreateInterruptGroup)?;
+        let base = layout::smmuv3_cmdqv_instance_addr(index).0;
+        let id = format!("{smmuv3_id}_cmdqv");
+        let mut cmdqv = Tegra241CmdqvIommufd::new(
+            id.clone(),
+            index,
+            irq,
+            interrupt,
+            Arc::clone(viommu),
+            granule,
+        )
+        .map_err(DeviceManagerError::Smmuv3Cmdqv)?;
+        let device = Arc::clone(cmdqv.device());
+        let vintf_page = cmdqv.vintf_page_addr();
+
+        // Map the VINTF page0 as both VCMDQ page0s so doorbells do not exit.
+        let mut memslots = Vec::new();
+        for (offset, what) in [
+            (VCMDQ_PAGE0_OFFSET, "VCMDQ"),
+            (VI_VCMDQ_PAGE0_OFFSET, "VI_VCMDQ"),
+        ] {
+            // SAFETY: the CMDQV keeps the mapping until the memslot is
+            // removed in DeviceManager::drop.
+            let slot = unsafe {
+                self.memory_manager
+                    .lock()
+                    .unwrap()
+                    .create_userspace_mapping(
+                        base + offset,
+                        CMDQV_VINTF_PAGE_SIZE as usize,
+                        vintf_page,
+                        false,
+                        false,
+                        false,
+                        hypervisor::MemoryVisibility::Shared,
+                    )
+            };
+            match slot {
+                Ok(slot) => memslots.push((slot, base + offset)),
+                Err(e) => warn!("Tegra241 CMDQV {id}: no {what} page0 memslot: {e:?}"),
+            }
+        }
+        cmdqv.set_memslots(memslots);
+        // DeviceManager::drop releases it from here on.
+        self.cmdqv_devices.insert(key.to_string(), cmdqv);
+
+        self.bus_devices
+            .push(Arc::clone(&device) as Arc<dyn BusDeviceSync>);
+        self.address_manager
+            .mmio_bus
+            .insert(
+                Arc::clone(&device) as Arc<dyn BusDeviceSync>,
+                base,
+                layout::SMMUV3_CMDQV_MMIO_SIZE,
+            )
+            .map_err(DeviceManagerError::BusError)?;
+        self.device_tree
+            .lock()
+            .unwrap()
+            .insert(id.clone(), device_node!(id, device));
+        info!("Tegra241 CMDQV {id}: hardware-backed at {base:#x}, IRQ {irq}");
+
+        Ok(())
+    }
+
+    #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
     fn add_smmuv3(
         &mut self,
         key: &str,
@@ -4171,8 +4307,10 @@ impl DeviceManager {
         let vfio_iommufd = (Arc::clone(vfio_ops) as Arc<dyn Any + Send + Sync>)
             .downcast::<VfioIommufd>()
             .map_err(|_| DeviceManagerError::ExpectedIommufdBackend)?;
+        let index = self.smmuv3s.len();
+        let cmdqv = cmdqv_wanted(key, index, probe_host_cmdqv(vfio_iommufd.iommufd(), dev_id));
         let viommu = Arc::new(
-            IommufdVIommu::new(Arc::clone(vfio_iommufd.ioas()), dev_id, false)
+            IommufdVIommu::new(Arc::clone(vfio_iommufd.ioas()), dev_id, cmdqv)
                 .map_err(DeviceManagerError::IommufdCreate)?,
         );
 
@@ -4181,7 +4319,6 @@ impl DeviceManager {
             .clone()
             .expect("Legacy interrupt manager available before PCI devices are added");
 
-        let index = self.smmuv3s.len();
         let smmuv3_id = format!("{SMMUV3_DEVICE_NAME}_{index}");
 
         let event_irq = self
@@ -4239,6 +4376,7 @@ impl DeviceManager {
             event_gsiv: event_irq,
             gerror_gsiv: gerror_irq,
             sync_gsiv: sync_irq,
+            iort_node_id: iort_smmu_node_id(index as u32),
             ..Default::default()
         };
 
@@ -4247,11 +4385,15 @@ impl DeviceManager {
             guest_memory,
             interrupts,
             acpi_info,
-            viommu,
+            Arc::clone(&viommu),
             dev_id,
         )
         .map_err(DeviceManagerError::Smmuv3)?;
         let smmuv3_device = Arc::clone(smmu.device());
+
+        if cmdqv {
+            self.add_cmdqv(key, &smmuv3_id, index as u32, &smmu, &viommu)?;
+        }
 
         self.bus_devices
             .push(Arc::clone(&smmuv3_device) as Arc<dyn BusDeviceSync>);
@@ -6518,6 +6660,20 @@ impl Aml for DeviceManager {
             vmgenid_device.lock().unwrap().to_aml_bytes(sink);
         }
 
+        // A CMDQV shares its SMMUv3's index; Linux pairs them by IORT identifier.
+        #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+        for entry in self.cmdqv_devices.values() {
+            let cmdqv = entry.device().lock().unwrap();
+            Tegra241CmdqvAcpiDevice {
+                instance_id: cmdqv.instance_id(),
+                uid: iort_smmu_node_id(cmdqv.instance_id()),
+                base: layout::smmuv3_cmdqv_instance_addr(cmdqv.instance_id()).0,
+                len: layout::SMMUV3_CMDQV_MMIO_SIZE,
+                irq: cmdqv.irq(),
+            }
+            .to_aml_bytes(sink);
+        }
+
         self.ged_notification_device
             .as_ref()
             .unwrap()
@@ -6782,6 +6938,28 @@ impl Drop for DeviceManager {
         // See eject_device() for the device hot-unplug equivalent.
         self.mmio_regions.lock().unwrap().clear();
 
+        // The MMIO bus keeps the CMDQVs alive; release their vIOMMUs.
+        #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+        for cmdqv in self.cmdqv_devices.values_mut() {
+            cmdqv.release(|slot, guest_addr, vintf_page| {
+                // SAFETY: the VINTF page is still mapped.
+                if let Err(e) = unsafe {
+                    self.memory_manager
+                        .lock()
+                        .unwrap()
+                        .remove_userspace_mapping(
+                            guest_addr,
+                            CMDQV_VINTF_PAGE_SIZE as usize,
+                            vintf_page,
+                            false,
+                            slot,
+                        )
+                } {
+                    error!("Failed to remove Tegra241 CMDQV memslot {slot}: {e}");
+                }
+            });
+        }
+
         // Remove the VM Generation ID memory slot created in add_vmgenid_device.
         #[cfg(not(target_arch = "riscv64"))]
         if let Some(mapping) = self.vmgenid_mapping.take() {
@@ -6950,5 +7128,30 @@ mod tests {
             create_mmio_allocators(0x100000, 0x3fffff, 1024, &[1; 1024], 4 << 10),
             Err(DeviceManagerError::PciSegmentMmioAperture(0))
         ));
+    }
+}
+
+#[cfg(all(test, target_arch = "aarch64", feature = "kvm"))]
+mod cmdqv_selection_tests {
+    use iommufd_ioctls::IommufdError;
+    use vmm_sys_util::errno::Error as SysError;
+
+    use super::{HostCmdqv, cmdqv_wanted, layout};
+
+    #[test]
+    fn only_a_compatible_cmdqv_is_used() {
+        assert!(cmdqv_wanted("smmu0", 0, Ok(HostCmdqv::Compatible)));
+        assert!(!cmdqv_wanted("smmu0", 0, Ok(HostCmdqv::Incompatible)));
+        assert!(!cmdqv_wanted("smmu0", 0, Ok(HostCmdqv::Absent)));
+        let failed = IommufdError::IommuGetHwInfo(SysError::new(libc::EPERM));
+        assert!(!cmdqv_wanted("smmu0", 0, Err(failed)));
+    }
+
+    #[test]
+    fn cmdqvs_are_bounded_by_the_region() {
+        let max = layout::SMMUV3_CMDQV_MAX_INSTANCES as usize;
+        assert_eq!(max, 128);
+        assert!(cmdqv_wanted("smmu0", max - 1, Ok(HostCmdqv::Compatible)));
+        assert!(!cmdqv_wanted("smmu0", max, Ok(HostCmdqv::Compatible)));
     }
 }

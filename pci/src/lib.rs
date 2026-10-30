@@ -9,7 +9,7 @@
 mod bus;
 mod configuration;
 mod device;
-mod mmap;
+pub mod mmap;
 mod msi;
 mod msix;
 mod vfio;

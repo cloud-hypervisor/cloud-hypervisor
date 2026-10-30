@@ -40,6 +40,8 @@
 //                              |                     32-bit PCI MMIO space                     |
 //                              |                                                               |
 // 0x1000_0000 (256 MiB)        +---------------------------------------------------------------+
+//                              |           Tegra241 CMDQV window, 512 KiB per SMMUv3           |
+// 0x0c00_0000 (192 MiB)        +---------------------------------------------------------------+
 //                              |                             Unused                            |
 // 0x0906_0000                  +---------------------------------------------------------------+
 //                              |                         PCI I/O space                         |
@@ -95,6 +97,41 @@ pub const ACPI_TAD_MAPPED_IO_START: GuestAddress = GuestAddress(0x0904_0000);
 /// Space 0x0905_0000 ~ 0x0906_0000 is reserved for pcie io address
 pub const MEM_PCI_IO_START: GuestAddress = GuestAddress(0x0905_0000);
 pub const MEM_PCI_IO_SIZE: u64 = 0x10000;
+
+/// Tegra241 CMDQVs, one per emulated SMMUv3 at most:
+/// 0x0C00_0000 ~ 0x1000_0000.
+pub const SMMUV3_CMDQV_REGION_START: GuestAddress = GuestAddress(0x0C00_0000);
+pub const SMMUV3_CMDQV_REGION_SIZE: u64 = 0x400_0000; // 64 MiB
+pub const SMMUV3_CMDQV_INSTANCE_STRIDE: u64 = 0x8_0000; // 512 KiB per instance
+pub const SMMUV3_CMDQV_MMIO_SIZE: u64 = 0x5_0000; // 320 KiB
+/// The number of CMDQVs the region holds.
+pub const SMMUV3_CMDQV_MAX_INSTANCES: u32 =
+    (SMMUV3_CMDQV_REGION_SIZE / SMMUV3_CMDQV_INSTANCE_STRIDE) as u32;
+
+#[inline]
+pub const fn smmuv3_cmdqv_instance_addr(instance: u32) -> GuestAddress {
+    assert!(instance < SMMUV3_CMDQV_MAX_INSTANCES);
+    GuestAddress(SMMUV3_CMDQV_REGION_START.0 + (instance as u64 * SMMUV3_CMDQV_INSTANCE_STRIDE))
+}
+
+const _: () = assert!(
+    MEM_PCI_IO_START.0 + MEM_PCI_IO_SIZE <= SMMUV3_CMDQV_REGION_START.0,
+    "CMDQV region must not overlap with the PCIe I/O window"
+);
+const _: () = assert!(
+    SMMUV3_CMDQV_REGION_START.0 + SMMUV3_CMDQV_REGION_SIZE <= MEM_32BIT_DEVICES_START.0,
+    "CMDQV region must not overlap with PCI MMIO space"
+);
+const _: () = assert!(
+    SMMUV3_CMDQV_MMIO_SIZE <= SMMUV3_CMDQV_INSTANCE_STRIDE,
+    "CMDQV MMIO must fit within its instance stride"
+);
+// Two pages of each instance are memslots.
+const _: () = assert!(
+    SMMUV3_CMDQV_INSTANCE_STRIDE.is_multiple_of(0x1_0000)
+        && SMMUV3_CMDQV_REGION_START.0.is_multiple_of(0x1_0000),
+    "CMDQV instances must be 64 KiB-aligned"
+);
 
 /// Starting from 0x1000_0000 (256MiB) to 0x3000_0000 (768MiB) is used for PCIE MMIO
 pub const MEM_32BIT_DEVICES_START: GuestAddress = GuestAddress(0x1000_0000);

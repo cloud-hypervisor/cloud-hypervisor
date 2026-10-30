@@ -334,3 +334,13 @@ break-before-make level (BBML) only as the host SMMUv3 supports them.  If the
 CPUs support BBML2 without aborts, Linux uses shared virtual addressing (SVA)
 only when the SMMU advertises BBML2, and CUDA on a Grace-Blackwell GPU requires
 SVA.
+
+### Tegra241 CMDQV
+
+On an NVIDIA Grace host, an emulated SMMUv3 whose host SMMU has a Tegra241
+CMDQV is given one too. The guest then issues invalidations through hardware
+queues instead of trapping into the VMM. This needs `CONFIG_TEGRA241_CMDQV` in
+the host (Linux 6.17 or later) and in the guest.
+
+The queues must be physically contiguous, so their size is bounded by the
+smallest page size backing guest memory.

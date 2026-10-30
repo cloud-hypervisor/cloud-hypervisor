@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use std::result;
 use std::sync::{Arc, Barrier};
 
-use log::{debug, warn};
+use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error as ThisError;
 use vm_device::BusDevice;
@@ -101,7 +101,9 @@ const IDR1_SIDSIZE: u32 = 16;
 const IDR1_SIDSIZE_MASK: u32 = 0x3f;
 const IDR1_SSIDSIZE_SHIFT: u32 = 6;
 const IDR1_SSIDSIZE_MASK: u32 = 0x1f << IDR1_SSIDSIZE_SHIFT;
-const IDR1_CMDQS: u32 = Q_MAX_LOG2SIZE << 21;
+const IDR1_CMDQS_SHIFT: u32 = 21;
+const IDR1_CMDQS_MASK: u32 = 0x1f << IDR1_CMDQS_SHIFT;
+const IDR1_CMDQS: u32 = Q_MAX_LOG2SIZE << IDR1_CMDQS_SHIFT;
 const IDR1_EVENTQS: u32 = Q_MAX_LOG2SIZE << 16;
 // Emulation model supported features
 //   SIDSIZE: StreamIDs are 16 bits.
@@ -544,6 +546,18 @@ impl Smmuv3 {
         self.idr5 = oas | granules;
 
         Ok(())
+    }
+
+    /// Lowers IDR1.CMDQS to fit `bytes`; the guest sizes Tegra241 VCMDQs from it.
+    pub fn set_max_cmdq_size(&mut self, bytes: u64) {
+        // Command queue entries are 16 bytes.
+        let max_log2 = bytes.checked_ilog2().unwrap_or(0).saturating_sub(4);
+        let cur = (self.idr1 & IDR1_CMDQS_MASK) >> IDR1_CMDQS_SHIFT;
+        let new = cur.min(max_log2);
+        if new != cur {
+            self.idr1 = (self.idr1 & !IDR1_CMDQS_MASK) | (new << IDR1_CMDQS_SHIFT);
+            info!("SMMUv3 {}: CMDQS lowered from {cur} to {new}", self.id);
+        }
     }
 
     fn read_reg(&self, offset: u64, len: usize) -> Result<u64, Error> {
@@ -1422,6 +1436,20 @@ mod tests {
         backend.idr.lock().unwrap()[1] = 0;
         smmuv3.initialize().unwrap();
         assert_eq!(smmuv3.idr1 & IDR1_SSIDSIZE_MASK, 0);
+    }
+
+    #[test]
+    fn test_max_cmdq_size_only_lowers_cmdqs() {
+        let mut smmuv3 = test_smmuv3();
+        let others = smmuv3.idr1 & !IDR1_CMDQS_MASK;
+
+        // 64 KiB holds 2^12 16-byte entries.
+        smmuv3.set_max_cmdq_size(0x1_0000);
+        assert_eq!((smmuv3.idr1 & IDR1_CMDQS_MASK) >> IDR1_CMDQS_SHIFT, 12);
+        assert_eq!(smmuv3.idr1 & !IDR1_CMDQS_MASK, others);
+
+        smmuv3.set_max_cmdq_size(512 << 20);
+        assert_eq!((smmuv3.idr1 & IDR1_CMDQS_MASK) >> IDR1_CMDQS_SHIFT, 12);
     }
 
     #[test]
