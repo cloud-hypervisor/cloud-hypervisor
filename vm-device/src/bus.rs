@@ -15,6 +15,7 @@ use std::{convert, io, ptr, result};
 use thiserror::Error;
 
 const BUS_DEFAULT_READ_VALUE: u8 = 0x00;
+const BUS_UNASSIGNED_READ_VALUE: u8 = 0xff;
 
 /// Trait for devices that respond to reads or writes in an arbitrary address space.
 ///
@@ -246,15 +247,16 @@ impl Bus {
     /// Reads data from the device that owns the range containing `addr` and puts it into `data`.
     ///
     /// Fills the buffer with BUS_DEFAULT_READ_VALUE before dispatching the read to the owning
-    /// device.
+    /// device. Fills the buffer with BUS_UNASSIGNED_READ_VALUE if no device owns the range.
     pub fn read(&self, addr: u64, data: &mut [u8]) -> Result<()> {
-        // The Linux kernel doesn't zero the memory it gives us.
-        data.fill(BUS_DEFAULT_READ_VALUE);
         if let Some((base, offset, dev)) = self.resolve(addr) {
+            // The Linux kernel doesn't zero the memory it gives us.
+            data.fill(BUS_DEFAULT_READ_VALUE);
             // OK to unwrap as lock() failing is a serious error condition and should panic.
             dev.read(base, offset, data);
             Ok(())
         } else {
+            data.fill(BUS_UNASSIGNED_READ_VALUE);
             Err(Error::MissingAddressRange)
         }
     }
@@ -399,5 +401,16 @@ mod tests {
         // Range where base + len overflows u64 (equals 2^64).
         let res = bus.insert(dev, 0xffff_0000_0000_0000, 0x0001_0000_0000_0000);
         assert!(res.is_err(), "Overflowing address range must be rejected");
+    }
+
+    #[test]
+    fn bus_read_unassigned() {
+        let bus = Bus::new();
+        let mut values = [0, 1, 2, 3];
+        assert!(matches!(
+            bus.read(0x10, &mut values).unwrap_err(),
+            Error::MissingAddressRange
+        ));
+        assert_eq!(values, [BUS_UNASSIGNED_READ_VALUE; 4]);
     }
 }
