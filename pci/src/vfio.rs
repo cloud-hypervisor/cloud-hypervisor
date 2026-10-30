@@ -16,7 +16,6 @@ use std::{cmp, io, result};
 use anyhow::{Context, anyhow};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use byteorder::{ByteOrder, LittleEndian};
 use hypervisor::HypervisorVmError;
 use libc::{_SC_PAGESIZE, sysconf};
 use log::{debug, error, info, warn};
@@ -205,13 +204,17 @@ impl VfioMsix {
         let old_enabled = self.bar.enabled();
 
         // Update "Message Control" word
-        if offset == 2 && data.len() == 2 {
-            let data = LittleEndian::read_u16(data);
+        if offset == 2
+            && let Ok(data) = <[u8; 2]>::try_from(data)
+        {
+            let data = u16::from_le_bytes(data);
             self.bar.set_msg_ctl(data);
             self.cap.set_msg_ctl(data);
-        } else if offset == 0 && data.len() == 4 {
+        } else if offset == 0
+            && let Ok(data) = <[u8; 4]>::try_from(data)
+        {
             // Some guests update MSI-X control through the dword config write path.
-            let data = (LittleEndian::read_u32(data) >> 16) as u16;
+            let data = (u32::from_le_bytes(data) >> 16) as u16;
             self.bar.set_msg_ctl(data);
             self.cap.set_msg_ctl(data);
         }
@@ -1846,9 +1849,10 @@ impl VfioCommon {
             2 => self
                 .configuration
                 .write_word(byte_offset, u16::from(data[0]) | (u16::from(data[1]) << 8)),
-            4 => self
-                .configuration
-                .write_reg(reg_idx, LittleEndian::read_u32(data)),
+            4 => self.configuration.write_reg(
+                reg_idx,
+                u32::from_le_bytes(data.try_into().expect("data should be 4 bytes")),
+            ),
             _ => {}
         }
 

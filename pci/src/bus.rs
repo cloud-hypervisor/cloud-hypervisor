@@ -10,7 +10,6 @@ use std::ops::DerefMut;
 use std::result;
 use std::sync::{Arc, Barrier, Mutex};
 
-use byteorder::{ByteOrder, LittleEndian};
 use log::warn;
 use thiserror::Error;
 use vm_device::BusDevice;
@@ -339,7 +338,10 @@ impl PciConfigIo {
                 0x0000_ffff << (offset * 8),
                 ((u32::from(data[1]) << 8) | u32::from(data[0])) << (offset * 8),
             ),
-            4 => (0xffff_ffff, LittleEndian::read_u32(data)),
+            4 => (
+                0xffff_ffff,
+                u32::from_le_bytes(data.try_into().expect("data should be 4 bytes")),
+            ),
             _ => return,
         };
         self.config_address = (self.config_address & !mask) | value;
