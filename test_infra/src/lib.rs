@@ -2655,7 +2655,7 @@ pub fn on_kvm_sev_snp() -> bool {
     sev_snp_direct_kernel().is_some()
 }
 
-// Get the direct igvm boot file path based on the console type
+// Get the stage0 IGVM path or a console-specific Linux IGVM path.
 fn direct_igvm_boot_path(console: Option<&str>) -> Option<PathBuf> {
     // get the default hvc0 igvm file if console string is not passed
     let console_str = console.unwrap_or("hvc0");
@@ -2664,7 +2664,11 @@ fn direct_igvm_boot_path(console: Option<&str>) -> Option<PathBuf> {
         panic!("IGVM console should be hvc0 or ttyS0, got: {console_str}");
     }
 
-    let igvm_filepath = format!("/igvm_files/linux-{console_str}.bin");
+    let igvm_filepath = if on_kvm_sev_snp() {
+        "/igvm_files/stage0.igvm".to_string()
+    } else {
+        format!("/igvm_files/linux-{console_str}.bin")
+    };
     if Path::new(&igvm_filepath).exists() {
         Some(PathBuf::from(igvm_filepath))
     } else {
