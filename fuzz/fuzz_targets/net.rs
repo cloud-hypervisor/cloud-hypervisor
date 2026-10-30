@@ -7,7 +7,7 @@
 use std::fs::File;
 use std::io::{self, ErrorKind, Read, Write};
 use std::mem::size_of;
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::os::unix::io::{AsFd, AsRawFd, FromRawFd, RawFd};
 use std::sync::{Arc, Once};
 
 use libfuzzer_sys::{fuzz_target, Corpus};
@@ -1487,26 +1487,8 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
             true,
         );
     }
-    if let Ok(exit_evt) = EventFd::new(EFD_NONBLOCK) {
-        let invalid_fds = [-1];
-        let _ = virtio_devices::Net::from_tap_fds(
-            "ctor_from_bad_fd".to_owned(),
-            &invalid_fds,
-            guest_mac_addr,
-            None,
-            false,
-            QUEUE_SIZE,
-            SeccompAction::Allow,
-            None,
-            exit_evt,
-            None,
-            true,
-            true,
-            true,
-        );
-    }
     if let (Ok((fd0, _fd1)), Ok(exit_evt)) = (create_socketpair(), EventFd::new(EFD_NONBLOCK)) {
-        let fds = [fd0.as_raw_fd()];
+        let fds = [fd0.as_fd()];
         let _ = virtio_devices::Net::from_tap_fds(
             "ctor_from_fds".to_owned(),
             &fds,

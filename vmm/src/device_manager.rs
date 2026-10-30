@@ -21,6 +21,7 @@ use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{self, IsTerminal, Seek, SeekFrom, stdout};
 use std::num::Wrapping;
+use std::os::fd::BorrowedFd;
 #[cfg(feature = "kvm")]
 use std::os::fd::RawFd;
 use std::os::unix::fs::OpenOptionsExt;
@@ -3133,9 +3134,17 @@ impl DeviceManager {
                     .map_err(DeviceManagerError::CreateVirtioNet)?,
                 ))
             } else if let Some(fds) = &net_cfg.fds {
+                let borrowed = fds
+                    .iter()
+                    .map(|fd| {
+                        // SAFETY: CLI and SCM_RIGHTS descriptors remain open while
+                        // constructing the device. Config validation rejects stale FDs.
+                        unsafe { BorrowedFd::borrow_raw(*fd) }
+                    })
+                    .collect::<Vec<_>>();
                 let net = virtio_devices::Net::from_tap_fds(
                     id.clone(),
-                    fds,
+                    &borrowed,
                     guest_mac,
                     net_cfg.mtu,
                     self.force_access_platform | net_cfg.pci_common.iommu.attached(),
