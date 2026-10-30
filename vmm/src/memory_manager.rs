@@ -65,10 +65,14 @@ use crate::uffd::{
 use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
 use crate::{GuestMemory, GuestRegion, MEMORY_MANAGER_SNAPSHOT_ID, prefault, userfaultfd};
 
-struct UffdHandler {
+struct UffdWorker {
     result_rx: Receiver<Result<(), io::Error>>,
     handle: thread::JoinHandle<()>,
     fault_socket_fd: Option<OwnedFd>,
+}
+
+struct UffdHandler {
+    workers: Box<[UffdWorker]>,
     uffd_registry: Arc<UffdRegistry>,
 }
 
@@ -1487,9 +1491,11 @@ impl MemoryManager {
         }
 
         self.uffd_handler = Some(UffdHandler {
-            result_rx,
-            handle,
-            fault_socket_fd,
+            workers: Box::new([UffdWorker {
+                result_rx,
+                handle,
+                fault_socket_fd,
+            }]),
             uffd_registry,
         });
 
@@ -1518,18 +1524,23 @@ impl MemoryManager {
             if let Err(e) = uffd_handler.uffd_registry.stop() {
                 error!("UFFD registry stop failed: {e}");
             }
-            if let Some(fd) = &uffd_handler.fault_socket_fd {
-                // SAFETY: fd is a valid owned fd for the duration of this call.
-                unsafe { libc::shutdown(fd.as_raw_fd(), libc::SHUT_RDWR) };
-            }
-            uffd_handler.handle.join().ok();
-
-            match uffd_handler.result_rx.try_recv() {
-                Ok(Err(e)) => error!("UFFD handler terminated with error: {e}"),
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    warn!("UFFD handler terminated unexpectedly (possible panic)");
+            for worker in &uffd_handler.workers {
+                if let Some(fd) = &worker.fault_socket_fd {
+                    // SAFETY: fd is a valid owned fd for the duration of this call.
+                    unsafe { libc::shutdown(fd.as_raw_fd(), libc::SHUT_RDWR) };
                 }
-                _ => {}
+            }
+
+            for worker in uffd_handler.workers {
+                worker.handle.join().ok();
+
+                match worker.result_rx.try_recv() {
+                    Ok(Err(e)) => error!("UFFD handler terminated with error: {e}"),
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        warn!("UFFD handler terminated unexpectedly (possible panic)");
+                    }
+                    _ => {}
+                }
             }
         }
     }
