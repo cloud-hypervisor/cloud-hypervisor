@@ -5,7 +5,6 @@
 use std::os::unix::fs::FileExt;
 use std::{io, result};
 
-use remain::sorted;
 use thiserror::Error;
 use zerocopy::FromBytes;
 
@@ -61,7 +60,6 @@ const METADATA_ALL_PRESENT: u16 = METADATA_FILE_PARAMETER_PRESENT
 
 const METADATA_LENGTH_MAX: u32 = 1 << 20; // 1 MiB
 
-#[sorted]
 #[derive(Error, Debug)]
 pub enum VhdxMetadataError {
     #[error("Invalid block size count")]

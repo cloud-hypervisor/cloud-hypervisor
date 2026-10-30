@@ -13,7 +13,6 @@ use std::path::Path;
 use std::{io, result, str};
 
 use log::warn;
-use remain::sorted;
 use thiserror::Error;
 
 pub use super::header::{
@@ -35,7 +34,6 @@ use crate::aligned_file::AlignedFile;
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::query_device_size;
 
-#[sorted]
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("Backing file I/O error: {0}")]
