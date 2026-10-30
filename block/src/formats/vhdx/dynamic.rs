@@ -8,7 +8,6 @@ use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::fs::FileExt;
 use std::result;
 
-use remain::sorted;
 use thiserror::Error;
 
 use super::bat::{self, BatEntry, VhdxBatError};
@@ -16,7 +15,6 @@ use super::header::{self, RegionInfo, RegionTableEntry, VhdxHeader, VhdxHeaderEr
 use super::metadata::{self, DiskSpec, VhdxMetadataError};
 use crate::aligned_file::AlignedFile;
 
-#[sorted]
 #[derive(Error, Debug)]
 pub enum VhdxError {
     #[error("Failed to parse VHDx header")]
@@ -33,7 +31,6 @@ pub enum VhdxError {
 
 pub(super) type Result<T> = result::Result<T, VhdxError>;
 
-#[sorted]
 #[derive(Error, Debug)]
 enum VhdxIoError {
     #[error("Invalid BAT entry state")]
