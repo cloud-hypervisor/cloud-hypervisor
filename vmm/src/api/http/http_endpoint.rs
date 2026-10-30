@@ -35,7 +35,6 @@
 //! [special HTTP library]: https://github.com/firecracker-microvm/micro-http
 
 use std::fs::File;
-use std::os::fd::IntoRawFd;
 use std::result;
 use std::sync::mpsc::Sender;
 
@@ -58,6 +57,7 @@ use crate::api::{
 use crate::config::RestoreConfig;
 use crate::cpu::Error as CpuError;
 use crate::vm::Error as VmError;
+use crate::vm_config::ExternalFd;
 
 /// Helper module for attaching externally opened FDs to config objects.
 ///
@@ -599,7 +599,7 @@ impl PutHandler for VmRestore {
                 attach_fds_to_cfgs(vfio_files, cfgs.as_mut_slice())?;
             }
             if restore_cfg.vfio_fds.is_some() {
-                restore_cfg.iommufd_fd = Some(files.remove(0).into_raw_fd());
+                restore_cfg.iommufd_fd = ExternalFd::from(files.remove(0));
             }
 
             self.send(api_notifier, api_sender, restore_cfg)
@@ -647,7 +647,7 @@ impl PutHandler for VmReceiveMigration {
                 attach_fds_to_cfgs(vfio_files, cfgs.as_mut_slice())?;
             }
             if data.vfio_fds.is_some() {
-                data.iommufd_fd = Some(files.remove(0).into_raw_fd());
+                data.iommufd_fd = ExternalFd::from(files.remove(0));
             }
 
             self.send(api_notifier, api_sender, data)

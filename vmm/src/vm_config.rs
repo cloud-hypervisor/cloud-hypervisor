@@ -174,9 +174,9 @@ pub struct PlatformConfig {
     pub sev_snp: bool,
     #[serde(default)]
     pub iommufd: bool,
-    // Deserialized FD numbers carry no ownership and are discarded.
-    #[serde(skip_deserializing)]
-    pub iommufd_fd: Option<RawFd>,
+    // Deserialized FDs are discarded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iommufd_fd: ExternalFd,
     #[serde(default = "default_platformconfig_vfio_p2p_dma")]
     pub vfio_p2p_dma: bool,
 }

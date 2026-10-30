@@ -318,19 +318,9 @@ fn prepare_fd_command(matches: &ArgMatches) -> Result<Option<FdCommand>, Error> 
         Some(("restore", args)) => Some(restore_config(
             args.get_one::<String>("restore_config").unwrap(),
         )?),
-        Some(("receive-migration", args)) => {
-            let (body, fds) = receive_migration_data(
-                args.get_one::<String>("receive_migration_config").unwrap(),
-            )?;
-            let fds = fds
-                .into_iter()
-                .map(|fd| {
-                    // SAFETY: The CLI transfers these validated inherited FDs.
-                    Arc::new(unsafe { OwnedFd::from_raw_fd(fd) })
-                })
-                .collect();
-            Some((body, fds))
-        }
+        Some(("receive-migration", args)) => Some(receive_migration_data(
+            args.get_one::<String>("receive_migration_config").unwrap(),
+        )?),
         _ => None,
     };
     Ok(fd_command)
@@ -982,8 +972,7 @@ fn restore_config(config: &str) -> Result<FdCommand, Error> {
         }));
     }
     if let Some(iommufd_fd) = restore_config.iommufd_fd.take() {
-        // SAFETY: The CLI transfers this inherited FD, removed from the raw config above.
-        fds.push(Arc::new(unsafe { OwnedFd::from_raw_fd(iommufd_fd) }));
+        fds.push(iommufd_fd);
     }
     let restore_config = serde_json::to_string(&restore_config).unwrap();
 
@@ -998,14 +987,22 @@ fn coredump_config(destination_url: &str) -> String {
     serde_json::to_string(&coredump_config).unwrap()
 }
 
-fn receive_migration_data(config: &str) -> Result<(String, Vec<RawFd>), Error> {
-    let mut data =
-        api::VmReceiveMigrationData::parse(config).map_err(Error::ReceiveMigrationConfig)?;
+fn receive_migration_data(config: &str) -> Result<FdCommand, Error> {
+    // SAFETY: The CLI transfers ownership of the inherited descriptors.
+    let mut data = unsafe { api::VmReceiveMigrationData::parse(config) }
+        .map_err(Error::ReceiveMigrationConfig)?;
 
     // The FDs are passed to the server side process via SCM_RIGHTS, in the
     // order vfio_fds then the iommufd FD, matching the server's split.
-    let mut fds: Vec<RawFd> = match data.vfio_fds.as_mut() {
-        Some(vfio_fds) => vfio_fds.iter_mut().filter_map(|v| v.fd.take()).collect(),
+    let mut fds: Vec<Arc<OwnedFd>> = match data.vfio_fds.as_mut() {
+        Some(vfio_fds) => vfio_fds
+            .iter_mut()
+            .filter_map(|v| v.fd.take())
+            .map(|fd| {
+                // SAFETY: The CLI transfers these inherited FDs, removed from the raw configs above.
+                Arc::new(unsafe { OwnedFd::from_raw_fd(fd) })
+            })
+            .collect(),
         None => Vec::new(),
     };
     if let Some(iommufd_fd) = data.iommufd_fd.take() {
