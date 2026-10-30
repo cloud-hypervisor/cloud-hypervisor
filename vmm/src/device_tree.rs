@@ -78,9 +78,6 @@ impl DeviceTree {
     pub fn iter(&self) -> hash_map::Iter<'_, String, DeviceNode> {
         self.0.iter()
     }
-    pub fn breadth_first_traversal(&self) -> BftIter<'_> {
-        BftIter::new(&self.0)
-    }
     pub fn pci_devices(&self) -> Vec<&DeviceNode> {
         self.0
             .values()
@@ -102,53 +99,6 @@ impl DeviceTree {
         } else {
             None
         }
-    }
-}
-
-// Breadth first traversal iterator.
-pub struct BftIter<'a> {
-    nodes: Vec<&'a DeviceNode>,
-}
-
-impl<'a> BftIter<'a> {
-    fn new(hash_map: &'a HashMap<String, DeviceNode>) -> Self {
-        let mut nodes = Vec::with_capacity(hash_map.len());
-        let mut i = 0;
-
-        for node in hash_map.values() {
-            if node.parent.is_none() {
-                nodes.push(node);
-            }
-        }
-
-        while i < nodes.len() {
-            for child_node_id in nodes[i].children.iter() {
-                if let Some(child_node) = hash_map.get(child_node_id) {
-                    nodes.push(child_node);
-                }
-            }
-            i += 1;
-        }
-
-        BftIter { nodes }
-    }
-}
-
-impl<'a> Iterator for BftIter<'a> {
-    type Item = &'a DeviceNode;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.nodes.is_empty() {
-            None
-        } else {
-            Some(self.nodes.remove(0))
-        }
-    }
-}
-
-impl DoubleEndedIterator for BftIter<'_> {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        self.nodes.pop()
     }
 }
 
@@ -208,67 +158,5 @@ mod tests {
                 unreachable!()
             }
         }
-
-        // Check breadth_first_traversal() based on the following hierarchy
-        //
-        // 0
-        // | \
-        // 1  2
-        // |  | \
-        // 3  4  5
-        //
-        let mut device_tree = DeviceTree::new();
-        let child_1_id = String::from("child1");
-        let child_2_id = String::from("child2");
-        let child_3_id = String::from("child3");
-        let parent_1_id = String::from("parent1");
-        let parent_2_id = String::from("parent2");
-        let root_id = String::from("root");
-        let mut child_1_node = device_node!(child_1_id);
-        let mut child_2_node = device_node!(child_2_id);
-        let mut child_3_node = device_node!(child_3_id);
-        let mut parent_1_node = device_node!(parent_1_id);
-        let mut parent_2_node = device_node!(parent_2_id);
-        let mut root_node = device_node!(root_id);
-        child_1_node.parent = Some(parent_1_id.clone());
-        child_2_node.parent = Some(parent_2_id.clone());
-        child_3_node.parent = Some(parent_2_id.clone());
-        parent_1_node.children = vec![child_1_id.clone()];
-        parent_1_node.parent = Some(root_id.clone());
-        parent_2_node.children = vec![child_2_id.clone(), child_3_id.clone()];
-        parent_2_node.parent = Some(root_id.clone());
-        root_node.children = vec![parent_1_id.clone(), parent_2_id.clone()];
-        let device_list = vec![
-            (child_1_id.clone(), child_1_node),
-            (child_2_id.clone(), child_2_node),
-            (child_3_id.clone(), child_3_node),
-            (parent_1_id.clone(), parent_1_node),
-            (parent_2_id.clone(), parent_2_node),
-            (root_id.clone(), root_node),
-        ];
-        device_tree.0.extend(device_list);
-
-        let iter_vec = device_tree
-            .breadth_first_traversal()
-            .collect::<Vec<&DeviceNode>>();
-        assert_eq!(iter_vec.len(), 6);
-        assert_eq!(iter_vec[0].id, root_id);
-        assert_eq!(iter_vec[1].id, parent_1_id);
-        assert_eq!(iter_vec[2].id, parent_2_id);
-        assert_eq!(iter_vec[3].id, child_1_id);
-        assert_eq!(iter_vec[4].id, child_2_id);
-        assert_eq!(iter_vec[5].id, child_3_id);
-
-        let iter_vec = device_tree
-            .breadth_first_traversal()
-            .rev()
-            .collect::<Vec<&DeviceNode>>();
-        assert_eq!(iter_vec.len(), 6);
-        assert_eq!(iter_vec[5].id, root_id);
-        assert_eq!(iter_vec[4].id, parent_1_id);
-        assert_eq!(iter_vec[3].id, parent_2_id);
-        assert_eq!(iter_vec[2].id, child_1_id);
-        assert_eq!(iter_vec[1].id, child_2_id);
-        assert_eq!(iter_vec[0].id, child_3_id);
     }
 }
