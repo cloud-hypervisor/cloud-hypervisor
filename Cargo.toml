@@ -98,7 +98,7 @@ vhost-user-backend = { version = "0.23.0", default-features = false }
 virtio-bindings = "0.2.6"
 virtio-queue = "0.18.0"
 vm-fdt = "0.3.0"
-vm-memory = "0.18.0"
+vm-memory = { version = "0.18.0", default-features = false }
 vmm-sys-util = "0.15.0"
 
 # igvm crates
