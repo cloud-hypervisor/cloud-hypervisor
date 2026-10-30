@@ -4,7 +4,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::os::fd::{AsRawFd, RawFd};
 use std::{io, mem};
 
@@ -28,9 +28,14 @@ pub struct UringDataIo {
     // data operations store `Some(op)` so their iovecs and backing buffers
     // remain valid until completion; metadata operations store `None`.
     in_flight: HashMap<u64, Option<AsyncIoOperation>>,
+    // `pending` holds operations accepted but not yet published to the
+    // submission queue because it was full. Completion processing publishes
+    // them as ring capacity frees up.
+    pending: VecDeque<(RawFd, AsyncIoOperation)>,
     completions: CompletionCommon,
     // `needs_submit_retry` is set when SQEs have been published to the ring,
-    // but the submit syscall failed before confirming kernel ownership.
+    // but the submit syscall failed (or only partially succeeded) before
+    // confirming kernel ownership.
     needs_submit_retry: bool,
 }
 
@@ -56,6 +61,7 @@ impl UringDataIo {
         Ok(Self {
             io_uring,
             in_flight: HashMap::new(),
+            pending: VecDeque::new(),
             completions,
             needs_submit_retry: false,
         })
@@ -72,7 +78,12 @@ impl UringDataIo {
     }
 
     fn reserve_user_data(&mut self, user_data: u64) -> io::Result<()> {
-        if self.in_flight.contains_key(&user_data) {
+        if self.in_flight.contains_key(&user_data)
+            || self
+                .pending
+                .iter()
+                .any(|(_, op)| op.user_data() == user_data)
+        {
             return Err(duplicate_user_data_error(user_data));
         }
         self.in_flight.insert(user_data, None);
@@ -93,7 +104,11 @@ impl UringDataIo {
         sq.sync();
 
         match submitter.submit() {
-            Ok(_) => self.needs_submit_retry = false,
+            Ok(_) => {
+                // A partial submission leaves the remaining SQEs published;
+                // they are retried from next_completion().
+                self.needs_submit_retry = !sq.is_empty();
+            }
             Err(e) => {
                 self.needs_submit_retry = true;
                 warn!("io_uring submit failed after SQE was published: {e}");
@@ -106,88 +121,92 @@ impl UringDataIo {
 
     /// Submits a batch of owned read and write operations.
     ///
-    /// If the io_uring submission queue cannot accept the whole batch, each
-    /// operation is completed locally with `-EAGAIN` so callers can observe
-    /// every request through the normal completion path.
+    /// If the io_uring submission queue cannot accept the whole batch, the
+    /// operations that do not fit are queued and published once ring capacity
+    /// becomes available (see [`Self::next_completion`]). They are never
+    /// completed with `-EAGAIN`, which callers such as virtio-blk would
+    /// surface to the guest as a hard I/O error.
     pub fn submit_batch(&mut self, fd: RawFd, batch: Vec<AsyncIoOperation>) -> io::Result<()> {
         if batch.is_empty() {
             return Ok(());
         }
 
-        validate_batch(|user_data| self.in_flight.contains_key(&user_data), &batch)?;
+        validate_batch(
+            |user_data| {
+                self.in_flight.contains_key(&user_data)
+                    || self
+                        .pending
+                        .iter()
+                        .any(|(_, op)| op.user_data() == user_data)
+            },
+            &batch,
+        )?;
 
-        let (submitter, mut sq, _) = self.io_uring.split();
-        let available = sq.capacity() - sq.len();
-        if batch.len() > available {
-            // Not enough space for the batch.
-            // Drop sq, which will re-publish an unmodified tail pointer
-            drop(sq);
-            for op in batch {
-                self.completions
-                    .complete(AsyncIoCompletion::from_operation(op, -libc::EAGAIN));
-            }
-            return Ok(());
-        }
-
-        let mut signal_completion = false;
-        let mut batch = batch.into_iter();
-        while let Some(op) = batch.next() {
-            let user_data = op.user_data();
-            let entry = Self::build_entry(fd, &op);
-            self.in_flight.insert(user_data, Some(op));
-
-            // SAFETY: the SQ capacity was just checked. Every iovec's pointer is retained in
-            // self.in_flight before the SQ tail is advanced by sync or drop. in_flight only
-            // drops the memory after a completion.
-            if let Err(e) = unsafe { sq.push(&entry) } {
-                Self::handle_push_failure(
-                    &mut self.in_flight,
-                    &mut self.completions,
-                    user_data,
-                    batch.by_ref(),
-                    &e,
-                );
-                signal_completion = true;
-                break;
-            }
-        }
-
-        sq.sync();
-        match submitter.submit() {
-            Ok(_) => self.needs_submit_retry = false,
-            Err(e) => {
-                self.needs_submit_retry = true;
-                warn!("io_uring submit failed after SQEs were published: {e}");
-                signal_completion = true;
-            }
-        }
-        if signal_completion {
-            self.completions.notifier().write(1).unwrap();
-        }
+        self.pending.extend(batch.into_iter().map(|op| (fd, op)));
+        self.flush_pending();
 
         Ok(())
     }
 
-    #[cold]
-    fn handle_push_failure(
-        in_flight: &mut HashMap<u64, Option<AsyncIoOperation>>,
-        completions: &mut CompletionCommon,
-        user_data: u64,
-        remaining: impl Iterator<Item = AsyncIoOperation>,
-        error: &squeue::PushError,
-    ) {
-        // Since capacity was just checked, this should only happen if the ring
-        // state changed unexpectedly. Keep all affected operations memory safe
-        // by returning local completions through the normal path.
-        let op = in_flight
-            .remove(&user_data)
-            .flatten()
-            .expect("pending operation missing after failed push");
-        completions.complete(AsyncIoCompletion::from_operation(op, -libc::EAGAIN));
-        for op in remaining {
-            completions.complete(AsyncIoCompletion::from_operation(op, -libc::EAGAIN));
+    /// Publishes queued operations while the submission queue has room.
+    ///
+    /// Called when operations are queued and whenever completions are reaped,
+    /// which is when ring capacity is expected to have freed up.
+    fn flush_pending(&mut self) {
+        while !self.pending.is_empty() {
+            let (submitter, mut sq, _) = self.io_uring.split();
+            let available = sq.capacity() - sq.len();
+            if available == 0 {
+                // The ring is still full. next_completion() retries once
+                // in-flight operations have completed.
+                return;
+            }
+
+            let mut queued = 0;
+            while queued < available {
+                let Some((fd, op)) = self.pending.pop_front() else {
+                    break;
+                };
+                let user_data = op.user_data();
+                let entry = Self::build_entry(fd, &op);
+                self.in_flight.insert(user_data, Some(op));
+                // SAFETY: the SQ capacity was checked above. Every iovec's
+                // pointer is retained in self.in_flight before the SQ tail is
+                // advanced by sync or drop. in_flight only drops the memory
+                // after a completion.
+                if let Err(e) = unsafe { sq.push(&entry) } {
+                    // The ring state changed unexpectedly after the capacity
+                    // check. Requeue the operation and retry it later.
+                    let op = self.in_flight.remove(&user_data).flatten().unwrap();
+                    self.pending.push_front((fd, op));
+                    warn!("io_uring submission queue became full after capacity check: {e:?}");
+                    break;
+                }
+                queued += 1;
+            }
+
+            if queued == 0 {
+                return;
+            }
+
+            sq.sync();
+            match submitter.submit() {
+                Ok(_) => {
+                    // A partial submission leaves the remaining SQEs
+                    // published; they are retried from next_completion().
+                    self.needs_submit_retry = !sq.is_empty();
+                }
+                Err(e) => {
+                    self.needs_submit_retry = true;
+                    warn!("io_uring submit failed after SQEs were published: {e}");
+                    self.completions.notifier().write(1).unwrap();
+                }
+            }
+
+            if self.needs_submit_retry {
+                return;
+            }
         }
-        warn!("io_uring submission queue became full after capacity check: {error:?}");
     }
 
     fn build_entry(fd: RawFd, op: &AsyncIoOperation) -> squeue::Entry {
@@ -235,11 +254,21 @@ impl UringDataIo {
     /// by the corresponding operation.
     pub fn next_completion(&mut self) -> Option<AsyncIoCompletion> {
         if self.needs_submit_retry {
-            match self.io_uring.submitter().submit() {
-                Ok(_) => self.needs_submit_retry = false,
+            let submit_result = self.io_uring.submitter().submit();
+            match submit_result {
+                Ok(_) => {
+                    if self.io_uring.submission().is_empty() {
+                        self.needs_submit_retry = false;
+                    }
+                }
                 Err(e) => warn!("io_uring retry submit failed for retained SQEs: {e}"),
             }
         }
+
+        // Publish operations that were deferred because the submission queue
+        // was full. Completions are exactly when capacity is expected to free
+        // up again.
+        self.flush_pending();
 
         if let Some(entry) = self.io_uring.completion().next() {
             let user_data = entry.user_data();
@@ -259,6 +288,8 @@ impl UringDataIo {
 
 impl Drop for UringDataIo {
     fn drop(&mut self) {
+        // Operations still waiting for submission queue capacity never reached
+        // the kernel; dropping them releases their buffers.
         // Closing the ring fd does not cancel io_uring ops that have started.
         // Wait for CQEs before releasing retained iovecs.
         if self.needs_submit_retry {
@@ -430,8 +461,9 @@ mod tests {
     }
 
     #[test]
-    fn uring_queue_full_batch_completes_each_operation() {
+    fn uring_queue_full_batch_is_deferred_not_failed() {
         let file = TempFile::new().unwrap().into_file();
+        file.set_len(512).unwrap();
         let fd = file.as_raw_fd();
         let mut data_io = UringDataIo::new(1).unwrap();
         let available = {
@@ -447,13 +479,38 @@ mod tests {
 
         data_io.submit_batch(fd, batch).unwrap();
 
+        // Operations that did not fit must not be failed with -EAGAIN: they
+        // stay queued and are submitted once ring capacity frees up, so every
+        // request completes normally.
         let mut completed = Vec::new();
-        while let Some(completion) = data_io.next_completion() {
-            assert_eq!(completion.result, -libc::EAGAIN);
-            assert!(completion.buffer.is_some());
-            completed.push(completion.user_data);
+        for _ in 0..(batch_len * 8) {
+            while let Some(completion) = data_io.next_completion() {
+                assert_eq!(completion.result, 512);
+                assert!(completion.buffer.is_some());
+                completed.push(completion.user_data);
+            }
+            if completed.len() == batch_len {
+                break;
+            }
+            sleep(Duration::from_millis(1));
         }
         completed.sort_unstable();
         assert_eq!(completed, (0..batch_len as u64).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn uring_rejects_duplicate_user_data_while_pending() {
+        let mut data_io = UringDataIo::new(1).unwrap();
+        // Simulate an operation that could not be published to the ring yet.
+        data_io.pending.push_back((
+            0,
+            AsyncIoOperation::read_to_vec(0, OwnedIoBuffer::from_vec(vec![0; 512]), 7),
+        ));
+
+        let duplicate = AsyncIoOperation::read_to_vec(0, OwnedIoBuffer::from_vec(vec![0; 512]), 7);
+        assert_eq!(
+            data_io.submit_batch(0, vec![duplicate]).unwrap_err().kind(),
+            io::ErrorKind::AlreadyExists
+        );
     }
 }
