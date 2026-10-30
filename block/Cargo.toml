@@ -12,7 +12,7 @@ test-utils = []
 
 [dependencies]
 bitflags = { workspace = true }
-crc-any = { workspace = true }
+crc-any = { workspace = true, features = ["std"] }
 flate2 = { version = "1.1", default-features = false, features = [
   "rust_backend",
 ] }
