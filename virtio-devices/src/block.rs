@@ -761,6 +761,9 @@ pub struct Block {
     device_status: Arc<AtomicU8>,
     active_request_count: Arc<AtomicUsize>,
     draining_active_requests: Arc<AtomicBool>,
+    // True for a device restored from a snapshot or a migration until its
+    // first resume, which drops the host's cached pages of the disk image.
+    drop_host_page_cache_on_resume: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -793,6 +796,7 @@ impl Block {
         lock_granularity: LockGranularityChoice,
         guest_block_size: Option<u32>,
     ) -> io::Result<Self> {
+        let restored = state.is_some();
         let (disk_nsectors, avail_features, acked_features, config, paused) =
             if let Some(state) = state {
                 info!("Restoring virtio-block {id}");
@@ -927,7 +931,49 @@ impl Block {
             device_status: Arc::new(AtomicU8::new(0)),
             active_request_count: Arc::new(AtomicUsize::new(0)),
             draining_active_requests: Arc::new(AtomicBool::new(false)),
+            drop_host_page_cache_on_resume: restored,
         })
+    }
+
+    /// Whether the disk image was opened without O_DIRECT, so that what the
+    /// guest wrote may still be in the host's page cache.
+    fn uses_host_page_cache(&self) -> bool {
+        let fd = self.disk_image.fd().as_raw_fd();
+        // SAFETY: F_GETFL only reads the status flags of a valid fd.
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+        flags >= 0 && flags & libc::O_DIRECT == 0
+    }
+
+    /// Writes back what the host's page cache holds of the disk image.
+    fn sync_host_page_cache(&self) -> io::Result<()> {
+        if !self.uses_host_page_cache() {
+            return Ok(());
+        }
+        // SAFETY: fsync on a valid fd.
+        if unsafe { libc::fsync(self.disk_image.fd().as_raw_fd()) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    /// Drops the host's cached pages of the disk image.
+    fn drop_host_page_cache(&self) -> io::Result<()> {
+        if !self.uses_host_page_cache() {
+            return Ok(());
+        }
+        // SAFETY: posix_fadvise on a valid fd only advises the kernel.
+        let ret = unsafe {
+            libc::posix_fadvise(
+                self.disk_image.fd().as_raw_fd(),
+                0,
+                0,
+                libc::POSIX_FADV_DONTNEED,
+            )
+        };
+        if ret != 0 {
+            return Err(io::Error::from_raw_os_error(ret));
+        }
+        Ok(())
     }
 
     fn wait_for_active_requests(&self) -> result::Result<(), anyhow::Error> {
@@ -1320,6 +1366,13 @@ impl Pausable for Block {
                     MigratableError::Pause(anyhow::Error::new(e).context("sync disk metadata"))
                 })
             })
+            .and_then(|()| {
+                // Without O_DIRECT, completed writes may only be in the host's
+                // page cache. A migration's destination, or a copy of the
+                // image, reads the disk once the VM is paused: write them back.
+                self.sync_host_page_cache()
+                    .map_err(|e| MigratableError::Pause(anyhow::Error::new(e).context("sync disk")))
+            })
             .and_then(|()| self.common.pause());
 
         self.draining_active_requests.store(false, Ordering::SeqCst);
@@ -1327,6 +1380,16 @@ impl Pausable for Block {
     }
 
     fn resume(&mut self) -> result::Result<(), MigratableError> {
+        // A restored device's image was opened, and may have been read, while
+        // the VM it came from still wrote to it: a migration's destination
+        // opens its disks before the source stops. Pages read then may be
+        // stale. Drop them before the guest runs.
+        if self.drop_host_page_cache_on_resume {
+            self.drop_host_page_cache().map_err(|e| {
+                MigratableError::Resume(anyhow::Error::new(e).context("drop host page cache"))
+            })?;
+            self.drop_host_page_cache_on_resume = false;
+        }
         self.draining_active_requests.store(false, Ordering::SeqCst);
         self.common.resume()
     }
@@ -1346,6 +1409,11 @@ impl Migratable for Block {
     fn notify_started_migration(&mut self) -> result::Result<(), MigratableError> {
         if let Err(e) = self.disk_image.sync_metadata() {
             warn!("Failed to flush disk {} before migration: {e}", self.id);
+        }
+        // Writing back the host's page cache now leaves pause() only what the
+        // guest writes during the migration.
+        if let Err(e) = self.sync_host_page_cache() {
+            warn!("Failed to sync disk {} before migration: {e}", self.id);
         }
         Ok(())
     }
@@ -1398,6 +1466,15 @@ mod tests {
     }
 
     fn make_block_with_serial(dir: &Path, serial: Option<&str>, num_queues: u16) -> Block {
+        make_block(dir, serial, num_queues, None)
+    }
+
+    fn make_block(
+        dir: &Path,
+        serial: Option<&str>,
+        num_queues: u16,
+        state: Option<BlockState>,
+    ) -> Block {
         use block::ImageType;
         use block::factory::{DiskOpenOptions, open_disk};
 
@@ -1428,7 +1505,7 @@ mod tests {
             SeccompAction::Allow,
             None,
             EventFd::new(0).unwrap(),
-            None,
+            state,
             BTreeMap::new(),
             true,
             LockGranularityChoice::default(),
@@ -1589,6 +1666,25 @@ mod tests {
     fn rejected_request_writes_one_status_byte() {
         let status = process_one_request(VIRTIO_BLK_T_OUT, 1 << VIRTIO_BLK_F_RO);
         assert_eq!(status, [VIRTIO_BLK_S_IOERR as u8, 0xff, 0xff, 0xff]);
+    }
+
+    // Pages a migration's destination read before the source stopped may be
+    // stale: a restored device drops them once, at its first resume.
+    #[test]
+    fn restored_device_drops_host_page_cache_at_first_resume() {
+        use vmm_sys_util::tempdir::TempDir;
+
+        let dir = TempDir::new_with_prefix("/dev/shm/ch-page-cache").unwrap();
+        let mut block = make_block(dir.as_path(), None, 1, None);
+        assert!(block.uses_host_page_cache());
+        assert!(!block.drop_host_page_cache_on_resume);
+        block.pause().unwrap();
+        block.resume().unwrap();
+
+        let mut restored = make_block(dir.as_path(), None, 1, Some(block.state()));
+        assert!(restored.drop_host_page_cache_on_resume);
+        restored.resume().unwrap();
+        assert!(!restored.drop_host_page_cache_on_resume);
     }
 
     #[test]
