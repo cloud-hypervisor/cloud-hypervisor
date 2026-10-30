@@ -1627,12 +1627,8 @@ version = "0.35.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "682396b533413cc2e009fbb48aadf93619a149d3e57defba19ff50ce0201bd0d"
 dependencies = [
- "ipnetwork",
  "pnet_base",
- "pnet_datalink",
  "pnet_packet",
- "pnet_sys",
- "pnet_transport",
 ]
 
 [[package]]
@@ -1698,18 +1694,6 @@ checksum = "7d4643d3d4db6b08741050c2f3afa9a892c4244c085a72fcda93c9c2c9a00f4b"
 dependencies = [
  "libc",
  "winapi",
-]
-
-[[package]]
-name = "pnet_transport"
-version = "0.35.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f604d98bc2a6591cf719b58d3203fd882bdd6bf1db696c4ac97978e9f4776bf"
-dependencies = [
- "libc",
- "pnet_base",
- "pnet_packet",
- "pnet_sys",
 ]
 
 [[package]]
