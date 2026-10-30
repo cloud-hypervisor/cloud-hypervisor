@@ -7,7 +7,7 @@ version = "0.1.0"
 
 [dependencies]
 clap = { workspace = true, features = ["derive"] }
-env_logger = { workspace = true }
+env_logger = { workspace = true, features = ["auto-color", "humantime"] }
 libc = { workspace = true }
 log = { workspace = true }
 serde_json = { workspace = true }

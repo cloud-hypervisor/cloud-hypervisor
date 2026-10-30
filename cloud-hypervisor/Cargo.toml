@@ -14,7 +14,7 @@ version = "55.0.0"
 api_client = { path = "../api_client" }
 clap = { workspace = true, features = ["string"] }
 dhat = { workspace = true, optional = true }
-env_logger = { workspace = true }
+env_logger = { workspace = true, features = ["auto-color", "humantime"] }
 event_monitor = { path = "../event_monitor" }
 hypervisor = { path = "../hypervisor" }
 jiff = { workspace = true }

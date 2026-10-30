@@ -7,7 +7,7 @@ version = "0.1.0"
 [dependencies]
 block = { path = "../block" }
 clap = { workspace = true, features = ["cargo", "wrap_help"] }
-env_logger = { workspace = true }
+env_logger = { workspace = true, features = ["auto-color", "humantime"] }
 libc = { workspace = true }
 log = { workspace = true }
 option_parser = { path = "../option_parser" }
