@@ -25,7 +25,7 @@ vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { workspace = true }
 
 [dev-dependencies]
-pnet = "0.35.0"
+pnet = { version = "0.35.0", default-features = false }
 pnet_datalink = "0.35.0"
 serde_json = { workspace = true }
 virtio-queue = { workspace = true, features = ["test-utils"] }
