@@ -9,7 +9,7 @@ version = "0.1.0"
 hypervisor = { path = "../hypervisor" }
 serde = { workspace = true, features = ["derive", "rc"] }
 thiserror = { workspace = true }
-vm-memory = { workspace = true, features = ["backend-mmap"] }
+vm-memory = { workspace = true, features = ["backend-bitmap", "backend-mmap"] }
 vmm-sys-util = { workspace = true }
 
 [lints]

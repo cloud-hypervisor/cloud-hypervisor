@@ -20,7 +20,11 @@ serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
-vm-memory = { workspace = true, features = ["backend-bitmap", "backend-mmap"] }
+vm-memory = { workspace = true, features = [
+  "backend-atomic",
+  "backend-bitmap",
+  "backend-mmap",
+] }
 
 [dev-dependencies]
 proptest = { version = "1.0.0", default-features = false, features = ["std"] }

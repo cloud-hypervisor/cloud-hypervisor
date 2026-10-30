@@ -33,11 +33,7 @@ serde_with = { workspace = true, default-features = false, features = [
 ] }
 thiserror = { workspace = true }
 vfio-ioctls = { workspace = true, default-features = false }
-vm-memory = { workspace = true, features = [
-  "backend-atomic",
-  "backend-bitmap",
-  "backend-mmap",
-] }
+vm-memory = { workspace = true, features = ["backend-bitmap"] }
 vmm-sys-util = { workspace = true, features = ["with-serde"] }
 zerocopy = { workspace = true, features = ["derive"] }
 

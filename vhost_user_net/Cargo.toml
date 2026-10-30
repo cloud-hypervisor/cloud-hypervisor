@@ -23,7 +23,7 @@ thiserror = { workspace = true }
 vhost = { workspace = true, features = ["vhost-user-backend"] }
 vhost-user-backend = { workspace = true }
 virtio-bindings = { workspace = true }
-vm-memory = { workspace = true }
+vm-memory = { workspace = true, features = ["backend-atomic", "backend-mmap"] }
 vmm-sys-util = { workspace = true }
 
 [lints]
