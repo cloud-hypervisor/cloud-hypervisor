@@ -688,7 +688,6 @@ dependencies = [
  "arch",
  "bitfield-struct",
  "bitflags 2.13.2",
- "byteorder",
  "event_monitor",
  "getrandom 0.4.3",
  "hypervisor",

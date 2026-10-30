@@ -11,7 +11,6 @@ anyhow = { workspace = true }
 arch = { path = "../arch" }
 bitfield-struct = { workspace = true, optional = true }
 bitflags = { workspace = true }
-byteorder = { workspace = true }
 event_monitor = { path = "../event_monitor" }
 getrandom = { workspace = true }
 hypervisor = { path = "../hypervisor" }
