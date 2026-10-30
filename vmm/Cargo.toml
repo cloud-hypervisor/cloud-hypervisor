@@ -77,7 +77,7 @@ pci = { path = "../pci" }
 range_map_vec = { version = "0.2.0", optional = true }
 rate_limiter = { path = "../rate_limiter" }
 seccompiler = { workspace = true }
-serde = { workspace = true, features = ["derive", "rc"] }
+serde = { workspace = true, features = ["derive", "rc", "std"] }
 serde_json = { workspace = true }
 serde_with = { workspace = true, features = ["macros"] }
 serial_buffer = { path = "../serial_buffer" }

@@ -16,7 +16,7 @@ hypervisor = { path = "../hypervisor" }
 libc = { workspace = true }
 linux-loader = { workspace = true, features = ["elf"] }
 log = { workspace = true }
-serde = { workspace = true, features = ["derive", "rc"] }
+serde = { workspace = true, features = ["derive", "rc", "std"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }

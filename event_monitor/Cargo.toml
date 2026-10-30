@@ -8,7 +8,7 @@ version = "0.1.0"
 [dependencies]
 libc = { workspace = true }
 log = { workspace = true }
-serde = { workspace = true, features = ["derive", "rc"] }
+serde = { workspace = true, features = ["derive", "rc", "std"] }
 serde_json = { workspace = true }
 
 [lints]
