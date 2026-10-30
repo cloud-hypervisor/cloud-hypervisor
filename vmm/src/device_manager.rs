@@ -22,8 +22,6 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, IsTerminal, Seek, SeekFrom, stdout};
 use std::num::Wrapping;
 use std::os::fd::BorrowedFd;
-#[cfg(feature = "kvm")]
-use std::os::fd::RawFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 #[cfg(not(target_arch = "riscv64"))]
@@ -4110,7 +4108,7 @@ impl DeviceManager {
     #[cfg(feature = "kvm")]
     fn create_vfio_device_from_fd(
         &self,
-        fd: RawFd,
+        fd: BorrowedFd<'_>,
         vfio_ops: &Arc<dyn VfioOps>,
         attach_ioas: bool,
     ) -> DeviceManagerResult<(VfioDevice, PathBuf)> {
@@ -4132,16 +4130,13 @@ impl DeviceManager {
             config
                 .preserved_fds
                 .as_ref()
-                .is_some_and(|s| s.contains(&fd))
+                .is_some_and(|s| s.contains(&fd.as_raw_fd()))
         };
 
-        // SAFETY: FFI call to dup. Trivially safe.
-        let dup_fd = unsafe { libc::dup(fd) };
-        if dup_fd < 0 {
-            return Err(DeviceManagerError::VfioDupFd(io::Error::last_os_error()));
-        }
-        // SAFETY: dup_fd is a freshly-opened fd owned by this File.
-        let file = unsafe { File::from_raw_fd(dup_fd) };
+        let file = fd
+            .try_clone_to_owned()
+            .map(File::from)
+            .map_err(DeviceManagerError::VfioDupFd)?;
         let vfio_iommufd = (Arc::clone(vfio_ops) as Arc<dyn Any + Send + Sync>)
             .downcast::<VfioIommufd>()
             .map_err(|_| DeviceManagerError::ExpectedIommufdBackend)?;
@@ -4156,16 +4151,9 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::VfioCreate)?
         };
 
-        // SAFETY: fd is a valid open vfio cdev FD; the VfioDevice only
-        // holds a dup, so VmConfig can safely take ownership of the
-        // original.
-        unsafe {
-            self.config.lock().unwrap().add_preserved_fds(vec![fd]);
-        }
-
         // Diagnostic-only: resolve the FD back to the path it was opened
         // from, falling back to /proc/self/fd/<n>.
-        let fd_link = PathBuf::from(format!("/proc/self/fd/{fd}"));
+        let fd_link = PathBuf::from(format!("/proc/self/fd/{}", fd.as_raw_fd()));
         let device_path = fs::read_link(&fd_link).unwrap_or(fd_link);
         Ok((vfio_device, device_path))
     }
@@ -4460,11 +4448,17 @@ impl DeviceManager {
             (None, Some(fd)) => {
                 #[cfg(feature = "kvm")]
                 {
-                    self.create_vfio_device_from_fd(
-                        fd,
+                    let device = self.create_vfio_device_from_fd(
+                        // SAFETY: The CLI or SCM_RIGHTS supplied this live descriptor.
+                        unsafe { BorrowedFd::borrow_raw(fd) },
                         &(Arc::clone(&vfio_ops) as Arc<dyn VfioOps>),
                         !smmuv3_attached,
-                    )?
+                    )?;
+                    // SAFETY: The device owns a duplicate; preserve the original for reboot.
+                    unsafe {
+                        self.config.lock().unwrap().add_preserved_fds(vec![fd]);
+                    }
+                    device
                 }
                 #[cfg(not(feature = "kvm"))]
                 {
