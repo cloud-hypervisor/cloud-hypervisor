@@ -56,7 +56,8 @@ pub use self::dbus::start_dbus_thread;
 pub use self::http::{start_http_fd_thread, start_http_path_thread};
 use crate::Error as VmmError;
 use crate::config::{
-    RestoreConfig, RestoredVfioConfig, VmMemoryZoneUpdateData, deserialize_restored_fd,
+    Error as ConfigError, RestoreConfig, RestoredVfioConfig, Result as ConfigResult,
+    VmMemoryZoneUpdateData, deserialize_restored_fd, parse_inherited_fd, validate_inherited_fds,
 };
 use crate::device_tree::DeviceTree;
 use crate::migration::transport::{
@@ -343,6 +344,8 @@ fn default_receive_migration_background_fetch_pages() -> bool {
 
 #[derive(Debug, Error)]
 pub enum VmReceiveMigrationConfigError {
+    #[error("Invalid inherited file descriptor")]
+    InheritedFd(#[from] ConfigError),
     /// Parsing of `VmReceiveMigrationData` failed
     #[error("Error parsing receive migration parameters")]
     ParseError(#[source] OptionParserError),
@@ -393,6 +396,7 @@ impl VmReceiveMigrationData {
         [,zone_updates=[<id@host_numa_node>]][,background_fetch_pages=on|off]\"";
 
     pub fn parse(migration: &str) -> Result<Self, VmReceiveMigrationConfigError> {
+        validate_inherited_fds([migration])?;
         let mut parser = OptionParser::new();
         parser
             .add("receiver_url")
@@ -419,15 +423,20 @@ impl VmReceiveMigrationData {
             .map_err(VmReceiveMigrationConfigError::ParseError)?
             .map(|v| {
                 v.0.into_iter()
-                    .map(|Tuple(id, fd)| RestoredVfioConfig {
-                        id,
-                        fd: Some(fd as RawFd),
+                    .map(|Tuple(id, fd)| {
+                        Ok(RestoredVfioConfig {
+                            id,
+                            fd: Some(parse_inherited_fd(fd)?),
+                        })
                     })
-                    .collect()
-            });
+                    .collect::<ConfigResult<Vec<_>>>()
+            })
+            .transpose()?;
         let iommufd_fd = parser
             .convert::<RawFd>("iommufd_fd")
-            .map_err(VmReceiveMigrationConfigError::ParseError)?;
+            .map_err(VmReceiveMigrationConfigError::ParseError)?
+            .map(parse_inherited_fd)
+            .transpose()?;
 
         let zone_updates: Vec<VmMemoryZoneUpdateData> = parser
             .convert::<TupleList<String, u32>>("zone_updates")

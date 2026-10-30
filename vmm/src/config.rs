@@ -51,6 +51,10 @@ const MAX_SUPPORTED_CPUS: u32 = 255;
 /// Errors associated with VM configuration parameters.
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("Inherited file descriptor {0} is specified more than once")]
+    DuplicateInheritedFd(RawFd),
+    #[error("Invalid inherited file descriptor")]
+    InheritedFd(#[source] io::Error),
     /// Filesystem tag is missing
     #[error("Error parsing --fs: tag missing")]
     ParseFsTagMissing,
@@ -1072,6 +1076,7 @@ impl PlatformConfig {
     }
 
     pub fn parse(platform: &str) -> Result<Self> {
+        validate_inherited_fds([platform])?;
         struct StringField {
             key: &'static str,
             apply: fn(&mut PlatformConfig, String),
@@ -1146,7 +1151,9 @@ impl PlatformConfig {
             .map(|v| v.0.into_boxed_slice());
         let iommufd_fd = parser
             .convert::<RawFd>("iommufd_fd")
-            .map_err(Error::ParsePlatform)?;
+            .map_err(Error::ParsePlatform)?
+            .map(parse_inherited_fd)
+            .transpose()?;
         // `iommufd_fd=<n>` implies `iommufd=on` unless the user explicitly set the value.
         let iommufd = parser
             .convert::<Toggle>("iommufd")
@@ -1914,6 +1921,7 @@ impl NetConfig {
     offload_tso=on|off,offload_ufo=on|off,offload_csum=on|off\"";
 
     pub fn parse(net: &str) -> Result<Self> {
+        validate_inherited_fds([net])?;
         let mut parser = OptionParser::new();
 
         parser
@@ -1984,7 +1992,12 @@ impl NetConfig {
         let fds = parser
             .convert::<IntegerList>("fd")
             .map_err(Error::ParseNetwork)?
-            .map(|v| v.0.iter().map(|e| *e as RawFd).collect());
+            .map(|v| {
+                v.0.into_iter()
+                    .map(parse_inherited_fd)
+                    .collect::<Result<Vec<_>>>()
+            })
+            .transpose()?;
         let bw_size = parser
             .convert("bw_size")
             .map_err(Error::ParseNetwork)?
@@ -2740,6 +2753,7 @@ impl DeviceConfig {
     x_exclude_mmap_bars=[<bar>...]\"";
 
     pub fn parse(device: &str) -> Result<Self> {
+        validate_inherited_fds([device])?;
         let mut parser = OptionParser::new();
         parser
             .add("path")
@@ -2751,7 +2765,11 @@ impl DeviceConfig {
 
         let pci_common = PciDeviceCommonConfig::parse(device)?;
         let path = parser.get("path").map(PathBuf::from);
-        let fd = parser.convert::<RawFd>("fd").map_err(Error::ParseDevice)?;
+        let fd = parser
+            .convert::<RawFd>("fd")
+            .map_err(Error::ParseDevice)?
+            .map(parse_inherited_fd)
+            .transpose()?;
         let x_nv_gpudirect_clique = parser
             .convert::<u8>("x_nv_gpudirect_clique")
             .map_err(Error::ParseDevice)?;
@@ -3170,6 +3188,7 @@ impl RestoreConfig {
         \n `zone_updates` can be used to update NUMA memory zones. Expects a list of elements in the form `id@host_numa_node`";
 
     pub fn parse(restore: &str) -> Result<Self> {
+        validate_inherited_fds([restore])?;
         let mut parser = OptionParser::new();
         parser
             .add("source_url")
@@ -3200,27 +3219,39 @@ impl RestoreConfig {
             .map_err(Error::ParseRestore)?
             .map(|v| {
                 v.0.into_iter()
-                    .map(|Tuple(id, fds)| RestoredNetConfig {
-                        id,
-                        num_fds: fds.len(),
-                        fds: Some(fds.into_iter().map(|e| e as RawFd).collect()),
+                    .map(|Tuple(id, fds)| {
+                        Ok(RestoredNetConfig {
+                            id,
+                            num_fds: fds.len(),
+                            fds: Some(
+                                fds.into_iter()
+                                    .map(parse_inherited_fd)
+                                    .collect::<Result<Vec<_>>>()?,
+                            ),
+                        })
                     })
-                    .collect()
-            });
+                    .collect::<Result<Vec<_>>>()
+            })
+            .transpose()?;
         let vfio_fds = parser
             .convert::<TupleList<String, u64>>("vfio_fds")
             .map_err(Error::ParseRestore)?
             .map(|v| {
                 v.0.into_iter()
-                    .map(|Tuple(id, fd)| RestoredVfioConfig {
-                        id,
-                        fd: Some(fd as RawFd),
+                    .map(|Tuple(id, fd)| {
+                        Ok(RestoredVfioConfig {
+                            id,
+                            fd: Some(parse_inherited_fd(fd)?),
+                        })
                     })
-                    .collect()
-            });
+                    .collect::<Result<Vec<_>>>()
+            })
+            .transpose()?;
         let iommufd_fd = parser
             .convert::<RawFd>("iommufd_fd")
-            .map_err(Error::ParseRestore)?;
+            .map_err(Error::ParseRestore)?
+            .map(parse_inherited_fd)
+            .transpose()?;
         let resume = parser
             .convert::<Toggle>("resume")
             .map_err(Error::ParseRestore)?
@@ -4031,6 +4062,16 @@ impl VmConfig {
     }
 
     pub fn parse(vm_params: VmParams) -> Result<Self> {
+        validate_inherited_fds(
+            vm_params
+                .net
+                .iter()
+                .flatten()
+                .copied()
+                .chain(vm_params.devices.iter().flatten().copied())
+                .chain(vm_params.platform),
+        )?;
+
         let mut rate_limit_groups: Option<Box<[RateLimiterGroupConfig]>> = None;
         if let Some(rate_limit_group_list) = &vm_params.rate_limit_groups {
             let mut rate_limit_group_config_list = Vec::new();
@@ -4411,6 +4452,74 @@ impl Drop for VmConfig {
     }
 }
 
+pub(crate) fn parse_inherited_fd(fd: impl TryInto<RawFd>) -> Result<RawFd> {
+    let fd = fd
+        .try_into()
+        .map_err(|_| Error::InheritedFd(io::Error::from_raw_os_error(libc::EBADF)))?;
+    // SAFETY: F_GETFD takes no pointer arguments and rejects invalid FDs.
+    if fd < 3 || unsafe { libc::fcntl(fd, libc::F_GETFD) } < 0 {
+        return Err(Error::InheritedFd(io::Error::from_raw_os_error(
+            libc::EBADF,
+        )));
+    }
+    Ok(fd)
+}
+
+// Reject repeated CLI numbers before constructing configs that will own them.
+pub(crate) fn validate_inherited_fds<'a>(configs: impl IntoIterator<Item = &'a str>) -> Result<()> {
+    let mut seen = HashSet::new();
+    for config in configs {
+        let mut parser = OptionParser::new();
+        parser
+            .add("fd")
+            .add("iommufd_fd")
+            .add("net_fds")
+            .add("vfio_fds");
+        // The regular config parser reports malformed values.
+        if parser.parse_subset(config).is_err() {
+            continue;
+        }
+        let mut fds = parser
+            .convert::<IntegerList>("fd")
+            .ok()
+            .flatten()
+            .map_or_else(
+                || {
+                    parser
+                        .convert::<u64>("fd")
+                        .ok()
+                        .flatten()
+                        .into_iter()
+                        .collect()
+                },
+                |fds| fds.0,
+            );
+        fds.extend(parser.convert::<u64>("iommufd_fd").ok().flatten());
+        if let Some(pairs) = parser
+            .convert::<TupleList<String, Vec<u64>>>("net_fds")
+            .ok()
+            .flatten()
+        {
+            fds.extend(pairs.0.into_iter().flat_map(|Tuple(_, fds)| fds));
+        }
+        if let Some(pairs) = parser
+            .convert::<TupleList<String, u64>>("vfio_fds")
+            .ok()
+            .flatten()
+        {
+            fds.extend(pairs.0.into_iter().map(|Tuple(_, fd)| fd));
+        }
+        for fd in fds {
+            if let Ok(fd) = RawFd::try_from(fd)
+                && !seen.insert(fd)
+            {
+                return Err(Error::DuplicateInheritedFd(fd));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs::File;
@@ -4422,6 +4531,29 @@ mod tests {
 
     use super::*;
     use crate::tests::test_fd;
+
+    #[test]
+    fn test_parse_inherited_fd() {
+        parse_inherited_fd(-1).unwrap_err();
+        parse_inherited_fd(u64::MAX).unwrap_err();
+        let file = test_fd();
+        assert_eq!(
+            parse_inherited_fd(file.as_raw_fd()).unwrap(),
+            file.as_raw_fd()
+        );
+        for input in [
+            vec!["fd=[3,3]"],
+            vec!["fd=3", "iommufd_fd=3"],
+            vec!["net_fds=[net0@[3,4]],vfio_fds=[vfio0@4]"],
+            vec!["fd= [3,3]"],
+        ] {
+            assert!(matches!(
+                validate_inherited_fds(input),
+                Err(Error::DuplicateInheritedFd(_))
+            ));
+        }
+        validate_inherited_fds(["fd=[3,4]", "fd=5", "iommufd_fd=6"]).unwrap();
+    }
 
     #[test]
     fn test_vfio_binding_state_is_runtime_only() {
