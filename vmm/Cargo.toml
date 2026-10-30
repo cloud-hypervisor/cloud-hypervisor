@@ -23,14 +23,12 @@ kvm = [
   "vfio-ioctls/kvm",
   "vfio-ioctls/vfio_cdev",
   "virtio-devices/kvm",
-  "vm-device/kvm",
 ]
 mshv = [
   "hypervisor/mshv",
   "pci/mshv",
   "vfio-ioctls/mshv",
   "virtio-devices/mshv",
-  "vm-device/mshv",
 ]
 pvmemcontrol = ["devices/pvmemcontrol"]
 sev_snp = [
