@@ -1075,7 +1075,10 @@ impl PlatformConfig {
         &SYNTAX
     }
 
-    pub fn parse(platform: &str) -> Result<Self> {
+    /// # Safety
+    /// Live FDs named in the input must be exclusively owned by the caller.
+    /// Referenced descriptors may be consumed even if parsing fails.
+    pub unsafe fn parse(platform: &str) -> Result<Self> {
         validate_inherited_fds([platform])?;
         struct StringField {
             key: &'static str,
@@ -1152,8 +1155,10 @@ impl PlatformConfig {
         let iommufd_fd = parser
             .convert::<RawFd>("iommufd_fd")
             .map_err(Error::ParsePlatform)?
-            .map(parse_inherited_fd)
-            .transpose()?;
+            // SAFETY: The caller transfers ownership of the inherited CLI descriptors.
+            .map(|fd| unsafe { take_inherited_fd(fd) })
+            .transpose()?
+            .unwrap_or_default();
         // `iommufd_fd=<n>` implies `iommufd=on` unless the user explicitly set the value.
         let iommufd = parser
             .convert::<Toggle>("iommufd")
@@ -3128,9 +3133,9 @@ pub struct RestoreConfig {
     pub net_fds: Option<Vec<RestoredNetConfig>>,
     #[serde(default)]
     pub vfio_fds: Option<Vec<RestoredVfioConfig>>,
-    // Deserialized FD numbers carry no ownership and are discarded.
-    #[serde(skip_deserializing)]
-    pub iommufd_fd: Option<RawFd>,
+    // Deserialized FDs are discarded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iommufd_fd: ExternalFd,
     #[serde(default)]
     pub resume: bool,
     #[serde(default)]
@@ -3225,8 +3230,10 @@ impl RestoreConfig {
         let iommufd_fd = parser
             .convert::<RawFd>("iommufd_fd")
             .map_err(Error::ParseRestore)?
-            .map(parse_inherited_fd)
-            .transpose()?;
+            // SAFETY: The caller transfers ownership of the inherited CLI descriptors.
+            .map(|fd| unsafe { take_inherited_fd(fd) })
+            .transpose()?
+            .unwrap_or_default();
         let resume = parser
             .convert::<Toggle>("resume")
             .map_err(Error::ParseRestore)?
@@ -4185,7 +4192,11 @@ impl VmConfig {
             pci_segments = Some(pci_segment_config_list.into_boxed_slice());
         }
 
-        let platform = vm_params.platform.map(PlatformConfig::parse).transpose()?;
+        let platform = vm_params
+            .platform
+            // SAFETY: The caller transfers ownership of the inherited CLI descriptors.
+            .map(|platform| unsafe { PlatformConfig::parse(platform) })
+            .transpose()?;
 
         let mut numa: Option<Box<[NumaConfig]>> = None;
         if let Some(numa_list) = &vm_params.numa {
@@ -5938,7 +5949,9 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
     #[test]
     fn test_platform_smbios_parsing() -> Result<()> {
-        let config = PlatformConfig::parse("system_serial_number=serial,system_uuid=uuid")?;
+        let config =
+            // SAFETY: This test input contains no inherited descriptors.
+            unsafe { PlatformConfig::parse("system_serial_number=serial,system_uuid=uuid") }?;
         assert_eq!(config.system_serial_number.as_deref(), Some("serial"));
         assert_eq!(config.system_uuid.as_deref(), Some("uuid"));
 
@@ -5953,7 +5966,8 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         for key in ["serial_number", "uuid"] {
             for prefix in ["", "system_serial_number=serial,system_uuid=uuid,"] {
                 assert!(matches!(
-                    PlatformConfig::parse(&format!("{prefix}{key}=legacy")),
+                    // SAFETY: This test input contains no inherited descriptors.
+                    unsafe { PlatformConfig::parse(&format!("{prefix}{key}=legacy")) },
                     Err(Error::ParsePlatform(OptionParserError::UnknownOption(option)))
                         if option == key
                 ));
@@ -5971,14 +5985,17 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
     #[test]
     fn test_platform_iommufd_fd_parsing() -> Result<()> {
-        let platform = PlatformConfig::parse("")?;
+        // SAFETY: This input contains no inherited descriptors.
+        let platform = unsafe { PlatformConfig::parse("") }?;
         assert!(!platform.iommufd);
         assert!(platform.iommufd_fd.is_none());
 
+        use std::os::fd::IntoRawFd;
         for prefix in ["", "iommufd=on,"] {
             let file = test_fd();
-            let fd = file.as_raw_fd();
-            let platform = PlatformConfig::parse(&format!("{prefix}iommufd_fd={fd}"))?;
+            let fd = file.into_raw_fd();
+            // SAFETY: The file transferred exclusive ownership to us.
+            let platform = unsafe { PlatformConfig::parse(&format!("{prefix}iommufd_fd={fd}")) }?;
             assert!(platform.iommufd);
             assert_eq!(platform.iommufd_fd.as_ref().unwrap().as_raw_fd(), fd);
             platform.validate().unwrap();
@@ -6227,7 +6244,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let iommu = test_fd();
         let fd0 = vfio0.as_raw_fd();
         let fd1 = vfio1.as_raw_fd();
-        let fd2 = iommu.as_raw_fd();
+        let fd2 = iommu.into_raw_fd();
         // SAFETY: The files transferred exclusive ownership to us.
         let config = unsafe {
             RestoreConfig::parse(&format!(
@@ -6252,7 +6269,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                         fd: vfio_fds[1].fd,
                     },
                 ]),
-                iommufd_fd: config.iommufd_fd,
+                iommufd_fd: config.iommufd_fd.clone(),
                 ..Default::default()
             }
         );
@@ -6573,7 +6590,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
     #[test]
     fn test_restore_config_vfio_fds_validation() {
-        let fd = test_fd();
+        let fd: ExternalFd = test_fd().into();
 
         // interested in only VmConfig.devices and platform, so set rest to
         // default values
@@ -6635,9 +6652,9 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             memory_restore_mode: MemoryRestoreMode::Copy,
             vfio_fds: Some(vec![RestoredVfioConfig {
                 id: "vfio0".to_string(),
-                fd: Some(fd.as_raw_fd()),
+                fd: Some(fd.as_ref().unwrap().as_raw_fd()),
             }]),
-            iommufd_fd: Some(fd.as_raw_fd()),
+            iommufd_fd: fd.clone(),
             resume: false,
             zone_updates: vec![],
             ..Default::default()
@@ -6645,7 +6662,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         valid_config.validate(&snapshot_vm_config).unwrap();
 
         let missing_iommufd = RestoreConfig {
-            iommufd_fd: None,
+            iommufd_fd: Default::default(),
             ..valid_config.clone()
         };
         assert_eq!(
@@ -6656,7 +6673,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let unknown_id = RestoreConfig {
             vfio_fds: Some(vec![RestoredVfioConfig {
                 id: "missing".to_string(),
-                fd: Some(fd.as_raw_fd()),
+                fd: Some(fd.as_ref().unwrap().as_raw_fd()),
             }]),
             ..valid_config.clone()
         };
@@ -6669,11 +6686,11 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             vfio_fds: Some(vec![
                 RestoredVfioConfig {
                     id: "vfio0".to_string(),
-                    fd: Some(fd.as_raw_fd()),
+                    fd: Some(fd.as_ref().unwrap().as_raw_fd()),
                 },
                 RestoredVfioConfig {
                     id: "vfio0".to_string(),
-                    fd: Some(fd.as_raw_fd()),
+                    fd: Some(fd.as_ref().unwrap().as_raw_fd()),
                 },
             ]),
             ..valid_config.clone()
@@ -6688,7 +6705,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         snapshot_vm_config.devices.as_mut().unwrap()[0].fd = None;
         let no_substitution = RestoreConfig {
             vfio_fds: None,
-            iommufd_fd: None,
+            iommufd_fd: Default::default(),
             ..valid_config.clone()
         };
         assert_eq!(
@@ -6713,7 +6730,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             system_uuid: None,
             oem_strings: None,
             iommufd: false,
-            iommufd_fd: None,
+            iommufd_fd: Default::default(),
             vfio_p2p_dma: default_platformconfig_vfio_p2p_dma(),
             system_manufacturer: None,
             system_product_name: None,
@@ -7895,7 +7912,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let mut fd_valid_config = valid_config.clone();
         fd_valid_config.platform = Some(PlatformConfig {
             iommufd: true,
-            iommufd_fd: Some(fd.as_ref().unwrap().as_raw_fd()),
+            iommufd_fd: fd.clone(),
             ..platform_fixture()
         });
         fd_valid_config.devices = Some(vec![DeviceConfig {
@@ -7908,7 +7925,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let mut fd_without_iommufd_fd = fd_valid_config.clone();
         fd_without_iommufd_fd.platform = Some(PlatformConfig {
             iommufd: true,
-            iommufd_fd: None,
+            iommufd_fd: Default::default(),
             ..platform_fixture()
         });
         assert!(matches!(
@@ -7920,7 +7937,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let mut iommufd_fd_without_iommufd = valid_config.clone();
         iommufd_fd_without_iommufd.platform = Some(PlatformConfig {
             iommufd: false,
-            iommufd_fd: Some(fd.as_ref().unwrap().as_raw_fd()),
+            iommufd_fd: fd.clone(),
             ..platform_fixture()
         });
         assert!(matches!(

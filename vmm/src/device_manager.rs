@@ -4060,26 +4060,19 @@ impl DeviceManager {
                     .unwrap()
                     .platform
                     .as_ref()
-                    .and_then(|p| p.iommufd_fd);
-                let iommufd = match iommufd_fd {
+                    .map(|p| p.iommufd_fd.clone())
+                    .unwrap_or_default();
+                let iommufd = match iommufd_fd.as_ref() {
                     Some(fd) => {
-                        // SAFETY: The CLI or SCM_RIGHTS supplied this live descriptor.
-                        let fd = unsafe { BorrowedFd::borrow_raw(fd) };
                         info!(
                             "Using vfio cdev mode with externally-supplied iommufd fd: {}.",
                             fd.as_raw_fd()
                         );
                         let file = fd
+                            .as_fd()
                             .try_clone_to_owned()
                             .map(File::from)
                             .map_err(DeviceManagerError::VfioDupFd)?;
-                        // SAFETY: IommuFd receives the duplicate; preserve the original for reboot.
-                        unsafe {
-                            self.config
-                                .lock()
-                                .unwrap()
-                                .add_preserved_fds(vec![fd.as_raw_fd()]);
-                        }
                         IommuFd::new_from_fd(file)
                     }
                     None => {
