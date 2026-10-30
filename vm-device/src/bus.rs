@@ -14,6 +14,8 @@ use std::{convert, io, ptr, result};
 
 use thiserror::Error;
 
+const BUS_DEFAULT_READ_VALUE: u8 = 0x00;
+
 /// Trait for devices that respond to reads or writes in an arbitrary address space.
 ///
 /// The device does not care where it exists in address space as each method is only given an offset
@@ -242,9 +244,12 @@ impl Bus {
     }
 
     /// Reads data from the device that owns the range containing `addr` and puts it into `data`.
+    ///
+    /// Fills the buffer with BUS_DEFAULT_READ_VALUE before dispatching the read to the owning
+    /// device.
     pub fn read(&self, addr: u64, data: &mut [u8]) -> Result<()> {
-        // The Linux kernel, quite reasonably, doesn't zero the memory it gives us.
-        data.fill(0);
+        // The Linux kernel doesn't zero the memory it gives us.
+        data.fill(BUS_DEFAULT_READ_VALUE);
         if let Some((base, offset, dev)) = self.resolve(addr) {
             // OK to unwrap as lock() failing is a serious error condition and should panic.
             dev.read(base, offset, data);
