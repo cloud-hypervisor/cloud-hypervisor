@@ -32,7 +32,7 @@ serde_with = { workspace = true, features = ["macros"] }
 thiserror = { workspace = true }
 vfio-ioctls = { workspace = true }
 vm-memory = { workspace = true, features = ["backend-bitmap"] }
-vmm-sys-util = { workspace = true, features = ["with-serde"] }
+vmm-sys-util = { workspace = true }
 zerocopy = { workspace = true, features = ["derive"] }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies.iced-x86]
