@@ -112,7 +112,6 @@ dependencies = [
 name = "arch"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "crc-any",
  "fdt",
  "hypervisor",
