@@ -10,6 +10,7 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::Arc;
 use std::{ffi, io};
 
+use cloud_hypervisor_fuzz::FuzzCursor;
 use libc::{MAP_NORESERVE, MAP_PRIVATE, PROT_READ, PROT_WRITE};
 use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
@@ -39,49 +40,6 @@ const VRING_DESC_F_WRITE: u16 = 2;
 const REQ_BASE_ADDR: u64 = 0x10_000;
 const STATUS_BASE_ADDR: u64 = 0x20_000;
 const BAD_USED_RING_ADDR: u64 = MEM_SIZE as u64 + 0x1000;
-
-struct FuzzCursor<'a> {
-    bytes: &'a [u8],
-    cursor: usize,
-}
-
-impl<'a> FuzzCursor<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, cursor: 0 }
-    }
-
-    fn next_u8(&mut self) -> u8 {
-        let value = self.bytes[self.cursor % self.bytes.len()];
-        self.cursor = self.cursor.wrapping_add(1);
-        value
-    }
-
-    fn next_u32(&mut self) -> u32 {
-        u32::from_le_bytes([
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-        ])
-    }
-
-    fn next_u64(&mut self) -> u64 {
-        u64::from_le_bytes([
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-        ])
-    }
-
-    fn next_bool(&mut self) -> bool {
-        self.next_u8() & 1 != 0
-    }
-}
 
 #[derive(Copy, Clone)]
 struct ChainCase {
