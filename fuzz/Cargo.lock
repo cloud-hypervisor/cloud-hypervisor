@@ -109,7 +109,6 @@ dependencies = [
  "uuid",
  "vm-fdt",
  "vm-memory",
- "vmm-sys-util",
 ]
 
 [[package]]
