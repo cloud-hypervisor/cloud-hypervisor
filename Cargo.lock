@@ -525,8 +525,6 @@ dependencies = [
  "signal-hook-registry",
  "test_infra",
  "thiserror",
- "tracer",
- "vm-migration",
  "vmm",
  "vmm-sys-util",
  "wait-timeout",
