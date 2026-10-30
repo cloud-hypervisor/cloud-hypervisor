@@ -5,7 +5,6 @@
 use std::os::unix::fs::FileExt;
 use std::{io, result};
 
-use byteorder::{ByteOrder, LittleEndian};
 use remain::sorted;
 use thiserror::Error;
 
@@ -68,7 +67,7 @@ impl BatEntry {
             let mut entry = [0u8; size_of::<u64>()];
             f.read_exact_at(&mut entry, offset + i * size_of::<u64>() as u64)
                 .map_err(VhdxBatError::ReadBat)?;
-            let raw_entry = LittleEndian::read_u64(&entry);
+            let raw_entry = u64::from_le_bytes(entry);
             if raw_entry & BAT_STATE_BIT_MASK == PAYLOAD_BLOCK_FULLY_PRESENT
                 && (raw_entry & BAT_FILE_OFF_MASK).saturating_add(disk_spec.block_size as u64)
                     > disk_spec.image_size
@@ -101,8 +100,7 @@ impl BatEntry {
                 }
             };
 
-            let mut buf = [0u8; size_of::<u64>()];
-            LittleEndian::write_u64(&mut buf, bat_entry);
+            let buf = bat_entry.to_le_bytes();
             f.write_all_at(&buf, bat_offset + i * size_of::<u64>() as u64)
                 .map_err(VhdxBatError::WriteBat)?;
         }
