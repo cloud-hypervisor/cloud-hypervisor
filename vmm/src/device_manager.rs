@@ -4061,20 +4061,22 @@ impl DeviceManager {
                     .and_then(|p| p.iommufd_fd);
                 let iommufd = match iommufd_fd {
                     Some(fd) => {
-                        info!("Using vfio cdev mode with externally-supplied iommufd fd: {fd}.");
-                        // Dup so the IommuFd owns its own File; the
-                        // caller-supplied fd is kept alive across reboot
-                        // via VmConfig::preserved_fds.
-                        // SAFETY: FFI call to dup. Trivially safe.
-                        let dup_fd = unsafe { libc::dup(fd) };
-                        if dup_fd < 0 {
-                            return Err(DeviceManagerError::VfioDupFd(io::Error::last_os_error()));
-                        }
-                        // SAFETY: dup_fd is valid and can be owned by this File
-                        let file = unsafe { File::from_raw_fd(dup_fd) };
-                        // SAFETY: fd is a valid open iommufd
+                        // SAFETY: The CLI or SCM_RIGHTS supplied this live descriptor.
+                        let fd = unsafe { BorrowedFd::borrow_raw(fd) };
+                        info!(
+                            "Using vfio cdev mode with externally-supplied iommufd fd: {}.",
+                            fd.as_raw_fd()
+                        );
+                        let file = fd
+                            .try_clone_to_owned()
+                            .map(File::from)
+                            .map_err(DeviceManagerError::VfioDupFd)?;
+                        // SAFETY: IommuFd receives the duplicate; preserve the original for reboot.
                         unsafe {
-                            self.config.lock().unwrap().add_preserved_fds(vec![fd]);
+                            self.config
+                                .lock()
+                                .unwrap()
+                                .add_preserved_fds(vec![fd.as_raw_fd()]);
                         }
                         IommuFd::new_from_fd(file)
                     }
