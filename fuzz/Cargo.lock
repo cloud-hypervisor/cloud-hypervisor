@@ -1436,7 +1436,6 @@ dependencies = [
  "gdbstub",
  "gdbstub_arch",
  "hypervisor",
- "iommufd-bindings",
  "iommufd-ioctls",
  "landlock",
  "libc",
