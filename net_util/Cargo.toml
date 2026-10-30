@@ -16,11 +16,7 @@ smallvec = { workspace = true }
 thiserror = { workspace = true }
 virtio-bindings = { workspace = true }
 virtio-queue = { workspace = true }
-vm-memory = { workspace = true, features = [
-  "backend-atomic",
-  "backend-bitmap",
-  "backend-mmap",
-] }
+vm-memory = { workspace = true, features = ["backend-bitmap", "backend-mmap"] }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { workspace = true }
 
