@@ -14,7 +14,7 @@ sev_snp = []
 [dependencies]
 hypervisor = { path = "../hypervisor" }
 libc = { workspace = true }
-linux-loader = { workspace = true, features = ["bzimage", "elf", "pe"] }
+linux-loader = { workspace = true, features = ["elf"] }
 log = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
