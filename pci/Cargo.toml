@@ -17,7 +17,7 @@ mshv = ["hypervisor/mshv", "vfio-ioctls/mshv"]
 
 [dependencies]
 anyhow = { workspace = true, features = ["std"] }
-base64 = { workspace = true }
+base64 = { workspace = true, features = ["alloc"] }
 hypervisor = { path = "../hypervisor" }
 iommufd-ioctls = { workspace = true, optional = true }
 libc = { workspace = true }

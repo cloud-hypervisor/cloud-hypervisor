@@ -112,7 +112,7 @@ serde_with = { version = "3.19.0", default-features = false }
 
 # other crates
 anyhow = { version = "1.0.102", default-features = false }
-base64 = "0.23.0"
+base64 = { version = "0.23.0", default-features = false }
 bitfield-struct = "0.13.0"
 bitflags = "2.11.1"
 cfg-if = "1.0.4"
