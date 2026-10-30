@@ -2448,7 +2448,6 @@ fn apply_vfio_fds_to_vm_config(
         .iommufd_fd = Some(iommufd_fd);
 }
 
-#[allow(unused)]
 fn update_memory_zones(
     zone_updates: &[VmMemoryZoneUpdateData],
     vm_config: &Arc<Mutex<VmConfig>>,
