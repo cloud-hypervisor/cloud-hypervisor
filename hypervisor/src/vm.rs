@@ -23,6 +23,7 @@ use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
 #[cfg(feature = "sev_snp")]
 use igvm_defs::SnpPolicy;
 use thiserror::Error;
+use vm_memory::GuestMemoryError;
 use vmm_sys_util::eventfd::EventFd;
 
 #[cfg(target_arch = "x86_64")]
@@ -125,10 +126,10 @@ pub enum HypervisorVmError {
     CreatePassthroughDevice(#[source] anyhow::Error),
     /// Write to Guest memory
     #[error("Failed to write to guest memory")]
-    GuestMemWrite(#[source] anyhow::Error),
+    GuestMemWrite(#[source] GuestMemoryError),
     /// Read Guest memory
     #[error("Failed to read guest memory")]
-    GuestMemRead(#[source] anyhow::Error),
+    GuestMemRead(#[source] GuestMemoryError),
     /// Start dirty log error
     #[error("Failed to get dirty log")]
     StartDirtyLog(#[source] anyhow::Error),
