@@ -6,12 +6,11 @@
 // found in the THIRD-PARTY file.
 
 use std::collections::HashMap;
-use std::fs::File;
 use std::io::{self, Write};
 use std::net::IpAddr;
 use std::num::Wrapping;
 use std::ops::Deref;
-use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd};
+use std::os::fd::{AsRawFd, BorrowedFd};
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
@@ -725,15 +724,9 @@ impl Net {
             .ok_or(Error::BadQueueNum)?;
 
         for fd in fds.iter() {
-            // Duplicate so that it can survive reboots
-            // SAFETY: FFI call to dup. Trivially safe.
-            let fd = unsafe { libc::dup(fd.as_raw_fd()) };
-            if fd < 0 {
-                return Err(Error::DuplicateTapFd(io::Error::last_os_error()));
-            }
-            // SAFETY: dup returned a new descriptor owned by this File.
-            let file = unsafe { File::from_raw_fd(fd) };
-            let tap = Tap::from_file(file, num_queue_pairs).map_err(Error::TapError)?;
+            // Keep the preserved original available across reboots.
+            let fd = fd.try_clone_to_owned().map_err(Error::DuplicateTapFd)?;
+            let tap = Tap::from_file(fd.into(), num_queue_pairs).map_err(Error::TapError)?;
             taps.push(tap);
         }
 
