@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-use std::collections::HashSet;
 use std::net::{IpAddr, SocketAddr};
 use std::ops::{Deref, DerefMut};
 use std::os::fd::{AsRawFd, OwnedFd, RawFd};
@@ -1284,7 +1283,7 @@ impl ApplyLandlock for LandlockConfig {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct VmConfig {
     #[serde(default)]
     pub cpus: CpusConfig,
@@ -1329,16 +1328,6 @@ pub struct VmConfig {
     pub pci_segments: Option<Box<[PciSegmentConfig]>>,
     pub platform: Option<PlatformConfig>,
     pub tpm: Option<TpmConfig>,
-    // Preserved FDs are the ones that share the same life-time as its holding
-    // VmConfig instance, such as FDs for creating TAP devices.
-    // Preserved FDs will stay open as long as the holding VmConfig instance is
-    // valid, and will be closed when the holding VmConfig instance is destroyed.
-    //
-    // This is populated as devices are added at runtime. Removing them again
-    // causes the FDs to be closed early. This allows management software to
-    // gracefully clean up resources (e.g., libvirt closes tap devices).
-    #[serde(skip)]
-    pub preserved_fds: Option<HashSet<RawFd>>,
     #[serde(default)]
     pub landlock_enable: bool,
     pub landlock_rules: Option<Box<[LandlockConfig]>>,

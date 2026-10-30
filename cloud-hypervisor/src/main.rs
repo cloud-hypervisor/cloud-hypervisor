@@ -1392,7 +1392,6 @@ mod tests {
             #[cfg(feature = "pvmemcontrol")]
             pvmemcontrol: None,
             iommu: false,
-            preserved_fds: None,
             numa: None,
             watchdog: false,
             rtc: None,
