@@ -19,6 +19,7 @@ use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::fs::FileExt;
 use std::{fmt, thread};
 
+use vm_allocator::page_size::get_page_size;
 use vm_migration::protocol::{MemoryRange, Request, Response, Status};
 
 use crate::migration::transport::SocketStream;
@@ -209,8 +210,7 @@ pub(crate) fn allocate_zero_buffer(len: usize) -> Vec<u8> {
 
     // Ensure the page tables of the buffer exist, so UFFDIO_COPY works
     // with it on 1 GiB pages.
-    // SAFETY: FFI call. Trivially safe.
-    let base_page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
+    let base_page_size = get_page_size() as usize;
     let start = buf.as_ptr() as usize & !(base_page_size - 1);
     // SAFETY: the range only covers pages backing `buf`.
     let ret = unsafe {
