@@ -25,9 +25,7 @@ pci = { path = "../pci" }
 rate_limiter = { path = "../rate_limiter" }
 seccompiler = { workspace = true }
 serde = { workspace = true, features = ["derive", "std"] }
-serde_with = { workspace = true, default-features = false, features = [
-  "macros",
-] }
+serde_with = { workspace = true, features = ["macros"] }
 serial_buffer = { path = "../serial_buffer" }
 smallvec = { workspace = true }
 thiserror = { workspace = true }
