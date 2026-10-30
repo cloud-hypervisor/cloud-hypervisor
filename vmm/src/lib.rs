@@ -2432,7 +2432,7 @@ fn apply_vfio_fds_to_vm_config(
             for device in devices.iter_mut() {
                 if device.pci_common.id.as_deref() == Some(v.id.as_str()) {
                     device.path = None;
-                    device.fd = v.fd;
+                    device.fd.clone_from(&v.fd);
                 }
             }
         }
@@ -2698,7 +2698,7 @@ impl RequestHandler for Vmm {
                             for device_config in vm_device_configs.iter_mut() {
                                 if device_config.pci_common.id.as_ref() == Some(&v.id) {
                                     device_config.path = None;
-                                    device_config.fd = v.fd;
+                                    device_config.fd.clone_from(&v.fd);
                                 }
                             }
                         }
@@ -3851,7 +3851,8 @@ mod tests {
     #[test]
     fn test_vmm_vm_cold_add_device() {
         let mut vmm = create_dummy_vmm();
-        let device_config = DeviceConfig::parse("path=/path/to/device").unwrap();
+        // SAFETY: This test input contains no inherited descriptors.
+        let device_config = unsafe { DeviceConfig::parse("path=/path/to/device") }.unwrap();
 
         assert!(matches!(
             vmm.vm_add_device(device_config.clone()),
@@ -4347,7 +4348,7 @@ mod tests {
                         ..Default::default()
                     },
                     path: Some(PathBuf::from(format!("/sys/bus/pci/devices/{id}"))),
-                    fd: None,
+                    fd: Default::default(),
                     x_nv_gpudirect_clique: None,
                     x_exclude_mmap_bars: Vec::new(),
                     iommufd_dev_id: None,
@@ -4371,10 +4372,10 @@ mod tests {
         }
     }
 
-    fn vfio_fd(id: &str, fd: RawFd) -> RestoredVfioConfig {
+    fn vfio_fd(id: &str, fd: ExternalFd) -> RestoredVfioConfig {
         RestoredVfioConfig {
             id: id.to_owned(),
-            fd: Some(fd),
+            fd,
         }
     }
 
@@ -4390,12 +4391,12 @@ mod tests {
 
     #[test]
     fn test_apply_vfio_fds_swaps_path_for_fd() {
-        let vfio = test_fd();
+        let vfio: ExternalFd = test_fd().into();
         let iommu: ExternalFd = test_fd().into();
 
         let vm_config = vm_config_with_vfio_devices(&["vfio0", "vfio1"], true);
         let data = receive_data(
-            Some(vec![vfio_fd("vfio1", vfio.as_raw_fd())]),
+            Some(vec![vfio_fd("vfio1", vfio.clone())]),
             Some(iommu.clone()),
         );
         apply_vfio_fds_to_vm_config(&data, &vm_config);
@@ -4406,7 +4407,7 @@ mod tests {
         assert!(devices[1].path.is_none());
         assert_eq!(
             devices[1].fd.as_ref().unwrap().as_raw_fd(),
-            vfio.as_raw_fd()
+            vfio.as_ref().unwrap().as_raw_fd()
         );
         assert_eq!(
             config
@@ -4423,17 +4424,17 @@ mod tests {
 
     #[test]
     fn test_validate_vfio_fds_requires_iommufd_fd() {
-        let vfio = test_fd();
+        let vfio: ExternalFd = test_fd().into();
 
         let vm_config = vm_config_with_vfio_devices(&["vfio0"], true);
-        let data = receive_data(Some(vec![vfio_fd("vfio0", vfio.as_raw_fd())]), None);
+        let data = receive_data(Some(vec![vfio_fd("vfio0", vfio.clone())]), None);
         data.validate_vfio_fds(&vm_config.lock().unwrap())
             .unwrap_err();
     }
 
     #[test]
     fn test_validate_vfio_fds_unknown_id_fails() {
-        let vfio = test_fd();
+        let vfio: ExternalFd = test_fd().into();
         let iommu: ExternalFd = test_fd().into();
 
         // vfio0 is covered so coverage passes, the extra bogus id is what the
@@ -4441,8 +4442,8 @@ mod tests {
         let vm_config = vm_config_with_vfio_devices(&["vfio0"], true);
         let data = receive_data(
             Some(vec![
-                vfio_fd("vfio0", vfio.as_raw_fd()),
-                vfio_fd("missing", vfio.as_raw_fd()),
+                vfio_fd("vfio0", vfio.clone()),
+                vfio_fd("missing", vfio.clone()),
             ]),
             Some(iommu.clone()),
         );
@@ -4452,14 +4453,14 @@ mod tests {
 
     #[test]
     fn test_validate_vfio_fds_duplicate_id_fails() {
-        let vfio = test_fd();
+        let vfio: ExternalFd = test_fd().into();
         let iommu: ExternalFd = test_fd().into();
 
         let vm_config = vm_config_with_vfio_devices(&["vfio0"], true);
         let data = receive_data(
             Some(vec![
-                vfio_fd("vfio0", vfio.as_raw_fd()),
-                vfio_fd("vfio0", vfio.as_raw_fd()),
+                vfio_fd("vfio0", vfio.clone()),
+                vfio_fd("vfio0", vfio.clone()),
             ]),
             Some(iommu.clone()),
         );
@@ -4469,12 +4470,12 @@ mod tests {
 
     #[test]
     fn test_validate_vfio_fds_requires_iommufd_backend() {
-        let vfio = test_fd();
+        let vfio: ExternalFd = test_fd().into();
         let iommu: ExternalFd = test_fd().into();
 
         let vm_config = vm_config_with_vfio_devices(&["vfio0"], false);
         let data = receive_data(
-            Some(vec![vfio_fd("vfio0", vfio.as_raw_fd())]),
+            Some(vec![vfio_fd("vfio0", vfio.clone())]),
             Some(iommu.clone()),
         );
         data.validate_vfio_fds(&vm_config.lock().unwrap())
@@ -4488,7 +4489,7 @@ mod tests {
             let mut config = vm_config.lock().unwrap();
             let device = &mut config.devices.as_mut().unwrap()[0];
             device.path = None;
-            device.fd = None;
+            device.fd = Default::default();
         }
         receive_data(None, None)
             .validate_vfio_fds(&vm_config.lock().unwrap())
@@ -4507,12 +4508,12 @@ mod tests {
 
     #[test]
     fn test_validate_vfio_fds_all_substituted_ok() {
-        let vfio = test_fd();
+        let vfio: ExternalFd = test_fd().into();
         let iommu: ExternalFd = test_fd().into();
 
         let vm_config = vm_config_with_vfio_devices(&["vfio0"], true);
         let data = receive_data(
-            Some(vec![vfio_fd("vfio0", vfio.as_raw_fd())]),
+            Some(vec![vfio_fd("vfio0", vfio.clone())]),
             Some(iommu.clone()),
         );
         data.validate_vfio_fds(&vm_config.lock().unwrap()).unwrap();

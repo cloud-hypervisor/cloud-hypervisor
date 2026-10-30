@@ -9,7 +9,7 @@ mod test_util;
 
 use std::io::{self, Read};
 use std::marker::PhantomData;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
 use std::{error, fs, iter, num, process};
@@ -301,17 +301,9 @@ impl TargetApi<'_> {
 
 fn prepare_fd_command(matches: &ArgMatches) -> Result<Option<FdCommand>, Error> {
     let fd_command = match matches.subcommand() {
-        Some(("add-device", args)) => {
-            let (body, fds) = add_device_config(args.get_one::<String>("device_config").unwrap())?;
-            let fds = fds
-                .into_iter()
-                .map(|fd| {
-                    // SAFETY: The CLI transfers these validated inherited FDs.
-                    Arc::new(unsafe { OwnedFd::from_raw_fd(fd) })
-                })
-                .collect();
-            Some((body, fds))
-        }
+        Some(("add-device", args)) => Some(add_device_config(
+            args.get_one::<String>("device_config").unwrap(),
+        )?),
         Some(("add-net", args)) => Some(add_net_config(
             args.get_one::<String>("net_config").unwrap(),
         )?),
@@ -848,8 +840,10 @@ fn resize_zone_config(id: &str, size: &str) -> Result<String, Error> {
     Ok(serde_json::to_string(&resize_zone).unwrap())
 }
 
-fn add_device_config(config: &str) -> Result<(String, Vec<RawFd>), Error> {
-    let mut device_config = DeviceConfig::parse(config).map_err(Error::AddDeviceConfig)?;
+fn add_device_config(config: &str) -> Result<FdCommand, Error> {
+    let mut device_config =
+        // SAFETY: The CLI transfers ownership of the inherited descriptors.
+        unsafe { DeviceConfig::parse(config) }.map_err(Error::AddDeviceConfig)?;
 
     // DeviceConfig is modified on purpose here by taking the file
     // descriptor out. Keeping it and sending it over to the server side
@@ -965,11 +959,7 @@ fn restore_config(config: &str) -> Result<FdCommand, Error> {
         None => Vec::new(),
     };
     if let Some(vfio_fds) = restore_config.vfio_fds.as_mut() {
-        fds.extend(vfio_fds.iter_mut().filter_map(|v| v.fd.take()).map(|fd| {
-            // SAFETY: The CLI transfers these inherited FDs. They have been
-            // removed from the config.
-            Arc::new(unsafe { OwnedFd::from_raw_fd(fd) })
-        }));
+        fds.extend(vfio_fds.iter_mut().filter_map(|v| v.fd.take()));
     }
     if let Some(iommufd_fd) = restore_config.iommufd_fd.take() {
         fds.push(iommufd_fd);
@@ -995,14 +985,7 @@ fn receive_migration_data(config: &str) -> Result<FdCommand, Error> {
     // The FDs are passed to the server side process via SCM_RIGHTS, in the
     // order vfio_fds then the iommufd FD, matching the server's split.
     let mut fds: Vec<Arc<OwnedFd>> = match data.vfio_fds.as_mut() {
-        Some(vfio_fds) => vfio_fds
-            .iter_mut()
-            .filter_map(|v| v.fd.take())
-            .map(|fd| {
-                // SAFETY: The CLI transfers these inherited FDs, removed from the raw configs above.
-                Arc::new(unsafe { OwnedFd::from_raw_fd(fd) })
-            })
-            .collect(),
+        Some(vfio_fds) => vfio_fds.iter_mut().filter_map(|v| v.fd.take()).collect(),
         None => Vec::new(),
     };
     if let Some(iommufd_fd) = data.iommufd_fd.take() {

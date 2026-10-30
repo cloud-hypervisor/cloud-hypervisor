@@ -907,9 +907,9 @@ pub struct DeviceConfig {
     pub pci_common: PciDeviceCommonConfig,
     #[serde(default)]
     pub path: Option<PathBuf>,
-    // Deserialized FD numbers carry no ownership and are discarded.
-    #[serde(skip_deserializing)]
-    pub fd: Option<RawFd>,
+    // Deserialized FDs are discarded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fd: ExternalFd,
     #[serde(default)]
     pub x_nv_gpudirect_clique: Option<u8>,
     #[serde(default)]

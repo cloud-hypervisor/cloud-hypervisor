@@ -116,7 +116,6 @@ mod fds_helper {
 
     mod config_with_fds_impls {
         use std::fs::File;
-        use std::os::fd::IntoRawFd;
 
         use super::{ConfigWithFDs, ConfigWithVariableFDs};
         use crate::config::{RestoredNetConfig, RestoredVfioConfig};
@@ -149,7 +148,10 @@ mod fds_helper {
                 // The VmAddDevice PutHandler enforces `fds.len() <= 1`
                 // before calling into this trait, so `pop()` yields the
                 // single FD when present.
-                self.fd = fds.and_then(|mut v| v.pop()).map(IntoRawFd::into_raw_fd);
+                self.fd = fds
+                    .and_then(|mut v| v.pop())
+                    .map(ExternalFd::from)
+                    .unwrap_or_default();
             }
         }
 
@@ -183,7 +185,10 @@ mod fds_helper {
             }
 
             fn set_fds(&mut self, fds: Option<Vec<File>>) {
-                self.fd = fds.and_then(|mut v| v.pop()).map(IntoRawFd::into_raw_fd);
+                self.fd = fds
+                    .and_then(|mut v| v.pop())
+                    .map(ExternalFd::from)
+                    .unwrap_or_default();
             }
         }
 
@@ -200,8 +205,7 @@ mod fds_helper {
         cfg: &mut T,
     ) {
         if cfg.has_fds() {
-            // Only FDs transmitted via SCM_RIGHTS are valid. Descriptor numbers
-            // in the HTTP request body are discarded.
+            // Only descriptors received through SCM_RIGHTS can be owned here.
             warn!(
                 "FDs were present in HTTP request body for device {:?} but will be ignored",
                 cfg.id()
