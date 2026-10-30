@@ -34,8 +34,6 @@ use std::{iter, path, result, sync};
 
 use acpi_tables::sdt::GenericAddress;
 use acpi_tables::{Aml, aml};
-#[cfg(not(target_arch = "riscv64"))]
-use anyhow::anyhow;
 #[cfg(target_arch = "x86_64")]
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
@@ -278,8 +276,9 @@ pub enum DeviceManagerError {
     CreateVirtioVsock(#[source] io::Error),
 
     /// Cannot create tpm device
+    #[cfg(not(target_arch = "riscv64"))]
     #[error("Cannot create tmp device")]
-    CreateTpmDevice(#[source] anyhow::Error),
+    CreateTpmDevice(#[source] tpm::Error),
 
     /// Failed to convert Path to &str for the vDPA device.
     #[error("Failed to convert Path to &str for the vDPA device")]
@@ -327,11 +326,11 @@ pub enum DeviceManagerError {
 
     /// Cannot register ioevent.
     #[error("Cannot register ioevent")]
-    RegisterIoevent(#[source] anyhow::Error),
+    RegisterIoevent(#[source] hypervisor::HypervisorVmError),
 
     /// Cannot unregister ioevent.
     #[error("Cannot unregister ioevent")]
-    UnRegisterIoevent(#[source] anyhow::Error),
+    UnRegisterIoevent(#[source] hypervisor::HypervisorVmError),
 
     /// Cannot create virtio device
     #[error("Cannot create virtio device")]
@@ -411,7 +410,7 @@ pub enum DeviceManagerError {
 
     /// Failed to create the passthrough device.
     #[error("Failed to create the passthrough device")]
-    CreatePassthroughDevice(#[source] anyhow::Error),
+    CreatePassthroughDevice(#[source] hypervisor::HypervisorVmError),
 
     /// Cannot add legacy device to Bus.
     #[error("Cannot add legacy device to Bus")]
@@ -2750,9 +2749,7 @@ impl DeviceManager {
     #[cfg(not(target_arch = "riscv64"))]
     fn add_tpm_device(&mut self, tpm_path: &Path) -> DeviceManagerResult<Arc<Mutex<tpm::Tpm>>> {
         // Create TPM Device
-        let tpm = tpm::Tpm::new(tpm_path).map_err(|e| {
-            DeviceManagerError::CreateTpmDevice(anyhow!("Failed to create TPM Device : {e:?}"))
-        })?;
+        let tpm = tpm::Tpm::new(tpm_path).map_err(DeviceManagerError::CreateTpmDevice)?;
         let tpm = Arc::new(Mutex::new(tpm));
 
         // Add TPM Device to mmio
@@ -4023,7 +4020,7 @@ impl DeviceManager {
                 self.address_manager
                     .vm
                     .create_passthrough_device()
-                    .map_err(|e| DeviceManagerError::CreatePassthroughDevice(e.into()))?,
+                    .map_err(DeviceManagerError::CreatePassthroughDevice)?,
             );
         }
 
@@ -5048,7 +5045,7 @@ impl DeviceManager {
             self.address_manager
                 .vm
                 .register_ioevent(event, &io_addr, None)
-                .map_err(|e| DeviceManagerError::RegisterIoevent(e.into()))?;
+                .map_err(DeviceManagerError::RegisterIoevent)?;
         }
 
         // Update the device tree with correct resource information.
@@ -5684,7 +5681,7 @@ impl DeviceManager {
                         self.address_manager
                             .vm
                             .unregister_ioevent(event, &io_addr)
-                            .map_err(|e| DeviceManagerError::UnRegisterIoevent(e.into()))?;
+                            .map_err(DeviceManagerError::UnRegisterIoevent)?;
                     }
                 }
 
