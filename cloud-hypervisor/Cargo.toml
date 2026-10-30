@@ -27,7 +27,10 @@ signal-hook = { workspace = true }
 thiserror = { workspace = true }
 vmm = { path = "../vmm" }
 vmm-sys-util = { workspace = true }
-zbus = { workspace = true, optional = true }
+zbus = { workspace = true, features = [
+  "async-io",
+  "blocking-api",
+], optional = true }
 
 [dev-dependencies]
 block = { path = "../block" }
