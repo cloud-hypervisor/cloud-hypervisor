@@ -23,7 +23,7 @@ uuid = { workspace = true }
 vm-memory = { workspace = true, features = ["backend-bitmap", "backend-mmap"] }
 
 [dev-dependencies]
-proptest = "1.0.0"
+proptest = { version = "1.0.0", default-features = false, features = ["std"] }
 vmm-sys-util = { workspace = true }
 
 [target.'cfg(target_arch = "aarch64")'.dependencies]
