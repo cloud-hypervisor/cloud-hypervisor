@@ -4488,7 +4488,7 @@ mod tests {
             let mut config = vm_config.lock().unwrap();
             let device = &mut config.devices.as_mut().unwrap()[0];
             device.path = None;
-            device.fd = Some(-1);
+            device.fd = None;
         }
         receive_data(None, None)
             .validate_vfio_fds(&vm_config.lock().unwrap())

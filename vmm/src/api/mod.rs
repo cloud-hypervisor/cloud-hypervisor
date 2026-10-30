@@ -57,7 +57,7 @@ pub use self::http::{start_http_fd_thread, start_http_path_thread};
 use crate::Error as VmmError;
 use crate::config::{
     Error as ConfigError, RestoreConfig, RestoredVfioConfig, Result as ConfigResult,
-    VmMemoryZoneUpdateData, deserialize_restored_fd, parse_inherited_fd, validate_inherited_fds,
+    VmMemoryZoneUpdateData, parse_inherited_fd, validate_inherited_fds,
 };
 use crate::device_tree::DeviceTree;
 use crate::migration::transport::{
@@ -327,8 +327,8 @@ pub struct VmReceiveMigrationData {
     /// device's saved path or stale FD in the received VmConfig.
     #[serde(default)]
     pub vfio_fds: Option<Vec<RestoredVfioConfig>>,
-    // FDs are not serialized and any deserialized value is invalid; see NetConfig::fds.
-    #[serde(default, deserialize_with = "deserialize_restored_fd")]
+    // Deserialized FD numbers carry no ownership and are discarded.
+    #[serde(skip_deserializing)]
     pub iommufd_fd: Option<RawFd>,
     /// Optional memory zone update data
     #[serde(default)]

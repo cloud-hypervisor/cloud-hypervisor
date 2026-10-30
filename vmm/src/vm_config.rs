@@ -172,8 +172,8 @@ pub struct PlatformConfig {
     pub sev_snp: bool,
     #[serde(default)]
     pub iommufd: bool,
-    // FDs are not serialized and any deserialized value is invalid; see NetConfig::fds.
-    #[serde(default, deserialize_with = "deserialize_platformconfig_iommufd_fd")]
+    // Deserialized FD numbers carry no ownership and are discarded.
+    #[serde(skip_deserializing)]
     pub iommufd_fd: Option<RawFd>,
     #[serde(default = "default_platformconfig_vfio_p2p_dma")]
     pub vfio_p2p_dma: bool,
@@ -220,21 +220,6 @@ impl PlatformConfig {
         };
 
         (!smbios.is_empty()).then_some(smbios)
-    }
-}
-
-fn deserialize_platformconfig_iommufd_fd<'de, D>(d: D) -> Result<Option<RawFd>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let invalid_fd: Option<RawFd> = Option::deserialize(d)?;
-    if invalid_fd.is_some() {
-        debug!(
-            "FD in 'PlatformConfig::iommufd_fd' won't be deserialized as it is most likely invalid now. Deserializing it as -1."
-        );
-        Ok(Some(-1))
-    } else {
-        Ok(None)
     }
 }
 
@@ -886,8 +871,8 @@ pub struct DeviceConfig {
     pub pci_common: PciDeviceCommonConfig,
     #[serde(default)]
     pub path: Option<PathBuf>,
-    // FDs are not serialized and any deserialized value is invalid; see NetConfig::fds.
-    #[serde(default, deserialize_with = "deserialize_deviceconfig_fd")]
+    // Deserialized FD numbers carry no ownership and are discarded.
+    #[serde(skip_deserializing)]
     pub fd: Option<RawFd>,
     #[serde(default)]
     pub x_nv_gpudirect_clique: Option<u8>,
@@ -895,21 +880,6 @@ pub struct DeviceConfig {
     pub x_exclude_mmap_bars: Vec<u64>,
     #[serde(skip)]
     pub iommufd_dev_id: Option<u32>,
-}
-
-fn deserialize_deviceconfig_fd<'de, D>(d: D) -> Result<Option<RawFd>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let invalid_fd: Option<RawFd> = Option::deserialize(d)?;
-    if invalid_fd.is_some() {
-        debug!(
-            "FD in 'DeviceConfig' won't be deserialized as it is most likely invalid now. Deserializing it as -1."
-        );
-        Ok(Some(-1))
-    } else {
-        Ok(None)
-    }
 }
 
 impl ApplyLandlock for DeviceConfig {
