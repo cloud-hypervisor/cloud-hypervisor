@@ -13,7 +13,6 @@ sev_snp = []
 
 [dependencies]
 anyhow = { workspace = true }
-byteorder = { workspace = true }
 hypervisor = { path = "../hypervisor" }
 libc = { workspace = true }
 linux-loader = { workspace = true, features = ["bzimage", "elf", "pe"] }

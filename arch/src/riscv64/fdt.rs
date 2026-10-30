@@ -13,7 +13,6 @@ use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 use std::{cmp, result, str};
 
-use byteorder::{BigEndian, ByteOrder};
 use hypervisor::arch::riscv64::aia::Vaia;
 use log::debug;
 use thiserror::Error;
@@ -467,9 +466,8 @@ fn print_node(node: fdt_parser::node::FdtNode<'_, '_>, n_spaces: usize) {
                 indent = (n_spaces + 2)
             );
         } else {
-            let mut array = Vec::with_capacity(256);
-            array.resize(value.len() / 4, 0u32);
-            BigEndian::read_u32_into(value, &mut array);
+            let (chunks, _) = value.as_chunks::<4>();
+            let array: Vec<u32> = chunks.iter().map(|c| u32::from_be_bytes(*c)).collect();
             debug!(
                 "{:indent$}{} : {:X?}",
                 "",
