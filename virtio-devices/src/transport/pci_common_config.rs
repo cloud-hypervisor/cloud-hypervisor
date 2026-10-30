@@ -10,7 +10,6 @@ use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 
-use byteorder::{ByteOrder, LittleEndian};
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use virtio_queue::{Queue, QueueT};
@@ -200,15 +199,15 @@ impl VirtioPciCommonConfig {
             }
             2 => {
                 let v = self.read_common_config_word(offset, queues);
-                LittleEndian::write_u16(data, v);
+                data.copy_from_slice(&v.to_le_bytes());
             }
             4 => {
                 let v = self.read_common_config_dword(offset);
-                LittleEndian::write_u32(data, v);
+                data.copy_from_slice(&v.to_le_bytes());
             }
             8 => {
                 let v = self.read_common_config_qword(offset);
-                LittleEndian::write_u64(data, v);
+                data.copy_from_slice(&v.to_le_bytes());
             }
             _ => debug!("invalid data length for virtio read: len {}", data.len()),
         }
@@ -219,11 +218,23 @@ impl VirtioPciCommonConfig {
 
         match data.len() {
             1 => self.write_common_config_byte(offset, data[0]),
-            2 => self.write_common_config_word(offset, LittleEndian::read_u16(data), queues),
+            2 => self.write_common_config_word(
+                offset,
+                u16::from_le_bytes(data.try_into().expect("data should be 2 bytes")),
+                queues,
+            ),
             4 => {
-                self.write_common_config_dword(offset, LittleEndian::read_u32(data), queues);
+                self.write_common_config_dword(
+                    offset,
+                    u32::from_le_bytes(data.try_into().expect("data should be 4 bytes")),
+                    queues,
+                );
             }
-            8 => self.write_common_config_qword(offset, LittleEndian::read_u64(data), queues),
+            8 => self.write_common_config_qword(
+                offset,
+                u64::from_le_bytes(data.try_into().expect("data should be 8 bytes")),
+                queues,
+            ),
             _ => debug!("invalid data length for virtio write: len {}", data.len()),
         }
     }
@@ -513,19 +524,19 @@ mod tests {
 
         // Device features is read-only and passed through from the device.
         regs.write(0x04, &[0, 0, 0, 0], &mut queues);
-        let mut read_back = vec![0, 0, 0, 0];
+        let mut read_back = [0; 4];
         regs.read(0x04, &mut read_back, &queues);
-        assert_eq!(LittleEndian::read_u32(&read_back), DUMMY_FEATURES as u32);
+        assert_eq!(u32::from_le_bytes(read_back), DUMMY_FEATURES as u32);
 
         // Feature select registers are read/write.
         regs.write(0x00, &[1, 2, 3, 4], &mut queues);
-        let mut read_back = vec![0, 0, 0, 0];
+        let mut read_back = [0; 4];
         regs.read(0x00, &mut read_back, &queues);
-        assert_eq!(LittleEndian::read_u32(&read_back), 0x0403_0201);
+        assert_eq!(u32::from_le_bytes(read_back), 0x0403_0201);
         regs.write(0x08, &[1, 2, 3, 4], &mut queues);
-        let mut read_back = vec![0, 0, 0, 0];
+        let mut read_back = [0; 4];
         regs.read(0x08, &mut read_back, &queues);
-        assert_eq!(LittleEndian::read_u32(&read_back), 0x0403_0201);
+        assert_eq!(u32::from_le_bytes(read_back), 0x0403_0201);
 
         // 'queue_select' can be read and written.
         regs.write(0x16, &[0xaa, 0x55], &mut queues);
@@ -556,9 +567,9 @@ mod tests {
         regs.write(0x16, &[0xFF, 0xFF], &mut queues);
 
         // Read queue_msix_vector — must not panic, should return VIRTQ_MSI_NO_VECTOR.
-        let mut read_back = vec![0x00, 0x00];
+        let mut read_back = [0x00, 0x00];
         regs.read(0x1a, &mut read_back, &queues);
-        assert_eq!(LittleEndian::read_u16(&read_back), VIRTQ_MSI_NO_VECTOR);
+        assert_eq!(u16::from_le_bytes(read_back), VIRTQ_MSI_NO_VECTOR);
 
         // Write queue_msix_vector — must not panic.
         regs.write(0x1a, &[0xAB, 0xCD], &mut queues);
