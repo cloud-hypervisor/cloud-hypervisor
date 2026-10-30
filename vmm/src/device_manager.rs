@@ -4111,10 +4111,11 @@ impl DeviceManager {
     fn create_vfio_device_from_fd(
         &self,
         fd: BorrowedFd<'_>,
+        already_bound: bool,
         vfio_ops: &Arc<dyn VfioOps>,
         attach_ioas: bool,
     ) -> DeviceManagerResult<(VfioDevice, PathBuf)> {
-        let already_bound = {
+        {
             let config = self.config.lock().unwrap();
             assert!(
                 config.platform.as_ref().is_some_and(|p| p.iommufd),
@@ -4127,13 +4128,7 @@ impl DeviceManager {
                     .is_some_and(|p| p.iommufd_fd.is_some()),
                 "DeviceConfig::validate enforces iommufd_fd when device fd is set",
             );
-            // If a cdev fd was preserved on a prior boot, it is already bound
-            // to an iommufd instance
-            config
-                .preserved_fds
-                .as_ref()
-                .is_some_and(|s| s.contains(&fd.as_raw_fd()))
-        };
+        }
 
         let file = fd
             .try_clone_to_owned()
@@ -4453,6 +4448,7 @@ impl DeviceManager {
                     let device = self.create_vfio_device_from_fd(
                         // SAFETY: The CLI or SCM_RIGHTS supplied this live descriptor.
                         unsafe { BorrowedFd::borrow_raw(fd) },
+                        device_cfg.iommufd_dev_id.is_some(),
                         &(Arc::clone(&vfio_ops) as Arc<dyn VfioOps>),
                         !smmuv3_attached,
                     )?;
