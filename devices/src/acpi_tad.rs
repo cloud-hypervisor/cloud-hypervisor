@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::{mem, ptr};
 
 use acpi_tables::{Aml, AmlSink, aml};
-use log::warn;
+use log::debug;
 use serde::{Deserialize, Serialize};
 use vm_device::BusDevice;
 use vm_memory::{ByteValued, GuestAddress};
@@ -60,7 +60,7 @@ impl AcpiTadDevice {
 impl BusDevice for AcpiTadDevice {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
         if data.len() != 4 || offset & 3 != 0 || offset > STATUS_OFFSET {
-            warn!(
+            debug!(
                 "Invalid ACPI TAD read: offset {offset}, length {}",
                 data.len()
             );
@@ -103,7 +103,7 @@ impl BusDevice for AcpiTadDevice {
 
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         if data.len() != 4 || offset & 3 != 0 || offset >= STATUS_OFFSET {
-            warn!(
+            debug!(
                 "Invalid ACPI TAD write: offset {offset}, length {}",
                 data.len()
             );
