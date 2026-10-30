@@ -52,7 +52,7 @@ impl AlignedFile {
     /// Wrap `file`, querying the O_DIRECT block alignment when `direct_io`.
     pub fn new(file: File, direct_io: bool) -> Self {
         let alignment = if direct_io {
-            Some(probe_direct_alignment(file.as_raw_fd()).unwrap_or(SECTOR_SIZE) as usize)
+            Some(probe_direct_alignment(&file).unwrap_or(SECTOR_SIZE) as usize)
         } else {
             None
         };

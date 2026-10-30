@@ -25,7 +25,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom};
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::fs::{FileExt, FileTypeExt};
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::str::FromStr;
 use std::{cmp, io, mem, result};
@@ -312,8 +312,8 @@ pub(crate) fn is_block_device(file: &File) -> bool {
         .is_ok_and(|metadata| metadata.file_type().is_block_device())
 }
 
-/// Returns the kernel reported direct I/O alignment for `fd`, or `None`
-/// when `fd` was not opened with O_DIRECT.
+/// Returns the kernel reported direct I/O alignment for `file`, or `None`
+/// when `file` was not opened with O_DIRECT.
 ///
 /// When O_DIRECT is set, uses `statx(STATX_DIOALIGN)` (Linux >= 6.1) to obtain
 /// the exact memory and offset alignment the kernel requires for direct I/O on
@@ -322,9 +322,9 @@ pub(crate) fn is_block_device(file: &File) -> bool {
 /// fd direct I/O constraint accounting for the filesystem, underlying block
 /// device, and any stacking such as loop or device mapper. Falls back to
 /// [`SECTOR_SIZE`] when the kernel does not report a value.
-pub(crate) fn probe_direct_alignment(fd: RawFd) -> Option<u64> {
+pub(crate) fn probe_direct_alignment(file: &File) -> Option<u64> {
     // SAFETY: fcntl(F_GETFL) is always safe on a valid fd.
-    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    let flags = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFL) };
     if flags < 0 || (flags & libc::O_DIRECT) == 0 {
         return None;
     }
@@ -350,7 +350,7 @@ pub(crate) fn probe_direct_alignment(fd: RawFd) -> Option<u64> {
     let ret = unsafe {
         libc::syscall(
             libc::SYS_statx,
-            fd,
+            file.as_raw_fd(),
             c"".as_ptr(),
             libc::AT_EMPTY_PATH,
             STATX_DIOALIGN,
@@ -675,7 +675,7 @@ impl DiskTopology {
         };
 
         // Direct I/O can require larger transfers than logical blocks.
-        if let Some(alignment) = probe_direct_alignment(f.as_raw_fd()) {
+        if let Some(alignment) = probe_direct_alignment(f) {
             let block_size = topology.logical_block_size.max(alignment);
             Ok(topology.with_block_size(block_size))
         } else {
