@@ -10,6 +10,7 @@ use std::io::{self, Write};
 use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
 use std::sync::Arc;
 
+use cloud_hypervisor_fuzz::FuzzCursor;
 use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
 use virtio_devices::{Endpoint, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
@@ -506,40 +507,6 @@ impl VirtioInterrupt for FuzzVirtioInterrupt {
         _vm: &dyn hypervisor::Vm,
     ) -> std::io::Result<()> {
         unimplemented!()
-    }
-}
-
-struct FuzzCursor<'a> {
-    bytes: &'a [u8],
-    index: usize,
-}
-
-impl<'a> FuzzCursor<'a> {
-    fn with_index(bytes: &'a [u8], index: usize) -> Self {
-        Self {
-            bytes,
-            index: index % bytes.len(),
-        }
-    }
-
-    fn next_u8(&mut self) -> u8 {
-        let value = self.bytes[self.index % self.bytes.len()];
-        self.index = self.index.wrapping_add(1);
-        value
-    }
-
-    fn next_u16(&mut self) -> u16 {
-        u16::from_le_bytes([self.next_u8(), self.next_u8()])
-    }
-
-    fn next_bool(&mut self) -> bool {
-        self.next_u8() & 1 != 0
-    }
-
-    fn fill_slice(&mut self, slice: &mut [u8]) {
-        for byte in slice.iter_mut() {
-            *byte = self.next_u8();
-        }
     }
 }
 

@@ -6,6 +6,7 @@
 use std::io;
 use std::sync::Arc;
 
+use cloud_hypervisor_fuzz::FuzzCursor;
 use devices::legacy::Serial;
 use libc::EFD_NONBLOCK;
 use libfuzzer_sys::fuzz_target;
@@ -140,30 +141,6 @@ fuzz_target!(|bytes: &[u8]| -> libfuzzer_sys::Corpus {
 
 fn eventfd() -> Option<EventFd> {
     EventFd::new(EFD_NONBLOCK).ok()
-}
-
-struct FuzzCursor<'a> {
-    bytes: &'a [u8],
-    index: usize,
-}
-
-impl<'a> FuzzCursor<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, index: 0 }
-    }
-
-    fn next_u8(&mut self) -> u8 {
-        if self.bytes.is_empty() {
-            return 0;
-        }
-        let value = self.bytes[self.index % self.bytes.len()];
-        self.index = self.index.wrapping_add(1);
-        value
-    }
-
-    fn next_bool(&mut self) -> bool {
-        self.next_u8() & 1 != 0
-    }
 }
 
 struct TestInterrupt {
