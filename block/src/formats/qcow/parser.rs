@@ -741,20 +741,11 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
                 refcounts.len(),
                 refblock_start + refcount_block_entries as usize,
             );
-            let refblock = &refcounts[refblock_start..refblock_end];
+            let mut refblock = refcounts[refblock_start..refblock_end].to_vec();
+            refblock.resize(refcount_block_entries as usize, 0);
             raw_file
-                .write_refcount_block(*refblock_addr, refblock)
+                .write_refcount_block(*refblock_addr, &refblock)
                 .map_err(Error::WritingHeader)?;
-
-            // If this is the last (partial) cluster, pad it out to a full refblock cluster.
-            if refblock.len() < refcount_block_entries as usize {
-                let refblock_padding = vec![0u64; refcount_block_entries as usize - refblock.len()];
-                let byte_offset =
-                    refblock.len() as u64 * raw_file.cluster_size() / refcount_block_entries;
-                raw_file
-                    .write_refcount_block(*refblock_addr + byte_offset, &refblock_padding)
-                    .map_err(Error::WritingHeader)?;
-            }
         }
 
         // Rewrite the top-level refcount table. The entries past the
@@ -1738,6 +1729,34 @@ mod tests {
         let counts = raw.read_refcount_block(refblock).unwrap();
         assert_eq!(&counts[..8], &[1; 8]);
         assert!(counts[8..].iter().all(|&count| count == 0));
+    }
+
+    #[test]
+    fn rebuild_refcounts_preserves_packed_tail() {
+        let cluster_size = 512u64;
+        for order in 0..=2 {
+            let mut header =
+                QcowHeader::create_for_size_path_and_cluster_bits(3, 4 * cluster_size, None, 9)
+                    .unwrap();
+            header.refcount_order = order;
+            let file = AlignedFile::new(TempFile::new().unwrap().into_file(), false);
+            header.write_to(&file).unwrap();
+            file.set_len(9 * cluster_size).unwrap();
+            let mut raw = QcowRawFile::from(file, cluster_size, 1 << order).unwrap();
+            raw.write_pointer_table_direct(header.l1_table_offset, [4 * cluster_size].iter())
+                .unwrap();
+            let entries = [5, 6, 7, 8].map(|index| util::l2_entry_make_std(index * cluster_size));
+            raw.write_pointer_table_direct(4 * cluster_size, entries.iter())
+                .unwrap();
+            let refcount_table_offset = header.refcount_table_offset;
+            super::rebuild_refcounts(&mut raw, header).unwrap();
+            let refblock = raw
+                .read_pointer_table(refcount_table_offset, 1, None)
+                .unwrap()[0];
+            let counts = raw.read_refcount_block(refblock).unwrap();
+            assert_eq!(&counts[..9], &[1; 9], "order={order}");
+            assert!(counts[9..].iter().all(|&count| count == 0));
+        }
     }
 
     #[test]
