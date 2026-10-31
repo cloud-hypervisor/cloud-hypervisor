@@ -48,6 +48,21 @@ pub(super) fn l2_entry_compressed_cluster_layout(l2_entry: u64, cluster_bits: u3
     (compressed_cluster_addr, compressed_cluster_size)
 }
 
+pub(super) fn compressed_cluster_range_is_valid(
+    addr: u64,
+    size: usize,
+    cluster_size: u64,
+    max_valid_cluster_offset: u64,
+) -> bool {
+    if size == 0 {
+        return false;
+    }
+    let Some(end) = addr.checked_add(size as u64) else {
+        return false;
+    };
+    addr >= cluster_size && end <= max_valid_cluster_offset.saturating_add(cluster_size)
+}
+
 /// Get file offset of standard (non-compressed) cluster.
 pub(super) fn l2_entry_std_cluster_addr(l2_entry: u64) -> u64 {
     l2_entry & L2_TABLE_OFFSET_MASK
@@ -76,4 +91,30 @@ pub(super) fn l1_entry_make(cluster_addr: u64, refcount_is_one: bool) -> u64 {
 /// Ceiling of the division of `dividend`/`divisor`.
 pub(super) fn div_round_up_u64(dividend: u64, divisor: u64) -> u64 {
     dividend / divisor + u64::from(!dividend.is_multiple_of(divisor))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compressed_cluster_range_is_valid;
+
+    #[test]
+    fn compressed_range_checks_the_whole_extent() {
+        let cluster_size = 512;
+        let max_valid = 3 * cluster_size;
+        for (addr, size, valid) in [
+            (cluster_size, 1, true),
+            (cluster_size + 1, 1023, true),
+            (max_valid + cluster_size - 1, 1, true),
+            (max_valid + cluster_size - 1, 2, false),
+            (cluster_size - 1, 2, false),
+            (cluster_size, 0, false),
+            (u64::MAX, 1, false),
+        ] {
+            assert_eq!(
+                compressed_cluster_range_is_valid(addr, size, cluster_size, max_valid),
+                valid,
+                "addr={addr:#x}, size={size}",
+            );
+        }
+    }
 }

@@ -28,9 +28,10 @@ use super::decoder::Decoder;
 use super::qcow_raw_file::QcowRawFile;
 use super::refcount::RefCount;
 use super::util::{
-    div_round_up_u64, l1_entry_make, l2_entry_compressed_cluster_layout, l2_entry_is_compressed,
-    l2_entry_is_empty, l2_entry_is_zero, l2_entry_make_std, l2_entry_make_zero,
-    l2_entry_make_zero_plain, l2_entry_std_cluster_addr,
+    compressed_cluster_range_is_valid, div_round_up_u64, l1_entry_make,
+    l2_entry_compressed_cluster_layout, l2_entry_is_compressed, l2_entry_is_empty,
+    l2_entry_is_zero, l2_entry_make_std, l2_entry_make_zero, l2_entry_make_zero_plain,
+    l2_entry_std_cluster_addr,
 };
 use super::vec_cache::{CacheMap, Cacheable, VecCache};
 use super::{QcowHeader, refcount};
@@ -465,6 +466,10 @@ impl QcowState {
         if l2_entry_is_compressed(l2_entry) {
             let (host_offset, compressed_size) =
                 l2_entry_compressed_cluster_layout(l2_entry, self.header.cluster_bits);
+            if !self.is_valid_compressed_range(host_offset, compressed_size) {
+                // Fall through to write lock path which sets the corrupt bit
+                return Ok(None);
+            }
             let cluster_offset = self.raw_file.cluster_offset(address) as usize;
             return Ok(Some(ClusterReadMapping::Compressed {
                 host_offset,
@@ -654,6 +659,24 @@ impl QcowState {
         cluster_addr != 0
             && cluster_addr & (self.raw_file.cluster_size() - 1) == 0
             && cluster_addr <= self.refcounts.max_valid_cluster_offset()
+    }
+
+    fn is_valid_compressed_range(&self, addr: u64, size: usize) -> bool {
+        compressed_cluster_range_is_valid(
+            addr,
+            size,
+            self.raw_file.cluster_size(),
+            self.refcounts.max_valid_cluster_offset(),
+        )
+    }
+
+    fn reject_invalid_compressed_range(&mut self, addr: u64, size: usize) -> io::Result<()> {
+        if self.is_valid_compressed_range(addr, size) {
+            Ok(())
+        } else {
+            self.set_corrupt_bit_best_effort();
+            Err(io::Error::from_raw_os_error(EIO))
+        }
     }
 
     fn reject_invalid_cluster_offset(&mut self, cluster_addr: u64) -> io::Result<()> {
@@ -1148,6 +1171,7 @@ impl QcowState {
     fn decompress_l2_cluster(&mut self, l2_entry: u64) -> io::Result<Vec<u8>> {
         let (compressed_addr, compressed_size) =
             l2_entry_compressed_cluster_layout(l2_entry, self.header.cluster_bits);
+        self.reject_invalid_compressed_range(compressed_addr, compressed_size)?;
         let mut compressed = vec![0u8; compressed_size];
         self.raw_file
             .file_mut()
@@ -1172,6 +1196,7 @@ impl QcowState {
     fn deallocate_compressed_cluster(&mut self, l2_entry: u64) -> io::Result<()> {
         let (compressed_addr, compressed_size) =
             l2_entry_compressed_cluster_layout(l2_entry, self.header.cluster_bits);
+        self.reject_invalid_compressed_range(compressed_addr, compressed_size)?;
         let cluster_size = self.raw_file.cluster_size();
 
         // Calculate the end of the compressed data region
@@ -1204,6 +1229,59 @@ impl QcowState {
 
 #[cfg(test)]
 mod tests {
+    use vmm_sys_util::tempfile::TempFile;
+
+    fn test_state() -> (TempFile, super::QcowState) {
+        let temp = super::super::QcowTempDisk::new(64 << 16, None, false, true, false)
+            .unwrap()
+            .into_tempfile();
+        let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+        let (mut state, _, _) = super::super::parser::parse_qcow(raw, 0, true).unwrap();
+        state.map_write(0, None).unwrap();
+        state.sync_caches().unwrap();
+        (temp, state)
+    }
+
+    #[test]
+    fn invalid_compressed_ranges_are_rejected_before_io() {
+        use super::super::util::COMPRESSED_FLAG;
+
+        let cluster_size = 1 << 16;
+        for addr in [0, cluster_size - 1, 1 << 50] {
+            let (_temp, mut inner) = test_state();
+            let free = inner.avail_clusters.clone();
+            let unref = inner.unref_clusters.clone();
+            let entry = COMPRESSED_FLAG | addr;
+            inner.l2_cache.get_mut(0).unwrap()[0] = entry;
+
+            assert!(inner.try_map_read(0, 1, false).unwrap().is_none());
+            assert_eq!(
+                inner
+                    .map_read_with_populate(0, 1, false)
+                    .unwrap_err()
+                    .raw_os_error(),
+                Some(libc::EIO),
+            );
+            assert!(inner.header.is_corrupt());
+            assert_eq!(
+                inner
+                    .decompress_l2_cluster(entry)
+                    .unwrap_err()
+                    .raw_os_error(),
+                Some(libc::EIO),
+            );
+            assert_eq!(
+                inner
+                    .deallocate_compressed_cluster(entry)
+                    .unwrap_err()
+                    .raw_os_error(),
+                Some(libc::EIO),
+            );
+            assert_eq!(inner.avail_clusters, free);
+            assert_eq!(inner.unref_clusters, unref);
+        }
+    }
+
     // Regression for the ENOSPC unwind on the relocate-on-write path: when
     // the allocation for the relocated table fails, the still-referenced old
     // L2 table must not be left on the free lists (issue #8606).
