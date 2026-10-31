@@ -319,17 +319,12 @@ pub(super) struct RegionTableEntry {
     pub required: u32,
 }
 
-enum HeaderNo {
-    First,
-    Second,
-}
-
 /// Contains the information from the header of a VHDx file
 #[derive(Clone, Debug)]
 pub(super) struct VhdxHeader {
     _file_type_identifier: FileTypeIdentifier,
-    header_1: Header,
-    header_2: Header,
+    header: Header,
+    header_offset: u64,
     region_table_1: RegionTableHeader,
     _region_table_2: RegionTableHeader,
 }
@@ -337,79 +332,51 @@ pub(super) struct VhdxHeader {
 impl VhdxHeader {
     /// Creates a VhdxHeader from a reference to a file
     pub(super) fn new(f: &AlignedFile) -> Result<VhdxHeader> {
+        let file_type_identifier = FileTypeIdentifier::new(f)?;
+        let header_1 = Header::new(f, HEADER_1_START)?;
+        let header_2 = Header::new(f, HEADER_2_START)?;
+        let (header_offset, header) = Self::current_header(Ok(header_1), Ok(header_2))?;
         Ok(VhdxHeader {
-            _file_type_identifier: FileTypeIdentifier::new(f)?,
-            header_1: Header::new(f, HEADER_1_START)?,
-            header_2: Header::new(f, HEADER_2_START)?,
+            _file_type_identifier: file_type_identifier,
+            header,
+            header_offset,
             region_table_1: RegionTableHeader::new(f, REGION_TABLE_1_START)?,
             _region_table_2: RegionTableHeader::new(f, REGION_TABLE_2_START)?,
         })
     }
 
-    /// Identify the current header and return both headers along with an
-    /// integer indicating the current header.
-    fn current_header(
-        header_1: Result<Header>,
-        header_2: Result<Header>,
-    ) -> Result<(HeaderNo, Header)> {
+    /// Select the current header and its file offset.
+    fn current_header(header_1: Result<Header>, header_2: Result<Header>) -> Result<(u64, Header)> {
         let header_1 = header_1.ok();
         let header_2 = header_2.ok();
 
         match (header_1, header_2) {
             (None, None) => Err(VhdxHeaderError::NoValidHeader),
-            (Some(header_1), None) => Ok((HeaderNo::First, header_1)),
-            (None, Some(header_2)) => Ok((HeaderNo::Second, header_2)),
+            (Some(header_1), None) => Ok((HEADER_1_START, header_1)),
+            (None, Some(header_2)) => Ok((HEADER_2_START, header_2)),
             (Some(header_1), Some(header_2)) => {
                 if header_1.sequence_number >= header_2.sequence_number {
-                    Ok((HeaderNo::First, header_1))
+                    Ok((HEADER_1_START, header_1))
                 } else {
-                    Ok((HeaderNo::Second, header_2))
+                    Ok((HEADER_2_START, header_2))
                 }
             }
         }
     }
 
-    /// This takes two headers and update the noncurrent header with the
-    /// current one. Returns both headers as a tuple sequenced the way it was
-    /// received from the parameter list.
-    fn update_header(
-        f: &AlignedFile,
-        header_1: Result<Header>,
-        header_2: Result<Header>,
-        guid: u128,
-    ) -> Result<(Header, Header)> {
-        let (header_no, current_header) = VhdxHeader::current_header(header_1, header_2)?;
-
-        match header_no {
-            HeaderNo::First => {
-                let other_header =
-                    Header::update_header(f, &current_header, true, guid, HEADER_2_START)?;
-                Ok((current_header, other_header))
-            }
-            HeaderNo::Second => {
-                let other_header =
-                    Header::update_header(f, &current_header, true, guid, HEADER_1_START)?;
-                Ok((other_header, current_header))
-            }
-        }
-    }
-
-    // Update the provided headers according to the spec
-    fn update_headers(
-        f: &AlignedFile,
-        header_1: Result<Header>,
-        header_2: Result<Header>,
-        guid: u128,
-    ) -> Result<(Header, Header)> {
-        // According to the spec, update twice
-        let (header_1, header_2) = VhdxHeader::update_header(f, header_1, header_2, guid)?;
-        VhdxHeader::update_header(f, Ok(header_1), Ok(header_2), guid)
-    }
-
     pub(super) fn update(&mut self, f: &AlignedFile) -> Result<()> {
-        let headers = VhdxHeader::update_headers(f, Ok(self.header_1), Ok(self.header_2), 0)?;
-        self.header_1 = headers.0;
-        self.header_2 = headers.1;
+        let mut header = self.header;
+        let mut offset = self.header_offset;
+        for _ in 0..2 {
+            offset = if offset == HEADER_1_START {
+                HEADER_2_START
+            } else {
+                HEADER_1_START
+            };
+            header = Header::update_header(f, &header, true, 0, offset)?;
+        }
+        self.header = header;
+        self.header_offset = offset;
         Ok(())
     }
 
@@ -418,15 +385,13 @@ impl VhdxHeader {
     }
 
     /// Return the current header's log region as (offset, length).
-    pub(super) fn log_region(&self) -> Result<(u64, u32)> {
-        let (_, header) = VhdxHeader::current_header(Ok(self.header_1), Ok(self.header_2))?;
-        Ok((header.log_offset, header.log_length))
+    pub(super) fn log_region(&self) -> (u64, u32) {
+        (self.header.log_offset, self.header.log_length)
     }
 
     /// A non-zero log GUID means a log is present and may need replay.
-    pub(super) fn has_active_log(&self) -> Result<bool> {
-        let (_, header) = VhdxHeader::current_header(Ok(self.header_1), Ok(self.header_2))?;
-        Ok(header.log_guid != 0 && header.log_length != 0)
+    pub(super) fn has_active_log(&self) -> bool {
+        self.header.log_guid != 0 && self.header.log_length != 0
     }
 }
 
