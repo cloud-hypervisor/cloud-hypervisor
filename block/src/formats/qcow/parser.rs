@@ -1206,6 +1206,27 @@ mod tests {
     }
 
     #[test]
+    fn header_update_preserves_extensions_and_tables() {
+        for version in [2, 3] {
+            let mut header =
+                QcowHeader::create_for_size_path_and_cluster_bits(version, 512, None, 9).unwrap();
+            let file = AlignedFile::new(TempFile::new().unwrap().into_file(), false);
+            file.write_all_at(&[0xa5; 1536], 0).unwrap();
+            header.size = 1024;
+            header.update(&file).unwrap();
+            let mut bytes = [0; 1536];
+            file.read_exact_at(&mut bytes, 0).unwrap();
+            let bare_size = if version == 2 {
+                V2_BARE_HEADER_SIZE
+            } else {
+                V3_BARE_HEADER_SIZE
+            } as usize;
+            assert_eq!(&bytes[24..32], &1024u64.to_be_bytes());
+            assert!(bytes[bare_size..].iter().all(|&byte| byte == 0xa5));
+        }
+    }
+
+    #[test]
     fn header_v2_with_backing() {
         let header = QcowHeader::create_for_size_and_path(2, 0x10_0000, Some("/my/path/to/a/file"))
             .expect("Failed to create header.");

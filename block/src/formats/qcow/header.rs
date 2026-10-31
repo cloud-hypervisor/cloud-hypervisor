@@ -614,7 +614,17 @@ impl QcowHeader {
         })
     }
 
-    /// Write the header to `f`.
+    /// Update the bare header, preserving additional fields, extensions and tables.
+    pub(super) fn update(&self, f: &AlignedFile) -> Result<()> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(RawHeaderV2::from_header(self).as_bytes());
+        if self.version == 3 {
+            buf.extend_from_slice(RawHeaderV3Tail::from_header(self).as_bytes());
+        }
+        f.write_all_at(&buf, 0).map_err(Error::WritingHeader)
+    }
+
+    /// Initialize an image with this header.
     pub fn write_to(&self, f: &AlignedFile) -> Result<()> {
         // Build the header in memory, then write it in one positional write.
         let mut buf = Vec::new();

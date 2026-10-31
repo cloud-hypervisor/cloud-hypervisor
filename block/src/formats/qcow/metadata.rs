@@ -1050,7 +1050,7 @@ impl QcowState {
         self.header.size = new_size;
 
         self.header
-            .write_to(self.raw_file.file_mut())
+            .update(self.raw_file.file_mut())
             .map_err(|e| io::Error::other(format!("failed to write header during resize: {e}")))?;
 
         self.raw_file.file_mut().sync_all()?;
@@ -1124,7 +1124,7 @@ impl QcowState {
         self.header.l1_table_offset = new_l1_offset;
 
         self.header
-            .write_to(self.raw_file.file_mut())
+            .update(self.raw_file.file_mut())
             .map_err(|e| io::Error::other(format!("failed to write header during resize: {e}")))?;
 
         self.raw_file.file_mut().sync_all()?;
