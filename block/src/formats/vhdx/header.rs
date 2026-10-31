@@ -377,7 +377,7 @@ impl VhdxHeader {
 
     /// A non-zero log GUID means a log is present and may need replay.
     pub(super) fn has_active_log(&self) -> bool {
-        self.header.log_guid != 0 && self.header.log_length != 0
+        self.header.log_guid != 0
     }
 }
 
@@ -533,6 +533,17 @@ mod tests {
             table[12..16].fill(0xff);
         });
         VhdxHeader::new(&file).unwrap();
+    }
+
+    #[test]
+    fn active_log_does_not_depend_on_length() {
+        let tf = create_dynamic_vhdx(1, None);
+        let file = AlignedFile::new(tf.into_file(), false);
+        let mut header = VhdxHeader::new(&file).unwrap();
+        header.header.log_length = 0;
+        assert!(!header.has_active_log());
+        header.header.log_guid = 1;
+        assert!(header.has_active_log());
     }
 
     #[test]
