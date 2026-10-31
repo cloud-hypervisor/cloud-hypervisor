@@ -275,7 +275,9 @@ impl Vhdx {
                 bat::PAYLOAD_BLOCK_NOT_PRESENT
                 | bat::PAYLOAD_BLOCK_UNDEFINED
                 | bat::PAYLOAD_BLOCK_UNMAPPED
-                | bat::PAYLOAD_BLOCK_ZERO => {}
+                | bat::PAYLOAD_BLOCK_ZERO => {
+                    buf[read_count..read_count + sector.free_bytes as usize].fill(0);
+                }
                 bat::PAYLOAD_BLOCK_FULLY_PRESENT => {
                     self.check_payload_block_offset(bat_entry & bat::BAT_FILE_OFF_MASK)?;
 
@@ -476,6 +478,23 @@ mod tests {
             Sector::new(&spec, &bat, 2048, 1),
             Err(VhdxIoError::InvalidBatFileOffset)
         ));
+    }
+
+    #[test]
+    fn unallocated_reads_fill_buffer() {
+        let tf = create_dynamic_vhdx(1, None);
+        let mut vhdx = open_vhdx(tf.as_path()).unwrap();
+        for state in [
+            bat::PAYLOAD_BLOCK_NOT_PRESENT,
+            bat::PAYLOAD_BLOCK_UNDEFINED,
+            bat::PAYLOAD_BLOCK_ZERO,
+            bat::PAYLOAD_BLOCK_UNMAPPED,
+        ] {
+            vhdx.bat_entries[0] = BatEntry(state);
+            let mut buf = [0xff; 512];
+            assert_eq!(vhdx.read_at(&mut buf, 0).unwrap(), buf.len());
+            assert!(buf.iter().all(|&byte| byte == 0), "state={state}");
+        }
     }
 
     /// A VHDX image with an active log must be rejected until replay is
