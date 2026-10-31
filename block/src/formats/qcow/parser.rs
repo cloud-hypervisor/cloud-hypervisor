@@ -1264,6 +1264,27 @@ mod tests {
         );
     }
 
+    #[test]
+    fn backing_format_extension_follows_each_header_layout() {
+        for (version, header_size) in [(2, 72), (3, 104), (3, 112)] {
+            let mut header =
+                QcowHeader::create_for_size_and_path(version, 65536, Some("backing")).unwrap();
+            header.header_size = header_size;
+            header.backing_file_offset = 256;
+            let file = AlignedFile::new(TempFile::new().unwrap().into_file(), false);
+            header.write_to(&file).unwrap();
+            let mut extension = [0; 24];
+            extension[..4].copy_from_slice(&HEADER_EXT_BACKING_FORMAT.to_be_bytes());
+            extension[4..8].copy_from_slice(&3u32.to_be_bytes());
+            extension[8..11].copy_from_slice(b"raw");
+            file.write_all_at(&extension, u64::from(header_size))
+                .unwrap();
+
+            let parsed = QcowHeader::new(&file).unwrap();
+            assert_eq!(parsed.backing_file.unwrap().format, Some(ImageType::Raw));
+        }
+    }
+
     /// Write a header to a fresh file with backing_file_offset and
     /// backing_file_size patched. Panics on setup failures, returns
     /// the parse result of the patched header.

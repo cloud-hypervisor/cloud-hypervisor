@@ -493,19 +493,16 @@ impl QcowHeader {
             if !unsupported.is_empty() {
                 // Read extensions only to get feature names for error reporting
                 let mut feature_table = Vec::new();
-                if header.header_size > V3_BARE_HEADER_SIZE {
-                    let _ = Self::read_header_extensions(f, &mut header, Some(&mut feature_table));
-                }
+                let _ = Self::read_header_extensions(f, &mut header, Some(&mut feature_table));
                 return Err(Error::UnsupportedFeature(MissingFeatureError::new(
                     unsupported,
                     feature_table,
                 )));
             }
+        }
 
-            // Features OK, now read extensions normally
-            if header.header_size > V3_BARE_HEADER_SIZE {
-                Self::read_header_extensions(f, &mut header, None)?;
-            }
+        if matches!(version, 2 | 3) {
+            Self::read_header_extensions(f, &mut header, None)?;
         }
 
         Ok(header)
