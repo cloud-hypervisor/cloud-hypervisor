@@ -626,7 +626,7 @@ impl QcowState {
             }))
         } else {
             let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
-            if !self.is_refcount_addressable_cluster_offset(cluster_addr) {
+            if !self.is_valid_data_cluster_offset(cluster_addr) {
                 // Fall through to write lock path which sets the corrupt bit
                 return Ok(None);
             }
@@ -737,7 +737,7 @@ impl QcowState {
             // only reference, otherwise write into a new cluster
 
             let old_addr = l2_entry_std_cluster_addr(l2_entry);
-            self.reject_invalid_cluster_offset(old_addr)?;
+            self.reject_invalid_data_cluster_offset(old_addr)?;
             match self.cluster_refcount(old_addr)? {
                 1 => {
                     self.raw_file.zero_cluster(old_addr)?;
@@ -771,7 +771,7 @@ impl QcowState {
             // images with internal snapshots are rejected.
 
             let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
-            self.reject_invalid_cluster_offset(cluster_addr)?;
+            self.reject_invalid_data_cluster_offset(cluster_addr)?;
             cluster_addr
         };
 
@@ -796,11 +796,16 @@ impl QcowState {
         (address / self.raw_file.cluster_size()) % self.l2_entries
     }
 
-    fn is_refcount_addressable_cluster_offset(&self, cluster_addr: u64) -> bool {
+    fn is_valid_data_cluster_offset(&self, cluster_addr: u64) -> bool {
         cluster_addr_is_valid(
             cluster_addr,
             self.raw_file.cluster_size(),
             self.refcounts.max_valid_cluster_offset(),
+        ) && !MetadataLayout::new(&self.header, &self.l2_offsets).overlaps_metadata(
+            cluster_addr,
+            self.raw_file.cluster_size(),
+            None,
+            &self.refcounts,
         )
     }
 
@@ -827,8 +832,8 @@ impl QcowState {
         }
     }
 
-    fn reject_invalid_cluster_offset(&mut self, cluster_addr: u64) -> io::Result<()> {
-        if self.is_refcount_addressable_cluster_offset(cluster_addr) {
+    fn reject_invalid_data_cluster_offset(&mut self, cluster_addr: u64) -> io::Result<()> {
+        if self.is_valid_data_cluster_offset(cluster_addr) {
             Ok(())
         } else {
             self.set_corrupt_bit_best_effort();
@@ -918,10 +923,7 @@ impl QcowState {
     /// Allocates a new cluster from the free list or by extending the file.
     fn get_new_cluster(&mut self, initial_data: Option<Vec<u8>>) -> io::Result<u64> {
         if let Some(free_cluster) = self.avail_clusters.pop() {
-            if free_cluster == 0 {
-                self.set_corrupt_bit_best_effort();
-                return Err(io::Error::from_raw_os_error(EIO));
-            }
+            self.reject_invalid_data_cluster_offset(free_cluster)?;
             if let Some(initial_data) = initial_data {
                 self.raw_file.write_cluster(free_cluster, &initial_data)?;
             } else {
@@ -932,10 +934,7 @@ impl QcowState {
 
         let max_valid = self.refcounts.max_valid_cluster_offset();
         if let Some(new_cluster) = self.raw_file.add_cluster_end(max_valid)? {
-            if new_cluster == 0 {
-                self.set_corrupt_bit_best_effort();
-                return Err(io::Error::from_raw_os_error(EIO));
-            }
+            self.reject_invalid_data_cluster_offset(new_cluster)?;
             if let Some(initial_data) = initial_data {
                 self.raw_file.write_cluster(new_cluster, &initial_data)?;
             }
@@ -1196,7 +1195,7 @@ impl QcowState {
         }
 
         let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
-        self.reject_invalid_cluster_offset(cluster_addr)?;
+        self.reject_invalid_data_cluster_offset(cluster_addr)?;
         let refcount = self.cluster_refcount(cluster_addr)?;
         if refcount == 0 {
             return Err(io::Error::from_raw_os_error(EINVAL));
@@ -1671,6 +1670,45 @@ mod tests {
                 temp.as_file().read_exact_at(&mut after, 0).unwrap();
                 assert_eq!(before, after);
             }
+        }
+    }
+
+    #[test]
+    fn data_mappings_and_allocation_reject_metadata_clusters() {
+        use super::super::util::l2_entry_make_std;
+
+        for target in ["L1", "refcount table", "L2"] {
+            let (_temp, mut inner) = test_state();
+            let addr = match target {
+                "L1" => inner.header.l1_table_offset,
+                "refcount table" => inner.header.refcount_table_offset,
+                _ => inner.l1_table[0],
+            };
+            inner.l2_cache.get_mut(0).unwrap()[0] = l2_entry_make_std(addr);
+            assert!(inner.try_map_read(0, 1, false).unwrap().is_none());
+            assert_eq!(
+                inner
+                    .map_read_with_populate(0, 1, false)
+                    .unwrap_err()
+                    .raw_os_error(),
+                Some(libc::EIO)
+            );
+            assert_eq!(
+                inner.map_write(0, None).unwrap_err().raw_os_error(),
+                Some(libc::EIO)
+            );
+            assert_eq!(
+                inner
+                    .deallocate_cluster(0, true, false)
+                    .unwrap_err()
+                    .raw_os_error(),
+                Some(libc::EIO)
+            );
+            inner.avail_clusters.push(addr);
+            assert_eq!(
+                inner.get_new_cluster(None).unwrap_err().raw_os_error(),
+                Some(libc::EIO)
+            );
         }
     }
 
