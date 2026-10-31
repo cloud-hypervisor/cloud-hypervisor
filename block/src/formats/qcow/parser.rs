@@ -437,7 +437,7 @@ pub(crate) fn parse_qcow(
     let refcount_clusters = max_refcount_clusters(
         header.refcount_order,
         cluster_size as u32,
-        (num_clusters + l1_clusters + num_l2_clusters + header_clusters) as u32,
+        num_clusters + l1_clusters + num_l2_clusters + header_clusters,
     );
     // Check that the given header doesn't have a suspiciously sized refcount table.
     if u64::from(header.refcount_table_clusters) > 2 * refcount_clusters {
@@ -999,6 +999,21 @@ mod tests {
             backing_files,
             ..Default::default()
         })
+    }
+
+    #[test]
+    fn header_creation_preserves_large_cluster_counts() {
+        for size in [1u64 << 44, u64::from(u32::MAX) * 4096] {
+            let header =
+                QcowHeader::create_for_size_path_and_cluster_bits(3, size, None, 12).unwrap();
+            assert_eq!(header.l1_size, 1 << 23);
+            assert_eq!(header.refcount_table_offset, (1 << 26) + 4096);
+            assert_eq!(header.refcount_table_clusters, 4107);
+        }
+        assert!(matches!(
+            QcowHeader::create_for_size_path_and_cluster_bits(3, u64::MAX, None, 9),
+            Err(Error::TooManyL1Entries(_)),
+        ));
     }
 
     #[test]
