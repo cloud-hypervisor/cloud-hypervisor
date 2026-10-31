@@ -78,16 +78,12 @@ pub enum Error {
     InvalidHeaderLength(u32),
     #[error("Invalid index")]
     InvalidIndex,
-    #[error("Invalid L1 table offset")]
-    InvalidL1TableOffset,
     #[error("Invalid L1 table size: {0}")]
     InvalidL1TableSize(u32),
     #[error("Invalid magic")]
     InvalidMagic,
     #[error("Invalid offset: {0}")]
     InvalidOffset(u64),
-    #[error("Invalid refcount table offset")]
-    InvalidRefcountTableOffset,
     #[error("Invalid refcount table size: {0}")]
     InvalidRefcountTableSize(u64),
     #[error("Maximum disk nesting depth exceeded")]
@@ -96,6 +92,8 @@ pub enum Error {
     NoRefcountClusters,
     #[error("Not enough space for refcounts")]
     NotEnoughSpaceForRefcounts,
+    #[error("Metadata tables overlap or overflow")]
+    OverlappingMetadata,
     #[error("Failed to read header")]
     ReadingHeader(#[source] io::Error),
     #[error("Failed to read pointers")]
@@ -356,6 +354,12 @@ pub(crate) fn parse_qcow(
     // refcount table must be a cluster boundary, and within the file's virtual or actual size.
     offset_is_cluster_boundary(header.refcount_table_offset, header.cluster_bits)
         .map_err(|e| BlockError::new(BlockErrorKind::CorruptImage, e))?;
+    if !super::metadata::metadata_tables_are_disjoint(&header) {
+        return Err(BlockError::new(
+            BlockErrorKind::CorruptImage,
+            Error::OverlappingMetadata,
+        ));
+    }
     let file_size = file
         .metadata()
         .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::GettingFileSize(e)))?
@@ -472,24 +476,6 @@ pub(crate) fn parse_qcow(
     .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ReadingRefCounts(e)))?;
 
     let l2_entries = cluster_size / size_of::<u64>() as u64;
-
-    // Check that the L1 and refcount tables fit in a 64bit address space.
-    let l1_index = (header.size / cluster_size) / l2_entries;
-    header
-        .l1_table_offset
-        .checked_add(l1_index * size_of::<u64>() as u64)
-        .ok_or_else(|| {
-            BlockError::new(BlockErrorKind::CorruptImage, Error::InvalidL1TableOffset)
-        })?;
-    header
-        .refcount_table_offset
-        .checked_add(u64::from(header.refcount_table_clusters) * cluster_size)
-        .ok_or_else(|| {
-            BlockError::new(
-                BlockErrorKind::CorruptImage,
-                Error::InvalidRefcountTableOffset,
-            )
-        })?;
 
     // Find available (refcount == 0) clusters for the free list.
     let file_size = raw_file
@@ -1067,6 +1053,38 @@ mod tests {
                 Some(Error::InvalidL1TableSize(value)) if *value == l1_size,
             ));
             assert_eq!(fs::read(temp.as_path()).unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn metadata_tables_must_be_disjoint_before_rebuilding() {
+        use std::error::Error as StdError;
+
+        for (field, offset) in [
+            (40, 0u64),
+            (48, 0),
+            (40, 1 << 16),
+            (48, 4 << 16),
+            (40, !0xffffu64),
+        ] {
+            let mut header = valid_header_v3();
+            header[field..field + 8].copy_from_slice(&offset.to_be_bytes());
+            let temp = tempfile_with_header(&header);
+            let err = QcowDisk::new(
+                temp.as_file().try_clone().unwrap(),
+                false,
+                false,
+                true,
+                false,
+            )
+            .expect_err("overlapping or overflowing metadata must be rejected");
+            assert!(matches!(
+                StdError::source(&err).and_then(|source| source.downcast_ref::<Error>()),
+                Some(Error::OverlappingMetadata),
+            ));
+            let mut after = vec![0u8; header.len()];
+            temp.as_file().read_exact_at(&mut after, 0).unwrap();
+            assert_eq!(after, header);
         }
     }
 

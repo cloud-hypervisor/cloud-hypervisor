@@ -35,6 +35,35 @@ use super::util::{
 use super::vec_cache::{CacheMap, Cacheable, VecCache};
 use super::{QcowHeader, refcount};
 
+pub(super) fn metadata_tables_are_disjoint(header: &QcowHeader) -> bool {
+    let cluster_size = 1u64 << header.cluster_bits;
+    let l1_size = div_round_up_u64(u64::from(header.l1_size) * 8, cluster_size) * cluster_size;
+    let refcount_size = u64::from(header.refcount_table_clusters) * cluster_size;
+    (l1_size == 0 || header.l1_table_offset >= cluster_size)
+        && header.refcount_table_offset >= cluster_size
+        && header.l1_table_offset.checked_add(l1_size).is_some()
+        && header
+            .refcount_table_offset
+            .checked_add(refcount_size)
+            .is_some()
+        && !ranges_overlap(
+            header.l1_table_offset,
+            l1_size,
+            header.refcount_table_offset,
+            refcount_size,
+        )
+}
+
+fn ranges_overlap(addr: u64, size: u64, other: u64, other_size: u64) -> bool {
+    if size == 0 || other_size == 0 {
+        return false;
+    }
+    match (addr.checked_add(size), other.checked_add(other_size)) {
+        (Some(end), Some(other_end)) => addr < other_end && other < end,
+        _ => true,
+    }
+}
+
 /// Describes how to satisfy a guest read for a single cluster region.
 ///
 /// Returned by QcowMetadata::map_clusters_for_read. The caller performs
