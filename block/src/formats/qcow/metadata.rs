@@ -762,12 +762,23 @@ impl QcowState {
             self.update_cluster_addr(l1_index, l2_index, cluster_addr)?;
             cluster_addr
         } else {
-            // Allocated cluster: write in place. Its refcount is 1, as writable
-            // images with internal snapshots are rejected.
+            // Data clusters can need COW even without snapshots.
 
             let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
             self.reject_invalid_data_cluster_offset(cluster_addr)?;
-            cluster_addr
+            match self.cluster_refcount(cluster_addr)? {
+                0 => {
+                    self.set_corrupt_bit_best_effort();
+                    return Err(io::Error::from_raw_os_error(EIO));
+                }
+                1 => cluster_addr,
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Unsupported,
+                        "Writes to shared data clusters are not supported",
+                    ));
+                }
+            }
         };
 
         let intra_offset = self.raw_file.cluster_offset(address);
@@ -1484,6 +1495,38 @@ mod tests {
         assert!(!offsets.overlaps(512, 512, 512, None));
         assert!(offsets.overlaps(1536, 512, 512, None));
         assert!(offsets.overlaps(u64::MAX, 1, 512, None));
+    }
+
+    #[test]
+    fn shared_data_clusters_allow_reads_but_reject_writes() {
+        use std::io::ErrorKind;
+
+        let (_temp, mut state) = test_state();
+        let cluster_size = state.raw_file.cluster_size();
+        let data_addr = super::l2_entry_std_cluster_addr(state.l2_cache.get(0).unwrap()[0]);
+        // Two active L2 entries share a data cluster without any snapshots.
+        state.l2_cache.get_mut(0).unwrap()[0] = data_addr;
+        state.l2_cache.get_mut(0).unwrap()[1] = data_addr;
+        state.set_cluster_refcount(data_addr, 2).unwrap();
+        state.sync_caches().unwrap();
+
+        for address in [0, cluster_size] {
+            let super::ClusterReadMapping::Allocated { offset, .. } =
+                state.map_read_with_populate(address, 512, false).unwrap()
+            else {
+                panic!("Shared data cluster did not map for reading");
+            };
+            assert_eq!(offset, data_addr);
+            assert_eq!(
+                state.map_write(address, None).unwrap_err().kind(),
+                ErrorKind::Unsupported
+            );
+        }
+        assert_eq!(state.cluster_refcount(data_addr).unwrap(), 2);
+        for index in 0..2 {
+            assert_eq!(state.l2_cache.get(0).unwrap()[index], data_addr);
+        }
+        assert!(!state.header.is_corrupt());
     }
 
     #[test]
