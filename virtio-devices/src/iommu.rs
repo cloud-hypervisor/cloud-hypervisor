@@ -305,12 +305,16 @@ enum Error {
     InvalidDetachRequestWrongDomain,
     #[error("Guest sent us invalid MAP request")]
     InvalidMapRequest,
+    #[error("Guest sent us MAP request with an invalid range")]
+    InvalidMapRequestRange,
     #[error("Invalid to map because the domain is in bypass mode")]
     InvalidMapRequestBypassDomain,
     #[error("Invalid to map because the domain is missing")]
     InvalidMapRequestMissingDomain,
     #[error("Guest sent us invalid UNMAP request")]
     InvalidUnmapRequest,
+    #[error("Guest sent us UNMAP request with an invalid range")]
+    InvalidUnmapRequestRange,
     #[error("Invalid to unmap because the domain is in bypass mode")]
     InvalidUnmapRequestBypassDomain,
     #[error("Invalid to unmap because the domain is missing")]
@@ -534,7 +538,7 @@ impl Request {
                         && (req.virt_start < lo || req.virt_end > hi)
                     {
                         status = VIRTIO_IOMMU_S_RANGE;
-                        return Err(Error::InvalidMapRequest);
+                        return Err(Error::InvalidMapRequestRange);
                     }
 
                     // Copy the value to use it as a proper reference.
@@ -566,12 +570,12 @@ impl Request {
                         .and_then(|delta| delta.checked_add(1))
                     else {
                         status = VIRTIO_IOMMU_S_RANGE;
-                        return Err(Error::InvalidMapRequest);
+                        return Err(Error::InvalidMapRequestRange);
                     };
 
                     if req.phys_start > u64::MAX - size || req.virt_start > u64::MAX - size {
                         status = VIRTIO_IOMMU_S_RANGE;
-                        return Err(Error::InvalidMapRequest);
+                        return Err(Error::InvalidMapRequestRange);
                     }
 
                     let mask = VIRTIO_IOMMU_PAGE_GRANULE - 1;
@@ -580,7 +584,7 @@ impl Request {
                         || (size & mask) != 0
                     {
                         status = VIRTIO_IOMMU_S_RANGE;
-                        return Err(Error::InvalidMapRequest);
+                        return Err(Error::InvalidMapRequestRange);
                     }
 
                     // Going forward MAP rejects overlap, so within a domain
@@ -662,7 +666,7 @@ impl Request {
                         && (req.virt_start < lo || req.virt_end > hi)
                     {
                         status = VIRTIO_IOMMU_S_RANGE;
-                        return Err(Error::InvalidUnmapRequest);
+                        return Err(Error::InvalidUnmapRequestRange);
                     }
 
                     // Copy the value to use it as a proper reference.
@@ -685,7 +689,7 @@ impl Request {
                         .and_then(|d| d.checked_add(1))
                     else {
                         status = VIRTIO_IOMMU_S_RANGE;
-                        return Err(Error::InvalidUnmapRequest);
+                        return Err(Error::InvalidUnmapRequestRange);
                     };
 
                     // An UNMAP that would split an existing mapping must be
