@@ -336,13 +336,20 @@ impl QcowRawFile {
         // Determine where the new end of the file should be and set_len, which
         // translates to truncate(2).
         let file_end: u64 = self.physical_size()?;
-        let new_cluster_address: u64 = (file_end + self.cluster_size - 1) & !self.cluster_mask;
+        // Round the file end up to a cluster boundary.
+        let new_cluster_address: u64 = file_end
+            .div_ceil(self.cluster_size)
+            .checked_mul(self.cluster_size)
+            .ok_or_else(|| io::Error::other("Aligned file end overflow"))?;
 
         if new_cluster_address > max_valid_cluster_offset {
             return Ok(None);
         }
 
-        self.file.set_len(new_cluster_address + self.cluster_size)?;
+        let new_len = new_cluster_address
+            .checked_add(self.cluster_size)
+            .ok_or_else(|| io::Error::other("New cluster end overflow"))?;
+        self.file.set_len(new_len)?;
 
         Ok(Some(new_cluster_address))
     }
