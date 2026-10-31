@@ -312,11 +312,15 @@ impl QcowRawFile {
         self.file.write_all_at(&buffer, offset)
     }
 
-    /// Read a refcount block from the file and returns a Vec containing the block.
-    /// Always returns a cluster's worth of data.
+    /// Reads `count` refcounts from the file.
+    pub(super) fn read_refcounts(&mut self, offset: u64, count: usize) -> io::Result<Vec<u64>> {
+        (self.read_refcount_fn)(&mut self.file, offset, count)
+    }
+
+    /// Reads one cluster of refcounts.
     #[inline]
     pub(super) fn read_refcount_block(&mut self, offset: u64) -> io::Result<Vec<u64>> {
-        (self.read_refcount_fn)(&mut self.file, offset, self.refcount_block_entries as usize)
+        self.read_refcounts(offset, self.refcount_block_entries as usize)
     }
 
     /// Writes a refcount block to the file.
