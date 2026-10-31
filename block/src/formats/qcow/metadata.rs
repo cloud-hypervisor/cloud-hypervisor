@@ -414,7 +414,10 @@ impl QcowMetadata {
     /// clean shutdown.
     pub(super) fn shutdown(&self) {
         let mut inner = self.inner.write().unwrap();
-        let _ = inner.sync_caches();
+        if let Err(e) = inner.sync_caches() {
+            log::warn!("Failed to flush QCOW2 metadata on shutdown: {e}");
+            return;
+        }
         let QcowState {
             ref mut header,
             ref mut raw_file,
@@ -1495,6 +1498,24 @@ mod tests {
         assert!(!offsets.overlaps(512, 512, 512, None));
         assert!(offsets.overlaps(1536, 512, 512, None));
         assert!(offsets.overlaps(u64::MAX, 1, 512, None));
+    }
+
+    #[test]
+    fn failed_shutdown_keeps_dirty_bit() {
+        let (temp, mut state) = test_state();
+        state
+            .map_write(state.raw_file.cluster_size(), None)
+            .unwrap();
+        // Force writeback to fail by pointing L2 at the L1 table.
+        state.l1_table[0] = state.header.l1_table_offset;
+        super::QcowMetadata::new(state).shutdown();
+
+        let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+        let header = super::QcowHeader::new(&raw).unwrap();
+        assert_ne!(
+            header.incompatible_features & super::super::IncompatFeatures::DIRTY.bits(),
+            0
+        );
     }
 
     #[test]
