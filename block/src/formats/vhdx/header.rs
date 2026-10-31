@@ -327,9 +327,10 @@ impl VhdxHeader {
     /// Creates a VhdxHeader from a reference to a file
     pub(super) fn new(f: &AlignedFile) -> Result<VhdxHeader> {
         let file_type_identifier = FileTypeIdentifier::new(f)?;
-        let header_1 = Header::new(f, HEADER_1_START)?;
-        let header_2 = Header::new(f, HEADER_2_START)?;
-        let (header_offset, header) = Self::current_header(Ok(header_1), Ok(header_2))?;
+        let (header_offset, header) = Self::current_header(
+            Header::new(f, HEADER_1_START),
+            Header::new(f, HEADER_2_START),
+        )?;
         Ok(VhdxHeader {
             _file_type_identifier: file_type_identifier,
             header,
@@ -341,8 +342,15 @@ impl VhdxHeader {
 
     /// Select the current header and its file offset.
     fn current_header(header_1: Result<Header>, header_2: Result<Header>) -> Result<(u64, Header)> {
-        let header_1 = header_1.ok();
-        let header_2 = header_2.ok();
+        let valid_header = |header| match header {
+            Ok(header) => Ok(Some(header)),
+            Err(VhdxHeaderError::InvalidHeaderSign | VhdxHeaderError::InvalidChecksum(_)) => {
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        };
+        let header_1 = valid_header(header_1)?;
+        let header_2 = valid_header(header_2)?;
 
         match (header_1, header_2) {
             (None, None) => Err(VhdxHeaderError::NoValidHeader),
@@ -418,10 +426,48 @@ mod tests {
     use zerocopy::{FromBytes, IntoBytes};
 
     use super::{
-        BAT_GUID, HEADER_SIGN, Header, MDR_GUID, REGION_TABLE_1_START, RegionInfo,
-        RegionTableHeader, VhdxHeaderError, ranges_overlap,
+        BAT_GUID, HEADER_1_START, HEADER_2_START, HEADER_SIGN, Header, MDR_GUID,
+        REGION_TABLE_1_START, RegionInfo, RegionTableHeader, VhdxHeader, VhdxHeaderError,
+        ranges_overlap,
     };
-    use crate::formats::vhdx::test_util::{region_entry, region_file};
+    use crate::aligned_file::AlignedFile;
+    use crate::formats::vhdx::test_util::{create_dynamic_vhdx, region_entry, region_file};
+
+    #[test]
+    fn one_valid_header_is_enough() {
+        for invalid in [HEADER_1_START, HEADER_2_START] {
+            let tf = create_dynamic_vhdx(1, None);
+            let file = AlignedFile::new(tf.into_file(), false);
+            file.write_all_at(&[0; 4], invalid).unwrap();
+            let header = VhdxHeader::new(&file).unwrap();
+            assert_ne!(header.header_offset, invalid);
+            file.write_all_at(&[0; 4], header.header_offset).unwrap();
+            assert!(matches!(
+                VhdxHeader::new(&file),
+                Err(VhdxHeaderError::NoValidHeader)
+            ));
+        }
+    }
+
+    #[test]
+    fn header_read_errors_are_propagated() {
+        use std::io;
+
+        let tf = create_dynamic_vhdx(1, None);
+        let file = AlignedFile::new(tf.into_file(), false);
+        let header = Header::new(&file, HEADER_1_START).unwrap();
+        for failed in 0..2 {
+            let mut headers = [Ok(header), Ok(header)];
+            headers[failed] = Err(VhdxHeaderError::ReadHeader(io::Error::from_raw_os_error(
+                libc::EIO,
+            )));
+            let [header_1, header_2] = headers;
+            assert!(matches!(
+                VhdxHeader::current_header(header_1, header_2),
+                Err(VhdxHeaderError::ReadHeader(_))
+            ));
+        }
+    }
 
     #[test]
     fn test_header_bytes_round_trip() {
