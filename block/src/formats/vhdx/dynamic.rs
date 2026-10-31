@@ -11,7 +11,7 @@ use std::result;
 use thiserror::Error;
 
 use super::bat::{self, BatEntry, VhdxBatError};
-use super::header::{self, RegionInfo, RegionTableEntry, VhdxHeader, VhdxHeaderError};
+use super::header::{self, RegionInfo, VhdxHeader, VhdxHeaderError};
 use super::metadata::{self, DiskSpec, VhdxMetadataError};
 use crate::aligned_file::AlignedFile;
 
@@ -108,8 +108,7 @@ impl Sector {
 pub(super) struct Vhdx {
     aligned: AlignedFile,
     vhdx_header: VhdxHeader,
-    bat_entry: RegionTableEntry,
-    mdr_entry: RegionTableEntry,
+    regions: RegionInfo,
     log_offset: u64,
     log_length: u32,
     disk_spec: DiskSpec,
@@ -138,6 +137,17 @@ impl Vhdx {
         let bat_entry = collected_entries.bat_entry;
         let mdr_entry = collected_entries.mdr_entry;
         let (log_offset, log_length) = vhdx_header.log_region();
+        if collected_entries
+            .region_entries
+            .values()
+            .any(|&(start, end)| {
+                header::ranges_overlap(start, end, log_offset, log_offset + log_length as u64)
+            })
+        {
+            return Err(VhdxError::ParseVhdxRegionEntry(
+                VhdxHeaderError::RegionOverlap,
+            ));
+        }
 
         let disk_spec =
             DiskSpec::new(&aligned, &mdr_entry).map_err(VhdxError::ParseVhdxMetadata)?;
@@ -147,8 +157,7 @@ impl Vhdx {
         Ok(Vhdx {
             aligned,
             vhdx_header,
-            bat_entry,
-            mdr_entry,
+            regions: collected_entries,
             log_offset,
             log_length,
             disk_spec,
@@ -161,20 +170,18 @@ impl Vhdx {
         self.disk_spec.virtual_disk_size
     }
 
-    /// A fully-present BAT entry must describe a payload block that lies
-    /// outside the areas reserved for the header, metadata, BAT and log regions.
+    /// Check that a payload block does not overlap reserved space.
     fn check_payload_block_offset(&self, block_base: u64) -> result::Result<(), VhdxIoError> {
-        let block_size = self.disk_spec.block_size as u64;
-        let mdr_start = self.mdr_entry.file_offset;
-        let mdr_end = mdr_start.saturating_add(self.mdr_entry.length as u64);
-        let bat_start = self.bat_entry.file_offset;
-        let bat_end = bat_start.saturating_add(self.bat_entry.length as u64);
-        let log_end = self.log_offset.saturating_add(self.log_length as u64);
+        let block_end = block_base.saturating_add(self.disk_spec.block_size as u64);
+        let log_end = self.log_offset + self.log_length as u64;
 
         if block_base < metadata::BLOCK_SIZE_MIN as u64
-            || (block_base < mdr_end && block_base.saturating_add(block_size) > mdr_start)
-            || (block_base < bat_end && block_base.saturating_add(block_size) > bat_start)
-            || (block_base < log_end && block_base.saturating_add(block_size) > self.log_offset)
+            || self
+                .regions
+                .region_entries
+                .values()
+                .any(|&(start, end)| header::ranges_overlap(block_base, block_end, start, end))
+            || header::ranges_overlap(block_base, block_end, self.log_offset, log_end)
         {
             return Err(VhdxIoError::InvalidBatFileOffset);
         }
@@ -318,7 +325,7 @@ impl Vhdx {
             return Err(VhdxIoError::InvalidBufferLength);
         }
 
-        let bat_offset = self.bat_entry.file_offset;
+        let bat_offset = self.regions.bat_entry.file_offset;
         let mut write_count: usize = 0;
         while sector_count > 0 {
             let sector = Sector::new(
@@ -608,7 +615,7 @@ mod tests {
 
         let mut vhdx = open_vhdx(tf.as_path()).unwrap();
         assert_eq!(vhdx.disk_spec.block_size, 1 << 20);
-        let bat_start = vhdx.bat_entry.file_offset;
+        let bat_start = vhdx.regions.bat_entry.file_offset;
         vhdx.log_length = 0;
         vhdx.bat_entries[0] = BatEntry(
             PAYLOAD_BLOCK_FULLY_PRESENT | ((bat_start - (1 << 20)) & bat::BAT_FILE_OFF_MASK),
@@ -646,7 +653,7 @@ mod tests {
         let tf = create_dynamic_vhdx(16, Some(1));
 
         let mut vhdx = open_vhdx(tf.as_path()).unwrap();
-        let bat_start = vhdx.bat_entry.file_offset;
+        let bat_start = vhdx.regions.bat_entry.file_offset;
         assert_eq!(vhdx.disk_spec.block_size, 1 << 20);
 
         // The 1 MiB payload ends exactly where the metadata region starts, so
@@ -673,7 +680,7 @@ mod tests {
         let tf = create_dynamic_vhdx(32 << 20, None);
 
         let vhdx = open_vhdx(tf.as_path()).unwrap();
-        let bat_offset = vhdx.bat_entry.file_offset;
+        let bat_offset = vhdx.regions.bat_entry.file_offset;
         let entry_offset = bat_offset + (vhdx.bat_entries.len() as u64 - 1) * 8;
         assert!(entry_offset - bat_offset >= 1 << 20);
         let past_eof = ((vhdx.disk_spec.image_size / (1 << 20) + 1) << 20 & bat::BAT_FILE_OFF_MASK)
@@ -740,7 +747,7 @@ mod tests {
         let tf = create_dynamic_vhdx(16, None);
 
         let mut vhdx = open_vhdx(tf.as_path()).unwrap();
-        let mdr_offset = vhdx.mdr_entry.file_offset;
+        let mdr_offset = vhdx.regions.mdr_entry.file_offset;
         let mut before = [0u8; 8];
         vhdx.aligned
             .file()
@@ -769,7 +776,7 @@ mod tests {
         let tf = create_dynamic_vhdx(16, None);
 
         let mut vhdx = open_vhdx(tf.as_path()).unwrap();
-        let mdr_offset = vhdx.mdr_entry.file_offset;
+        let mdr_offset = vhdx.regions.mdr_entry.file_offset;
         vhdx.bat_entries[0] = BatEntry(PAYLOAD_BLOCK_FULLY_PRESENT | mdr_offset);
 
         let mut buf = vec![0u8; vhdx.disk_spec.logical_sector_size as usize];
