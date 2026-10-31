@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::num::Wrapping;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result, thread};
 
 use anyhow::anyhow;
@@ -274,6 +274,7 @@ impl Drop for WorkerThreads {
 #[derive(Default)]
 pub struct VirtioCommon {
     pub avail_features: u64,
+    pub(crate) pause_lock: Mutex<()>,
     pub acked_features: u64,
     pub interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     pub pause_evt: Option<EventFd>,
@@ -473,23 +474,33 @@ impl Pausable for VirtioCommon {
             VirtioDeviceType::from(self.device_type)
         );
 
+        let _pause_lock = self.pause_lock.lock().unwrap();
+
         // If already paused, return early to avoid deadlock waiting on barrier
         // for worker threads that are already parked.
-        if self.paused.swap(true, Ordering::SeqCst) {
+        if self.paused.load(Ordering::SeqCst) {
             return Ok(());
         }
 
         if let Some(pause_evt) = &self.pause_evt {
-            pause_evt
-                .write(1)
-                .map_err(|e| MigratableError::Pause(e.into()))?;
+            // One event per worker: a worker can still be starting and consume
+            // its own event before it reaches the epoll loop.
+            let workers = self.workers.as_ref().map_or(0, |w| w.threads.len());
+            if workers > 0 {
+                pause_evt
+                    .write(workers as u64)
+                    .map_err(|e| MigratableError::Pause(e.into()))?;
+            }
 
-            // Wait for all threads to acknowledge the pause before going
-            // any further. This is exclusively performed when pause_evt
-            // eventfd is Some(), as this means the virtio device has been
-            // activated. One specific case where the device can be paused
-            // while it hasn't been yet activated is snapshot/restore.
-            self.paused_sync.as_ref().unwrap().wait();
+            // Set the flag after the events; in-loop workers must observe it
+            // before acknowledging the barrier.
+            self.paused.store(true, Ordering::SeqCst);
+
+            if workers > 0 {
+                self.paused_sync.as_ref().unwrap().wait();
+            }
+        } else {
+            self.paused.store(true, Ordering::SeqCst);
         }
 
         Ok(())
