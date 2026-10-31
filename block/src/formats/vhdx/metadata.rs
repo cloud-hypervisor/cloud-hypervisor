@@ -131,7 +131,7 @@ impl DiskSpec {
             let metadata_entry =
                 MetadataTableEntry::new(&buffer[offset..offset + size_of::<MetadataTableEntry>()])?;
 
-            if metadata_entry.item_id == METADATA_FILE_PARAMETER {
+            let presence = if metadata_entry.item_id == METADATA_FILE_PARAMETER {
                 let item = metadata_entry.read_item::<8>(f, metadata_region.file_offset)?;
                 disk_spec.block_size = u32::from_le_bytes(item[0..4].try_into().unwrap());
 
@@ -148,17 +148,17 @@ impl DiskSpec {
                 let bits = u32::from_le_bytes(item[4..8].try_into().unwrap());
                 disk_spec.has_parent = bits & BLOCK_HAS_PARENT != 0;
 
-                metadata_presence |= METADATA_FILE_PARAMETER_PRESENT;
+                METADATA_FILE_PARAMETER_PRESENT
             } else if metadata_entry.item_id == METADATA_VIRTUAL_DISK_SIZE {
                 let item = metadata_entry.read_item::<8>(f, metadata_region.file_offset)?;
                 disk_spec.virtual_disk_size = u64::from_le_bytes(item);
 
-                metadata_presence |= METADATA_VIRTUAL_DISK_SIZE_PRESENT;
+                METADATA_VIRTUAL_DISK_SIZE_PRESENT
             } else if metadata_entry.item_id == METADATA_VIRTUAL_DISK_ID {
                 let item = metadata_entry.read_item::<16>(f, metadata_region.file_offset)?;
                 disk_spec.disk_id = u128::from_le_bytes(item);
 
-                metadata_presence |= METADATA_VIRTUAL_DISK_ID_PRESENT;
+                METADATA_VIRTUAL_DISK_ID_PRESENT
             } else if metadata_entry.item_id == METADATA_LOGICAL_SECTOR_SIZE {
                 let item = metadata_entry.read_item::<4>(f, metadata_region.file_offset)?;
                 disk_spec.logical_sector_size = u32::from_le_bytes(item);
@@ -166,7 +166,7 @@ impl DiskSpec {
                     return Err(VhdxMetadataError::InvalidLogicalSectorSize);
                 }
 
-                metadata_presence |= METADATA_LOGICAL_SECTOR_SIZE_PRESENT;
+                METADATA_LOGICAL_SECTOR_SIZE_PRESENT
             } else if metadata_entry.item_id == METADATA_PHYSICAL_SECTOR_SIZE {
                 let item = metadata_entry.read_item::<4>(f, metadata_region.file_offset)?;
                 disk_spec.physical_sector_size = u32::from_le_bytes(item);
@@ -176,16 +176,17 @@ impl DiskSpec {
                     return Err(VhdxMetadataError::InvalidPhysicalSectorSize);
                 }
 
-                metadata_presence |= METADATA_PHYSICAL_SECTOR_SIZE_PRESENT;
+                METADATA_PHYSICAL_SECTOR_SIZE_PRESENT
             } else if metadata_entry.item_id == METADATA_PARENT_LOCATOR {
-                metadata_presence |= METADATA_PARENT_LOCATOR_PRESENT;
+                METADATA_PARENT_LOCATOR_PRESENT
             } else {
                 return Err(VhdxMetadataError::InvalidMetadataItem);
-            }
+            };
 
             if (metadata_entry.flag_bits & METADATA_FLAGS_IS_REQUIRED) == 0 {
                 return Err(VhdxMetadataError::UnsupportedFlag);
             }
+            metadata_presence |= presence;
             offset += size_of::<MetadataTableEntry>();
         }
 
