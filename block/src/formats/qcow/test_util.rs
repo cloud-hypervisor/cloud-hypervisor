@@ -18,6 +18,7 @@ use super::qcow_raw_file::QcowRawFile;
 use super::util::{
     CLUSTER_USED_FLAG, COMPRESSED_FLAG, COMPRESSED_SECTOR_SIZE, L1_TABLE_OFFSET_MASK,
 };
+use super::vec_cache::{CacheMap, VecCache};
 use super::{QcowDisk, QcowHeader, QcowTempDisk};
 use crate::aligned_file::AlignedFile;
 use crate::error::BlockResult;
@@ -281,4 +282,24 @@ impl FileSnapshot {
             self.offset
         );
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) enum WritebackPath {
+    Flush,
+    ReadEviction,
+    WriteEviction,
+}
+
+impl WritebackPath {
+    pub(super) const ALL: [Self; 3] = [Self::Flush, Self::ReadEviction, Self::WriteEviction];
+}
+
+// One dirty table makes the next insertion evict that table deterministically.
+pub(super) fn dirty_table_cache(index: usize, entries: usize) -> CacheMap<VecCache<u64>> {
+    let mut cache = CacheMap::new(1);
+    cache
+        .insert(index, VecCache::new(entries), |_, _| unreachable!())
+        .unwrap();
+    cache
 }
