@@ -514,6 +514,46 @@ mod tests {
         assert!(!vhdx.first_write);
     }
 
+    #[test]
+    fn invalid_bat_encodings_are_rejected() {
+        let tf = create_dynamic_vhdx(8192, None);
+        let vhdx = open_vhdx(tf.as_path()).unwrap();
+        let bitmap = vhdx.disk_spec.chunk_ratio;
+        for (index, value) in [
+            (0, 4),
+            (0, 5),
+            (0, 7),
+            (0, 8),
+            (0, 1 << 19),
+            (bitmap, 1),
+            (bitmap, 2),
+            (bitmap, 3),
+            (bitmap, 4),
+            (bitmap, 5),
+            (bitmap, 6),
+            (bitmap, 7),
+        ] {
+            BatEntry::write_bat_entry(
+                &vhdx.aligned,
+                vhdx.regions.bat_entry.file_offset,
+                index,
+                value,
+            )
+            .unwrap();
+            assert!(matches!(
+                open_vhdx(tf.as_path()),
+                Err(VhdxError::ReadBatEntry(VhdxBatError::InvalidBatEntry))
+            ));
+            BatEntry::write_bat_entry(
+                &vhdx.aligned,
+                vhdx.regions.bat_entry.file_offset,
+                index,
+                vhdx.bat_entries[index as usize].0,
+            )
+            .unwrap();
+        }
+    }
+
     /// A VHDX image with an active log must be rejected until replay is
     /// supported; opening it would silently use a stale BAT.
     #[test]
