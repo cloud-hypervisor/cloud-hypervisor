@@ -17,6 +17,7 @@
 //! operations upgrade to a write lock.
 
 use std::cmp::min;
+use std::collections::BTreeMap;
 use std::os::unix::fs::FileExt;
 use std::sync::{Arc, RwLock};
 use std::{io, mem};
@@ -25,15 +26,179 @@ use libc::{EINVAL, EIO};
 use vmm_sys_util::write_zeroes::WriteZeroesAt;
 
 use super::decoder::Decoder;
+use super::header::{MAX_QCOW_FILE_SIZE, MAX_RAM_POINTER_TABLE_SIZE};
 use super::qcow_raw_file::QcowRawFile;
 use super::refcount::RefCount;
 use super::util::{
-    div_round_up_u64, l1_entry_make, l2_entry_compressed_cluster_layout, l2_entry_is_compressed,
-    l2_entry_is_empty, l2_entry_is_zero, l2_entry_make_std, l2_entry_make_zero,
-    l2_entry_make_zero_plain, l2_entry_std_cluster_addr,
+    cluster_addr_is_valid, compressed_cluster_range_is_valid, div_round_up_u64, l1_entry_make,
+    l2_entry_compressed_cluster_layout, l2_entry_is_compressed, l2_entry_is_empty,
+    l2_entry_is_zero, l2_entry_make_std, l2_entry_make_zero, l2_entry_make_zero_plain,
+    l2_entry_std_cluster_addr,
 };
 use super::vec_cache::{CacheMap, Cacheable, VecCache};
 use super::{QcowHeader, refcount};
+
+/// Counts references to metadata clusters, including duplicate pointers.
+/// Ordered offsets keep overlap checks independent of the table length.
+#[derive(Clone, Debug, Default)]
+pub(super) struct ClusterOffsets(BTreeMap<u64, usize>);
+
+impl ClusterOffsets {
+    pub(super) fn new(entries: &[u64]) -> Self {
+        let mut offsets = Self::default();
+        for &addr in entries {
+            offsets.replace(0, addr);
+        }
+        offsets
+    }
+
+    pub(super) fn replace(&mut self, old: u64, new: u64) {
+        if old == new {
+            return;
+        }
+        if old != 0 {
+            let count = self.0.get_mut(&old).expect("Metadata offset is indexed");
+            *count -= 1;
+            if *count == 0 {
+                self.0.remove(&old);
+            }
+        }
+        if new != 0 {
+            *self.0.entry(new).or_default() += 1;
+        }
+    }
+
+    pub(super) fn is_shared(&self, addr: u64) -> bool {
+        self.0.get(&addr).is_some_and(|&count| count > 1)
+    }
+
+    /// Excludes the caller's own metadata cluster, including shared references.
+    pub(super) fn overlaps(
+        &self,
+        addr: u64,
+        size: u64,
+        cluster_size: u64,
+        exclude: Option<u64>,
+    ) -> bool {
+        let Some(end) = addr.checked_add(size) else {
+            return true;
+        };
+        if size == 0 {
+            return false;
+        }
+        self.0
+            .range(addr.saturating_sub(cluster_size - 1)..end)
+            .any(|(&offset, _)| exclude != Some(offset))
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct MetadataLayout<'a> {
+    header: &'a QcowHeader,
+    l2_offsets: &'a ClusterOffsets,
+}
+
+impl<'a> MetadataLayout<'a> {
+    pub(super) fn new(header: &'a QcowHeader, l2_offsets: &'a ClusterOffsets) -> Self {
+        Self { header, l2_offsets }
+    }
+
+    pub(super) fn overlaps(&self, addr: u64, size: u64, exclude_l2: Option<u64>) -> bool {
+        let cluster_size = 1u64 << self.header.cluster_bits;
+        let l1_clusters = div_round_up_u64(u64::from(self.header.l1_size) * 8, cluster_size);
+        addr < cluster_size
+            || ranges_overlap(
+                addr,
+                size,
+                self.header.l1_table_offset,
+                l1_clusters * cluster_size,
+            )
+            || ranges_overlap(
+                addr,
+                size,
+                self.header.refcount_table_offset,
+                u64::from(self.header.refcount_table_clusters) * cluster_size,
+            )
+            || self
+                .l2_offsets
+                .overlaps(addr, size, cluster_size, exclude_l2)
+    }
+
+    fn overlaps_metadata(
+        &self,
+        addr: u64,
+        size: u64,
+        exclude_l2: Option<u64>,
+        refcounts: &RefCount,
+    ) -> bool {
+        self.overlaps(addr, size, exclude_l2) || refcounts.overlaps_blocks(addr, size)
+    }
+}
+
+pub(super) fn metadata_tables_are_disjoint(header: &QcowHeader) -> bool {
+    let cluster_size = 1u64 << header.cluster_bits;
+    let l1_size = div_round_up_u64(u64::from(header.l1_size) * 8, cluster_size) * cluster_size;
+    let refcount_size = u64::from(header.refcount_table_clusters) * cluster_size;
+    (l1_size == 0 || header.l1_table_offset >= cluster_size)
+        && header.refcount_table_offset >= cluster_size
+        && header.l1_table_offset.checked_add(l1_size).is_some()
+        && header
+            .refcount_table_offset
+            .checked_add(refcount_size)
+            .is_some()
+        && !ranges_overlap(
+            header.l1_table_offset,
+            l1_size,
+            header.refcount_table_offset,
+            refcount_size,
+        )
+}
+
+fn ranges_overlap(addr: u64, size: u64, other: u64, other_size: u64) -> bool {
+    if size == 0 || other_size == 0 {
+        return false;
+    }
+    match (addr.checked_add(size), other.checked_add(other_size)) {
+        (Some(end), Some(other_end)) => addr < other_end && other < end,
+        _ => true,
+    }
+}
+
+fn l2_cluster_addr_is_valid(
+    addr: u64,
+    cluster_size: u64,
+    max_valid: u64,
+    layout: MetadataLayout<'_>,
+    refcounts: &RefCount,
+) -> bool {
+    cluster_addr_is_valid(addr, cluster_size, max_valid)
+        && !layout.overlaps_metadata(addr, cluster_size, Some(addr), refcounts)
+}
+
+fn write_l2_table(
+    raw_file: &mut QcowRawFile,
+    header: &mut QcowHeader,
+    l2_offsets: &ClusterOffsets,
+    refcounts: &RefCount,
+    addr: u64,
+    table: &VecCache<u64>,
+) -> io::Result<()> {
+    if l2_offsets.is_shared(addr)
+        || !l2_cluster_addr_is_valid(
+            addr,
+            raw_file.cluster_size(),
+            refcounts.max_valid_cluster_offset(),
+            MetadataLayout::new(header, l2_offsets),
+            refcounts,
+        )
+    {
+        if let Err(e) = header.set_corrupt_bit(raw_file.file_mut()) {
+            log::warn!("Failed to persist corrupt bit: {e}");
+        }
+        return Err(io::Error::from_raw_os_error(EIO));
+    }
+    raw_file.write_pointer_table_direct(addr, table.iter())
+}
 
 /// Describes how to satisfy a guest read for a single cluster region.
 ///
@@ -123,7 +288,8 @@ pub(super) struct QcowMetadata {
 /// The actual metadata state, accessible only through the RwLock.
 pub(crate) struct QcowState {
     pub(crate) header: QcowHeader,
-    pub(crate) l1_table: VecCache<u64>,
+    pub(super) l1_table: VecCache<u64>,
+    pub(super) l2_offsets: ClusterOffsets,
     pub(crate) l2_entries: u64,
     pub(crate) l2_cache: CacheMap<VecCache<u64>>,
     pub(crate) refcounts: RefCount,
@@ -249,7 +415,10 @@ impl QcowMetadata {
     /// clean shutdown.
     pub(super) fn shutdown(&self) {
         let mut inner = self.inner.write().unwrap();
-        let _ = inner.sync_caches();
+        if let Err(e) = inner.sync_caches() {
+            log::warn!("Failed to flush QCOW2 metadata on shutdown: {e}");
+            return;
+        }
         let QcowState {
             ref mut header,
             ref mut raw_file,
@@ -303,7 +472,10 @@ impl QcowMetadata {
                 cluster_size as usize - offset_in_cluster,
             );
 
-            if count == cluster_size as usize {
+            if count == cluster_size as usize
+                && (inner.header.version >= 3
+                    || (sparse && (!zero_marker || backing_file.is_none())))
+            {
                 let punch_offset = inner.deallocate_cluster(
                     curr_addr,
                     sparse,
@@ -316,8 +488,8 @@ impl QcowMetadata {
                     });
                 }
             } else {
-                // Partial cluster - COW from backing to preserve non zeroed bytes,
-                // then the caller writes zeros to the partial range.
+                // Use explicit zeroes for partial ranges and v2 images.
+                // Copy backing data to preserve bytes outside the range.
                 let backing_data = if let Some(backing) = backing_file {
                     let cluster_begin = curr_addr - offset_in_cluster as u64;
                     let mut data = vec![0u8; cluster_size as usize];
@@ -377,15 +549,7 @@ impl QcowMetadata {
 
     #[cfg(test)]
     pub(super) fn cluster_refcount(&self, address: u64) -> io::Result<u64> {
-        let mut inner = self.inner.write().unwrap();
-        let QcowState {
-            refcounts,
-            raw_file,
-            ..
-        } = &mut *inner;
-        refcounts
-            .get_cluster_refcount(raw_file, address)
-            .map_err(|e| io::Error::other(format!("get_cluster_refcount: {e}")))
+        self.inner.write().unwrap().cluster_refcount(address)
     }
 }
 
@@ -396,11 +560,8 @@ impl Drop for QcowMetadata {
 }
 
 impl QcowState {
-    /// Fast path read mapping under read lock only. Returns None on cache
-    /// miss.
-    ///
-    /// All access here is through shared reference. CacheMap::get,
-    /// VecCache::get and index operations are all shared reference compatible.
+    /// Map a read without I/O. Returns None on a cache miss or when invalid
+    /// metadata needs to be marked corrupt under the write lock.
     fn try_map_read(
         &self,
         address: u64,
@@ -439,6 +600,10 @@ impl QcowState {
         if l2_entry_is_compressed(l2_entry) {
             let (host_offset, compressed_size) =
                 l2_entry_compressed_cluster_layout(l2_entry, self.header.cluster_bits);
+            if !self.is_valid_compressed_range(host_offset, compressed_size) {
+                // Fall through to write lock path which sets the corrupt bit
+                return Ok(None);
+            }
             let cluster_offset = self.raw_file.cluster_offset(address) as usize;
             return Ok(Some(ClusterReadMapping::Compressed {
                 host_offset,
@@ -460,7 +625,7 @@ impl QcowState {
             }))
         } else {
             let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
-            if !self.is_refcount_addressable_cluster_offset(cluster_addr) {
+            if !self.is_valid_data_cluster_offset(cluster_addr) {
                 // Fall through to write lock path which sets the corrupt bit
                 return Ok(None);
             }
@@ -496,34 +661,11 @@ impl QcowState {
         // Populate cache if needed as this does I/O via the metadata raw file
         self.cache_l2_cluster(l1_index, l2_addr_disk)?;
 
-        let l2_index = self.l2_table_index(address) as usize;
-        let l2_entry = self.l2_cache.get(l1_index).unwrap()[l2_index];
-
-        if l2_entry_is_empty(l2_entry) {
-            Ok(self.unallocated_read_mapping(address, count, has_backing_file))
-        } else if l2_entry_is_compressed(l2_entry) {
-            let (host_offset, compressed_size) =
-                l2_entry_compressed_cluster_layout(l2_entry, self.header.cluster_bits);
-            let cluster_offset = self.raw_file.cluster_offset(address) as usize;
-            Ok(ClusterReadMapping::Compressed {
-                host_offset,
-                compressed_size,
-                cluster_offset,
-                length: count,
+        self.try_map_read(address, count, has_backing_file)?
+            .ok_or_else(|| {
+                self.set_corrupt_bit_best_effort();
+                io::Error::from_raw_os_error(EIO)
             })
-        } else if l2_entry_is_zero(l2_entry) {
-            Ok(ClusterReadMapping::Zero {
-                length: count as u64,
-            })
-        } else {
-            let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
-            self.reject_invalid_cluster_offset(cluster_addr)?;
-            let intra_offset = self.raw_file.cluster_offset(address);
-            Ok(ClusterReadMapping::Allocated {
-                offset: cluster_addr + intra_offset,
-                length: count as u64,
-            })
-        }
     }
 
     fn unallocated_read_mapping(
@@ -561,6 +703,7 @@ impl QcowState {
         };
         let l2_index = self.l2_table_index(address) as usize;
 
+        self.reject_shared_l2_table_offset(l2_addr_disk)?;
         self.cache_l2_cluster_alloc(l1_index, l2_addr_disk)?;
 
         let l2_entry = self.l2_cache.get(l1_index).unwrap()[l2_index];
@@ -593,7 +736,7 @@ impl QcowState {
             // only reference, otherwise write into a new cluster
 
             let old_addr = l2_entry_std_cluster_addr(l2_entry);
-            self.reject_invalid_cluster_offset(old_addr)?;
+            self.reject_invalid_data_cluster_offset(old_addr)?;
             match self.cluster_refcount(old_addr)? {
                 1 => {
                     self.raw_file.zero_cluster(old_addr)?;
@@ -623,12 +766,23 @@ impl QcowState {
             self.update_cluster_addr(l1_index, l2_index, cluster_addr)?;
             cluster_addr
         } else {
-            // Allocated cluster: write in place. Its refcount is 1, as writable
-            // images with internal snapshots are rejected.
+            // Data clusters can need COW even without snapshots.
 
             let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
-            self.reject_invalid_cluster_offset(cluster_addr)?;
-            cluster_addr
+            self.reject_invalid_data_cluster_offset(cluster_addr)?;
+            match self.cluster_refcount(cluster_addr)? {
+                0 => {
+                    self.set_corrupt_bit_best_effort();
+                    return Err(io::Error::from_raw_os_error(EIO));
+                }
+                1 => cluster_addr,
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Unsupported,
+                        "Writes to shared data clusters are not supported",
+                    ));
+                }
+            }
         };
 
         let intra_offset = self.raw_file.cluster_offset(address);
@@ -639,6 +793,11 @@ impl QcowState {
 
     // -- Address computation helpers --
 
+    fn set_l2_table_addr(&mut self, index: usize, addr: u64) {
+        self.l2_offsets.replace(self.l1_table[index], addr);
+        self.l1_table[index] = addr;
+    }
+
     fn l1_table_index(&self, address: u64) -> u64 {
         (address / self.raw_file.cluster_size()) / self.l2_entries
     }
@@ -647,14 +806,59 @@ impl QcowState {
         (address / self.raw_file.cluster_size()) % self.l2_entries
     }
 
-    fn is_refcount_addressable_cluster_offset(&self, cluster_addr: u64) -> bool {
-        cluster_addr != 0
-            && cluster_addr & (self.raw_file.cluster_size() - 1) == 0
-            && cluster_addr <= self.refcounts.max_valid_cluster_offset()
+    fn is_valid_data_cluster_offset(&self, cluster_addr: u64) -> bool {
+        cluster_addr_is_valid(
+            cluster_addr,
+            self.raw_file.cluster_size(),
+            self.refcounts.max_valid_cluster_offset(),
+        ) && !MetadataLayout::new(&self.header, &self.l2_offsets).overlaps_metadata(
+            cluster_addr,
+            self.raw_file.cluster_size(),
+            None,
+            &self.refcounts,
+        )
     }
 
-    fn reject_invalid_cluster_offset(&mut self, cluster_addr: u64) -> io::Result<()> {
-        if self.is_refcount_addressable_cluster_offset(cluster_addr) {
+    fn is_valid_compressed_range(&self, addr: u64, size: usize) -> bool {
+        compressed_cluster_range_is_valid(
+            addr,
+            size,
+            self.raw_file.cluster_size(),
+            self.refcounts.max_valid_cluster_offset(),
+        ) && !MetadataLayout::new(&self.header, &self.l2_offsets).overlaps_metadata(
+            addr,
+            size as u64,
+            None,
+            &self.refcounts,
+        )
+    }
+
+    fn reject_invalid_compressed_range(&mut self, addr: u64, size: usize) -> io::Result<()> {
+        if self.is_valid_compressed_range(addr, size) {
+            Ok(())
+        } else {
+            self.set_corrupt_bit_best_effort();
+            Err(io::Error::from_raw_os_error(EIO))
+        }
+    }
+
+    fn reject_invalid_data_cluster_offset(&mut self, cluster_addr: u64) -> io::Result<()> {
+        if self.is_valid_data_cluster_offset(cluster_addr) {
+            Ok(())
+        } else {
+            self.set_corrupt_bit_best_effort();
+            Err(io::Error::from_raw_os_error(EIO))
+        }
+    }
+
+    fn reject_invalid_l2_table_offset(&mut self, addr: u64) -> io::Result<()> {
+        if l2_cluster_addr_is_valid(
+            addr,
+            self.raw_file.cluster_size(),
+            self.refcounts.max_valid_cluster_offset(),
+            MetadataLayout::new(&self.header, &self.l2_offsets),
+            &self.refcounts,
+        ) {
             Ok(())
         } else {
             self.set_corrupt_bit_best_effort();
@@ -664,17 +868,24 @@ impl QcowState {
 
     // -- Cache and allocation operations requiring exclusive access --
 
+    fn reject_shared_l2_table_offset(&self, addr: u64) -> io::Result<()> {
+        if self.l2_offsets.is_shared(addr) {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "Writes to shared L2 tables are not supported",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     /// Populates the L2 cache for read operations without allocation.
     fn cache_l2_cluster(&mut self, l1_index: usize, l2_addr_disk: u64) -> io::Result<()> {
         if !self.l2_cache.contains_key(l1_index) {
-            self.reject_invalid_cluster_offset(l2_addr_disk)?;
+            self.reject_invalid_l2_table_offset(l2_addr_disk)?;
             let l2_table =
                 VecCache::from_vec(self.raw_file.read_pointer_cluster(l2_addr_disk, None)?);
-            let l1_table = &self.l1_table;
-            let raw_file = &mut self.raw_file;
-            self.l2_cache.insert(l1_index, l2_table, |index, evicted| {
-                raw_file.write_pointer_table_direct(l1_table[index], evicted.iter())
-            })?;
+            self.insert_l2_table(l1_index, l2_table)?;
         }
         Ok(())
     }
@@ -686,28 +897,43 @@ impl QcowState {
             let l2_table = if l2_addr_disk == 0 {
                 // Set the new L2 table's refcount to 1 before the L1 entry points at it.
                 let new_addr = self.append_data_cluster(None)?;
-                self.l1_table[l1_index] = new_addr;
+                self.set_l2_table_addr(l1_index, new_addr);
                 VecCache::new(self.l2_entries as usize)
             } else {
-                self.reject_invalid_cluster_offset(l2_addr_disk)?;
+                self.reject_invalid_l2_table_offset(l2_addr_disk)?;
                 VecCache::from_vec(self.raw_file.read_pointer_cluster(l2_addr_disk, None)?)
             };
-            let l1_table = &self.l1_table;
-            let raw_file = &mut self.raw_file;
-            self.l2_cache.insert(l1_index, l2_table, |index, evicted| {
-                raw_file.write_pointer_table_direct(l1_table[index], evicted.iter())
-            })?;
+            self.insert_l2_table(l1_index, l2_table)?;
         }
         Ok(())
+    }
+
+    fn insert_l2_table(&mut self, index: usize, table: VecCache<u64>) -> io::Result<()> {
+        let Self {
+            raw_file,
+            header,
+            l1_table,
+            l2_offsets,
+            refcounts,
+            l2_cache,
+            ..
+        } = self;
+        l2_cache.insert(index, table, |index, evicted| {
+            write_l2_table(
+                raw_file,
+                header,
+                l2_offsets,
+                refcounts,
+                l1_table[index],
+                &evicted,
+            )
+        })
     }
 
     /// Allocates a new cluster from the free list or by extending the file.
     fn get_new_cluster(&mut self, initial_data: Option<Vec<u8>>) -> io::Result<u64> {
         if let Some(free_cluster) = self.avail_clusters.pop() {
-            if free_cluster == 0 {
-                self.set_corrupt_bit_best_effort();
-                return Err(io::Error::from_raw_os_error(EIO));
-            }
+            self.reject_invalid_data_cluster_offset(free_cluster)?;
             if let Some(initial_data) = initial_data {
                 self.raw_file.write_cluster(free_cluster, &initial_data)?;
             } else {
@@ -718,10 +944,7 @@ impl QcowState {
 
         let max_valid = self.refcounts.max_valid_cluster_offset();
         if let Some(new_cluster) = self.raw_file.add_cluster_end(max_valid)? {
-            if new_cluster == 0 {
-                self.set_corrupt_bit_best_effort();
-                return Err(io::Error::from_raw_os_error(EIO));
-            }
+            self.reject_invalid_data_cluster_offset(new_cluster)?;
             if let Some(initial_data) = initial_data {
                 self.raw_file.write_cluster(new_cluster, &initial_data)?;
             }
@@ -810,7 +1033,7 @@ impl QcowState {
         self.l2_cache.get_mut(l1_index).unwrap()[l2_index] = l2_entry_make_std(cluster_addr);
 
         if let Some((old_l2, new_addr)) = relocation {
-            self.l1_table[l1_index] = new_addr; // marks l1_table dirty via IndexMut
+            self.set_l2_table_addr(l1_index, new_addr);
             if old_l2 != 0 {
                 self.set_cluster_refcount_track_freed(old_l2, 0)?;
                 self.unref_clusters.push(old_l2);
@@ -833,10 +1056,24 @@ impl QcowState {
             return Err(io::Error::other("shrinking QCOW2 images is not supported"));
         }
 
+        if new_size > MAX_QCOW_FILE_SIZE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                super::Error::FileTooBig(new_size),
+            ));
+        }
+
         let cluster_size = self.raw_file.cluster_size();
         let entries_per_cluster = cluster_size / size_of::<u64>() as u64;
         let new_clusters = div_round_up_u64(new_size, cluster_size);
-        let needed_l1_entries = div_round_up_u64(new_clusters, entries_per_cluster) as u32;
+        let needed_l1_entries = div_round_up_u64(new_clusters, entries_per_cluster);
+        if needed_l1_entries > MAX_RAM_POINTER_TABLE_SIZE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                super::Error::TooManyL1Entries(needed_l1_entries),
+            ));
+        }
+        let needed_l1_entries = needed_l1_entries as u32;
 
         if needed_l1_entries > self.header.l1_size {
             self.grow_l1_table(needed_l1_entries)?;
@@ -845,7 +1082,7 @@ impl QcowState {
         self.header.size = new_size;
 
         self.header
-            .write_to(self.raw_file.file_mut())
+            .update(self.raw_file.file_mut())
             .map_err(|e| io::Error::other(format!("failed to write header during resize: {e}")))?;
 
         self.raw_file.file_mut().sync_all()?;
@@ -855,6 +1092,9 @@ impl QcowState {
 
     /// Grows the L1 table to accommodate at least the requested number of entries.
     fn grow_l1_table(&mut self, new_l1_size: u32) -> io::Result<()> {
+        // Make relocated L2 tables durable before the new L1 points at them.
+        self.sync_caches()?;
+
         let old_l1_size = self.header.l1_size;
         let old_l1_offset = self.header.l1_table_offset;
         let cluster_size = self.raw_file.cluster_size();
@@ -864,9 +1104,24 @@ impl QcowState {
 
         // Allocate contiguous clusters at file end for new L1 table
         let file_size = self.raw_file.physical_size()?;
-        let new_l1_offset = self.raw_file.cluster_address(file_size + cluster_size - 1);
-
-        let new_file_end = new_l1_offset + new_l1_clusters * cluster_size;
+        let new_l1_offset = self.raw_file.cluster_address(
+            file_size
+                .checked_add(cluster_size - 1)
+                .ok_or_else(|| io::Error::from_raw_os_error(EINVAL))?,
+        );
+        let new_l1_size_bytes = new_l1_clusters * cluster_size;
+        if MetadataLayout::new(&self.header, &self.l2_offsets).overlaps_metadata(
+            new_l1_offset,
+            new_l1_size_bytes,
+            None,
+            &self.refcounts,
+        ) {
+            self.set_corrupt_bit_best_effort();
+            return Err(io::Error::from_raw_os_error(EIO));
+        }
+        let new_file_end = new_l1_offset
+            .checked_add(new_l1_size_bytes)
+            .ok_or_else(|| io::Error::from_raw_os_error(EINVAL))?;
         self.raw_file.file_mut().set_len(new_file_end)?;
 
         // Set refcounts for the contiguous range
@@ -882,7 +1137,11 @@ impl QcowState {
             if *l2_addr != 0 {
                 let refcount = self
                     .refcounts
-                    .get_cluster_refcount(&mut self.raw_file, *l2_addr)
+                    .get_cluster_refcount(
+                        &mut self.raw_file,
+                        *l2_addr,
+                        MetadataLayout::new(&self.header, &self.l2_offsets),
+                    )
                     .map_err(|e| {
                         io::Error::other(format!("failed to get refcount during resize: {e}"))
                     })?;
@@ -900,7 +1159,7 @@ impl QcowState {
         self.header.l1_table_offset = new_l1_offset;
 
         self.header
-            .write_to(self.raw_file.file_mut())
+            .update(self.raw_file.file_mut())
             .map_err(|e| io::Error::other(format!("failed to write header during resize: {e}")))?;
 
         self.raw_file.file_mut().sync_all()?;
@@ -946,6 +1205,7 @@ impl QcowState {
             None => return Err(io::Error::from_raw_os_error(EINVAL)),
         };
         let l2_index = self.l2_table_index(address) as usize;
+        self.reject_shared_l2_table_offset(l2_addr_disk)?;
         let dealloc_entry = if zero_marker {
             l2_entry_make_zero_plain()
         } else {
@@ -981,7 +1241,7 @@ impl QcowState {
         }
 
         let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
-        self.reject_invalid_cluster_offset(cluster_addr)?;
+        self.reject_invalid_data_cluster_offset(cluster_addr)?;
         let refcount = self.cluster_refcount(cluster_addr)?;
         if refcount == 0 {
             return Err(io::Error::from_raw_os_error(EINVAL));
@@ -1009,9 +1269,17 @@ impl QcowState {
 
     fn cluster_refcount(&mut self, cluster_addr: u64) -> io::Result<u64> {
         self.refcounts
-            .get_cluster_refcount(&mut self.raw_file, cluster_addr)
+            .get_cluster_refcount(
+                &mut self.raw_file,
+                cluster_addr,
+                MetadataLayout::new(&self.header, &self.l2_offsets),
+            )
             .map_err(|e| {
-                if matches!(e, refcount::Error::RefblockUnaligned(_)) {
+                if matches!(
+                    e,
+                    refcount::Error::RefblockUnaligned(_)
+                        | refcount::Error::InvalidRefblockOffset(_)
+                ) {
                     self.set_corrupt_bit_best_effort();
                 }
                 io::Error::new(
@@ -1041,6 +1309,7 @@ impl QcowState {
                 address,
                 refcount,
                 new_cluster.take(),
+                MetadataLayout::new(&self.header, &self.l2_offsets),
             ) {
                 Ok(None) => {
                     refcount_set = true;
@@ -1078,7 +1347,10 @@ impl QcowState {
                 Err(refcount::Error::RefcountOverflow { .. }) => {
                     return Err(io::Error::from_raw_os_error(EINVAL));
                 }
-                Err(refcount::Error::RefblockUnaligned(_)) => {
+                Err(
+                    refcount::Error::RefblockUnaligned(_)
+                    | refcount::Error::InvalidRefblockOffset(_),
+                ) => {
                     self.set_corrupt_bit_best_effort();
                     return Err(io::Error::from_raw_os_error(EIO));
                 }
@@ -1094,20 +1366,20 @@ impl QcowState {
 
     /// Flushes all dirty metadata to disk.
     fn sync_caches(&mut self) -> io::Result<()> {
-        // Write out all dirty L2 tables.
         for (l1_index, l2_table) in self.l2_cache.iter_mut().filter(|(_k, v)| v.dirty()) {
-            let addr = self.l1_table[*l1_index];
-            if addr != 0 {
-                self.raw_file
-                    .write_pointer_table_direct(addr, l2_table.iter())?;
-            } else {
-                self.set_corrupt_bit_best_effort();
-                return Err(io::Error::from_raw_os_error(EINVAL));
-            }
+            write_l2_table(
+                &mut self.raw_file,
+                &mut self.header,
+                &self.l2_offsets,
+                &self.refcounts,
+                self.l1_table[*l1_index],
+                l2_table,
+            )?;
             l2_table.mark_clean();
         }
+        let layout = MetadataLayout::new(&self.header, &self.l2_offsets);
         // Write the modified refcount blocks.
-        self.refcounts.flush_blocks(&mut self.raw_file)?;
+        self.refcounts.flush_blocks(&mut self.raw_file, layout)?;
         // Sync metadata and data clusters.
         self.raw_file.file_mut().sync_all()?;
 
@@ -1122,7 +1394,7 @@ impl QcowState {
                         Ok(0)
                     } else {
                         let refcount = refcounts
-                            .get_cluster_refcount(raw_file, l2_addr)
+                            .get_cluster_refcount(raw_file, l2_addr, layout)
                             .map_err(|e| io::Error::other(super::Error::GettingRefcount(e)))?;
                         Ok(l1_entry_make(l2_addr, refcount == 1))
                     }
@@ -1145,6 +1417,7 @@ impl QcowState {
     fn decompress_l2_cluster(&mut self, l2_entry: u64) -> io::Result<Vec<u8>> {
         let (compressed_addr, compressed_size) =
             l2_entry_compressed_cluster_layout(l2_entry, self.header.cluster_bits);
+        self.reject_invalid_compressed_range(compressed_addr, compressed_size)?;
         let mut compressed = vec![0u8; compressed_size];
         self.raw_file
             .file_mut()
@@ -1169,6 +1442,7 @@ impl QcowState {
     fn deallocate_compressed_cluster(&mut self, l2_entry: u64) -> io::Result<()> {
         let (compressed_addr, compressed_size) =
             l2_entry_compressed_cluster_layout(l2_entry, self.header.cluster_bits);
+        self.reject_invalid_compressed_range(compressed_addr, compressed_size)?;
         let cluster_size = self.raw_file.cluster_size();
 
         // Calculate the end of the compressed data region
@@ -1201,6 +1475,430 @@ impl QcowState {
 
 #[cfg(test)]
 mod tests {
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::{ClusterOffsets, MetadataLayout};
+
+    fn test_state() -> (TempFile, super::QcowState) {
+        let temp = super::super::QcowTempDisk::new(64 << 16, None, false, true, false)
+            .unwrap()
+            .into_tempfile();
+        let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+        let (mut state, _, _) = super::super::parser::parse_qcow(raw, 0, true).unwrap();
+        state.map_write(0, None).unwrap();
+        state.sync_caches().unwrap();
+        (temp, state)
+    }
+
+    #[test]
+    fn metadata_layout_checks_partial_cluster_overlap() {
+        let header =
+            super::QcowHeader::create_for_size_path_and_cluster_bits(3, 512, None, 9).unwrap();
+        let offsets = ClusterOffsets::new(&[2048]);
+        let layout = MetadataLayout::new(&header, &offsets);
+        assert!(!layout.overlaps(2047, 1, None));
+        assert!(layout.overlaps(2047, 2, None));
+        assert!(!layout.overlaps(2560, 512, None));
+        assert!(!layout.overlaps(2048, 512, Some(2048)));
+    }
+
+    #[test]
+    fn metadata_offsets_track_relocation_and_duplicate_references() {
+        let mut offsets = ClusterOffsets::new(&[512, 512, 1024]);
+        assert!(offsets.is_shared(512));
+        assert!(!offsets.overlaps(512, 512, 512, Some(512)));
+        offsets.replace(512, 1536);
+        assert!(!offsets.is_shared(512));
+        assert!(!offsets.overlaps(512, 512, 512, Some(512)));
+        assert!(offsets.overlaps(511, 2, 512, None));
+        assert!(!offsets.overlaps(0, 512, 512, None));
+        offsets.replace(512, 0);
+        assert!(!offsets.overlaps(512, 512, 512, None));
+        assert!(offsets.overlaps(1536, 512, 512, None));
+        assert!(offsets.overlaps(u64::MAX, 1, 512, None));
+    }
+
+    #[test]
+    fn l1_growth_preserves_flushed_data_after_unclean_close() {
+        use std::os::unix::fs::FileExt;
+
+        let (temp, mut state) = test_state();
+        let cluster_size = state.raw_file.cluster_size();
+        let data_addr = super::l2_entry_std_cluster_addr(state.l2_cache.get(0).unwrap()[0]);
+        temp.as_file()
+            .write_all_at(&[0xa5; 512], data_addr)
+            .unwrap();
+        state.sync_caches().unwrap();
+
+        // Relocate L2 in memory, then grow L1 before that relocation is flushed.
+        let old_l2 = state.l1_table[0];
+        state.map_write(cluster_size, None).unwrap();
+        assert_ne!(state.l1_table[0], old_l2);
+        state
+            .resize(cluster_size * (cluster_size / 8) + cluster_size)
+            .unwrap();
+        drop(state); // Skip shutdown and its metadata flush.
+
+        let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+        let (mut state, _, _) = super::super::parser::parse_qcow(raw, 0, true).unwrap();
+        let super::ClusterReadMapping::Allocated { offset, .. } =
+            state.map_read_with_populate(0, 512, false).unwrap()
+        else {
+            panic!("Previously flushed data was lost during L1 growth");
+        };
+        let mut data = [0; 512];
+        temp.as_file().read_exact_at(&mut data, offset).unwrap();
+        assert_eq!(data, [0xa5; 512]);
+    }
+
+    #[test]
+    fn oversized_resize_does_not_modify_the_image() {
+        use std::fs;
+        use std::io::ErrorKind;
+
+        let cluster_size = 512;
+        let temp = super::super::QcowTempDisk::new_with_cluster_bits(
+            8 * cluster_size,
+            None,
+            false,
+            true,
+            false,
+            9,
+        )
+        .unwrap()
+        .into_tempfile();
+        let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+        let (mut state, _, _) = super::super::parser::parse_qcow(raw, 0, true).unwrap();
+        let before = fs::read(temp.as_path()).unwrap();
+        let old_size = state.header.size;
+        for new_size in [
+            super::MAX_QCOW_FILE_SIZE + 512,
+            1 << 47, // Requires 2^32 L1 entries with 512-byte clusters.
+            (super::MAX_RAM_POINTER_TABLE_SIZE + 1) * cluster_size * (cluster_size / 8),
+        ] {
+            assert_eq!(
+                state.resize(new_size).unwrap_err().kind(),
+                ErrorKind::InvalidInput
+            );
+            assert_eq!(state.header.size, old_size);
+            assert_eq!(fs::read(temp.as_path()).unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn failed_shutdown_keeps_dirty_bit() {
+        let (temp, mut state) = test_state();
+        state
+            .map_write(state.raw_file.cluster_size(), None)
+            .unwrap();
+        // Force writeback to fail by pointing L2 at the L1 table.
+        state.l1_table[0] = state.header.l1_table_offset;
+        super::QcowMetadata::new(state).shutdown();
+
+        let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+        let header = super::QcowHeader::new(&raw).unwrap();
+        assert_ne!(
+            header.incompatible_features & super::super::IncompatFeatures::DIRTY.bits(),
+            0
+        );
+    }
+
+    #[test]
+    fn shared_data_clusters_allow_reads_but_reject_writes() {
+        use std::io::ErrorKind;
+
+        let (_temp, mut state) = test_state();
+        let cluster_size = state.raw_file.cluster_size();
+        let data_addr = super::l2_entry_std_cluster_addr(state.l2_cache.get(0).unwrap()[0]);
+        // Two active L2 entries share a data cluster without any snapshots.
+        state.l2_cache.get_mut(0).unwrap()[0] = data_addr;
+        state.l2_cache.get_mut(0).unwrap()[1] = data_addr;
+        state.set_cluster_refcount(data_addr, 2).unwrap();
+        state.sync_caches().unwrap();
+
+        for address in [0, cluster_size] {
+            let super::ClusterReadMapping::Allocated { offset, .. } =
+                state.map_read_with_populate(address, 512, false).unwrap()
+            else {
+                panic!("Shared data cluster did not map for reading");
+            };
+            assert_eq!(offset, data_addr);
+            assert_eq!(
+                state.map_write(address, None).unwrap_err().kind(),
+                ErrorKind::Unsupported
+            );
+        }
+        assert_eq!(state.cluster_refcount(data_addr).unwrap(), 2);
+        for index in 0..2 {
+            assert_eq!(state.l2_cache.get(0).unwrap()[index], data_addr);
+        }
+        assert!(!state.header.is_corrupt());
+    }
+
+    #[test]
+    fn shared_l2_tables_allow_reads_but_reject_mutations() {
+        use std::fs::{self, OpenOptions};
+        use std::io::ErrorKind;
+        use std::os::unix::fs::FileExt;
+
+        let cluster_size = 1 << 16;
+        let l2_coverage = cluster_size * cluster_size / 8;
+        for shared_index in [1usize, 2] {
+            for writable in [false, true] {
+                let temp =
+                    super::super::QcowTempDisk::new(2 * l2_coverage, None, false, true, false)
+                        .unwrap()
+                        .into_tempfile();
+                // Include an alias beyond virtual coverage in the declared L1 table.
+                temp.as_file()
+                    .write_all_at(&((shared_index + 1) as u32).to_be_bytes(), 36)
+                    .unwrap();
+                let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+                let (mut state, _, _) = super::super::parser::parse_qcow(raw, 0, true).unwrap();
+                let super::ClusterWriteMapping::Allocated { offset: data_addr } =
+                    state.map_write(0, None).unwrap();
+                temp.as_file()
+                    .write_all_at(&[0xa5; 512], data_addr)
+                    .unwrap();
+                state.set_cluster_refcount(data_addr, 2).unwrap();
+                let l2_addr = state.l1_table[0];
+                state.set_cluster_refcount(l2_addr, 2).unwrap();
+                // Clear the copied flag on the shared data entry.
+                state.l2_cache.get_mut(0).unwrap()[0] = data_addr;
+                // Flush the contents before making the table shared on disk.
+                state.sync_caches().unwrap();
+                state.set_l2_table_addr(shared_index, l2_addr);
+                state.sync_caches().unwrap();
+                state
+                    .header
+                    .set_dirty_bit(state.raw_file.file_mut(), false)
+                    .unwrap();
+                drop(state);
+
+                let file = OpenOptions::new()
+                    .read(true)
+                    .write(writable)
+                    .open(temp.as_path())
+                    .unwrap();
+                let raw = crate::AlignedFile::new(file, false);
+                let (mut state, _, _) = super::super::parser::parse_qcow(raw, 0, true).unwrap();
+                state.l2_cache = super::super::vec_cache::CacheMap::new(1);
+                let before = fs::read(temp.as_path()).unwrap();
+                for address in [0, l2_coverage * shared_index as u64] {
+                    if address >= state.header.size {
+                        continue;
+                    }
+                    let super::ClusterReadMapping::Allocated { offset, .. } =
+                        state.map_read_with_populate(address, 512, false).unwrap()
+                    else {
+                        panic!("Shared L2 table did not map the data cluster");
+                    };
+                    assert_eq!(offset, data_addr);
+                    let mut data = [0; 512];
+                    temp.as_file().read_exact_at(&mut data, offset).unwrap();
+                    assert_eq!(data, [0xa5; 512]);
+                    assert_eq!(
+                        state.map_write(address, None).unwrap_err().kind(),
+                        ErrorKind::Unsupported
+                    );
+                    for (sparse, zero_marker) in [(false, false), (true, false), (true, true)] {
+                        assert_eq!(
+                            state
+                                .deallocate_cluster(address, sparse, zero_marker)
+                                .unwrap_err()
+                                .kind(),
+                            ErrorKind::Unsupported,
+                        );
+                    }
+                }
+                assert!(!state.header.is_corrupt());
+                assert_eq!(state.cluster_refcount(l2_addr).unwrap(), 2);
+                assert_eq!(state.cluster_refcount(data_addr).unwrap(), 2);
+                assert_eq!(fs::read(temp.as_path()).unwrap(), before);
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_compressed_ranges_are_rejected_before_io() {
+        use std::os::unix::fs::FileExt;
+
+        use super::super::util::COMPRESSED_FLAG;
+
+        let cluster_size = 1 << 16;
+        for target in [
+            "header",
+            "header end",
+            "out of range",
+            "L1",
+            "refcount table",
+            "L2",
+            "refcount block",
+            "L2 boundary",
+        ] {
+            let (temp, mut inner) = test_state();
+            let mut refblock = [0u8; 8];
+            temp.as_file()
+                .read_exact_at(&mut refblock, inner.header.refcount_table_offset)
+                .unwrap();
+            let addr = match target {
+                "header" => 0,
+                "header end" => cluster_size - 1,
+                "out of range" => 1 << 50,
+                "L1" => inner.header.l1_table_offset,
+                "refcount table" => inner.header.refcount_table_offset,
+                "L2" => inner.l1_table[0],
+                "refcount block" => u64::from_be_bytes(refblock),
+                _ => inner.l1_table[0] - 1,
+            };
+            let free = inner.avail_clusters.clone();
+            let unref = inner.unref_clusters.clone();
+            // Two sectors make the last case cross into the L2 table.
+            let entry = COMPRESSED_FLAG | addr | if target == "L2 boundary" { 1 << 54 } else { 0 };
+            inner.l2_cache.get_mut(0).unwrap()[0] = entry;
+
+            assert!(inner.try_map_read(0, 1, false).unwrap().is_none());
+            assert_eq!(
+                inner
+                    .map_read_with_populate(0, 1, false)
+                    .unwrap_err()
+                    .raw_os_error(),
+                Some(libc::EIO),
+            );
+            assert!(inner.header.is_corrupt());
+            assert_eq!(
+                inner
+                    .decompress_l2_cluster(entry)
+                    .unwrap_err()
+                    .raw_os_error(),
+                Some(libc::EIO),
+            );
+            assert_eq!(
+                inner
+                    .deallocate_compressed_cluster(entry)
+                    .unwrap_err()
+                    .raw_os_error(),
+                Some(libc::EIO),
+            );
+            assert_eq!(inner.avail_clusters, free);
+            assert_eq!(inner.unref_clusters, unref);
+        }
+    }
+
+    #[test]
+    fn invalid_l1_writeback_targets_are_rejected() {
+        use std::os::unix::fs::FileExt;
+
+        let cluster_size = 1 << 16;
+        for target in [
+            "header",
+            "unaligned header",
+            "unaligned cluster",
+            "out of range",
+            "L1",
+            "refcount table",
+            "refcount block",
+            "shared L2",
+        ] {
+            for path in ["flush", "read eviction", "write eviction"] {
+                let (temp, mut inner) = test_state();
+                let l2_addr = inner.append_data_cluster(None).unwrap();
+                inner.l1_table.extend(2);
+                inner.set_l2_table_addr(1, l2_addr);
+                inner.sync_caches().unwrap();
+                let mut refblock = [0u8; 8];
+                temp.as_file()
+                    .read_exact_at(&mut refblock, inner.header.refcount_table_offset)
+                    .unwrap();
+                let addr = match target {
+                    "header" => 0,
+                    "unaligned header" => 1,
+                    "unaligned cluster" => cluster_size + 1,
+                    "out of range" => 1 << 50,
+                    "L1" => inner.header.l1_table_offset,
+                    "refcount table" => inner.header.refcount_table_offset,
+                    "refcount block" => u64::from_be_bytes(refblock),
+                    _ => l2_addr,
+                };
+                // A single dirty entry makes eviction deterministic.
+                inner.l2_cache = super::super::vec_cache::CacheMap::new(1);
+                inner
+                    .l2_cache
+                    .insert(
+                        0,
+                        super::super::vec_cache::VecCache::new(inner.l2_entries as usize),
+                        |_, _| unreachable!(),
+                    )
+                    .unwrap();
+                inner.set_l2_table_addr(0, addr);
+                let mut before = [0u8; 72];
+                temp.as_file().read_exact_at(&mut before, 0).unwrap();
+
+                let err = match path {
+                    "flush" => inner.sync_caches(),
+                    "read eviction" => inner.cache_l2_cluster(1, l2_addr),
+                    _ => inner.cache_l2_cluster_alloc(1, l2_addr),
+                }
+                .unwrap_err();
+                assert_eq!(err.raw_os_error(), Some(libc::EIO));
+                assert!(inner.header.is_corrupt());
+                let mut after = [0u8; 72];
+                temp.as_file().read_exact_at(&mut after, 0).unwrap();
+                assert_eq!(before, after);
+            }
+        }
+    }
+
+    #[test]
+    fn data_mappings_and_allocation_reject_metadata_clusters() {
+        use super::super::util::l2_entry_make_std;
+
+        for target in ["L1", "refcount table", "L2"] {
+            let (_temp, mut inner) = test_state();
+            let addr = match target {
+                "L1" => inner.header.l1_table_offset,
+                "refcount table" => inner.header.refcount_table_offset,
+                _ => inner.l1_table[0],
+            };
+            inner.l2_cache.get_mut(0).unwrap()[0] = l2_entry_make_std(addr);
+            assert!(inner.try_map_read(0, 1, false).unwrap().is_none());
+            assert_eq!(
+                inner
+                    .map_read_with_populate(0, 1, false)
+                    .unwrap_err()
+                    .raw_os_error(),
+                Some(libc::EIO)
+            );
+            assert_eq!(
+                inner.map_write(0, None).unwrap_err().raw_os_error(),
+                Some(libc::EIO)
+            );
+            assert_eq!(
+                inner
+                    .deallocate_cluster(0, true, false)
+                    .unwrap_err()
+                    .raw_os_error(),
+                Some(libc::EIO)
+            );
+            inner.avail_clusters.push(addr);
+            assert_eq!(
+                inner.get_new_cluster(None).unwrap_err().raw_os_error(),
+                Some(libc::EIO)
+            );
+        }
+    }
+
+    #[test]
+    fn l1_growth_rejects_metadata_overlap_before_extending_the_file() {
+        let (_temp, mut state) = test_state();
+        let file_len = state.raw_file.physical_size().unwrap();
+        let cluster_size = state.raw_file.cluster_size();
+        state.header.refcount_table_clusters = (file_len / cluster_size + 1) as u32;
+        let err = state.grow_l1_table(state.header.l1_size + 1).unwrap_err();
+        assert_eq!(err.raw_os_error(), Some(libc::EIO));
+        assert_eq!(state.raw_file.physical_size().unwrap(), file_len);
+    }
+
     // Regression for the ENOSPC unwind on the relocate-on-write path: when
     // the allocation for the relocated table fails, the still-referenced old
     // L2 table must not be left on the free lists (issue #8606).
@@ -1340,10 +2038,7 @@ mod tests {
             .filter(|&(_, addr)| addr != 0)
             .collect();
         for (index, addr) in published {
-            let refcount = inner
-                .refcounts
-                .get_cluster_refcount(&mut inner.raw_file, addr)
-                .unwrap();
+            let refcount = inner.cluster_refcount(addr).unwrap();
             assert_ne!(
                 refcount, 0,
                 "L1[{index}] points at cluster {addr:#x} that the free list scan reclaims"
@@ -1396,10 +2091,7 @@ mod tests {
             .expect_err("the L2 relocation must fail with the allocator exhausted");
         assert_eq!(err.raw_os_error(), Some(libc::ENOSPC));
 
-        let refcount = inner
-            .refcounts
-            .get_cluster_refcount(&mut inner.raw_file, data_cluster)
-            .unwrap();
+        let refcount = inner.cluster_refcount(data_cluster).unwrap();
         assert_eq!(
             refcount, 0,
             "the data cluster of a failed write must not stay allocated"
@@ -1590,14 +2282,7 @@ mod tests {
             super::super::parser::parse_qcow(raw, 0, true).unwrap();
         assert_eq!(reopened.l1_table[0], live_l2);
 
-        let live_refcount = {
-            let super::QcowState {
-                refcounts,
-                raw_file,
-                ..
-            } = &mut reopened;
-            refcounts.get_cluster_refcount(raw_file, live_l2).unwrap()
-        };
+        let live_refcount = reopened.cluster_refcount(live_l2).unwrap();
         let live_marked_free = reopened.avail_clusters.contains(&live_l2);
         let next_allocation = reopened
             .get_new_cluster(None)
@@ -1639,19 +2324,8 @@ mod tests {
         assert_ne!(relocated_l2, 0);
         assert_ne!(relocated_l2, old_l2);
 
-        let (old_refcount, relocated_refcount) = {
-            let super::QcowState {
-                refcounts,
-                raw_file,
-                ..
-            } = &mut inner;
-            (
-                refcounts.get_cluster_refcount(raw_file, old_l2).unwrap(),
-                refcounts
-                    .get_cluster_refcount(raw_file, relocated_l2)
-                    .unwrap(),
-            )
-        };
+        let old_refcount = inner.cluster_refcount(old_l2).unwrap();
+        let relocated_refcount = inner.cluster_refcount(relocated_l2).unwrap();
         assert_eq!(
             old_refcount, 0,
             "successful relocation must release the old L2 refcount"
@@ -1703,14 +2377,7 @@ mod tests {
             .expect("zero-marker deallocation must allocate its metadata table");
         let live_l2 = inner.l1_table[0];
         assert_ne!(live_l2, 0);
-        let refcount = {
-            let super::QcowState {
-                refcounts,
-                raw_file,
-                ..
-            } = &mut inner;
-            refcounts.get_cluster_refcount(raw_file, live_l2).unwrap()
-        };
+        let refcount = inner.cluster_refcount(live_l2).unwrap();
         assert_eq!(refcount, 1);
     }
 
@@ -1813,17 +2480,7 @@ mod tests {
         let mut inner = open();
         assert_eq!(read_back(&mut inner), [0xa5; 16]);
         let data_cluster = offset & !(cluster_size - 1);
-        let super::QcowState {
-            ref mut refcounts,
-            ref mut raw_file,
-            ..
-        } = inner;
-        assert_eq!(
-            refcounts
-                .get_cluster_refcount(raw_file, data_cluster)
-                .unwrap(),
-            1
-        );
+        assert_eq!(inner.cluster_refcount(data_cluster).unwrap(), 1);
     }
 
     // A one-cluster refcount table of 512-byte clusters covers 8 MiB of the

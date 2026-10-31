@@ -103,7 +103,8 @@ where
     let bytes_per_entry = size_of::<T>();
     let mut buffer = Vec::with_capacity(table.len() * bytes_per_entry);
     for &val in table {
-        let converted = T::try_from(val).expect("refcount values are validated on increment");
+        let converted = T::try_from(val)
+            .map_err(|_| io::Error::other(format!("Refcount value out of range: {val}")))?;
         T::write_be(&mut buffer, converted)?;
     }
     file.write_all_at(&buffer, offset)
@@ -312,11 +313,15 @@ impl QcowRawFile {
         self.file.write_all_at(&buffer, offset)
     }
 
-    /// Read a refcount block from the file and returns a Vec containing the block.
-    /// Always returns a cluster's worth of data.
+    /// Reads `count` refcounts from the file.
+    pub(super) fn read_refcounts(&mut self, offset: u64, count: usize) -> io::Result<Vec<u64>> {
+        (self.read_refcount_fn)(&mut self.file, offset, count)
+    }
+
+    /// Reads one cluster of refcounts.
     #[inline]
     pub(super) fn read_refcount_block(&mut self, offset: u64) -> io::Result<Vec<u64>> {
-        (self.read_refcount_fn)(&mut self.file, offset, self.refcount_block_entries as usize)
+        self.read_refcounts(offset, self.refcount_block_entries as usize)
     }
 
     /// Writes a refcount block to the file.
@@ -333,13 +338,19 @@ impl QcowRawFile {
         // Determine where the new end of the file should be and set_len, which
         // translates to truncate(2).
         let file_end: u64 = self.physical_size()?;
-        let new_cluster_address: u64 = (file_end + self.cluster_size - 1) & !self.cluster_mask;
+        let new_cluster_address: u64 = file_end
+            .checked_add(self.cluster_size - 1)
+            .ok_or_else(|| io::Error::other("File end + cluster size overflow"))?
+            & !self.cluster_mask;
 
         if new_cluster_address > max_valid_cluster_offset {
             return Ok(None);
         }
 
-        self.file.set_len(new_cluster_address + self.cluster_size)?;
+        let new_len = new_cluster_address
+            .checked_add(self.cluster_size)
+            .ok_or_else(|| io::Error::other("New cluster end overflow"))?;
+        self.file.set_len(new_len)?;
 
         Ok(Some(new_cluster_address))
     }

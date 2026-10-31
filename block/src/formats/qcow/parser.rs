@@ -21,14 +21,16 @@ pub use super::header::{
     QcowHeader,
 };
 use super::header::{
-    COMPATIBLE_FEATURES_LAZY_REFCOUNTS, MAX_CLUSTER_BITS, MAX_QCOW_FILE_SIZE,
-    MAX_RAM_POINTER_TABLE_SIZE, MIN_CLUSTER_BITS, QCOW_MAGIC, max_refcount_clusters,
-    offset_is_cluster_boundary,
+    MAX_CLUSTER_BITS, MAX_QCOW_FILE_SIZE, MAX_RAM_POINTER_TABLE_SIZE, MIN_CLUSTER_BITS, QCOW_MAGIC,
+    max_refcount_clusters, offset_is_cluster_boundary,
 };
 use super::qcow_raw_file::QcowRawFile;
 use super::refcount::RefCount;
 pub(crate) use super::util::MAX_NESTING_DEPTH;
-use super::util::{L1_TABLE_OFFSET_MASK, L2_TABLE_OFFSET_MASK, div_round_up_u64};
+use super::util::{
+    L1_TABLE_OFFSET_MASK, compressed_cluster_range_is_valid, div_round_up_u64,
+    l2_entry_compressed_cluster_layout, l2_entry_is_compressed, l2_entry_std_cluster_addr,
+};
 use super::vec_cache::{CacheMap, VecCache};
 use super::{metadata, refcount};
 use crate::aligned_file::AlignedFile;
@@ -74,20 +76,18 @@ pub enum Error {
     InvalidClusterIndex,
     #[error("Invalid cluster size")]
     InvalidClusterSize,
+    #[error("Compression type and incompatible feature bit do not match")]
+    InvalidCompressionFeature,
     #[error("Invalid header length: {0}")]
     InvalidHeaderLength(u32),
     #[error("Invalid index")]
     InvalidIndex,
-    #[error("Invalid L1 table offset")]
-    InvalidL1TableOffset,
     #[error("Invalid L1 table size: {0}")]
     InvalidL1TableSize(u32),
     #[error("Invalid magic")]
     InvalidMagic,
     #[error("Invalid offset: {0}")]
     InvalidOffset(u64),
-    #[error("Invalid refcount table offset")]
-    InvalidRefcountTableOffset,
     #[error("Invalid refcount table size: {0}")]
     InvalidRefcountTableSize(u64),
     #[error("Maximum disk nesting depth exceeded")]
@@ -96,6 +96,8 @@ pub enum Error {
     NoRefcountClusters,
     #[error("Not enough space for refcounts")]
     NotEnoughSpaceForRefcounts,
+    #[error("Metadata tables overlap or overflow")]
+    OverlappingMetadata,
     #[error("Failed to read header")]
     ReadingHeader(#[source] io::Error),
     #[error("Failed to read pointers")]
@@ -253,7 +255,8 @@ pub(crate) fn parse_qcow(
         let kind = match &e {
             Error::InvalidMagic
             | Error::BackingFileTooLong(_)
-            | Error::InvalidBackingFileName(_) => BlockErrorKind::InvalidFormat,
+            | Error::InvalidBackingFileName(_)
+            | Error::InvalidCompressionFeature => BlockErrorKind::InvalidFormat,
             Error::UnsupportedFeature(_)
             | Error::UnsupportedCompressionType
             | Error::UnsupportedSnapshots => BlockErrorKind::UnsupportedFeature,
@@ -292,6 +295,16 @@ pub(crate) fn parse_qcow(
         return Err(BlockError::new(
             BlockErrorKind::InvalidFormat,
             Error::FileTooBig(header.size),
+        ));
+    }
+
+    let entries_per_cluster = cluster_size / size_of::<u64>() as u64;
+    let num_clusters = div_round_up_u64(header.size, cluster_size);
+    let num_l2_clusters = div_round_up_u64(num_clusters, entries_per_cluster);
+    if u64::from(header.l1_size) < num_l2_clusters {
+        return Err(BlockError::new(
+            BlockErrorKind::CorruptImage,
+            Error::InvalidL1TableSize(header.l1_size),
         ));
     }
 
@@ -346,6 +359,12 @@ pub(crate) fn parse_qcow(
     // refcount table must be a cluster boundary, and within the file's virtual or actual size.
     offset_is_cluster_boundary(header.refcount_table_offset, header.cluster_bits)
         .map_err(|e| BlockError::new(BlockErrorKind::CorruptImage, e))?;
+    if !super::metadata::metadata_tables_are_disjoint(&header) {
+        return Err(BlockError::new(
+            BlockErrorKind::CorruptImage,
+            Error::OverlappingMetadata,
+        ));
+    }
     let file_size = file
         .metadata()
         .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::GettingFileSize(e)))?
@@ -364,22 +383,17 @@ pub(crate) fn parse_qcow(
     file.read_exact_at(&mut first_refblock_bytes, header.refcount_table_offset)
         .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ReadingHeader(e)))?;
     let first_refblock_addr = u64::from_be_bytes(first_refblock_bytes);
+    let mut raw_file = QcowRawFile::from(file, cluster_size, refcount_bits)
+        .ok_or_else(|| BlockError::new(BlockErrorKind::InvalidFormat, Error::InvalidClusterSize))?;
     if first_refblock_addr != 0 {
-        let mut refcount_bytes = [0u8; 2];
-        file.read_exact_at(&mut refcount_bytes, first_refblock_addr)
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ReadingHeader(e)))?;
-        let first_cluster_refcount = u16::from_be_bytes(refcount_bytes);
+        let first_cluster_refcount = raw_file
+            .read_refcounts(first_refblock_addr, 1)
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ReadingHeader(e)))?[0];
         if first_cluster_refcount != 0 {
             refcount_rebuild_required = false;
         }
     }
 
-    if (header.compatible_features & COMPATIBLE_FEATURES_LAZY_REFCOUNTS) != 0 {
-        refcount_rebuild_required = true;
-    }
-
-    let mut raw_file = QcowRawFile::from(file, cluster_size, refcount_bits)
-        .ok_or_else(|| BlockError::new(BlockErrorKind::InvalidFormat, Error::InvalidClusterSize))?;
     let is_writable = raw_file.file().is_writable();
 
     if is_writable && header.nb_snapshots != 0 {
@@ -409,37 +423,33 @@ pub(crate) fn parse_qcow(
         refcount_rebuild_required = true;
     }
 
+    if is_writable {
+        header
+            .clear_autoclear_features(raw_file.file_mut())
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
+    }
+
     // Skip refcount rebuilding for readonly files.
     if refcount_rebuild_required && is_writable {
         rebuild_refcounts(&mut raw_file, header.clone())?;
     }
 
-    let entries_per_cluster = cluster_size / size_of::<u64>() as u64;
-    let num_clusters = div_round_up_u64(header.size, cluster_size);
-    let num_l2_clusters = div_round_up_u64(num_clusters, entries_per_cluster);
-    let l1_clusters = div_round_up_u64(num_l2_clusters, entries_per_cluster);
+    let l1_clusters = div_round_up_u64(u64::from(header.l1_size), entries_per_cluster);
     let header_clusters = div_round_up_u64(size_of::<QcowHeader>() as u64, cluster_size);
-    if num_l2_clusters > MAX_RAM_POINTER_TABLE_SIZE {
-        return Err(BlockError::new(
-            BlockErrorKind::CorruptImage,
-            Error::TooManyL1Entries(num_l2_clusters),
-        ));
-    }
     let l1_table = VecCache::from_vec(
         raw_file
             .read_pointer_table(
                 header.l1_table_offset,
-                num_l2_clusters,
+                u64::from(header.l1_size),
                 Some(L1_TABLE_OFFSET_MASK),
             )
             .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ReadingHeader(e)))?,
     );
 
-    let num_clusters = div_round_up_u64(header.size, cluster_size);
     let refcount_clusters = max_refcount_clusters(
         header.refcount_order,
         cluster_size as u32,
-        (num_clusters + l1_clusters + num_l2_clusters + header_clusters) as u32,
+        num_clusters + l1_clusters + num_l2_clusters + header_clusters,
     );
     // Check that the given header doesn't have a suspiciously sized refcount table.
     if u64::from(header.refcount_table_clusters) > 2 * refcount_clusters {
@@ -473,24 +483,6 @@ pub(crate) fn parse_qcow(
 
     let l2_entries = cluster_size / size_of::<u64>() as u64;
 
-    // Check that the L1 and refcount tables fit in a 64bit address space.
-    let l1_index = (header.size / cluster_size) / l2_entries;
-    header
-        .l1_table_offset
-        .checked_add(l1_index * size_of::<u64>() as u64)
-        .ok_or_else(|| {
-            BlockError::new(BlockErrorKind::CorruptImage, Error::InvalidL1TableOffset)
-        })?;
-    header
-        .refcount_table_offset
-        .checked_add(u64::from(header.refcount_table_clusters) * cluster_size)
-        .ok_or_else(|| {
-            BlockError::new(
-                BlockErrorKind::CorruptImage,
-                Error::InvalidRefcountTableOffset,
-            )
-        })?;
-
     // Find available (refcount == 0) clusters for the free list.
     let file_size = raw_file
         .file_mut()
@@ -498,38 +490,40 @@ pub(crate) fn parse_qcow(
         .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::GettingFileSize(e)))?
         .len();
     let mut avail_clusters = Vec::new();
+    let l2_offsets = super::metadata::ClusterOffsets::new(l1_table.get_values());
+    let layout = super::metadata::MetadataLayout::new(&header, &l2_offsets);
     for i in (0..file_size).step_by(cluster_size as usize) {
         let refcount = refcounts
-            .get_cluster_refcount(&mut raw_file, i)
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::GettingRefcount(e)))?;
+            .get_cluster_refcount(&mut raw_file, i, layout)
+            .map_err(|e| {
+                let kind = if matches!(
+                    e,
+                    refcount::Error::InvalidRefblockOffset(_)
+                        | refcount::Error::RefblockUnaligned(_)
+                ) {
+                    BlockErrorKind::CorruptImage
+                } else {
+                    BlockErrorKind::Io
+                };
+                BlockError::new(kind, Error::GettingRefcount(e))
+            })?;
         if refcount == 0 {
             avail_clusters.push(i);
         }
     }
 
-    if is_writable {
-        if !IncompatFeatures::from_bits_truncate(header.incompatible_features)
+    if is_writable
+        && !IncompatFeatures::from_bits_truncate(header.incompatible_features)
             .contains(IncompatFeatures::DIRTY)
-        {
-            header
-                .set_dirty_bit(raw_file.file_mut(), true)
-                .map_err(|e| {
-                    BlockError::new(
-                        BlockErrorKind::Io,
-                        Error::WritingHeader(io::Error::other(e)),
-                    )
-                })?;
-        }
-
-        header
-            .clear_autoclear_features(raw_file.file_mut())
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
+    {
+        header.set_dirty_bit(raw_file.file_mut(), true)?;
     }
 
     let inner = metadata::QcowState {
         raw_file,
         header,
         l1_table,
+        l2_offsets,
         l2_entries,
         l2_cache: CacheMap::new(100),
         refcounts,
@@ -540,7 +534,7 @@ pub(crate) fn parse_qcow(
     Ok((inner, backing_file, sparse))
 }
 
-fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockResult<()> {
+fn rebuild_refcounts(raw_file: &mut QcowRawFile, mut header: QcowHeader) -> BlockResult<()> {
     fn add_ref(
         refcounts: &mut [u64],
         cluster_size: u64,
@@ -626,21 +620,29 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
 
                 // Read the L2 table and find all referenced data clusters.
                 let l2_table = raw_file
-                    .read_pointer_table(
-                        l2_addr_disk,
-                        cluster_size / size_of::<u64>() as u64,
-                        Some(L2_TABLE_OFFSET_MASK),
-                    )
+                    .read_pointer_table(l2_addr_disk, cluster_size / size_of::<u64>() as u64, None)
                     .map_err(Error::ReadingPointers)?;
-                for data_cluster_addr in l2_table {
-                    if data_cluster_addr != 0 {
-                        add_ref(
-                            refcounts,
-                            cluster_size,
-                            data_cluster_addr,
-                            max_refcount,
-                            refcount_bits,
-                        )?;
+                for entry in l2_table {
+                    let (first, last) = if l2_entry_is_compressed(entry) {
+                        let (addr, size) =
+                            l2_entry_compressed_cluster_layout(entry, header.cluster_bits);
+                        let max_valid = (refcounts.len() as u64 - 1) * cluster_size;
+                        if !compressed_cluster_range_is_valid(addr, size, cluster_size, max_valid) {
+                            return Err(Error::InvalidOffset(addr));
+                        }
+                        (
+                            raw_file.cluster_address(addr),
+                            raw_file.cluster_address(addr + size as u64 - 1),
+                        )
+                    } else {
+                        let addr = l2_entry_std_cluster_addr(entry);
+                        if addr == 0 {
+                            continue;
+                        }
+                        (addr, addr)
+                    };
+                    for addr in (first..=last).step_by(cluster_size as usize) {
+                        add_ref(refcounts, cluster_size, addr, max_refcount, refcount_bits)?;
                     }
                 }
             }
@@ -677,12 +679,14 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
         refcounts: &mut [u64],
         cluster_size: u64,
         refblock_clusters: u64,
+        declared_table_entries: u64,
         max_refcount: u64,
         refcount_bits: u64,
     ) -> Result<Vec<u64>> {
         let mut ref_table = vec![0; refblock_clusters as usize];
         let mut first_free_cluster: u64 = 0;
-        for refblock_addr in &mut ref_table {
+        let mut index = 0;
+        while index < ref_table.len() {
             loop {
                 if first_free_cluster >= refcounts.len() as u64 {
                     return Err(Error::NotEnoughSpaceForRefcounts);
@@ -693,16 +697,24 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
                 first_free_cluster += 1;
             }
 
-            *refblock_addr = first_free_cluster * cluster_size;
+            // A new refblock may need another refblock to cover it.
+            let needed_blocks = first_free_cluster / (cluster_size * 8 / refcount_bits) + 1;
+            if needed_blocks > declared_table_entries {
+                return Err(Error::NotEnoughSpaceForRefcounts);
+            }
+            ref_table.resize(ref_table.len().max(needed_blocks as usize), 0);
+            let refblock_addr = first_free_cluster * cluster_size;
+            ref_table[index] = refblock_addr;
             add_ref(
                 refcounts,
                 cluster_size,
-                *refblock_addr,
+                refblock_addr,
                 max_refcount,
                 refcount_bits,
             )?;
 
             first_free_cluster += 1;
+            index += 1;
         }
 
         Ok(ref_table)
@@ -714,16 +726,12 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
     // `ref_table` covers only the refblocks this rebuild produced.
     fn write_refblocks(
         refcounts: &[u64],
-        mut header: QcowHeader,
+        header: &QcowHeader,
         ref_table: &[u64],
         declared_table_entries: u64,
         raw_file: &mut QcowRawFile,
         refcount_block_entries: u64,
     ) -> Result<()> {
-        // Rewrite the header with lazy refcounts enabled while we are rebuilding the tables.
-        header.compatible_features |= COMPATIBLE_FEATURES_LAZY_REFCOUNTS;
-        header.write_to(raw_file.file_mut())?;
-
         for (i, refblock_addr) in ref_table.iter().enumerate() {
             // Write a block of refcounts to the location indicated by refblock_addr.
             let refblock_start = i * (refcount_block_entries as usize);
@@ -731,20 +739,11 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
                 refcounts.len(),
                 refblock_start + refcount_block_entries as usize,
             );
-            let refblock = &refcounts[refblock_start..refblock_end];
+            let mut refblock = refcounts[refblock_start..refblock_end].to_vec();
+            refblock.resize(refcount_block_entries as usize, 0);
             raw_file
-                .write_refcount_block(*refblock_addr, refblock)
+                .write_refcount_block(*refblock_addr, &refblock)
                 .map_err(Error::WritingHeader)?;
-
-            // If this is the last (partial) cluster, pad it out to a full refblock cluster.
-            if refblock.len() < refcount_block_entries as usize {
-                let refblock_padding = vec![0u64; refcount_block_entries as usize - refblock.len()];
-                let byte_offset =
-                    refblock.len() as u64 * raw_file.cluster_size() / refcount_block_entries;
-                raw_file
-                    .write_refcount_block(*refblock_addr + byte_offset, &refblock_padding)
-                    .map_err(Error::WritingHeader)?;
-            }
         }
 
         // Rewrite the top-level refcount table. The entries past the
@@ -759,10 +758,6 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
                 declared_table_entries,
             )
             .map_err(Error::WritingHeader)?;
-
-        // Rewrite the header again, now with lazy refcounts disabled.
-        header.compatible_features &= !COMPATIBLE_FEATURES_LAZY_REFCOUNTS;
-        header.write_to(raw_file.file_mut())?;
 
         Ok(())
     }
@@ -867,15 +862,17 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
         &mut refcounts,
         cluster_size,
         used_refblocks,
+        declared_table_entries,
         max_refcount,
         refcount_bits,
     )
     .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
 
-    // Write updated reference counts and point the reftable at them.
+    // Persist DIRTY before writing the rebuilt tables.
+    header.set_dirty_bit(raw_file.file_mut(), true)?;
     write_refblocks(
         &refcounts,
-        header,
+        &header,
         &ref_table,
         declared_table_entries,
         raw_file,
@@ -1022,6 +1019,104 @@ mod tests {
     }
 
     #[test]
+    fn header_creation_preserves_large_cluster_counts() {
+        for size in [1u64 << 44, u64::from(u32::MAX) * 4096] {
+            let header =
+                QcowHeader::create_for_size_path_and_cluster_bits(3, size, None, 12).unwrap();
+            assert_eq!(header.l1_size, 1 << 23);
+            assert_eq!(header.refcount_table_offset, (1 << 26) + 4096);
+            assert_eq!(header.refcount_table_clusters, 4107);
+        }
+        assert!(matches!(
+            QcowHeader::create_for_size_path_and_cluster_bits(3, u64::MAX, None, 9),
+            Err(Error::TooManyL1Entries(_)),
+        ));
+    }
+
+    #[test]
+    fn undersized_l1_table_is_rejected_before_rebuilding() {
+        use std::fs;
+
+        let size = 2 * ((1u64 << 16) * (1u64 << 16) / 8);
+        for l1_size in [0u32, 1] {
+            let temp = QcowTempDisk::new(size, None, false, true, false)
+                .unwrap()
+                .into_tempfile();
+            temp.as_file()
+                .write_all_at(&l1_size.to_be_bytes(), 36)
+                .unwrap();
+            // Force a rebuild if header validation does not reject the image.
+            temp.as_file()
+                .write_all_at(&1u64.to_be_bytes(), 72)
+                .unwrap();
+            let before = fs::read(temp.as_path()).unwrap();
+            let err = QcowDisk::new(
+                temp.as_file().try_clone().unwrap(),
+                false,
+                false,
+                true,
+                false,
+            )
+            .unwrap_err();
+            assert_eq!(err.kind(), BlockErrorKind::CorruptImage);
+            assert!(matches!(
+                StdError::source(&err).and_then(|source| source.downcast_ref::<Error>()),
+                Some(Error::InvalidL1TableSize(value)) if *value == l1_size,
+            ));
+            assert_eq!(fs::read(temp.as_path()).unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn invalid_refcount_offsets_are_corrupt_images() {
+        for addr in [1u64, 1 << 16, 2 << 16] {
+            let temp = QcowTempDisk::new(1 << 16, None, false, true, false)
+                .unwrap()
+                .into_tempfile();
+            let mut table_offset = [0; 8];
+            temp.as_file().read_exact_at(&mut table_offset, 48).unwrap();
+            temp.as_file()
+                .write_all_at(&addr.to_be_bytes(), u64::from_be_bytes(table_offset))
+                .unwrap();
+            let file = OpenOptions::new().read(true).open(temp.as_path()).unwrap();
+            let err = QcowDisk::new(file, false, false, true, false).unwrap_err();
+            assert_eq!(err.kind(), BlockErrorKind::CorruptImage, "{err}");
+        }
+    }
+
+    #[test]
+    fn metadata_tables_must_be_disjoint_before_rebuilding() {
+        use std::error::Error as StdError;
+
+        for (field, offset) in [
+            (40, 0u64),
+            (48, 0),
+            (40, 1 << 16),
+            (48, 4 << 16),
+            (40, !0xffffu64),
+        ] {
+            let mut header = valid_header_v3();
+            header[field..field + 8].copy_from_slice(&offset.to_be_bytes());
+            let temp = tempfile_with_header(&header);
+            let err = QcowDisk::new(
+                temp.as_file().try_clone().unwrap(),
+                false,
+                false,
+                true,
+                false,
+            )
+            .expect_err("overlapping or overflowing metadata must be rejected");
+            assert!(matches!(
+                StdError::source(&err).and_then(|source| source.downcast_ref::<Error>()),
+                Some(Error::OverlappingMetadata),
+            ));
+            let mut after = vec![0u8; header.len()];
+            temp.as_file().read_exact_at(&mut after, 0).unwrap();
+            assert_eq!(after, header);
+        }
+    }
+
+    #[test]
     fn detect_image_type_recognizes_qcow2_magic() {
         let mut file = basic_file(&valid_header_v3());
         assert_eq!(detect_image_type(&mut file).unwrap(), ImageType::Qcow2);
@@ -1060,11 +1155,35 @@ mod tests {
 
     #[test]
     fn header_with_invalid_v3_length_is_rejected() {
-        for bad in [V2_BARE_HEADER_SIZE, 0xffff_ffff] {
+        for bad in [V2_BARE_HEADER_SIZE, 105, 111, 0xffff_ffff] {
             let mut header = valid_header_v3();
             header[100..104].copy_from_slice(&bad.to_be_bytes());
             let err = QcowHeader::new(&basic_file(&header)).unwrap_err();
             assert!(matches!(err, Error::InvalidHeaderLength(_)), "{err:?}");
+        }
+    }
+
+    #[test]
+    fn compression_type_requires_matching_feature_bit() {
+        for (length, features, compression, valid) in [
+            (104u32, 0u64, 0u8, true),
+            (104, IncompatFeatures::COMPRESSION.bits(), 0, false),
+            (112, 0, 0, true),
+            (112, IncompatFeatures::COMPRESSION.bits(), 0, false),
+            (112, 0, 1, false),
+            (112, IncompatFeatures::COMPRESSION.bits(), 1, true),
+        ] {
+            let mut header = valid_header_v3();
+            header[72..80].copy_from_slice(&features.to_be_bytes());
+            header[100..104].copy_from_slice(&length.to_be_bytes());
+            header.resize(112, 0);
+            header[104] = compression;
+            let result = QcowHeader::new(&basic_file(&header));
+            if valid {
+                result.unwrap();
+            } else {
+                assert!(matches!(result, Err(Error::InvalidCompressionFeature)));
+            }
         }
     }
 
@@ -1119,6 +1238,27 @@ mod tests {
     }
 
     #[test]
+    fn header_update_preserves_extensions_and_tables() {
+        for version in [2, 3] {
+            let mut header =
+                QcowHeader::create_for_size_path_and_cluster_bits(version, 512, None, 9).unwrap();
+            let file = AlignedFile::new(TempFile::new().unwrap().into_file(), false);
+            file.write_all_at(&[0xa5; 1536], 0).unwrap();
+            header.size = 1024;
+            header.update(&file).unwrap();
+            let mut bytes = [0; 1536];
+            file.read_exact_at(&mut bytes, 0).unwrap();
+            let bare_size = if version == 2 {
+                V2_BARE_HEADER_SIZE
+            } else {
+                V3_BARE_HEADER_SIZE
+            } as usize;
+            assert_eq!(&bytes[24..32], &1024u64.to_be_bytes());
+            assert!(bytes[bare_size..].iter().all(|&byte| byte == 0xa5));
+        }
+    }
+
+    #[test]
     fn header_v2_with_backing() {
         let header = QcowHeader::create_for_size_and_path(2, 0x10_0000, Some("/my/path/to/a/file"))
             .expect("Failed to create header.");
@@ -1154,6 +1294,27 @@ mod tests {
             read_header.backing_file.as_ref().map(|bf| &bf.path),
             header.backing_file.as_ref().map(|bf| &bf.path)
         );
+    }
+
+    #[test]
+    fn backing_format_extension_follows_each_header_layout() {
+        for (version, header_size) in [(2, 72), (3, 104), (3, 112)] {
+            let mut header =
+                QcowHeader::create_for_size_and_path(version, 65536, Some("backing")).unwrap();
+            header.header_size = header_size;
+            header.backing_file_offset = 256;
+            let file = AlignedFile::new(TempFile::new().unwrap().into_file(), false);
+            header.write_to(&file).unwrap();
+            let mut extension = [0; 24];
+            extension[..4].copy_from_slice(&HEADER_EXT_BACKING_FORMAT.to_be_bytes());
+            extension[4..8].copy_from_slice(&3u32.to_be_bytes());
+            extension[8..11].copy_from_slice(b"raw");
+            file.write_all_at(&extension, u64::from(header_size))
+                .unwrap();
+
+            let parsed = QcowHeader::new(&file).unwrap();
+            assert_eq!(parsed.backing_file.unwrap().format, Some(ImageType::Raw));
+        }
     }
 
     /// Write a header to a fresh file with backing_file_offset and
@@ -1550,6 +1711,7 @@ mod tests {
         header[31] = 0;
         // set cluster_bits
         header[23] = 16;
+        header[36..40].copy_from_slice(&2048u32.to_be_bytes());
         let disk = try_open_header(&header).expect("Failed to create file.");
         // Write a sentinel value near the end of the virtual disk.
         let value = 0x0000_0040_3f00_ffffu64;
@@ -1602,6 +1764,169 @@ mod tests {
         // After rebuild the first cluster (header) must have refcount > 0.
         let refcount = disk.metadata().cluster_refcount(0).unwrap();
         assert!(refcount > 0, "header cluster refcount should be set");
+    }
+
+    #[test]
+    fn rebuild_refcounts_sets_dirty_and_preserves_compatible_features() {
+        let cluster_size = 1u64 << 16;
+        let mut header = QcowHeader::create_for_size_and_path(3, cluster_size, None).unwrap();
+        // Lazy refcounts and an unknown compatible feature.
+        header.compatible_features = 1 | (1 << 42);
+        let file = AlignedFile::new(TempFile::new().unwrap().into_file(), false);
+        header.write_to(&file).unwrap();
+        let mut raw = QcowRawFile::from(file, cluster_size, 16).unwrap();
+        super::rebuild_refcounts(&mut raw, header.clone()).unwrap();
+        let updated = QcowHeader::new(raw.file()).unwrap();
+        assert_eq!(updated.compatible_features, header.compatible_features);
+        assert_eq!(
+            updated.incompatible_features,
+            IncompatFeatures::DIRTY.bits()
+        );
+    }
+
+    #[test]
+    fn rebuild_refcounts_covers_new_refblocks() {
+        let cluster_size = 512;
+        // Header, L1 table and refcount table occupy exactly 256 clusters.
+        // The first refblock is therefore outside its own coverage.
+        let temp =
+            QcowTempDisk::new_with_cluster_bits(829000 * cluster_size, None, false, true, false, 9)
+                .unwrap();
+        let header = temp.disk().metadata().header();
+        let file = AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+        let mut raw = QcowRawFile::from(file, cluster_size, 16).unwrap();
+        let refblocks = raw
+            .read_pointer_table(header.refcount_table_offset, 2, None)
+            .unwrap();
+        assert_eq!(refblocks, [256 * cluster_size, 257 * cluster_size]);
+        for addr in refblocks {
+            assert_eq!(temp.disk().metadata().cluster_refcount(addr).unwrap(), 1);
+        }
+    }
+
+    #[test]
+    fn rebuild_refcounts_can_use_the_full_declared_table() {
+        let cluster_size = 512;
+        let header =
+            QcowHeader::create_for_size_path_and_cluster_bits(3, cluster_size, None, 9).unwrap();
+        assert_eq!(header.refcount_table_clusters, 1);
+        let file = AlignedFile::new(TempFile::new().unwrap().into_file(), false);
+        header.write_to(&file).unwrap();
+        // All 64 refblocks fit in holes within the existing coverage.
+        file.set_len(64 * 256 * cluster_size).unwrap();
+        let mut raw = QcowRawFile::from(file, cluster_size, 16).unwrap();
+        super::rebuild_refcounts(&mut raw, header.clone()).unwrap();
+        let refblocks = raw
+            .read_pointer_table(header.refcount_table_offset, 64, None)
+            .unwrap();
+        assert!(refblocks.iter().all(|&addr| addr != 0));
+    }
+
+    #[test]
+    fn rebuild_refcounts_for_compressed_clusters() {
+        let cluster_size = 1u64 << 16;
+        let header = QcowHeader::create_for_size_and_path(3, 2 * cluster_size, None).unwrap();
+        let file = AlignedFile::new(TempFile::new().unwrap().into_file(), false);
+        header.write_to(&file).unwrap();
+        file.set_len(8 * cluster_size).unwrap();
+        let mut raw = QcowRawFile::from(file, cluster_size, 16).unwrap();
+        raw.write_pointer_table_direct(header.l1_table_offset, [4 * cluster_size].iter())
+            .unwrap();
+        // One unaligned extent and one spanning two host clusters.
+        let entries = [
+            util::COMPRESSED_FLAG | (1 << 54) | (5 * cluster_size + 1),
+            util::COMPRESSED_FLAG | (4 << 54) | (7 * cluster_size - 512),
+        ];
+        raw.write_pointer_table_direct(4 * cluster_size, entries.iter())
+            .unwrap();
+        let refcount_table_offset = header.refcount_table_offset;
+        super::rebuild_refcounts(&mut raw, header).unwrap();
+        let refblock = raw
+            .read_pointer_table(refcount_table_offset, 1, None)
+            .unwrap()[0];
+        let counts = raw.read_refcount_block(refblock).unwrap();
+        assert_eq!(&counts[..8], &[1; 8]);
+        assert!(counts[8..].iter().all(|&count| count == 0));
+    }
+
+    #[test]
+    fn rebuild_refcounts_preserves_packed_tail() {
+        let cluster_size = 512u64;
+        for order in 0..=2 {
+            let mut header =
+                QcowHeader::create_for_size_path_and_cluster_bits(3, 4 * cluster_size, None, 9)
+                    .unwrap();
+            header.refcount_order = order;
+            let file = AlignedFile::new(TempFile::new().unwrap().into_file(), false);
+            header.write_to(&file).unwrap();
+            file.set_len(9 * cluster_size).unwrap();
+            let mut raw = QcowRawFile::from(file, cluster_size, 1 << order).unwrap();
+            raw.write_pointer_table_direct(header.l1_table_offset, [4 * cluster_size].iter())
+                .unwrap();
+            let entries = [5, 6, 7, 8].map(|index| util::l2_entry_make_std(index * cluster_size));
+            raw.write_pointer_table_direct(4 * cluster_size, entries.iter())
+                .unwrap();
+            let refcount_table_offset = header.refcount_table_offset;
+            super::rebuild_refcounts(&mut raw, header).unwrap();
+            let refblock = raw
+                .read_pointer_table(refcount_table_offset, 1, None)
+                .unwrap()[0];
+            let counts = raw.read_refcount_block(refblock).unwrap();
+            assert_eq!(&counts[..9], &[1; 9], "order={order}");
+            assert!(counts[9..].iter().all(|&count| count == 0));
+        }
+    }
+
+    #[test]
+    fn clean_images_do_not_rebuild_refcounts() {
+        let cluster_size = 512u64;
+        for (order, compatible_features) in [
+            (0, 0),
+            (1, 0),
+            (2, 0),
+            (3, 0),
+            (4, 0),
+            (5, 0),
+            (6, 0),
+            (4, 1), // Clean image with lazy refcounts.
+        ] {
+            let temp = TempFile::new().unwrap();
+            let mut header =
+                QcowHeader::create_for_size_path_and_cluster_bits(3, cluster_size, None, 9)
+                    .unwrap();
+            header.refcount_order = order;
+            header.compatible_features = compatible_features;
+            let raw = AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+            header.write_to(&raw).unwrap();
+            raw.write_all_at(
+                &(4 * cluster_size).to_be_bytes(),
+                header.refcount_table_offset,
+            )
+            .unwrap();
+            let refcount_bits = 1 << order;
+            let mut raw = QcowRawFile::from(raw, cluster_size, refcount_bits).unwrap();
+            let mut counts = vec![0; (cluster_size * 8 / refcount_bits) as usize];
+            for index in [0, 1, 2, 4] {
+                counts[index] = 1;
+            }
+            raw.write_refcount_block(4 * cluster_size, &counts).unwrap();
+
+            let _disk = QcowDisk::new(
+                temp.as_file().try_clone().unwrap(),
+                false,
+                false,
+                true,
+                false,
+            )
+            .unwrap();
+            // A needless rebuild would move the refblock into free cluster 3.
+            assert_eq!(
+                raw.read_pointer_table(header.refcount_table_offset, 1, None)
+                    .unwrap()[0],
+                4 * cluster_size,
+                "order={order}, compatible_features={compatible_features}"
+            );
+        }
     }
 
     /// Test all valid refcount orders (0-6) can be opened.
@@ -1738,7 +2063,12 @@ mod tests {
     /// Test RefcountOverflow error when exceeding max refcount value.
     #[test]
     fn refcount_overflow_returns_error() {
+        use super::metadata::{ClusterOffsets, MetadataLayout};
         use super::refcount::Error as RefcountError;
+
+        let header = QcowHeader::create_for_size_and_path(3, 0, None).unwrap();
+        let l2_offsets = ClusterOffsets::default();
+        let layout = MetadataLayout::new(&header, &l2_offsets);
 
         for (refcount_bits, max_val) in [(1u64, 1u64), (2, 3), (4, 15)] {
             let file = TempFile::new().unwrap().into_file();
@@ -1772,14 +2102,14 @@ mod tests {
             .unwrap();
 
             // Overflow should fail
-            let result = refcount.set_cluster_refcount(&mut qcow_raw, 0, max_val + 1, None);
+            let result = refcount.set_cluster_refcount(&mut qcow_raw, 0, max_val + 1, None, layout);
             assert!(
                 matches!(result, Err(RefcountError::RefcountOverflow { .. })),
                 "{refcount_bits}-bit: expected overflow error"
             );
 
             // Max value should not overflow
-            let result = refcount.set_cluster_refcount(&mut qcow_raw, 0, max_val, None);
+            let result = refcount.set_cluster_refcount(&mut qcow_raw, 0, max_val, None, layout);
             assert!(
                 !matches!(result, Err(RefcountError::RefcountOverflow { .. })),
                 "{refcount_bits}-bit: max value should not overflow"

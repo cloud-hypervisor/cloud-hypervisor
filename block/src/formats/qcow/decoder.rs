@@ -52,13 +52,15 @@ impl Decoder for ZstdDecoder {
         use std::io::Read;
 
         let mut decoder = zstd::stream::read::Decoder::new(input).map_err(Error::ZstdDecompress)?;
-        let decoded_size = decoder.read(output).map_err(Error::ZstdFillBuffer)?;
-        Ok(decoded_size)
+        decoder.read_exact(output).map_err(Error::ZstdFillBuffer)?;
+        Ok(output.len())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use zstd::stream::encode_all;
+
     use super::*;
 
     #[test]
@@ -85,5 +87,24 @@ mod tests {
         let invalid_input = vec![1, 2, 3, 4];
         let mut output2 = vec![0; 1024];
         d.decode(&invalid_input, &mut output2).unwrap_err();
+    }
+
+    #[test]
+    fn test_zstd_decode_large_cluster() {
+        let mut state = 1u32;
+        let block: Vec<u8> = (0..256 * 1024)
+            .map(|_| {
+                state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+                (state >> 24) as u8
+            })
+            .collect();
+        let data = block.repeat(8);
+        let compressed = encode_all(data.as_slice(), 3).unwrap();
+        let mut output = vec![0; data.len()];
+        let decoded = ZstdDecoder::default()
+            .decode(&compressed, &mut output)
+            .unwrap();
+        assert_eq!(decoded, data.len());
+        assert_eq!(output, data);
     }
 }

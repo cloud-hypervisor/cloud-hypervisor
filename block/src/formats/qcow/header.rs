@@ -19,7 +19,7 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 use super::decoder::{Decoder, ZlibDecoder, ZstdDecoder};
 use super::parser::{Error, Result};
-use super::util::{div_round_up_u32, div_round_up_u64};
+use super::util::div_round_up_u64;
 use crate::aligned_file::AlignedFile;
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 
@@ -84,8 +84,6 @@ pub(super) const DEFAULT_REFCOUNT_ORDER: u32 = 4;
 pub(super) const V2_BARE_HEADER_SIZE: u32 = 72;
 pub(super) const V3_BARE_HEADER_SIZE: u32 = 104;
 pub(super) const AUTOCLEAR_FEATURES_OFFSET: u64 = 88;
-
-pub(super) const COMPATIBLE_FEATURES_LAZY_REFCOUNTS: u64 = 1;
 
 // Compression types as defined in https://www.qemu.org/docs/master/interop/qcow2.html
 const COMPRESSION_TYPE_ZLIB: u64 = 0; // zlib/deflate <https://www.ietf.org/rfc/rfc1951.txt>
@@ -444,6 +442,7 @@ impl QcowHeader {
             let cluster_size = 1u64 << header.cluster_bits;
             if u64::from(header.header_size) < u64::from(V3_BARE_HEADER_SIZE)
                 || u64::from(header.header_size) > cluster_size
+                || !header.header_size.is_multiple_of(8)
             {
                 return Err(Error::InvalidHeaderLength(header.header_size));
             }
@@ -495,19 +494,20 @@ impl QcowHeader {
             if !unsupported.is_empty() {
                 // Read extensions only to get feature names for error reporting
                 let mut feature_table = Vec::new();
-                if header.header_size > V3_BARE_HEADER_SIZE {
-                    let _ = Self::read_header_extensions(f, &mut header, Some(&mut feature_table));
-                }
+                let _ = Self::read_header_extensions(f, &mut header, Some(&mut feature_table));
                 return Err(Error::UnsupportedFeature(MissingFeatureError::new(
                     unsupported,
                     feature_table,
                 )));
             }
-
-            // Features OK, now read extensions normally
-            if header.header_size > V3_BARE_HEADER_SIZE {
-                Self::read_header_extensions(f, &mut header, None)?;
+            let non_default_compression = !matches!(header.compression_type, CompressionType::Zlib);
+            if features.contains(IncompatFeatures::COMPRESSION) != non_default_compression {
+                return Err(Error::InvalidCompressionFeature);
             }
+        }
+
+        if matches!(version, 2 | 3) {
+            Self::read_header_extensions(f, &mut header, None)?;
         }
 
         Ok(header)
@@ -557,11 +557,14 @@ impl QcowHeader {
         }
 
         // L2 blocks are always one cluster long. They contain cluster_size/sizeof(u64) addresses.
-        let entries_per_cluster: u32 = cluster_size / size_of::<u64>() as u32;
-        let num_clusters: u32 = div_round_up_u64(size, u64::from(cluster_size)) as u32;
-        let num_l2_clusters: u32 = div_round_up_u32(num_clusters, entries_per_cluster);
-        let l1_clusters: u32 = div_round_up_u32(num_l2_clusters, entries_per_cluster);
-        let header_clusters = div_round_up_u32(size_of::<QcowHeader>() as u32, cluster_size);
+        let entries_per_cluster = u64::from(cluster_size) / size_of::<u64>() as u64;
+        let num_clusters = div_round_up_u64(size, u64::from(cluster_size));
+        let num_l2_clusters = div_round_up_u64(num_clusters, entries_per_cluster);
+        let l1_size =
+            u32::try_from(num_l2_clusters).map_err(|_| Error::TooManyL1Entries(num_l2_clusters))?;
+        let l1_clusters = div_round_up_u64(num_l2_clusters, entries_per_cluster);
+        let header_clusters =
+            div_round_up_u64(size_of::<QcowHeader>() as u64, u64::from(cluster_size));
         Ok(QcowHeader {
             magic: QCOW_MAGIC,
             version,
@@ -577,10 +580,10 @@ impl QcowHeader {
             cluster_bits,
             size,
             crypt_method: 0,
-            l1_size: num_l2_clusters,
+            l1_size,
             l1_table_offset: u64::from(cluster_size),
             // The refcount table is after l1 + header.
-            refcount_table_offset: u64::from(cluster_size * (l1_clusters + 1)),
+            refcount_table_offset: u64::from(cluster_size) * (l1_clusters + 1),
             refcount_table_clusters: {
                 // Pre-allocate enough clusters for the entire refcount table as it must be
                 // continuous in the file. Allocate enough space to refcount all clusters, including
@@ -589,12 +592,14 @@ impl QcowHeader {
                     DEFAULT_REFCOUNT_ORDER,
                     cluster_size,
                     num_clusters + l1_clusters + num_l2_clusters + header_clusters,
-                ) as u32;
+                );
                 // The refcount table needs to store the offset of each refcount cluster.
-                div_round_up_u32(
-                    max_refcount_clusters * size_of::<u64>() as u32,
-                    cluster_size,
-                )
+                let table_clusters = div_round_up_u64(
+                    max_refcount_clusters * size_of::<u64>() as u64,
+                    u64::from(cluster_size),
+                );
+                u32::try_from(table_clusters)
+                    .map_err(|_| Error::InvalidRefcountTableSize(table_clusters))?
             },
             nb_snapshots: 0,
             snapshots_offset: 0,
@@ -611,7 +616,17 @@ impl QcowHeader {
         })
     }
 
-    /// Write the header to `f`.
+    /// Update the bare header, preserving additional fields, extensions and tables.
+    pub(super) fn update(&self, f: &AlignedFile) -> Result<()> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(RawHeaderV2::from_header(self).as_bytes());
+        if self.version == 3 {
+            buf.extend_from_slice(RawHeaderV3Tail::from_header(self).as_bytes());
+        }
+        f.write_all_at(&buf, 0).map_err(Error::WritingHeader)
+    }
+
+    /// Initialize an image with this header.
     pub fn write_to(&self, f: &AlignedFile) -> Result<()> {
         // Build the header in memory, then write it in one positional write.
         let mut buf = Vec::new();
@@ -728,12 +743,12 @@ impl QcowHeader {
 pub(super) fn max_refcount_clusters(
     refcount_order: u32,
     cluster_size: u32,
-    num_clusters: u32,
+    num_clusters: u64,
 ) -> u64 {
     // Use u64 as the product of the u32 inputs can overflow.
     let refcount_bits = 0x01u64 << u64::from(refcount_order);
     let cluster_bits = u64::from(cluster_size) * 8;
-    let for_data = div_round_up_u64(u64::from(num_clusters) * refcount_bits, cluster_bits);
+    let for_data = div_round_up_u64(num_clusters * refcount_bits, cluster_bits);
     let for_refcounts = div_round_up_u64(for_data * refcount_bits, cluster_bits);
     for_data + for_refcounts
 }
