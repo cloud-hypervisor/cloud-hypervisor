@@ -169,6 +169,9 @@ impl DiskSpec {
                 }
 
                 let bits = u32::from_le_bytes(item[4..8].try_into().unwrap());
+                if bits & !0x03 != 0 {
+                    return Err(VhdxMetadataError::ReservedIsNonZero);
+                }
                 disk_spec.has_parent = bits & BLOCK_HAS_PARENT != 0;
 
                 METADATA_FILE_PARAMETER_PRESENT
@@ -280,7 +283,7 @@ struct MetadataTableHeader {
     signature: u64,
     reserved: u16,
     entry_count: u16,
-    _reserved2: [u8; 20],
+    reserved2: [u8; 20],
 }
 
 impl MetadataTableHeader {
@@ -295,7 +298,7 @@ impl MetadataTableHeader {
             return Err(VhdxMetadataError::InvalidEntryCount);
         }
 
-        if metadata_table_header.reserved != 0 {
+        if metadata_table_header.reserved != 0 || metadata_table_header.reserved2 != [0; 20] {
             return Err(VhdxMetadataError::ReservedIsNonZero);
         }
 
@@ -533,5 +536,34 @@ mod tests {
             DiskSpec::new(&file, &region).unwrap().virtual_disk_size,
             VIRTUAL_DISK_SIZE_MAX
         );
+    }
+
+    #[test]
+    fn reserved_metadata_fields_are_checked() {
+        let (file, region) = metadata_region();
+        for offset in [12, 31] {
+            file.write_all_at(&[1], region.file_offset + offset)
+                .unwrap();
+            assert!(matches!(
+                DiskSpec::new(&file, &region),
+                Err(VhdxMetadataError::ReservedIsNonZero)
+            ));
+            file.write_all_at(&[0], region.file_offset + offset)
+                .unwrap();
+        }
+
+        let (_, item_offset) = metadata_item(&file, &region, METADATA_FILE_PARAMETER);
+        let flags_offset = item_offset + 4;
+        for bits in [4u32, 1 << 31] {
+            file.write_all_at(&bits.to_le_bytes(), flags_offset)
+                .unwrap();
+            assert!(matches!(
+                DiskSpec::new(&file, &region),
+                Err(VhdxMetadataError::ReservedIsNonZero)
+            ));
+        }
+        file.write_all_at(&1u32.to_le_bytes(), flags_offset)
+            .unwrap();
+        DiskSpec::new(&file, &region).unwrap();
     }
 }
