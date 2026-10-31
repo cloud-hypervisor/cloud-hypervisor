@@ -74,6 +74,8 @@ pub enum Error {
     InvalidClusterIndex,
     #[error("Invalid cluster size")]
     InvalidClusterSize,
+    #[error("Compression type and incompatible feature bit do not match")]
+    InvalidCompressionFeature,
     #[error("Invalid header length: {0}")]
     InvalidHeaderLength(u32),
     #[error("Invalid index")]
@@ -251,7 +253,8 @@ pub(crate) fn parse_qcow(
         let kind = match &e {
             Error::InvalidMagic
             | Error::BackingFileTooLong(_)
-            | Error::InvalidBackingFileName(_) => BlockErrorKind::InvalidFormat,
+            | Error::InvalidBackingFileName(_)
+            | Error::InvalidCompressionFeature => BlockErrorKind::InvalidFormat,
             Error::UnsupportedFeature(_)
             | Error::UnsupportedCompressionType
             | Error::UnsupportedSnapshots => BlockErrorKind::UnsupportedFeature,
@@ -1125,6 +1128,30 @@ mod tests {
             patch_u32(&mut header, header_field::HEADER_LENGTH, bad);
             let err = QcowHeader::new(&basic_file(&header)).unwrap_err();
             assert!(matches!(err, Error::InvalidHeaderLength(_)), "{err:?}");
+        }
+    }
+
+    #[test]
+    fn compression_type_requires_matching_feature_bit() {
+        for (length, features, compression, valid) in [
+            (104u32, 0u64, 0u8, true),
+            (104, IncompatFeatures::COMPRESSION.bits(), 0, false),
+            (112, 0, 0, true),
+            (112, IncompatFeatures::COMPRESSION.bits(), 0, false),
+            (112, 0, 1, false),
+            (112, IncompatFeatures::COMPRESSION.bits(), 1, true),
+        ] {
+            let mut header = valid_header_v3();
+            patch_u64(&mut header, header_field::INCOMPATIBLE_FEATURES, features);
+            patch_u32(&mut header, header_field::HEADER_LENGTH, length);
+            header.resize(112, 0);
+            header[104] = compression;
+            let result = QcowHeader::new(&basic_file(&header));
+            if valid {
+                result.unwrap();
+            } else {
+                assert!(matches!(result, Err(Error::InvalidCompressionFeature)));
+            }
         }
     }
 
