@@ -1092,6 +1092,9 @@ impl QcowState {
 
     /// Grows the L1 table to accommodate at least the requested number of entries.
     fn grow_l1_table(&mut self, new_l1_size: u32) -> io::Result<()> {
+        // Make relocated L2 tables durable before the new L1 points at them.
+        self.sync_caches()?;
+
         let old_l1_size = self.header.l1_size;
         let old_l1_offset = self.header.l1_table_offset;
         let cluster_size = self.raw_file.cluster_size();
@@ -1513,6 +1516,39 @@ mod tests {
         assert!(!offsets.overlaps(512, 512, 512, None));
         assert!(offsets.overlaps(1536, 512, 512, None));
         assert!(offsets.overlaps(u64::MAX, 1, 512, None));
+    }
+
+    #[test]
+    fn l1_growth_preserves_flushed_data_after_unclean_close() {
+        use std::os::unix::fs::FileExt;
+
+        let (temp, mut state) = test_state();
+        let cluster_size = state.raw_file.cluster_size();
+        let data_addr = super::l2_entry_std_cluster_addr(state.l2_cache.get(0).unwrap()[0]);
+        temp.as_file()
+            .write_all_at(&[0xa5; 512], data_addr)
+            .unwrap();
+        state.sync_caches().unwrap();
+
+        // Relocate L2 in memory, then grow L1 before that relocation is flushed.
+        let old_l2 = state.l1_table[0];
+        state.map_write(cluster_size, None).unwrap();
+        assert_ne!(state.l1_table[0], old_l2);
+        state
+            .resize(cluster_size * (cluster_size / 8) + cluster_size)
+            .unwrap();
+        drop(state); // Skip shutdown and its metadata flush.
+
+        let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+        let (mut state, _, _) = super::super::parser::parse_qcow(raw, 0, true).unwrap();
+        let super::ClusterReadMapping::Allocated { offset, .. } =
+            state.map_read_with_populate(0, 512, false).unwrap()
+        else {
+            panic!("Previously flushed data was lost during L1 growth");
+        };
+        let mut data = [0; 512];
+        temp.as_file().read_exact_at(&mut data, offset).unwrap();
+        assert_eq!(data, [0xa5; 512]);
     }
 
     #[test]
