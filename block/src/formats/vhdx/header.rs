@@ -215,13 +215,15 @@ impl RegionTableHeader {
 
 /// Returns `true` if the half-open byte ranges `[a_start, a_end)` and
 /// `[b_start, b_end)` overlap.
-fn ranges_overlap(a_start: u64, a_end: u64, b_start: u64, b_end: u64) -> bool {
+pub(super) fn ranges_overlap(a_start: u64, a_end: u64, b_start: u64, b_end: u64) -> bool {
     a_start < a_end && b_start < b_end && a_start < b_end && b_start < a_end
 }
 
+#[derive(Debug)]
 pub(super) struct RegionInfo {
     pub bat_entry: RegionTableEntry,
     pub mdr_entry: RegionTableEntry,
+    pub region_entries: BTreeMap<[u8; 16], (u64, u64)>,
 }
 
 impl RegionInfo {
@@ -294,13 +296,13 @@ impl RegionInfo {
         }
 
         let (Some(bat_entry), Some(mdr_entry)) = (bat_entry, mdr_entry) else {
-            region_entries.clear();
             return Err(VhdxHeaderError::RegionEntryCollectionFailed);
         };
 
         Ok(RegionInfo {
             bat_entry,
             mdr_entry,
+            region_entries,
         })
     }
 }
@@ -731,6 +733,66 @@ mod tests {
         file.write_all_at(&region_entry(BAT_GUID, 3 * MIB, MIB as u32), entries_at)
             .unwrap();
         RegionInfo::new(&file, REGION_TABLE_1_START, 2).unwrap();
+    }
+
+    #[test]
+    fn optional_regions_are_protected_from_payloads() {
+        use crate::formats::vhdx::bat::{BatEntry, PAYLOAD_BLOCK_FULLY_PRESENT};
+        use crate::formats::vhdx::dynamic::Vhdx;
+        use crate::formats::vhdx::metadata::DiskSpec;
+
+        let tf = create_dynamic_vhdx(1, None);
+        let file = AlignedFile::new(tf.into_file(), false);
+        let header = VhdxHeader::new(&file).unwrap();
+        let regions =
+            RegionInfo::new(&file, REGION_TABLE_1_START, header.region_entry_count()).unwrap();
+        let spec = DiskSpec::new(&file, &regions.mdr_entry).unwrap();
+        let start = file.file().metadata().unwrap().len().div_ceil(1 << 20) * (1 << 20);
+        file.file().set_len(start + spec.block_size as u64).unwrap();
+
+        edit_header(&file, REGION_TABLE_1_START, REGION_SIZE as usize, |table| {
+            let next = size_of::<RegionTableHeader>() + header.region_entry_count() as usize * 32;
+            table[next..next + 32].copy_from_slice(&region_entry([1; 16], start, 1 << 20));
+            table[8..12].copy_from_slice(&(header.region_entry_count() + 1).to_le_bytes());
+        });
+        BatEntry::write_bat_entry(
+            &file,
+            regions.bat_entry.file_offset,
+            0,
+            start | PAYLOAD_BLOCK_FULLY_PRESENT,
+        )
+        .unwrap();
+
+        let mut disk = Vhdx::new(file.file().try_clone().unwrap(), false).unwrap();
+        disk.read_at(&mut [0; 512], 0).unwrap_err();
+        assert!(disk.write_all_at(&[0xff; 512], 0).is_err());
+    }
+
+    #[test]
+    fn log_cannot_overlap_regions() {
+        use crate::formats::vhdx::dynamic::{Vhdx, VhdxError};
+
+        let tf = create_dynamic_vhdx(1, None);
+        let file = AlignedFile::new(tf.into_file(), false);
+        let header = VhdxHeader::new(&file).unwrap();
+        let regions =
+            RegionInfo::new(&file, REGION_TABLE_1_START, header.region_entry_count()).unwrap();
+        let mut raw = header.header;
+        let offset = if header.header_offset == HEADER_1_START {
+            HEADER_2_START
+        } else {
+            HEADER_1_START
+        };
+        for start in [regions.bat_entry.file_offset, regions.mdr_entry.file_offset] {
+            raw.log_offset = start;
+            Header::update_header(&file, &raw, raw.file_write_guid, offset).unwrap();
+            assert!(matches!(
+                Vhdx::new(file.file().try_clone().unwrap(), false),
+                Err(VhdxError::ParseVhdxRegionEntry(
+                    VhdxHeaderError::RegionOverlap
+                ))
+            ));
+        }
     }
 
     #[test]
