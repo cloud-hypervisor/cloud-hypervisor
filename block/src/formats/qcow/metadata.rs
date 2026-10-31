@@ -26,6 +26,7 @@ use libc::{EINVAL, EIO};
 use vmm_sys_util::write_zeroes::WriteZeroesAt;
 
 use super::decoder::Decoder;
+use super::header::{MAX_QCOW_FILE_SIZE, MAX_RAM_POINTER_TABLE_SIZE};
 use super::qcow_raw_file::QcowRawFile;
 use super::refcount::RefCount;
 use super::util::{
@@ -1067,10 +1068,27 @@ impl QcowState {
             return Err(io::Error::other("shrinking QCOW2 images is not supported"));
         }
 
+        if new_size > MAX_QCOW_FILE_SIZE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                super::Error::FileTooBig(new_size),
+            ));
+        }
+
         let cluster_size = self.raw_file.cluster_size();
         let entries_per_cluster = cluster_size / size_of::<u64>() as u64;
         let new_clusters = new_size.div_ceil(cluster_size);
-        let needed_l1_entries = new_clusters.div_ceil(entries_per_cluster) as u32;
+        let needed_l1_entries = new_clusters.div_ceil(entries_per_cluster);
+        if needed_l1_entries > MAX_RAM_POINTER_TABLE_SIZE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                super::Error::TooManyL1Entries(needed_l1_entries),
+            ));
+        }
+        let needed_l1_entries = needed_l1_entries as u32;
+        self.header
+            .validate_table_geometry(new_size, self.header.l1_size.max(needed_l1_entries))
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
 
         if needed_l1_entries > self.header.l1_size {
             self.grow_l1_table(needed_l1_entries)?;
@@ -1586,6 +1604,66 @@ mod tests {
         assert!(!offsets.overlaps(512, 512, 512, None));
         assert!(offsets.overlaps(1536, 512, 512, None));
         assert!(offsets.overlaps(u64::MAX, 1, 512, None));
+    }
+
+    #[test]
+    fn oversized_resize_does_not_modify_the_image() {
+        use std::io::ErrorKind;
+
+        let cluster_size = 512;
+        let temp = TestImage::with_cluster_bits(8 * cluster_size, 9);
+        let mut state = open_state(&temp);
+        let before = temp.snapshot();
+        let old_size = state.header.size;
+        for new_size in [
+            super::MAX_QCOW_FILE_SIZE + 512,
+            1 << 47, // Requires 2^32 L1 entries with 512-byte clusters.
+            (super::MAX_RAM_POINTER_TABLE_SIZE + 1) * cluster_size * (cluster_size / 8),
+        ] {
+            assert_eq!(
+                state.resize(new_size).unwrap_err().kind(),
+                ErrorKind::InvalidInput
+            );
+            assert_eq!(state.header.size, old_size);
+            before.assert_unchanged(&temp);
+        }
+    }
+
+    #[test]
+    fn resize_respects_combined_table_limit() {
+        use std::io::ErrorKind;
+
+        use super::super::test_util::write_u64_at;
+
+        let cluster_size = 512;
+        let mut header =
+            super::QcowHeader::create_for_size_path_and_cluster_bits(3, 8 * cluster_size, None, 9)
+                .unwrap();
+        header.refcount_order = 6;
+        let image = TestImage::from_header(&header);
+        write_u64_at(
+            image.as_file(),
+            header.refcount_table_offset,
+            3 * cluster_size,
+        );
+        let mut counts = vec![0; (cluster_size / 8) as usize];
+        counts[..4].fill(1);
+        image
+            .qcow_raw(cluster_size, 64)
+            .write_refcount_block(3 * cluster_size, &counts)
+            .unwrap();
+        let mut state = open_state(&image);
+        let before = image.snapshot();
+
+        // L1 alone fits, but 64-bit refcounts push the combined tables over the limit.
+        let err = state.resize(1_126_400_000_000).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+        assert!(matches!(
+            err.get_ref().unwrap().downcast_ref::<super::super::Error>(),
+            Some(super::super::Error::TooManyRefcounts(_))
+        ));
+        assert_eq!(state.header.size, header.size);
+        before.assert_unchanged(&image);
     }
 
     #[test]

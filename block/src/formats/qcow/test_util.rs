@@ -134,6 +134,21 @@ impl TestImage {
             bytes,
         }
     }
+
+    pub(super) fn with_cluster_bits(virtual_size: u64, cluster_bits: u32) -> Self {
+        Self {
+            temp: QcowTempDisk::new_with_cluster_bits(
+                virtual_size,
+                None,
+                false,
+                true,
+                false,
+                cluster_bits,
+            )
+            .unwrap()
+            .into_tempfile(),
+        }
+    }
 }
 
 pub(super) mod header_field {
