@@ -487,7 +487,18 @@ pub(crate) fn parse_qcow(
     for i in (0..file_size).step_by(cluster_size as usize) {
         let refcount = refcounts
             .get_cluster_refcount(&mut raw_file, i, layout)
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::GettingRefcount(e)))?;
+            .map_err(|e| {
+                let kind = if matches!(
+                    e,
+                    refcount::Error::InvalidRefblockOffset(_)
+                        | refcount::Error::RefblockUnaligned(_)
+                ) {
+                    BlockErrorKind::CorruptImage
+                } else {
+                    BlockErrorKind::Io
+                };
+                BlockError::new(kind, Error::GettingRefcount(e))
+            })?;
         if refcount == 0 {
             avail_clusters.push(i);
         }
@@ -898,7 +909,9 @@ mod tests {
         DEFAULT_CLUSTER_BITS, DEFAULT_REFCOUNT_ORDER, HEADER_EXT_BACKING_FORMAT, HEADER_EXT_END,
         MAX_CLUSTER_BITS, MIN_CLUSTER_BITS, V2_BARE_HEADER_SIZE, V3_BARE_HEADER_SIZE,
     };
-    use super::super::test_util::{DiskOptions, TestImage, header_field, patch_u32, patch_u64};
+    use super::super::test_util::{
+        DiskOptions, TestImage, header_field, patch_u32, patch_u64, read_u64_at, write_u64_at,
+    };
     use super::super::util::{self, ZERO_FLAG};
     use super::*;
     use crate::formats::qcow::{QcowDisk, QcowTempDisk};
@@ -1024,6 +1037,23 @@ mod tests {
                 Some(Error::InvalidL1TableSize(value)) if *value == l1_size,
             ));
             before.assert_unchanged(&temp);
+        }
+    }
+
+    #[test]
+    fn invalid_refcount_offsets_are_corrupt_images() {
+        for addr in [1u64, 1 << 16, 2 << 16] {
+            let temp = TestImage::new(1 << 16);
+            let table_offset =
+                read_u64_at(temp.as_file(), header_field::REFCOUNT_TABLE_OFFSET as u64);
+            write_u64_at(temp.as_file(), table_offset, addr);
+            let err = temp
+                .open_with(DiskOptions {
+                    read_only: true,
+                    ..Default::default()
+                })
+                .unwrap_err();
+            assert_eq!(err.kind(), BlockErrorKind::CorruptImage, "{err}");
         }
     }
 
