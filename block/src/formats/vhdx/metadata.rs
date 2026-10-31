@@ -92,6 +92,8 @@ pub enum VhdxMetadataError {
     ReadMetadata(#[source] io::Error),
     #[error("Reserved region has non-zero value")]
     ReservedIsNonZero,
+    #[error("Differencing images are not supported")]
+    UnsupportedDifferencing,
     #[error("This implementation doesn't support this metadata flag")]
     UnsupportedFlag,
 }
@@ -103,7 +105,6 @@ pub(super) struct DiskSpec {
     pub disk_id: u128,
     pub image_size: u64,
     pub block_size: u32,
-    pub has_parent: bool,
     pub sectors_per_block: u32,
     pub virtual_disk_size: u64,
     pub logical_sector_size: u32,
@@ -172,7 +173,9 @@ impl DiskSpec {
                 if bits & !0x03 != 0 {
                     return Err(VhdxMetadataError::ReservedIsNonZero);
                 }
-                disk_spec.has_parent = bits & BLOCK_HAS_PARENT != 0;
+                if bits & BLOCK_HAS_PARENT != 0 {
+                    return Err(VhdxMetadataError::UnsupportedDifferencing);
+                }
 
                 METADATA_FILE_PARAMETER_PRESENT
             } else if metadata_entry.item_id == METADATA_VIRTUAL_DISK_SIZE {
@@ -536,6 +539,26 @@ mod tests {
             DiskSpec::new(&file, &region).unwrap().virtual_disk_size,
             VIRTUAL_DISK_SIZE_MAX
         );
+    }
+
+    #[test]
+    fn differencing_images_are_rejected_before_bat_validation() {
+        use crate::error::BlockErrorKind;
+        use crate::formats::vhdx::VhdxDisk;
+
+        let (file, region) = metadata_region();
+        let (_, item_offset) = metadata_item(&file, &region, METADATA_FILE_PARAMETER);
+        file.write_all_at(&BLOCK_HAS_PARENT.to_le_bytes(), item_offset + 4)
+            .unwrap();
+        let header = VhdxHeader::new(&file).unwrap();
+        let regions =
+            RegionInfo::new(&file, REGION_TABLE_1_START, header.region_entry_count()).unwrap();
+        for state in [0u64, 7] {
+            file.write_all_at(&state.to_le_bytes(), regions.bat_entry.file_offset)
+                .unwrap();
+            let error = VhdxDisk::new(file.file().try_clone().unwrap(), false).unwrap_err();
+            assert_eq!(error.kind(), BlockErrorKind::UnsupportedFeature);
+        }
     }
 
     #[test]

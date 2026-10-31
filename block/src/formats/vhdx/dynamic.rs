@@ -252,9 +252,6 @@ impl Vhdx {
         mut sector_index: u64,
         mut sector_count: u64,
     ) -> result::Result<usize, VhdxIoError> {
-        if self.disk_spec.has_parent {
-            return Err(VhdxIoError::UnsupportedMode);
-        }
         let expected_len = sector_count
             .checked_mul(self.disk_spec.logical_sector_size as u64)
             .ok_or(VhdxIoError::InvalidBufferLength)?;
@@ -315,9 +312,6 @@ impl Vhdx {
         mut sector_index: u64,
         mut sector_count: u64,
     ) -> result::Result<usize, VhdxIoError> {
-        if self.disk_spec.has_parent {
-            return Err(VhdxIoError::UnsupportedMode);
-        }
         let expected_len = sector_count
             .checked_mul(self.disk_spec.logical_sector_size as u64)
             .ok_or(VhdxIoError::InvalidBufferLength)?;
