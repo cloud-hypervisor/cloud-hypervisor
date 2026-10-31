@@ -442,6 +442,7 @@ impl QcowHeader {
             let cluster_size = 1u64 << header.cluster_bits;
             if u64::from(header.header_size) < u64::from(V3_BARE_HEADER_SIZE)
                 || u64::from(header.header_size) > cluster_size
+                || !header.header_size.is_multiple_of(8)
             {
                 return Err(Error::InvalidHeaderLength(header.header_size));
             }
