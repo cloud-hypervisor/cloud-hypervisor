@@ -9,6 +9,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::fs::File;
+use std::hint::spin_loop;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::Barrier;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -173,8 +174,14 @@ impl EpollHelper {
         // to be in a paused state. This is helpful for the restore code path
         // as the device thread should not start processing anything before the
         // device has been resumed.
-        while paused.load(Ordering::SeqCst) {
-            thread::park();
+        if paused.load(Ordering::SeqCst) {
+            // A pause may arrive while this worker is starting; acknowledge it.
+            if self.pause_evt.read().is_ok() {
+                paused_sync.wait();
+            }
+            while paused.load(Ordering::SeqCst) {
+                thread::park();
+            }
         }
 
         loop {
@@ -218,8 +225,11 @@ impl EpollHelper {
                     EPOLL_HELPER_EVENT_PAUSE => {
                         debug!("PAUSE_EVENT received, pausing epoll loop");
 
-                        // Acknowledge the pause is effective by using the
-                        // paused_sync barrier.
+                        // The event can race with the paused flag; wait for the
+                        // flag before acknowledging the barrier.
+                        while !paused.load(Ordering::SeqCst) {
+                            spin_loop();
+                        }
                         paused_sync.wait();
 
                         // We loop here to handle spurious park() returns.
@@ -299,8 +309,11 @@ impl EpollHelper {
                     EPOLL_HELPER_EVENT_PAUSE => {
                         debug!("PAUSE_EVENT received, pausing epoll loop");
 
-                        // Acknowledge the pause is effective by using the
-                        // paused_sync barrier.
+                        // The event can race with the paused flag; wait for the
+                        // flag before acknowledging the barrier.
+                        while !paused.load(Ordering::SeqCst) {
+                            spin_loop();
+                        }
                         paused_sync.wait();
 
                         // We loop here to handle spurious park() returns.
@@ -331,5 +344,69 @@ impl EpollHelper {
 impl AsRawFd for EpollHelper {
     fn as_raw_fd(&self) -> RawFd {
         self.epoll_file.as_raw_fd()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Barrier, mpsc};
+    use std::thread;
+    use std::time::Duration;
+
+    use vmm_sys_util::eventfd::{EFD_NONBLOCK, EventFd};
+
+    use super::*;
+
+    struct Dummy;
+
+    impl EpollHelperHandler for Dummy {
+        fn handle_event(
+            &mut self,
+            _helper: &mut EpollHelper,
+            _event: &epoll::Event,
+        ) -> Result<(), EpollHelperError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn paused_start_acknowledges_barrier() {
+        let paused = Arc::new(AtomicBool::new(true));
+        let pause_evt = EventFd::new(EFD_NONBLOCK).unwrap();
+        let kill_evt = EventFd::new(EFD_NONBLOCK).unwrap();
+        let barrier = Arc::new(Barrier::new(2));
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (start_tx, start_rx) = mpsc::channel();
+        let paused_worker = Arc::clone(&paused);
+        let barrier_worker = Arc::clone(&barrier);
+        let pause_worker = pause_evt.try_clone().unwrap();
+        let kill_worker = kill_evt.try_clone().unwrap();
+        let worker = thread::spawn(move || {
+            let mut helper = EpollHelper::new(&kill_worker, &pause_worker).unwrap();
+            ready_tx.send(()).unwrap();
+            start_rx.recv().unwrap();
+            helper
+                .run(&paused_worker, &barrier_worker, &mut Dummy)
+                .unwrap();
+        });
+
+        ready_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        pause_evt.write(1).unwrap();
+        start_tx.send(()).unwrap();
+
+        let (sync_tx, sync_rx) = mpsc::channel();
+        let barrier_wait = Arc::clone(&barrier);
+        thread::spawn(move || {
+            barrier_wait.wait();
+            sync_tx.send(()).unwrap();
+        });
+        sync_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("paused worker did not acknowledge the barrier");
+
+        paused.store(false, Ordering::SeqCst);
+        worker.thread().unpark();
+        kill_evt.write(1).unwrap();
+        worker.join().unwrap();
     }
 }
