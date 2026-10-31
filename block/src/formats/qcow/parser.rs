@@ -20,9 +20,8 @@ pub use super::header::{
     QcowHeader,
 };
 use super::header::{
-    COMPATIBLE_FEATURES_LAZY_REFCOUNTS, MAX_CLUSTER_BITS, MAX_QCOW_FILE_SIZE,
-    MAX_RAM_POINTER_TABLE_SIZE, MIN_CLUSTER_BITS, QCOW_MAGIC, max_refcount_clusters,
-    offset_is_cluster_boundary,
+    MAX_CLUSTER_BITS, MAX_QCOW_FILE_SIZE, MAX_RAM_POINTER_TABLE_SIZE, MIN_CLUSTER_BITS, QCOW_MAGIC,
+    max_refcount_clusters, offset_is_cluster_boundary,
 };
 use super::qcow_raw_file::QcowRawFile;
 use super::refcount::RefCount;
@@ -388,10 +387,6 @@ pub(crate) fn parse_qcow(
         if first_cluster_refcount != 0 {
             refcount_rebuild_required = false;
         }
-    }
-
-    if (header.compatible_features & COMPATIBLE_FEATURES_LAZY_REFCOUNTS) != 0 {
-        refcount_rebuild_required = true;
     }
 
     let is_writable = raw_file.file().is_writable();
@@ -1782,11 +1777,21 @@ mod tests {
     #[test]
     fn clean_images_do_not_rebuild_refcounts() {
         let cluster_size = 512u64;
-        for order in 0..=6 {
+        for (order, compatible_features) in [
+            (0, 0),
+            (1, 0),
+            (2, 0),
+            (3, 0),
+            (4, 0),
+            (5, 0),
+            (6, 0),
+            (4, 1), // Clean image with lazy refcounts.
+        ] {
             let mut header =
                 QcowHeader::create_for_size_path_and_cluster_bits(3, cluster_size, None, 9)
                     .unwrap();
             header.refcount_order = order;
+            header.compatible_features = compatible_features;
             let temp = TestImage::from_header(&header);
             write_u64_at(
                 temp.as_file(),
@@ -1807,7 +1812,7 @@ mod tests {
                 raw.read_pointer_table(header.refcount_table_offset, 1, None)
                     .unwrap()[0],
                 4 * cluster_size,
-                "order={order}"
+                "order={order}, compatible_features={compatible_features}"
             );
         }
     }
