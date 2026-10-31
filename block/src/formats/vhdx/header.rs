@@ -71,6 +71,8 @@ pub enum VhdxHeaderError {
     SequenceNumberOverflow,
     #[error("We do not recognize this entry")]
     UnrecognizedRegionEntry,
+    #[error("Unsupported VHDX version {0}")]
+    UnsupportedVersion(u16),
     #[error("Failed to write header {0}")]
     WriteHeader(#[source] io::Error),
 }
@@ -331,6 +333,9 @@ impl VhdxHeader {
             Header::new(f, HEADER_1_START),
             Header::new(f, HEADER_2_START),
         )?;
+        if header.version != 1 {
+            return Err(VhdxHeaderError::UnsupportedVersion(header.version));
+        }
         Ok(VhdxHeader {
             _file_type_identifier: file_type_identifier,
             header,
@@ -467,6 +472,23 @@ mod tests {
                 Err(VhdxHeaderError::ReadHeader(_))
             ));
         }
+    }
+
+    #[test]
+    fn current_header_version_is_checked() {
+        let tf = create_dynamic_vhdx(1, None);
+        let file = AlignedFile::new(tf.into_file(), false);
+        let mut header = Header::new(&file, HEADER_2_START).unwrap();
+        header.version = 2;
+        Header::update_header(&file, &header, false, 0, HEADER_1_START).unwrap();
+        assert!(matches!(
+            VhdxHeader::new(&file),
+            Err(VhdxHeaderError::UnsupportedVersion(2))
+        ));
+        header.sequence_number += 2;
+        header.version = 1;
+        Header::update_header(&file, &header, false, 0, HEADER_2_START).unwrap();
+        VhdxHeader::new(&file).unwrap();
     }
 
     #[test]
