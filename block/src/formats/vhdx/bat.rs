@@ -26,10 +26,14 @@ pub(super) const BAT_FILE_OFF_MASK: u64 = 0xFFFFFFFFFFF00000;
 
 #[derive(Error, Debug)]
 pub enum VhdxBatError {
+    #[error("Duplicate BAT file offset")]
+    DuplicateFileOffset,
     #[error("Invalid BAT entry")]
     InvalidBatEntry,
     #[error("Invalid BAT entry count")]
     InvalidEntryCount,
+    #[error("Overlapping payload blocks")]
+    OverlappingPayloadBlocks,
     #[error("BAT entry payload block extends past end of file")]
     PayloadPastEnd,
     #[error("Failed to read BAT entry")]
@@ -44,12 +48,12 @@ pub(super) type Result<T> = result::Result<T, VhdxBatError>;
 pub(super) struct BatEntry(pub u64);
 
 impl BatEntry {
-    // Read all BAT entries presented on the disk and insert them to a vector
+    // Read the BAT and collect offsets reserved beyond EOF.
     pub(super) fn collect_bat_entries(
         f: &AlignedFile,
         disk_spec: &DiskSpec,
         bat_entry: &RegionTableEntry,
-    ) -> Result<Vec<BatEntry>> {
+    ) -> Result<(Vec<BatEntry>, Vec<u64>)> {
         let entry_count = BatEntry::calculate_entries(
             disk_spec.block_size,
             disk_spec.virtual_disk_size,
@@ -66,6 +70,7 @@ impl BatEntry {
         let mut buf = vec![0u8; bytes.min(1 << 20)];
 
         let mut bat: Vec<BatEntry> = Vec::with_capacity(entry_count as usize);
+        let mut nonzero_entries = Vec::new();
         for offset in (0..bytes).step_by(1 << 20) {
             let len = (bytes - offset).min(buf.len());
             f.read_exact_at(&mut buf[..len], bat_entry.file_offset + offset as u64)
@@ -87,17 +92,49 @@ impl BatEntry {
                 {
                     return Err(VhdxBatError::InvalidBatEntry);
                 }
-                if raw_entry & BAT_STATE_BIT_MASK == PAYLOAD_BLOCK_FULLY_PRESENT
+                // UNDEFINED and UNMAPPED entries can retain a payload block.
+                if (state == PAYLOAD_BLOCK_FULLY_PRESENT
+                    || (raw_entry & BAT_FILE_OFF_MASK != 0
+                        && matches!(state, PAYLOAD_BLOCK_UNDEFINED | PAYLOAD_BLOCK_UNMAPPED)))
                     && (raw_entry & BAT_FILE_OFF_MASK).saturating_add(disk_spec.block_size as u64)
                         > disk_spec.image_size
                 {
                     return Err(VhdxBatError::PayloadPastEnd);
                 }
+                if raw_entry & BAT_FILE_OFF_MASK != 0 {
+                    nonzero_entries.push(raw_entry);
+                }
                 bat.push(BatEntry(raw_entry));
             }
         }
 
-        Ok(bat)
+        nonzero_entries.sort_unstable();
+        let mut previous_offset = 0;
+        let mut payload_end = 0;
+        for entry in &nonzero_entries {
+            let offset = entry & BAT_FILE_OFF_MASK;
+            if offset == previous_offset {
+                return Err(VhdxBatError::DuplicateFileOffset);
+            }
+            previous_offset = offset;
+            if matches!(
+                entry & BAT_STATE_BIT_MASK,
+                PAYLOAD_BLOCK_UNDEFINED | PAYLOAD_BLOCK_UNMAPPED | PAYLOAD_BLOCK_FULLY_PRESENT
+            ) {
+                if offset < payload_end {
+                    return Err(VhdxBatError::OverlappingPayloadBlocks);
+                }
+                payload_end = offset.saturating_add(disk_spec.block_size as u64);
+            }
+        }
+
+        // Unused entries may reserve offsets beyond EOF without naming blocks.
+        nonzero_entries.retain_mut(|entry| {
+            *entry &= BAT_FILE_OFF_MASK;
+            *entry >= disk_spec.image_size
+        });
+        nonzero_entries.shrink_to_fit();
+        Ok((bat, nonzero_entries))
     }
 
     // Calculate the number of entries in the BAT
