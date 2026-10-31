@@ -679,12 +679,14 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, mut header: QcowHeader) -> Bloc
         refcounts: &mut [u64],
         cluster_size: u64,
         refblock_clusters: u64,
+        declared_table_entries: u64,
         max_refcount: u64,
         refcount_bits: u64,
     ) -> Result<Vec<u64>> {
         let mut ref_table = vec![0; refblock_clusters as usize];
         let mut first_free_cluster: u64 = 0;
-        for refblock_addr in &mut ref_table {
+        let mut index = 0;
+        while index < ref_table.len() {
             loop {
                 if first_free_cluster >= refcounts.len() as u64 {
                     return Err(Error::NotEnoughSpaceForRefcounts);
@@ -695,16 +697,24 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, mut header: QcowHeader) -> Bloc
                 first_free_cluster += 1;
             }
 
-            *refblock_addr = first_free_cluster * cluster_size;
+            // A new refblock may need another refblock to cover it.
+            let needed_blocks = first_free_cluster / (cluster_size * 8 / refcount_bits) + 1;
+            if needed_blocks > declared_table_entries {
+                return Err(Error::NotEnoughSpaceForRefcounts);
+            }
+            ref_table.resize(ref_table.len().max(needed_blocks as usize), 0);
+            let refblock_addr = first_free_cluster * cluster_size;
+            ref_table[index] = refblock_addr;
             add_ref(
                 refcounts,
                 cluster_size,
-                *refblock_addr,
+                refblock_addr,
                 max_refcount,
                 refcount_bits,
             )?;
 
             first_free_cluster += 1;
+            index += 1;
         }
 
         Ok(ref_table)
@@ -852,6 +862,7 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, mut header: QcowHeader) -> Bloc
         &mut refcounts,
         cluster_size,
         used_refblocks,
+        declared_table_entries,
         max_refcount,
         refcount_bits,
     )
@@ -1771,6 +1782,44 @@ mod tests {
             updated.incompatible_features,
             IncompatFeatures::DIRTY.bits()
         );
+    }
+
+    #[test]
+    fn rebuild_refcounts_covers_new_refblocks() {
+        let cluster_size = 512;
+        // Header, L1 table and refcount table occupy exactly 256 clusters.
+        // The first refblock is therefore outside its own coverage.
+        let temp =
+            QcowTempDisk::new_with_cluster_bits(829000 * cluster_size, None, false, true, false, 9)
+                .unwrap();
+        let header = temp.disk().metadata().header();
+        let file = AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+        let mut raw = QcowRawFile::from(file, cluster_size, 16).unwrap();
+        let refblocks = raw
+            .read_pointer_table(header.refcount_table_offset, 2, None)
+            .unwrap();
+        assert_eq!(refblocks, [256 * cluster_size, 257 * cluster_size]);
+        for addr in refblocks {
+            assert_eq!(temp.disk().metadata().cluster_refcount(addr).unwrap(), 1);
+        }
+    }
+
+    #[test]
+    fn rebuild_refcounts_can_use_the_full_declared_table() {
+        let cluster_size = 512;
+        let header =
+            QcowHeader::create_for_size_path_and_cluster_bits(3, cluster_size, None, 9).unwrap();
+        assert_eq!(header.refcount_table_clusters, 1);
+        let file = AlignedFile::new(TempFile::new().unwrap().into_file(), false);
+        header.write_to(&file).unwrap();
+        // All 64 refblocks fit in holes within the existing coverage.
+        file.set_len(64 * 256 * cluster_size).unwrap();
+        let mut raw = QcowRawFile::from(file, cluster_size, 16).unwrap();
+        super::rebuild_refcounts(&mut raw, header.clone()).unwrap();
+        let refblocks = raw
+            .read_pointer_table(header.refcount_table_offset, 64, None)
+            .unwrap();
+        assert!(refblocks.iter().all(|&addr| addr != 0));
     }
 
     #[test]
