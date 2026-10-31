@@ -468,7 +468,10 @@ impl QcowMetadata {
                 cluster_size as usize - offset_in_cluster,
             );
 
-            if count == cluster_size as usize {
+            if count == cluster_size as usize
+                && (inner.header.version >= 3
+                    || (sparse && (!zero_marker || backing_file.is_none())))
+            {
                 let punch_offset = inner.deallocate_cluster(
                     curr_addr,
                     sparse,
@@ -481,8 +484,8 @@ impl QcowMetadata {
                     });
                 }
             } else {
-                // Partial cluster - COW from backing to preserve non zeroed bytes,
-                // then the caller writes zeros to the partial range.
+                // Use explicit zeroes for partial ranges and v2 images.
+                // Copy backing data to preserve bytes outside the range.
                 let backing_data = if let Some(backing) = backing_file {
                     let cluster_begin = curr_addr - offset_in_cluster as u64;
                     let mut data = vec![0u8; cluster_size as usize];

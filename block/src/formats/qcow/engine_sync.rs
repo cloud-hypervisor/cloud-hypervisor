@@ -657,6 +657,68 @@ mod tests {
     }
 
     #[test]
+    fn test_v2_write_zeroes() {
+        let cluster_size = 1u64 << 16;
+        let file_size = 3 * cluster_size;
+        let backing_temp = TempFile::new().unwrap();
+        backing_temp
+            .as_file()
+            .write_all_at(&vec![0xab; file_size as usize], 0)
+            .unwrap();
+        let backing_path = backing_temp.as_path().to_str().unwrap();
+
+        for (sparse, backing) in [
+            (false, None),
+            (true, None),
+            (false, Some(backing_path)),
+            (true, Some(backing_path)),
+        ] {
+            let temp = TempFile::new().unwrap();
+            let raw = AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+            QcowHeader::create_for_size_and_path(2, file_size, backing)
+                .unwrap()
+                .write_to(&raw)
+                .unwrap();
+            let open = || {
+                QcowDisk::new(
+                    temp.as_file().try_clone().unwrap(),
+                    false,
+                    true,
+                    sparse,
+                    false,
+                )
+                .unwrap()
+            };
+            let disk = open();
+            disk.write_all_at(0, &vec![0xa5; cluster_size as usize]);
+            let mut async_io = disk.create_async_io(1).unwrap();
+            // Zero both an allocated cluster and an unallocated cluster.
+            async_io.write_zeroes(0, 2 * cluster_size, 42).unwrap();
+            assert_eq!(next_completion(async_io.as_mut()), (42, 0));
+            drop(async_io);
+            drop(disk);
+
+            let mut file = temp.as_file().try_clone().unwrap();
+            let l2_offset = first_l2_entry_offset(&mut file);
+            for offset in [l2_offset, l2_offset + 8] {
+                assert_eq!(read_be_u64_at(&mut file, offset) & TEST_ZERO_FLAG, 0);
+            }
+            let disk = open();
+            assert!(
+                async_read(&disk, 0, 2 * cluster_size as usize)
+                    .iter()
+                    .all(|&b| b == 0)
+            );
+            let untouched = if backing.is_some() { 0xab } else { 0 };
+            assert!(
+                async_read(&disk, 2 * cluster_size, cluster_size as usize)
+                    .iter()
+                    .all(|&b| b == untouched)
+            );
+        }
+    }
+
+    #[test]
     fn test_write_zeroes_compressed_entry_checks_compressed_before_zero_bit() {
         let cluster_size = 1u64 << 16;
         let data = vec![0xEE; cluster_size as usize];
