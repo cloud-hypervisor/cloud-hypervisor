@@ -70,6 +70,9 @@ pub const FW_CFG_ADDRESS_BASE: u64 = 0x9030000;
 #[cfg(target_arch = "aarch64")]
 pub const FW_CFG_ADDRESS_WIDTH: u64 = 0x18;
 
+// CH return value for accesses to unassigned port I/O and MMIO.
+const CH_UNASSIGNED_IO_RETURN_VALUE: u8 = 0xFF;
+
 const FW_CFG_SIGNATURE: u16 = 0x00;
 const FW_CFG_ID: u16 = 0x01;
 const FW_CFG_KERNEL_SIZE: u16 = 0x08;
@@ -742,9 +745,6 @@ impl Aml for FwCfg {
 impl BusDevice for FwCfg {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
         match (offset, data.len()) {
-            (FW_CFG_SELECTOR_OFFSET, _) => {
-                error!("fw_cfg: selector register is write-only.");
-            }
             (FW_CFG_DATA_OFFSET, _) => self.read_data(data),
             (FW_CFG_DMA_HI_OFFSET, 4) => {
                 let addr = self.dma_address;
@@ -756,11 +756,15 @@ impl BusDevice for FwCfg {
                 let addr_lo = (addr & 0xffff_ffff) as u32;
                 data.copy_from_slice(&addr_lo.to_be_bytes());
             }
-            _ => {
+            (offset, _) => {
+                // Return CH unassigned IO value for invalid reads.
                 debug!(
-                    "fw_cfg: read from unknown offset {offset:#x}: {:#x} bytes.",
-                    data.len()
+                    "fw_cfg: Unsupported {:#x}-byte read from address: base={:#x} + offset={:#x}.",
+                    data.len(),
+                    FW_CFG_ADDRESS_BASE,
+                    offset
                 );
+                data.fill(CH_UNASSIGNED_IO_RETURN_VALUE);
             }
         }
     }
@@ -809,6 +813,7 @@ impl BusDevice for FwCfg {
 
 #[cfg(test)]
 mod tests {
+    use core::ops::RangeInclusive;
     use std::ffi::CString;
     use std::io::Write;
 
@@ -1235,5 +1240,42 @@ mod tests {
         assert_eq!(run_dma(&mut fw_cfg, &mem, skip, 0), 0);
         assert_eq!(run_dma(&mut fw_cfg, &mem, skip, 2), 0);
         assert_eq!(fw_cfg.data_offset, 6);
+    }
+
+    #[test]
+    fn test_invalid_reads_behave_as_unassigned_reads() {
+        // QEMU uses two separately mapped regions instead of a single contiguous one as CH does.
+        #[cfg(target_arch = "x86_64")]
+        const QEMU_IO_REGISTER_REGION: RangeInclusive<u64> =
+            FW_CFG_SELECTOR_OFFSET..=FW_CFG_DATA_OFFSET;
+        #[cfg(target_arch = "aarch64")]
+        const QEMU_IO_REGISTER_REGION: RangeInclusive<u64> =
+            FW_CFG_DATA_OFFSET..=FW_CFG_SELECTOR_OFFSET + 1;
+        const QEMU_DMA_REGISTER_REGION: RangeInclusive<u64> =
+            FW_CFG_DMA_HI_OFFSET..=FW_CFG_DMA_LO_OFFSET + 3;
+        let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(GuestMemoryMmap::new()));
+        // QEMU maps two regions of addresses to fw_cfg: One for the SELECTOR and DATA register and
+        // one for the DMA registers, so there is a mapping hole between these two in QEMU. CH can
+        // only map one contiguous region that includes both regions that QEMU would map separately.
+        // We must therefore ensure that the CH fw_cfg impl discards them as unassigned reads. The
+        // addresses below are chosen to be part of the mapping holes, among addresses that are
+        // invalid to read from.
+        let invalid_addresses = [
+            FW_CFG_SELECTOR_OFFSET,               /* SELECTOR is write-only */
+            QEMU_IO_REGISTER_REGION.end() + 1,    /* Start of the QEMU mapping hole. */
+            QEMU_DMA_REGISTER_REGION.start() - 1, /* End of the QEMU mapping hole. */
+            QEMU_DMA_REGISTER_REGION.end() + 1,   /* First address succeeding the mapped region */
+        ];
+
+        for address in invalid_addresses {
+            let mut buff = [0xCD; 1];
+            fw_cfg.read(0, address, &mut buff);
+            assert_eq!(fw_cfg.data_offset, 0);
+            assert_eq!(
+                buff,
+                [CH_UNASSIGNED_IO_RETURN_VALUE],
+                "Address={address:#x}"
+            );
+        }
     }
 }
