@@ -62,6 +62,8 @@ const METADATA_LENGTH_MAX: u32 = 1 << 20; // 1 MiB
 
 #[derive(Error, Debug)]
 pub enum VhdxMetadataError {
+    #[error("Duplicate metadata item")]
+    DuplicateMetadataItem,
     #[error("Invalid block size count")]
     InvalidBlockSize,
     #[error("Invalid disk size {0}")]
@@ -204,6 +206,9 @@ impl DiskSpec {
 
             if (metadata_entry.flag_bits & METADATA_FLAGS_IS_REQUIRED) == 0 {
                 return Err(VhdxMetadataError::UnsupportedFlag);
+            }
+            if metadata_presence & presence != 0 {
+                return Err(VhdxMetadataError::DuplicateMetadataItem);
             }
             metadata_presence |= presence;
             offset += size_of::<MetadataTableEntry>();
@@ -450,6 +455,33 @@ mod tests {
         assert!(matches!(
             DiskSpec::new(&file, &region),
             Err(VhdxMetadataError::OverlappingMetadata)
+        ));
+    }
+
+    #[test]
+    fn duplicate_metadata_items_are_rejected() {
+        let (file, region) = metadata_region();
+        let (entry_offset, _) = metadata_item(&file, &region, METADATA_VIRTUAL_DISK_SIZE);
+        let mut entry = [0u8; 32];
+        file.read_exact_at(&mut entry, entry_offset).unwrap();
+        let item_offset = region.length - 8;
+        entry[16..20].copy_from_slice(&item_offset.to_le_bytes());
+        file.write_all_at(
+            &(2u64 << 20).to_le_bytes(),
+            region.file_offset + u64::from(item_offset),
+        )
+        .unwrap();
+        let mut count = [0; 2];
+        file.read_exact_at(&mut count, region.file_offset + 10)
+            .unwrap();
+        let count = u16::from_le_bytes(count);
+        file.write_all_at(&entry, region.file_offset + 32 + u64::from(count) * 32)
+            .unwrap();
+        file.write_all_at(&(count + 1).to_le_bytes(), region.file_offset + 10)
+            .unwrap();
+        assert!(matches!(
+            DiskSpec::new(&file, &region),
+            Err(VhdxMetadataError::DuplicateMetadataItem)
         ));
     }
 }
