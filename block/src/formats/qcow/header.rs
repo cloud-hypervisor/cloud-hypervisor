@@ -85,8 +85,6 @@ pub(super) const V2_BARE_HEADER_SIZE: u32 = 72;
 pub(super) const V3_BARE_HEADER_SIZE: u32 = 104;
 pub(super) const AUTOCLEAR_FEATURES_OFFSET: u64 = 88;
 
-pub(super) const COMPATIBLE_FEATURES_LAZY_REFCOUNTS: u64 = 1;
-
 // Compression types as defined in https://www.qemu.org/docs/master/interop/qcow2.html
 const COMPRESSION_TYPE_ZLIB: u64 = 0; // zlib/deflate <https://www.ietf.org/rfc/rfc1951.txt>
 const COMPRESSION_TYPE_ZSTD: u64 = 1; // zstd <http://github.com/facebook/zstd>
