@@ -46,6 +46,8 @@ pub enum VhdxHeaderError {
     InvalidEntryCount,
     #[error("Not a valid VHDx header")]
     InvalidHeaderSign,
+    #[error("Invalid log range")]
+    InvalidLogRange,
     #[error("Invalid region range")]
     InvalidRegionRange,
     #[error("Not a valid VHDx region")]
@@ -332,6 +334,21 @@ impl VhdxHeader {
         if header.version != 1 {
             return Err(VhdxHeaderError::UnsupportedVersion(header.version));
         }
+        let log_end = header
+            .log_offset
+            .checked_add(header.log_length as u64)
+            .ok_or(VhdxHeaderError::InvalidLogRange)?;
+        let image_size = f
+            .file()
+            .metadata()
+            .map_err(VhdxHeaderError::GetFileMetadata)?
+            .len();
+        if !header.log_offset.is_multiple_of(1 << 20)
+            || !header.log_length.is_multiple_of(1 << 20)
+            || (header.log_length != 0 && (header.log_offset < 1 << 20 || log_end > image_size))
+        {
+            return Err(VhdxHeaderError::InvalidLogRange);
+        }
         Ok(VhdxHeader {
             _file_type_identifier: file_type_identifier,
             header,
@@ -560,6 +577,40 @@ mod tests {
         assert!(!header.has_active_log());
         header.header.log_guid = 1;
         assert!(header.has_active_log());
+    }
+
+    #[test]
+    fn log_ranges_are_validated() {
+        const MIB: u64 = 1 << 20;
+        let tf = create_dynamic_vhdx(1, None);
+        let file = AlignedFile::new(tf.into_file(), false);
+        let header = VhdxHeader::new(&file).unwrap();
+        let mut raw = header.header;
+        let offset = if header.header_offset == HEADER_1_START {
+            HEADER_2_START
+        } else {
+            HEADER_1_START
+        };
+        let file_end = file.file().metadata().unwrap().len().div_ceil(MIB) * MIB;
+        for (start, length) in [
+            (0, MIB),
+            (MIB + 1, MIB),
+            (MIB, MIB + 1),
+            (file_end, MIB),
+            (u64::MAX - MIB + 1, MIB),
+        ] {
+            raw.log_offset = start;
+            raw.log_length = length as u32;
+            Header::update_header(&file, &raw, raw.file_write_guid, offset).unwrap();
+            assert!(matches!(
+                VhdxHeader::new(&file),
+                Err(VhdxHeaderError::InvalidLogRange)
+            ));
+        }
+        raw.log_offset = 0;
+        raw.log_length = 0;
+        Header::update_header(&file, &raw, raw.file_write_guid, offset).unwrap();
+        VhdxHeader::new(&file).unwrap();
     }
 
     #[test]
