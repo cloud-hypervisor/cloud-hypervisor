@@ -310,6 +310,8 @@ jobs:
           components: clippy
       - name: Install Cargo fuzz
         run: cargo install cargo-fuzz
+      - name: Check fuzz lockfile
+        run: cargo metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml > /dev/null
       - name: Fuzz Build
         run: cargo fuzz build
       - name: Fuzz Check
