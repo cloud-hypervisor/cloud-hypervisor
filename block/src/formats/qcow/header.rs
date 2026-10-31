@@ -19,7 +19,7 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 use super::decoder::{Decoder, ZlibDecoder, ZstdDecoder};
 use super::parser::{Error, Result};
-use super::util::{div_round_up_u32, div_round_up_u64};
+use super::util::div_round_up_u64;
 use crate::aligned_file::AlignedFile;
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 
@@ -557,11 +557,14 @@ impl QcowHeader {
         }
 
         // L2 blocks are always one cluster long. They contain cluster_size/sizeof(u64) addresses.
-        let entries_per_cluster: u32 = cluster_size / size_of::<u64>() as u32;
-        let num_clusters: u32 = div_round_up_u64(size, u64::from(cluster_size)) as u32;
-        let num_l2_clusters: u32 = div_round_up_u32(num_clusters, entries_per_cluster);
-        let l1_clusters: u32 = div_round_up_u32(num_l2_clusters, entries_per_cluster);
-        let header_clusters = div_round_up_u32(size_of::<QcowHeader>() as u32, cluster_size);
+        let entries_per_cluster = u64::from(cluster_size) / size_of::<u64>() as u64;
+        let num_clusters = div_round_up_u64(size, u64::from(cluster_size));
+        let num_l2_clusters = div_round_up_u64(num_clusters, entries_per_cluster);
+        let l1_size =
+            u32::try_from(num_l2_clusters).map_err(|_| Error::TooManyL1Entries(num_l2_clusters))?;
+        let l1_clusters = div_round_up_u64(num_l2_clusters, entries_per_cluster);
+        let header_clusters =
+            div_round_up_u64(size_of::<QcowHeader>() as u64, u64::from(cluster_size));
         Ok(QcowHeader {
             magic: QCOW_MAGIC,
             version,
@@ -577,10 +580,10 @@ impl QcowHeader {
             cluster_bits,
             size,
             crypt_method: 0,
-            l1_size: num_l2_clusters,
+            l1_size,
             l1_table_offset: u64::from(cluster_size),
             // The refcount table is after l1 + header.
-            refcount_table_offset: u64::from(cluster_size * (l1_clusters + 1)),
+            refcount_table_offset: u64::from(cluster_size) * (l1_clusters + 1),
             refcount_table_clusters: {
                 // Pre-allocate enough clusters for the entire refcount table as it must be
                 // continuous in the file. Allocate enough space to refcount all clusters, including
@@ -589,12 +592,14 @@ impl QcowHeader {
                     DEFAULT_REFCOUNT_ORDER,
                     cluster_size,
                     num_clusters + l1_clusters + num_l2_clusters + header_clusters,
-                ) as u32;
+                );
                 // The refcount table needs to store the offset of each refcount cluster.
-                div_round_up_u32(
-                    max_refcount_clusters * size_of::<u64>() as u32,
-                    cluster_size,
-                )
+                let table_clusters = div_round_up_u64(
+                    max_refcount_clusters * size_of::<u64>() as u64,
+                    u64::from(cluster_size),
+                );
+                u32::try_from(table_clusters)
+                    .map_err(|_| Error::InvalidRefcountTableSize(table_clusters))?
             },
             nb_snapshots: 0,
             snapshots_offset: 0,
@@ -728,12 +733,12 @@ impl QcowHeader {
 pub(super) fn max_refcount_clusters(
     refcount_order: u32,
     cluster_size: u32,
-    num_clusters: u32,
+    num_clusters: u64,
 ) -> u64 {
     // Use u64 as the product of the u32 inputs can overflow.
     let refcount_bits = 0x01u64 << u64::from(refcount_order);
     let cluster_bits = u64::from(cluster_size) * 8;
-    let for_data = div_round_up_u64(u64::from(num_clusters) * refcount_bits, cluster_bits);
+    let for_data = div_round_up_u64(num_clusters * refcount_bits, cluster_bits);
     let for_refcounts = div_round_up_u64(for_data * refcount_bits, cluster_bits);
     for_data + for_refcounts
 }
