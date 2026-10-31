@@ -1077,9 +1077,24 @@ impl QcowState {
 
         // Allocate contiguous clusters at file end for new L1 table
         let file_size = self.raw_file.physical_size()?;
-        let new_l1_offset = self.raw_file.cluster_address(file_size + cluster_size - 1);
-
-        let new_file_end = new_l1_offset + new_l1_clusters * cluster_size;
+        let new_l1_offset = self.raw_file.cluster_address(
+            file_size
+                .checked_add(cluster_size - 1)
+                .ok_or_else(|| io::Error::from_raw_os_error(EINVAL))?,
+        );
+        let new_l1_size_bytes = new_l1_clusters * cluster_size;
+        if MetadataLayout::new(&self.header, &self.l2_offsets).overlaps_metadata(
+            new_l1_offset,
+            new_l1_size_bytes,
+            None,
+            &self.refcounts,
+        ) {
+            self.set_corrupt_bit_best_effort();
+            return Err(io::Error::from_raw_os_error(EIO));
+        }
+        let new_file_end = new_l1_offset
+            .checked_add(new_l1_size_bytes)
+            .ok_or_else(|| io::Error::from_raw_os_error(EINVAL))?;
         self.raw_file.file_mut().set_len(new_file_end)?;
 
         // Set refcounts for the contiguous range
@@ -1710,6 +1725,17 @@ mod tests {
                 Some(libc::EIO)
             );
         }
+    }
+
+    #[test]
+    fn l1_growth_rejects_metadata_overlap_before_extending_the_file() {
+        let (_temp, mut state) = test_state();
+        let file_len = state.raw_file.physical_size().unwrap();
+        let cluster_size = state.raw_file.cluster_size();
+        state.header.refcount_table_clusters = (file_len / cluster_size + 1) as u32;
+        let err = state.grow_l1_table(state.header.l1_size + 1).unwrap_err();
+        assert_eq!(err.raw_os_error(), Some(libc::EIO));
+        assert_eq!(state.raw_file.physical_size().unwrap(), file_len);
     }
 
     // Regression for the ENOSPC unwind on the relocate-on-write path: when
