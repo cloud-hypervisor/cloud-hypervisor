@@ -376,11 +376,12 @@ pub(crate) fn parse_qcow(
     file.read_exact_at(&mut first_refblock_bytes, header.refcount_table_offset)
         .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ReadingHeader(e)))?;
     let first_refblock_addr = u64::from_be_bytes(first_refblock_bytes);
+    let mut raw_file = QcowRawFile::from(file, cluster_size, refcount_bits)
+        .ok_or_else(|| BlockError::new(BlockErrorKind::InvalidFormat, Error::InvalidClusterSize))?;
     if first_refblock_addr != 0 {
-        let mut refcount_bytes = [0u8; 2];
-        file.read_exact_at(&mut refcount_bytes, first_refblock_addr)
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ReadingHeader(e)))?;
-        let first_cluster_refcount = u16::from_be_bytes(refcount_bytes);
+        let first_cluster_refcount = raw_file
+            .read_refcounts(first_refblock_addr, 1)
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ReadingHeader(e)))?[0];
         if first_cluster_refcount != 0 {
             refcount_rebuild_required = false;
         }
@@ -390,8 +391,6 @@ pub(crate) fn parse_qcow(
         refcount_rebuild_required = true;
     }
 
-    let mut raw_file = QcowRawFile::from(file, cluster_size, refcount_bits)
-        .ok_or_else(|| BlockError::new(BlockErrorKind::InvalidFormat, Error::InvalidClusterSize))?;
     let is_writable = raw_file.file().is_writable();
 
     if is_writable && header.nb_snapshots != 0 {
@@ -1677,6 +1676,39 @@ mod tests {
         // After rebuild the first cluster (header) must have refcount > 0.
         let refcount = disk.metadata().cluster_refcount(0).unwrap();
         assert!(refcount > 0, "header cluster refcount should be set");
+    }
+
+    #[test]
+    fn clean_images_do_not_rebuild_refcounts() {
+        let cluster_size = 512u64;
+        for order in 0..=6 {
+            let mut header =
+                QcowHeader::create_for_size_path_and_cluster_bits(3, cluster_size, None, 9)
+                    .unwrap();
+            header.refcount_order = order;
+            let temp = TestImage::from_header(&header);
+            write_u64_at(
+                temp.as_file(),
+                header.refcount_table_offset,
+                4 * cluster_size,
+            );
+            let refcount_bits = 1 << order;
+            let mut raw = temp.qcow_raw(cluster_size, refcount_bits);
+            let mut counts = vec![0; (cluster_size * 8 / refcount_bits) as usize];
+            for index in [0, 1, 2, 4] {
+                counts[index] = 1;
+            }
+            raw.write_refcount_block(4 * cluster_size, &counts).unwrap();
+
+            let _disk = temp.open().unwrap();
+            // A needless rebuild would move the refblock into free cluster 3.
+            assert_eq!(
+                raw.read_pointer_table(header.refcount_table_offset, 1, None)
+                    .unwrap()[0],
+                4 * cluster_size,
+                "order={order}"
+            );
+        }
     }
 
     /// Test all valid refcount orders (0-6) can be opened.
