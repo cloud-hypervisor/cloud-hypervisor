@@ -11,7 +11,20 @@ use thiserror::Error;
 
 use super::metadata::ClusterOffsets;
 use super::qcow_raw_file::QcowRawFile;
+use super::util::cluster_addr_is_valid;
 use super::vec_cache::{CacheMap, Cacheable, VecCache};
+
+fn write_refcount_block(
+    raw_file: &mut QcowRawFile,
+    addr: u64,
+    block: &VecCache<u64>,
+    max_valid: u64,
+) -> io::Result<()> {
+    if !cluster_addr_is_valid(addr, raw_file.cluster_size(), max_valid) {
+        return Err(io::Error::from_raw_os_error(EINVAL));
+    }
+    raw_file.write_refcount_block(addr, block.get_values())
+}
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -157,9 +170,11 @@ impl RefCount {
             if let Some((addr, table)) = new_cluster.take() {
                 self.set_block_addr(table_index, addr);
                 let ref_table = &self.ref_table;
+                let max_valid = self.max_valid_cluster_offset;
                 self.refblock_cache
                     .insert(table_index, table, |index, evicted| {
-                        raw_file.write_refcount_block(ref_table[index], evicted.get_values())
+                        let addr = ref_table[index];
+                        write_refcount_block(raw_file, addr, &evicted, max_valid)
                     })
                     .map_err(Error::EvictingRefCounts)?;
             } else {
@@ -191,14 +206,13 @@ impl RefCount {
     /// Flush the dirty refcount blocks. This must be done before flushing the table that points to
     /// the blocks.
     pub(super) fn flush_blocks(&mut self, raw_file: &mut QcowRawFile) -> io::Result<()> {
-        // Write out all dirty L2 tables.
         for (table_index, block) in self.refblock_cache.iter_mut().filter(|(_k, v)| v.dirty()) {
-            let addr = self.ref_table[*table_index];
-            if addr != 0 {
-                raw_file.write_refcount_block(addr, block.get_values())?;
-            } else {
-                return Err(io::Error::from_raw_os_error(EINVAL));
-            }
+            write_refcount_block(
+                raw_file,
+                self.ref_table[*table_index],
+                block,
+                self.max_valid_cluster_offset,
+            )?;
             block.mark_clean();
         }
         Ok(())
@@ -238,9 +252,11 @@ impl RefCount {
                     .map_err(Error::ReadingRefCounts)?,
             );
             let ref_table = &self.ref_table;
+            let max_valid = self.max_valid_cluster_offset;
             self.refblock_cache
                 .insert(table_index, table, |index, evicted| {
-                    raw_file.write_refcount_block(ref_table[index], evicted.get_values())
+                    let addr = ref_table[index];
+                    write_refcount_block(raw_file, addr, &evicted, max_valid)
                 })
                 .map_err(Error::EvictingRefCounts)?;
         }
@@ -259,8 +275,85 @@ impl RefCount {
 mod tests {
     use std::io;
 
-    use super::super::test_util::TestImage;
+    use super::super::qcow_raw_file::QcowRawFile;
+    use super::super::test_util::{TestImage, WritebackPath, dirty_table_cache};
     use super::RefCount;
+
+    struct RefcountFixture {
+        image: TestImage,
+        raw_file: QcowRawFile,
+        refs: RefCount,
+    }
+
+    impl RefcountFixture {
+        fn new() -> Self {
+            let cluster_size = 512;
+            let image = TestImage::from_bytes(&[0xa5; 512], 8 * cluster_size);
+            let mut raw_file = image.qcow_raw(cluster_size, 16);
+            let refs = RefCount::new(
+                &mut raw_file,
+                cluster_size,
+                3,
+                cluster_size * 8 / 16,
+                cluster_size,
+                16,
+            )
+            .unwrap();
+
+            Self {
+                image,
+                raw_file,
+                refs,
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_refcount_writeback_targets_are_rejected() {
+        use super::super::vec_cache::VecCache;
+
+        let cluster_size = 512;
+        let block_entries = cluster_size * 8 / 16;
+        for (target, addr) in [
+            ("header", 0),
+            ("unaligned header", 1),
+            ("unaligned cluster", cluster_size + 1),
+            ("out of range", 3 * block_entries * cluster_size),
+        ] {
+            for path in WritebackPath::ALL {
+                let RefcountFixture {
+                    image: temp,
+                    mut raw_file,
+                    mut refs,
+                } = RefcountFixture::new();
+                refs.set_block_addr(0, addr);
+                refs.set_block_addr(1, 3 * cluster_size);
+                refs.refblock_cache = dirty_table_cache(0, block_entries as usize);
+                let before = temp.snapshot();
+
+                let err = match path {
+                    WritebackPath::Flush => refs.flush_blocks(&mut raw_file).unwrap_err(),
+                    WritebackPath::ReadEviction => match refs
+                        .get_cluster_refcount(&mut raw_file, block_entries * cluster_size)
+                    {
+                        Err(super::Error::EvictingRefCounts(err)) => err,
+                        result => panic!("expected eviction error, got {result:?}"),
+                    },
+                    WritebackPath::WriteEviction => match refs.set_cluster_refcount(
+                        &mut raw_file,
+                        block_entries * cluster_size,
+                        1,
+                        Some((3 * cluster_size, VecCache::new(block_entries as usize))),
+                    ) {
+                        Err(super::Error::EvictingRefCounts(err)) => err,
+                        result => panic!("expected eviction error, got {result:?}"),
+                    },
+                };
+                assert_eq!(err.raw_os_error(), Some(libc::EINVAL), "{target}, {path:?}");
+                before.assert_unchanged(&temp);
+            }
+        }
+    }
 
     // A refcount table whose entry count, refcounts-per-block and cluster size
     // all come from the image can describe more clusters than a 64-bit byte
