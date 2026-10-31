@@ -72,6 +72,21 @@ impl BatEntry {
                 .map_err(VhdxBatError::ReadBat)?;
             for chunk in buf[..len].as_chunks::<{ size_of::<u64>() }>().0 {
                 let raw_entry = u64::from_le_bytes(*chunk);
+                let state = raw_entry & BAT_STATE_BIT_MASK;
+                let bitmap = (bat.len() as u64 + 1).is_multiple_of(disk_spec.chunk_ratio + 1);
+                if raw_entry & !(BAT_FILE_OFF_MASK | BAT_STATE_BIT_MASK) != 0
+                    || (bitmap && state != 0)
+                    || !matches!(
+                        state,
+                        PAYLOAD_BLOCK_NOT_PRESENT
+                            | PAYLOAD_BLOCK_UNDEFINED
+                            | PAYLOAD_BLOCK_ZERO
+                            | PAYLOAD_BLOCK_UNMAPPED
+                            | PAYLOAD_BLOCK_FULLY_PRESENT
+                    )
+                {
+                    return Err(VhdxBatError::InvalidBatEntry);
+                }
                 if raw_entry & BAT_STATE_BIT_MASK == PAYLOAD_BLOCK_FULLY_PRESENT
                     && (raw_entry & BAT_FILE_OFF_MASK).saturating_add(disk_spec.block_size as u64)
                         > disk_spec.image_size
