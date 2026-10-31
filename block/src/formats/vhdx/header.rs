@@ -168,6 +168,7 @@ impl Header {
 
         f.write_all_at(&buffer, start)
             .map_err(VhdxHeaderError::WriteHeader)?;
+        f.sync_all().map_err(VhdxHeaderError::WriteHeader)?;
 
         Ok(new_header)
     }
@@ -361,19 +362,16 @@ impl VhdxHeader {
     }
 
     pub(super) fn update(&mut self, f: &AlignedFile) -> Result<()> {
-        let mut header = self.header;
-        let mut offset = self.header_offset;
         let file_write_guid = Uuid::new_v4().as_u128();
         for _ in 0..2 {
-            offset = if offset == HEADER_1_START {
+            let offset = if self.header_offset == HEADER_1_START {
                 HEADER_2_START
             } else {
                 HEADER_1_START
             };
-            header = Header::update_header(f, &header, file_write_guid, offset)?;
+            self.header = Header::update_header(f, &self.header, file_write_guid, offset)?;
+            self.header_offset = offset;
         }
-        self.header = header;
-        self.header_offset = offset;
         Ok(())
     }
 
@@ -507,6 +505,23 @@ mod tests {
                 header.header.file_write_guid
             });
         }
+    }
+
+    #[test]
+    fn successful_header_update_is_retained_on_error() {
+        let tf = create_dynamic_vhdx(1, None);
+        let file = AlignedFile::new(tf.into_file(), false);
+        let mut header = VhdxHeader::new(&file).unwrap();
+        let old_offset = header.header_offset;
+        header.header.sequence_number = u64::MAX - 1;
+        assert!(matches!(
+            header.update(&file),
+            Err(VhdxHeaderError::SequenceNumberOverflow)
+        ));
+        assert_eq!({ header.header.sequence_number }, u64::MAX);
+        assert_ne!(header.header_offset, old_offset);
+        let stored = Header::new(&file, header.header_offset).unwrap();
+        assert_eq!({ stored.sequence_number }, u64::MAX);
     }
 
     #[test]
