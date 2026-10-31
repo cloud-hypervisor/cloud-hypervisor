@@ -55,11 +55,24 @@ mod defs {
         /// Valid with a VSOCK_OP_SHUTDOWN packet: the packet sender will send no more data.
         pub(crate) const VSOCK_FLAGS_SHUTDOWN_SEND: u32 = 2;
 
+        /// Vsock RW packet flags (SOCK_SEQPACKET only).
+        /// Defined in `/include/uapi/linux/virtio_vsock.h`.
+        ///
+        /// End of message: the RW packet carrying this flag is the last one of a seqpacket
+        /// message. The receiver uses it to reconstruct message boundaries.
+        pub(crate) const VSOCK_SEQ_EOM: u32 = 1;
+
         /// Vsock packet type.
         /// Defined in `/include/uapi/linux/virtio_vsock.h`.
         ///
-        /// Stream / connection-oriented packet (the only currently valid type).
+        /// Stream / connection-oriented packet.
         pub(crate) const VSOCK_TYPE_STREAM: u16 = 1;
+        /// Seqpacket / connection-oriented, message-oriented packet.
+        pub(crate) const VSOCK_TYPE_SEQPACKET: u16 = 2;
+
+        /// Vsock device feature bit: SOCK_SEQPACKET support.
+        /// Defined in `/include/uapi/linux/virtio_vsock.h`.
+        pub(crate) const VIRTIO_VSOCK_F_SEQPACKET: u64 = 1;
 
         pub(crate) const VSOCK_HOST_CID: u64 = 2;
     }
@@ -147,10 +160,10 @@ pub trait VsockChannel {
 /// Currently, the only implementation we have is `crate::virtio::unix::muxer::VsockMuxer`, which
 /// translates guest-side vsock connections to host-side Unix domain socket connections.
 pub trait VsockBackend: VsockChannel + VsockEpollListener + Send {
-    fn connections(&self) -> Vec<(u32, u32)> {
+    fn connections(&self) -> Vec<(u32, u32, u16)> {
         Vec::new()
     }
-    fn queue_rst_for_connections(&mut self, _conns: Vec<(u32, u32)>) {}
+    fn queue_rst_for_connections(&mut self, _conns: Vec<(u32, u32, u16)>) {}
 }
 
 #[cfg(any(test, fuzzing))]

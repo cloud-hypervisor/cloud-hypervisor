@@ -19,7 +19,7 @@ use byteorder::{ByteOrder, LittleEndian};
 use event_monitor::event;
 use log::{debug, error, info, warn};
 use seccompiler::SeccompAction;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic};
@@ -27,6 +27,8 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottabl
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
 
+use super::defs::uapi;
+use super::unix::SEQPACKET_PATH_SUFFIX;
 /// This is the `VirtioDevice` implementation for our vsock device. It handles the virtio-level
 /// device logic: feature negotiation, device configuration, and device activation.
 /// The run-time device logic (i.e. event-driven data handling) is implemented by
@@ -344,6 +346,8 @@ pub struct Vsock<B: VsockBackend> {
     cid: u64,
     backend: Arc<RwLock<B>>,
     path: PathBuf,
+    /// Path of the seqpacket listener the backend binds alongside `path`.
+    path_seqpacket: PathBuf,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
 }
@@ -352,8 +356,36 @@ pub struct Vsock<B: VsockBackend> {
 pub struct VsockState {
     pub avail_features: u64,
     pub acked_features: u64,
-    #[serde(default)]
-    pub connections: Vec<(u32, u32)>,
+    /// Open connections as (local_port, peer_port, socket type).
+    #[serde(default, deserialize_with = "deserialize_connections")]
+    pub connections: Vec<(u32, u32, u16)>,
+}
+
+/// Snapshots taken before seqpacket support store each connection as
+/// (local_port, peer_port), so accept that shape too. Every connection in
+/// such a snapshot is a stream connection.
+fn deserialize_connections<'de, D>(deserializer: D) -> Result<Vec<(u32, u32, u16)>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Connection {
+        Typed(u32, u32, u16),
+        Legacy(u32, u32),
+    }
+
+    Ok(Vec::<Connection>::deserialize(deserializer)?
+        .into_iter()
+        .map(|conn| match conn {
+            Connection::Typed(local_port, peer_port, sock_type) => {
+                (local_port, peer_port, sock_type)
+            }
+            Connection::Legacy(local_port, peer_port) => {
+                (local_port, peer_port, uapi::VSOCK_TYPE_STREAM)
+            }
+        })
+        .collect())
 }
 
 impl<B> Vsock<B>
@@ -380,13 +412,18 @@ where
             backend.queue_rst_for_connections(state.connections.clone());
             (state.avail_features, state.acked_features, true)
         } else {
-            let mut avail_features = (1u64 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_F_IN_ORDER);
+            let mut avail_features = (1u64 << VIRTIO_F_VERSION_1)
+                | (1u64 << VIRTIO_F_IN_ORDER)
+                | (1u64 << uapi::VIRTIO_VSOCK_F_SEQPACKET);
 
             if access_platform_enabled {
                 avail_features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
             }
             (avail_features, 0, false)
         };
+
+        let mut path_seqpacket = path.clone().into_os_string();
+        path_seqpacket.push(SEQPACKET_PATH_SUFFIX);
 
         Ok(Vsock {
             common: VirtioCommon {
@@ -403,6 +440,7 @@ where
             cid: cid.into(),
             backend: Arc::new(RwLock::new(backend)),
             path,
+            path_seqpacket: path_seqpacket.into(),
             seccomp_action,
             exit_evt,
         })
@@ -509,6 +547,7 @@ where
 
     fn shutdown(&mut self) {
         fs::remove_file(&self.path).ok();
+        fs::remove_file(&self.path_seqpacket).ok();
     }
 
     fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
@@ -562,7 +601,9 @@ mod tests {
     #[test]
     fn test_virtio_device() {
         let mut ctx = TestContext::new();
-        let avail_features = (1u64 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_F_IN_ORDER);
+        let avail_features = (1u64 << VIRTIO_F_VERSION_1)
+            | (1u64 << VIRTIO_F_IN_ORDER)
+            | (1u64 << uapi::VIRTIO_VSOCK_F_SEQPACKET);
         let device_features = avail_features;
         let driver_features: u64 = avail_features | 1 | (1 << 32);
         let device_pages = [
@@ -655,6 +696,18 @@ mod tests {
                 device_status: Arc::new(AtomicU8::new(0)),
             })
             .unwrap();
+    }
+
+    #[test]
+    fn test_seqpacket_feature_advertised() {
+        // Test case: the device offers VIRTIO_VSOCK_F_SEQPACKET, without which the guest
+        // driver refuses to create SOCK_SEQPACKET sockets.
+        let ctx = TestContext::new();
+        assert_ne!(
+            ctx.device.features() & (1u64 << uapi::VIRTIO_VSOCK_F_SEQPACKET),
+            0,
+            "vsock device should advertise VIRTIO_VSOCK_F_SEQPACKET"
+        );
     }
 
     #[test]
@@ -912,5 +965,45 @@ mod tests {
         ctx.handler
             .handle_event(&mut epoll_helper, &event)
             .expect_err("handle_event() should have failed");
+    }
+
+    #[test]
+    fn test_state_legacy_connections() {
+        // VsockState as saved before seqpacket support.
+        #[derive(Serialize)]
+        struct LegacyVsockState {
+            avail_features: u64,
+            acked_features: u64,
+            connections: Vec<(u32, u32)>,
+        }
+
+        let snapshot = Snapshot::new_from_state(&LegacyVsockState {
+            avail_features: 1,
+            acked_features: 1,
+            connections: vec![(1024, 5000), (1025, 5001)],
+        })
+        .unwrap();
+        let state: VsockState = snapshot.to_state().unwrap();
+        assert_eq!(
+            state.connections,
+            vec![
+                (1024, 5000, uapi::VSOCK_TYPE_STREAM),
+                (1025, 5001, uapi::VSOCK_TYPE_STREAM),
+            ]
+        );
+
+        // The current format keeps the type of each connection.
+        let connections = vec![
+            (1024, 5000, uapi::VSOCK_TYPE_STREAM),
+            (1025, 5001, uapi::VSOCK_TYPE_SEQPACKET),
+        ];
+        let snapshot = Snapshot::new_from_state(&VsockState {
+            avail_features: 1,
+            acked_features: 1,
+            connections: connections.clone(),
+        })
+        .unwrap();
+        let state: VsockState = snapshot.to_state().unwrap();
+        assert_eq!(state.connections, connections);
     }
 }
