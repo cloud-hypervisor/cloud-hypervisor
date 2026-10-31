@@ -9,6 +9,7 @@ use std::{io, result};
 use libc::EINVAL;
 use thiserror::Error;
 
+use super::metadata::ClusterOffsets;
 use super::qcow_raw_file::QcowRawFile;
 use super::vec_cache::{CacheMap, Cacheable, VecCache};
 
@@ -47,6 +48,7 @@ pub(super) type Result<T> = result::Result<T, Error>;
 #[derive(Clone, Debug)]
 pub(super) struct RefCount {
     ref_table: VecCache<u64>,
+    block_offsets: ClusterOffsets,
     refcount_table_offset: u64,
     refblock_cache: CacheMap<VecCache<u64>>,
     refcount_block_entries: u64, // number of refcounts in a cluster.
@@ -93,6 +95,7 @@ impl RefCount {
             (1u64 << refcount_bits) - 1
         };
         Ok(RefCount {
+            block_offsets: ClusterOffsets::new(ref_table.get_values()),
             ref_table,
             refcount_table_offset,
             refblock_cache: CacheMap::new(50),
@@ -112,6 +115,16 @@ impl RefCount {
     /// Returns the maximum valid cluster offset in the raw file for this refcount table.
     pub(super) fn max_valid_cluster_offset(&self) -> u64 {
         self.max_valid_cluster_offset
+    }
+
+    pub(super) fn overlaps_blocks(&self, addr: u64, size: u64) -> bool {
+        self.block_offsets
+            .overlaps(addr, size, self.cluster_size, None)
+    }
+
+    fn set_block_addr(&mut self, index: usize, addr: u64) {
+        self.block_offsets.replace(self.ref_table[index], addr);
+        self.ref_table[index] = addr;
     }
 
     /// Returns `NeedNewCluster` if a new cluster needs to be allocated for refcounts. If an
@@ -142,7 +155,7 @@ impl RefCount {
         if !self.refblock_cache.contains_key(table_index) {
             // Need a new cluster
             if let Some((addr, table)) = new_cluster.take() {
-                self.ref_table[table_index] = addr;
+                self.set_block_addr(table_index, addr);
                 let ref_table = &self.ref_table;
                 self.refblock_cache
                     .insert(table_index, table, |index, evicted| {
@@ -164,7 +177,7 @@ impl RefCount {
             // Free the previously used block and use a new one. Writing modified counts to new
             // blocks keeps the on-disk state consistent even if it's out of date.
             if let Some((addr, _)) = new_cluster.take() {
-                self.ref_table[table_index] = addr;
+                self.set_block_addr(table_index, addr);
                 Some(block_addr_disk)
             } else {
                 return Err(Error::NeedNewCluster);

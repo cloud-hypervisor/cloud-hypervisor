@@ -17,6 +17,7 @@
 //! operations upgrade to a write lock.
 
 use std::cmp::min;
+use std::collections::BTreeMap;
 use std::os::unix::fs::FileExt;
 use std::sync::{Arc, RwLock};
 use std::{io, mem};
@@ -35,6 +36,99 @@ use super::util::{
 };
 use super::vec_cache::{CacheMap, Cacheable, VecCache};
 use super::{QcowHeader, refcount};
+
+/// Counts references to metadata clusters, including duplicate pointers.
+/// Ordered offsets keep overlap checks independent of the table length.
+#[derive(Clone, Debug, Default)]
+pub(super) struct ClusterOffsets(BTreeMap<u64, usize>);
+
+impl ClusterOffsets {
+    pub(super) fn new(entries: &[u64]) -> Self {
+        let mut offsets = Self::default();
+        for &addr in entries {
+            offsets.replace(0, addr);
+        }
+        offsets
+    }
+
+    pub(super) fn replace(&mut self, old: u64, new: u64) {
+        if old == new {
+            return;
+        }
+        if old != 0 {
+            let count = self.0.get_mut(&old).expect("Metadata offset is indexed");
+            *count -= 1;
+            if *count == 0 {
+                self.0.remove(&old);
+            }
+        }
+        if new != 0 {
+            *self.0.entry(new).or_default() += 1;
+        }
+    }
+
+    /// Excludes the caller's own metadata cluster, including shared references.
+    pub(super) fn overlaps(
+        &self,
+        addr: u64,
+        size: u64,
+        cluster_size: u64,
+        exclude: Option<u64>,
+    ) -> bool {
+        let Some(end) = addr.checked_add(size) else {
+            return true;
+        };
+        if size == 0 {
+            return false;
+        }
+        self.0
+            .range(addr.saturating_sub(cluster_size - 1)..end)
+            .any(|(&offset, _)| exclude != Some(offset))
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct MetadataLayout<'a> {
+    header: &'a QcowHeader,
+    l2_offsets: &'a ClusterOffsets,
+}
+
+impl<'a> MetadataLayout<'a> {
+    pub(super) fn new(header: &'a QcowHeader, l2_offsets: &'a ClusterOffsets) -> Self {
+        Self { header, l2_offsets }
+    }
+
+    pub(super) fn overlaps(&self, addr: u64, size: u64, exclude_l2: Option<u64>) -> bool {
+        let cluster_size = 1u64 << self.header.cluster_bits;
+        let l1_clusters = div_round_up_u64(u64::from(self.header.l1_size) * 8, cluster_size);
+        addr < cluster_size
+            || ranges_overlap(
+                addr,
+                size,
+                self.header.l1_table_offset,
+                l1_clusters * cluster_size,
+            )
+            || ranges_overlap(
+                addr,
+                size,
+                self.header.refcount_table_offset,
+                u64::from(self.header.refcount_table_clusters) * cluster_size,
+            )
+            || self
+                .l2_offsets
+                .overlaps(addr, size, cluster_size, exclude_l2)
+    }
+
+    fn overlaps_metadata(
+        &self,
+        addr: u64,
+        size: u64,
+        exclude_l2: Option<u64>,
+        refcounts: &RefCount,
+    ) -> bool {
+        self.overlaps(addr, size, exclude_l2) || refcounts.overlaps_blocks(addr, size)
+    }
+}
 
 pub(super) fn metadata_tables_are_disjoint(header: &QcowHeader) -> bool {
     let cluster_size = 1u64 << header.cluster_bits;
@@ -153,7 +247,8 @@ pub(super) struct QcowMetadata {
 /// The actual metadata state, accessible only through the RwLock.
 pub(crate) struct QcowState {
     pub(crate) header: QcowHeader,
-    pub(crate) l1_table: VecCache<u64>,
+    pub(super) l1_table: VecCache<u64>,
+    pub(super) l2_offsets: ClusterOffsets,
     pub(crate) l2_entries: u64,
     pub(crate) l2_cache: CacheMap<VecCache<u64>>,
     pub(crate) refcounts: RefCount,
@@ -647,6 +742,11 @@ impl QcowState {
 
     // -- Address computation helpers --
 
+    fn set_l2_table_addr(&mut self, index: usize, addr: u64) {
+        self.l2_offsets.replace(self.l1_table[index], addr);
+        self.l1_table[index] = addr;
+    }
+
     fn l1_table_index(&self, address: u64) -> u64 {
         (address / self.raw_file.cluster_size()) / self.l2_entries
     }
@@ -667,6 +767,11 @@ impl QcowState {
             size,
             self.raw_file.cluster_size(),
             self.refcounts.max_valid_cluster_offset(),
+        ) && !MetadataLayout::new(&self.header, &self.l2_offsets).overlaps_metadata(
+            addr,
+            size as u64,
+            None,
+            &self.refcounts,
         )
     }
 
@@ -712,7 +817,7 @@ impl QcowState {
             let l2_table = if l2_addr_disk == 0 {
                 // Set the new L2 table's refcount to 1 before the L1 entry points at it.
                 let new_addr = self.append_data_cluster(None)?;
-                self.l1_table[l1_index] = new_addr;
+                self.set_l2_table_addr(l1_index, new_addr);
                 VecCache::new(self.l2_entries as usize)
             } else {
                 self.reject_invalid_cluster_offset(l2_addr_disk)?;
@@ -836,7 +941,7 @@ impl QcowState {
         self.l2_cache.get_mut(l1_index).unwrap()[l2_index] = l2_entry_make_std(cluster_addr);
 
         if let Some((old_l2, new_addr)) = relocation {
-            self.l1_table[l1_index] = new_addr; // marks l1_table dirty via IndexMut
+            self.set_l2_table_addr(l1_index, new_addr);
             if old_l2 != 0 {
                 self.set_cluster_refcount_track_freed(old_l2, 0)?;
                 self.unref_clusters.push(old_l2);
@@ -1231,6 +1336,8 @@ impl QcowState {
 mod tests {
     use vmm_sys_util::tempfile::TempFile;
 
+    use super::{ClusterOffsets, MetadataLayout};
+
     fn test_state() -> (TempFile, super::QcowState) {
         let temp = super::super::QcowTempDisk::new(64 << 16, None, false, true, false)
             .unwrap()
@@ -1243,15 +1350,67 @@ mod tests {
     }
 
     #[test]
+    fn metadata_layout_checks_partial_cluster_overlap() {
+        let header =
+            super::QcowHeader::create_for_size_path_and_cluster_bits(3, 512, None, 9).unwrap();
+        let offsets = ClusterOffsets::new(&[2048]);
+        let layout = MetadataLayout::new(&header, &offsets);
+        assert!(!layout.overlaps(2047, 1, None));
+        assert!(layout.overlaps(2047, 2, None));
+        assert!(!layout.overlaps(2560, 512, None));
+        assert!(!layout.overlaps(2048, 512, Some(2048)));
+    }
+
+    #[test]
+    fn metadata_offsets_track_relocation_and_duplicate_references() {
+        let mut offsets = ClusterOffsets::new(&[512, 512, 1024]);
+        assert!(!offsets.overlaps(512, 512, 512, Some(512)));
+        offsets.replace(512, 1536);
+        assert!(!offsets.overlaps(512, 512, 512, Some(512)));
+        assert!(offsets.overlaps(511, 2, 512, None));
+        assert!(!offsets.overlaps(0, 512, 512, None));
+        offsets.replace(512, 0);
+        assert!(!offsets.overlaps(512, 512, 512, None));
+        assert!(offsets.overlaps(1536, 512, 512, None));
+        assert!(offsets.overlaps(u64::MAX, 1, 512, None));
+    }
+
+    #[test]
     fn invalid_compressed_ranges_are_rejected_before_io() {
+        use std::os::unix::fs::FileExt;
+
         use super::super::util::COMPRESSED_FLAG;
 
         let cluster_size = 1 << 16;
-        for addr in [0, cluster_size - 1, 1 << 50] {
-            let (_temp, mut inner) = test_state();
+        for target in [
+            "header",
+            "header end",
+            "out of range",
+            "L1",
+            "refcount table",
+            "L2",
+            "refcount block",
+            "L2 boundary",
+        ] {
+            let (temp, mut inner) = test_state();
+            let mut refblock = [0u8; 8];
+            temp.as_file()
+                .read_exact_at(&mut refblock, inner.header.refcount_table_offset)
+                .unwrap();
+            let addr = match target {
+                "header" => 0,
+                "header end" => cluster_size - 1,
+                "out of range" => 1 << 50,
+                "L1" => inner.header.l1_table_offset,
+                "refcount table" => inner.header.refcount_table_offset,
+                "L2" => inner.l1_table[0],
+                "refcount block" => u64::from_be_bytes(refblock),
+                _ => inner.l1_table[0] - 1,
+            };
             let free = inner.avail_clusters.clone();
             let unref = inner.unref_clusters.clone();
-            let entry = COMPRESSED_FLAG | addr;
+            // Two sectors make the last case cross into the L2 table.
+            let entry = COMPRESSED_FLAG | addr | if target == "L2 boundary" { 1 << 54 } else { 0 };
             inner.l2_cache.get_mut(0).unwrap()[0] = entry;
 
             assert!(inner.try_map_read(0, 1, false).unwrap().is_none());

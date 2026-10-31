@@ -512,10 +512,12 @@ pub(crate) fn parse_qcow(
             .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
     }
 
+    let l2_offsets = super::metadata::ClusterOffsets::new(l1_table.get_values());
     let inner = metadata::QcowState {
         raw_file,
         header,
         l1_table,
+        l2_offsets,
         l2_entries,
         l2_cache: CacheMap::new(100),
         refcounts,
