@@ -140,6 +140,7 @@ impl AsyncIo for QcowSync {
 mod tests {
     use std::fs::{File, OpenOptions, create_dir};
     use std::io::Write;
+    use std::os::unix::fs::FileExt;
     use std::path::Path;
     use std::sync::Arc;
     use std::{env, thread};
@@ -148,6 +149,7 @@ mod tests {
     use vmm_sys_util::tempdir::TempDir;
     use vmm_sys_util::tempfile::TempFile;
 
+    use super::super::test_util::{DiskOptions, TestImage};
     use super::*;
     use crate::aligned_file::AlignedFile;
     use crate::async_io::{AsyncIoCompletion, GuestMemoryTarget, OwnedIoBuffer};
@@ -644,6 +646,62 @@ mod tests {
             read_buf.iter().all(|&b| b == 0),
             "Zeroed region should read as zeros"
         );
+    }
+
+    #[test]
+    fn test_v2_write_zeroes() {
+        let cluster_size = 1u64 << 16;
+        let file_size = 3 * cluster_size;
+        let backing_temp = TempFile::new().unwrap();
+        backing_temp
+            .as_file()
+            .write_all_at(&vec![0xab; file_size as usize], 0)
+            .unwrap();
+        let backing_path = backing_temp.as_path().to_str().unwrap();
+
+        for (sparse, backing) in [
+            (false, None),
+            (true, None),
+            (false, Some(backing_path)),
+            (true, Some(backing_path)),
+        ] {
+            let header = QcowHeader::create_for_size_and_path(2, file_size, backing).unwrap();
+            let temp = TestImage::from_header(&header);
+            let open = || {
+                temp.open_with(DiskOptions {
+                    backing_files: true,
+                    sparse,
+                    ..Default::default()
+                })
+                .unwrap()
+            };
+            let disk = open();
+            disk.write_all_at(0, &vec![0xa5; cluster_size as usize]);
+            let mut async_io = disk.create_async_io(1).unwrap();
+            // Zero both an allocated cluster and an unallocated cluster.
+            async_io.write_zeroes(0, 2 * cluster_size, 42).unwrap();
+            assert_eq!(next_completion(async_io.as_mut()), (42, 0));
+            drop(async_io);
+            drop(disk);
+
+            let mut file = temp.as_file().try_clone().unwrap();
+            let l2_offset = first_l2_entry_offset(&mut file);
+            for offset in [l2_offset, l2_offset + 8] {
+                assert_eq!(read_u64_at(&file, offset) & TEST_ZERO_FLAG, 0);
+            }
+            let disk = open();
+            assert!(
+                async_read(&disk, 0, 2 * cluster_size as usize)
+                    .iter()
+                    .all(|&b| b == 0)
+            );
+            let untouched = if backing.is_some() { 0xab } else { 0 };
+            assert!(
+                async_read(&disk, 2 * cluster_size, cluster_size as usize)
+                    .iter()
+                    .all(|&b| b == untouched)
+            );
+        }
     }
 
     #[test]

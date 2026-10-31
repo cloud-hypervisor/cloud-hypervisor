@@ -468,7 +468,10 @@ impl QcowMetadata {
                 cluster_size as usize - offset_in_cluster,
             );
 
-            if count == cluster_size as usize {
+            if count == cluster_size as usize
+                && (inner.header.version >= 3
+                    || (sparse && (!zero_marker || backing_file.is_none())))
+            {
                 let punch_offset = inner.deallocate_cluster(
                     curr_addr,
                     sparse,
@@ -481,9 +484,21 @@ impl QcowMetadata {
                     });
                 }
             } else {
-                // Partial cluster - COW from backing to preserve non zeroed bytes,
-                // then the caller writes zeros to the partial range.
-                let backing_data = if let Some(backing) = backing_file {
+                // Use explicit zeroes for partial ranges and v2 images.
+                if inner.header.version == 2
+                    && backing_file.is_none()
+                    && matches!(
+                        inner.map_read_with_populate(curr_addr, count, false)?,
+                        ClusterReadMapping::Zero { .. }
+                    )
+                {
+                    nwritten += count;
+                    continue;
+                }
+                // Copy backing data to preserve bytes outside the range.
+                let backing_data = if let Some(backing) = backing_file
+                    && count != cluster_size as usize
+                {
                     let cluster_begin = curr_addr - offset_in_cluster as u64;
                     let mut data = vec![0u8; cluster_size as usize];
                     backing.read_at(cluster_begin, &mut data)?;
@@ -1557,6 +1572,66 @@ mod tests {
         assert!(!offsets.overlaps(512, 512, 512, None));
         assert!(offsets.overlaps(1536, 512, 512, None));
         assert!(offsets.overlaps(u64::MAX, 1, 512, None));
+    }
+
+    #[test]
+    fn v2_zeroing_unallocated_clusters_does_not_allocate() {
+        let cluster_size = 1 << 16;
+        for cached_l2 in [false, true] {
+            for length in [512, cluster_size as usize] {
+                let header =
+                    super::QcowHeader::create_for_size_and_path(2, 2 * cluster_size, None).unwrap();
+                let image = TestImage::from_header(&header);
+                let mut state = open_state(&image);
+                if cached_l2 {
+                    state.map_write(0, None).unwrap();
+                    state.sync_caches().unwrap();
+                }
+                let before = image.snapshot();
+                let metadata = super::QcowMetadata::new(state);
+
+                let actions = metadata
+                    .deallocate_bytes(cluster_size, length, false, true, None)
+                    .unwrap();
+                assert!(actions.is_empty());
+                before.assert_unchanged(&image);
+            }
+        }
+    }
+
+    #[test]
+    fn v2_full_cluster_zeroing_does_not_read_backing() {
+        use std::io;
+
+        struct UnreadableBacking;
+
+        impl super::BackingRead for UnreadableBacking {
+            fn read_at(&self, _address: u64, _buf: &mut [u8]) -> io::Result<()> {
+                Err(io::Error::other("Unexpected backing read"))
+            }
+        }
+
+        let cluster_size = 1 << 16;
+        for sparse in [false, true] {
+            let header =
+                super::QcowHeader::create_for_size_and_path(2, cluster_size, None).unwrap();
+            let image = TestImage::from_header(&header);
+            let metadata = super::QcowMetadata::new(open_state(&image));
+            let actions = metadata
+                .deallocate_bytes(
+                    0,
+                    cluster_size as usize,
+                    sparse,
+                    true,
+                    Some(&UnreadableBacking),
+                )
+                .unwrap();
+            assert!(matches!(
+                actions.as_slice(),
+                [super::DeallocAction::WriteZeroes { length, .. }]
+                    if *length == cluster_size as usize
+            ));
+        }
     }
 
     #[test]
