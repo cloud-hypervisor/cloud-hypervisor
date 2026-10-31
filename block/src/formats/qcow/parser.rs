@@ -392,10 +392,6 @@ pub(crate) fn parse_qcow(
         }
     }
 
-    if (header.compatible_features & COMPATIBLE_FEATURES_LAZY_REFCOUNTS) != 0 {
-        refcount_rebuild_required = true;
-    }
-
     let is_writable = raw_file.file().is_writable();
 
     if is_writable && header.nb_snapshots != 0 {
@@ -1762,12 +1758,22 @@ mod tests {
     #[test]
     fn clean_images_do_not_rebuild_refcounts() {
         let cluster_size = 512u64;
-        for order in 0..=6 {
+        for (order, compatible_features) in [
+            (0, 0),
+            (1, 0),
+            (2, 0),
+            (3, 0),
+            (4, 0),
+            (5, 0),
+            (6, 0),
+            (4, 1), // Clean image with lazy refcounts.
+        ] {
             let temp = TempFile::new().unwrap();
             let mut header =
                 QcowHeader::create_for_size_path_and_cluster_bits(3, cluster_size, None, 9)
                     .unwrap();
             header.refcount_order = order;
+            header.compatible_features = compatible_features;
             let raw = AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
             header.write_to(&raw).unwrap();
             raw.write_all_at(
@@ -1796,7 +1802,7 @@ mod tests {
                 raw.read_pointer_table(header.refcount_table_offset, 1, None)
                     .unwrap()[0],
                 4 * cluster_size,
-                "order={order}"
+                "order={order}, compatible_features={compatible_features}"
             );
         }
     }
