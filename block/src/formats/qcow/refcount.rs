@@ -11,7 +11,20 @@ use thiserror::Error;
 
 use super::metadata::ClusterOffsets;
 use super::qcow_raw_file::QcowRawFile;
+use super::util::cluster_addr_is_valid;
 use super::vec_cache::{CacheMap, Cacheable, VecCache};
+
+fn write_refcount_block(
+    raw_file: &mut QcowRawFile,
+    addr: u64,
+    block: &VecCache<u64>,
+    max_valid: u64,
+) -> io::Result<()> {
+    if !cluster_addr_is_valid(addr, raw_file.cluster_size(), max_valid) {
+        return Err(io::Error::from_raw_os_error(EINVAL));
+    }
+    raw_file.write_refcount_block(addr, block.get_values())
+}
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -157,9 +170,11 @@ impl RefCount {
             if let Some((addr, table)) = new_cluster.take() {
                 self.set_block_addr(table_index, addr);
                 let ref_table = &self.ref_table;
+                let max_valid = self.max_valid_cluster_offset;
                 self.refblock_cache
                     .insert(table_index, table, |index, evicted| {
-                        raw_file.write_refcount_block(ref_table[index], evicted.get_values())
+                        let addr = ref_table[index];
+                        write_refcount_block(raw_file, addr, &evicted, max_valid)
                     })
                     .map_err(Error::EvictingRefCounts)?;
             } else {
@@ -191,14 +206,13 @@ impl RefCount {
     /// Flush the dirty refcount blocks. This must be done before flushing the table that points to
     /// the blocks.
     pub(super) fn flush_blocks(&mut self, raw_file: &mut QcowRawFile) -> io::Result<()> {
-        // Write out all dirty L2 tables.
         for (table_index, block) in self.refblock_cache.iter_mut().filter(|(_k, v)| v.dirty()) {
-            let addr = self.ref_table[*table_index];
-            if addr != 0 {
-                raw_file.write_refcount_block(addr, block.get_values())?;
-            } else {
-                return Err(io::Error::from_raw_os_error(EINVAL));
-            }
+            write_refcount_block(
+                raw_file,
+                self.ref_table[*table_index],
+                block,
+                self.max_valid_cluster_offset,
+            )?;
             block.mark_clean();
         }
         Ok(())
@@ -238,9 +252,11 @@ impl RefCount {
                     .map_err(Error::ReadingRefCounts)?,
             );
             let ref_table = &self.ref_table;
+            let max_valid = self.max_valid_cluster_offset;
             self.refblock_cache
                 .insert(table_index, table, |index, evicted| {
-                    raw_file.write_refcount_block(ref_table[index], evicted.get_values())
+                    let addr = ref_table[index];
+                    write_refcount_block(raw_file, addr, &evicted, max_valid)
                 })
                 .map_err(Error::EvictingRefCounts)?;
         }
@@ -258,12 +274,84 @@ impl RefCount {
 #[cfg(test)]
 mod tests {
     use std::io;
+    use std::os::unix::fs::FileExt;
 
     use vmm_sys_util::tempfile::TempFile;
 
     use super::super::qcow_raw_file::QcowRawFile;
     use super::RefCount;
     use crate::aligned_file::AlignedFile;
+
+    fn test_refcounts() -> (TempFile, QcowRawFile, RefCount) {
+        let cluster_size = 512;
+        let temp = TempFile::new().unwrap();
+        temp.as_file().set_len(8 * cluster_size).unwrap();
+        temp.as_file().write_all_at(&[0xa5; 512], 0).unwrap();
+        let mut raw = QcowRawFile::from(
+            AlignedFile::new(temp.as_file().try_clone().unwrap(), false),
+            cluster_size,
+            16,
+        )
+        .unwrap();
+        let refs = RefCount::new(
+            &mut raw,
+            cluster_size,
+            3,
+            cluster_size * 8 / 16,
+            cluster_size,
+            16,
+        )
+        .unwrap();
+        (temp, raw, refs)
+    }
+
+    #[test]
+    fn invalid_refcount_writeback_targets_are_rejected() {
+        use super::super::vec_cache::{CacheMap, VecCache};
+
+        let cluster_size = 512;
+        let block_entries = cluster_size * 8 / 16;
+        for addr in [0, 1, cluster_size + 1, 3 * block_entries * cluster_size] {
+            for path in ["flush", "read eviction", "write eviction"] {
+                let (temp, mut raw_file, mut refs) = test_refcounts();
+                refs.set_block_addr(0, addr);
+                refs.set_block_addr(1, 3 * cluster_size);
+                refs.refblock_cache = CacheMap::new(1);
+                refs.refblock_cache
+                    .insert(
+                        0,
+                        VecCache::new(block_entries as usize),
+                        |_, _| unreachable!(),
+                    )
+                    .unwrap();
+                let mut before = [0u8; 4096];
+                temp.as_file().read_exact_at(&mut before, 0).unwrap();
+
+                let err = match path {
+                    "flush" => refs.flush_blocks(&mut raw_file).unwrap_err(),
+                    "read eviction" => match refs
+                        .get_cluster_refcount(&mut raw_file, block_entries * cluster_size)
+                    {
+                        Err(super::Error::EvictingRefCounts(err)) => err,
+                        result => panic!("expected eviction error, got {result:?}"),
+                    },
+                    _ => match refs.set_cluster_refcount(
+                        &mut raw_file,
+                        block_entries * cluster_size,
+                        1,
+                        Some((3 * cluster_size, VecCache::new(block_entries as usize))),
+                    ) {
+                        Err(super::Error::EvictingRefCounts(err)) => err,
+                        result => panic!("expected eviction error, got {result:?}"),
+                    },
+                };
+                assert_eq!(err.raw_os_error(), Some(libc::EINVAL));
+                let mut after = [0u8; 4096];
+                temp.as_file().read_exact_at(&mut after, 0).unwrap();
+                assert_eq!(before, after);
+            }
+        }
+    }
 
     // A refcount table whose entry count, refcounts-per-block and cluster size
     // all come from the image can describe more clusters than a 64-bit byte
