@@ -519,6 +519,25 @@ impl QcowHeader {
         }
     }
 
+    /// Check the combined table limit and return the L1 and refcount block cluster counts.
+    pub(super) fn validate_table_geometry(&self, size: u64, l1_size: u32) -> Result<(u64, u64)> {
+        let cluster_size = 1u64 << self.cluster_bits;
+        let entries_per_cluster = cluster_size / size_of::<u64>() as u64;
+        let num_clusters = size.div_ceil(cluster_size);
+        let num_l2_clusters = num_clusters.div_ceil(entries_per_cluster);
+        let l1_clusters = u64::from(l1_size).div_ceil(entries_per_cluster);
+        let header_clusters = (size_of::<QcowHeader>() as u64).div_ceil(cluster_size);
+        let refcount_clusters = max_refcount_clusters(
+            self.refcount_order,
+            cluster_size as u32,
+            num_clusters + l1_clusters + num_l2_clusters + header_clusters,
+        );
+        if l1_clusters + refcount_clusters > MAX_RAM_POINTER_TABLE_SIZE {
+            return Err(Error::TooManyRefcounts(refcount_clusters));
+        }
+        Ok((l1_clusters, refcount_clusters))
+    }
+
     pub fn create_for_size_and_path(
         version: u32,
         size: u64,

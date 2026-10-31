@@ -21,7 +21,7 @@ pub use super::header::{
 };
 use super::header::{
     MAX_CLUSTER_BITS, MAX_QCOW_FILE_SIZE, MAX_RAM_POINTER_TABLE_SIZE, MIN_CLUSTER_BITS, QCOW_MAGIC,
-    max_refcount_clusters, offset_is_cluster_boundary,
+    offset_is_cluster_boundary,
 };
 use super::qcow_raw_file::QcowRawFile;
 use super::refcount::RefCount;
@@ -363,24 +363,14 @@ pub(crate) fn parse_qcow(
             Error::OverlappingMetadata,
         ));
     }
-    let l1_clusters = u64::from(header.l1_size).div_ceil(entries_per_cluster);
-    let header_clusters = (size_of::<QcowHeader>() as u64).div_ceil(cluster_size);
-    let refcount_clusters = max_refcount_clusters(
-        header.refcount_order,
-        cluster_size as u32,
-        num_clusters + l1_clusters + num_l2_clusters + header_clusters,
-    );
+    let (l1_clusters, refcount_clusters) = header
+        .validate_table_geometry(header.size, header.l1_size)
+        .map_err(|e| BlockError::new(BlockErrorKind::InvalidFormat, e))?;
     // Check that the given header doesn't have a suspiciously sized refcount table.
     if u64::from(header.refcount_table_clusters) > 2 * refcount_clusters {
         return Err(BlockError::new(
             BlockErrorKind::CorruptImage,
             Error::RefcountTableTooLarge,
-        ));
-    }
-    if l1_clusters + refcount_clusters > MAX_RAM_POINTER_TABLE_SIZE {
-        return Err(BlockError::new(
-            BlockErrorKind::InvalidFormat,
-            Error::TooManyRefcounts(refcount_clusters),
         ));
     }
     let declared_table_entries =
