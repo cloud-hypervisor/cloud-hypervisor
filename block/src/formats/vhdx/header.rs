@@ -234,7 +234,7 @@ impl RegionInfo {
         let mut offset = 0;
         let mut region_entries = BTreeMap::new();
 
-        let mut buffer = [0; REGION_SIZE as usize];
+        let mut buffer = [0; REGION_SIZE as usize - size_of::<RegionTableHeader>()];
         // Read after the Region Table Header
         f.read_exact_at(
             &mut buffer,
@@ -657,10 +657,9 @@ mod tests {
         // rejected rather than silently producing a small end offset that
         // could mask a genuine overlap.
         let region_start = REGION_TABLE_1_START;
-        let entries_at = region_start + size_of::<RegionTableHeader>() as u64;
 
         let af = region_file(
-            entries_at + 64 * 1024,
+            region_start + 64 * 1024,
             &[region_entry(BAT_GUID, u64::MAX, 0x1000)],
         );
         let res = RegionInfo::new(&af, region_start, 1);
