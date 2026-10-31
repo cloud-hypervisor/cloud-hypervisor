@@ -173,6 +173,23 @@ pub(crate) fn register(
     Ok(reg.ioctls)
 }
 
+/// Unregister a memory range from UFFD fault handling.
+pub(crate) fn unregister(fd: BorrowedFd<'_>, addr: u64, len: u64) -> Result<(), Error> {
+    let mut range = UffdioRange { start: addr, len };
+    // SAFETY: `range` is a valid, correctly-sized struct for this ioctl.
+    let ret = unsafe {
+        libc::ioctl(
+            fd.as_raw_fd(),
+            userfaultfd::UFFDIO_UNREGISTER as libc::Ioctl,
+            &mut range,
+        )
+    };
+    if ret < 0 {
+        return Err(Error::last_os_error());
+    }
+    Ok(())
+}
+
 /// Resolve a page fault by copying data into the faulted address.
 pub(crate) fn copy(fd: BorrowedFd<'_>, dst: u64, src: *const u8, len: u64) -> Result<(), Error> {
     let mut cp = UffdioCopy {
@@ -281,6 +298,7 @@ struct UffdioPoison {
 
 /// A guest memory range registered with userfaultfd, plus where its bytes
 /// live for the data source.
+#[derive(Clone)]
 pub(crate) struct UffdRange {
     pub host_addr: u64,
     pub length: u64,

@@ -8,13 +8,13 @@ use std::collections::BTreeMap;
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom};
-use std::mem::{MaybeUninit, zeroed};
+use std::mem::{self, MaybeUninit, zeroed};
 use std::num::NonZeroUsize;
 use std::ops::{BitAnd, Not, Sub};
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, ffi, panic, process, result, thread, time};
@@ -32,6 +32,7 @@ use thiserror::Error;
 use tracer::trace_scoped;
 use virtio_devices::BlocksState;
 use virtio_devices::mem::Error as VirtioMemError;
+use virtio_devices::vhost_user::{PostcopyHandler, PostcopyRegion};
 #[cfg(target_arch = "x86_64")]
 use vm_allocator::GsiApic;
 use vm_allocator::page_size::get_page_size;
@@ -71,7 +72,110 @@ struct UffdHandler {
     result_rx: Receiver<Result<(), io::Error>>,
     handle: thread::JoinHandle<()>,
     fault_socket_fd: Option<OwnedFd>,
-    prefault_complete: Arc<AtomicBool>,
+    uffd_registry: Arc<UffdRegistry>,
+}
+
+/// Userfaultfds sent to a UFFD handler.
+pub(crate) struct UffdRegistry {
+    new_uffds: Mutex<Vec<(String, Uffd)>>,
+    new_uffd_evt: EventFd,
+    done: EventFd,
+    ranges: Box<[UffdRange]>,
+}
+
+impl UffdRegistry {
+    fn drain_new_uffds(&self) -> Vec<(String, Uffd)> {
+        mem::take(&mut *self.new_uffds.lock().unwrap())
+    }
+
+    fn is_done(&self) -> bool {
+        let mut pollfd = libc::pollfd {
+            fd: self.done.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: `pollfd` is valid for the one descriptor polled.
+        unsafe { libc::poll(&mut pollfd, 1, 0) == 1 }
+    }
+}
+
+impl PostcopyHandler for UffdRegistry {
+    // vhost-user backends get their memory regions through SET_MEM_TABLE and/or
+    // ADD_MEM_REG requests. These requests send to the backends memory regions,
+    // not the memory ranges. These two differs: we can have multiple memory
+    // ranges in a single memory region. In practice, this doesn't really happen
+    // and one region = one range (with the exception of virio-mem). However,
+    // there is nothing that enforces this and we need this assumption to hold,
+    // as we keep track of the served pages per uffd ranges. So, we take a
+    // defensive approach and design against this by creating a copy of the
+    // memory ranges for each backends (with an updated host_addr that reflects
+    // the backend VMA).
+    //
+    // Also, registering by ranges and not by regions also allows us to not
+    // handle pagefaults that are best handled by the kernel (so, pages that
+    // should be 0s like when the guest plugs a memory block in virtio-mem). So,
+    // punch holes in the UFFD of the backends to not have pagefaults on these
+    // addresses. They would make the handler error out and the VM shut down
+    // anyway.
+    fn register_uffd_regions(
+        &self,
+        id: &str,
+        fd: OwnedFd,
+        regions: &[PostcopyRegion],
+    ) -> Result<(), io::Error> {
+        let mut new_uffds = self.new_uffds.lock().unwrap();
+        if self.is_done() {
+            return Ok(());
+        }
+
+        let mut ranges = Vec::new();
+        for range in self.ranges.iter() {
+            let Some(region) = regions.iter().find(|region| {
+                range.host_addr >= region.host_addr
+                    && range.host_addr + range.length <= region.host_addr + region.memory_size
+            }) else {
+                return Err(io::Error::other(format!(
+                    "no region maps host range {:#x}-{:#x}",
+                    range.host_addr,
+                    range.host_addr + range.length
+                )));
+            };
+            ranges.push(UffdRange {
+                // Faults on `fd` are at the addresses where its process maps
+                // guest memory, so translate the handler ranges to those
+                host_addr: region.backend_addr + (range.host_addr - region.host_addr),
+                ..range.clone()
+            });
+        }
+
+        // We only want to register the backed ranges from the regions, not the
+        // whole region. Unregister memory that is not backed by any range.
+        for region in regions {
+            let end = region.backend_addr + region.memory_size;
+            let mut start = region.backend_addr;
+            for range in &ranges {
+                let in_region = range.host_addr >= region.backend_addr && range.host_addr < end;
+                if !in_region {
+                    continue;
+                }
+                if range.host_addr > start {
+                    uffd::unregister(fd.as_fd(), start, range.host_addr - start)?;
+                }
+                start = range.host_addr + range.length;
+            }
+            if start < end {
+                uffd::unregister(fd.as_fd(), start, end - start)?;
+            }
+        }
+
+        let entry = (id.to_string(), Uffd::new(fd, ranges.into())?);
+        new_uffds.push(entry);
+        self.new_uffd_evt.write(1)
+    }
+
+    fn postcopy_done_event(&self) -> &EventFd {
+        &self.done
+    }
 }
 
 pub const MEMORY_MANAGER_ACPI_SIZE: usize = 0x18;
@@ -1294,20 +1398,25 @@ impl MemoryManager {
         let panic_exit_evt = exit_evt.try_clone().map_err(Error::EventFdFail)?;
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let (result_tx, result_rx) = mpsc::sync_channel(1);
-        let prefault_complete = Arc::new(AtomicBool::new(false));
-        let thread_prefault_complete = Arc::clone(&prefault_complete);
+        let ranges = Box::from(uffd.ranges());
+        let uffd_registry = Arc::new(UffdRegistry {
+            new_uffds: Mutex::new(vec![("__vmm".to_string(), uffd)]),
+            new_uffd_evt: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
+            done: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
+            ranges,
+        });
+        let thread_uffd_registry = Arc::clone(&uffd_registry);
         let handle = thread::Builder::new()
             .name("uffd-handler".to_string())
             .spawn(move || {
                 panic::catch_unwind(panic::AssertUnwindSafe(move || {
                     let mut result = Self::uffd_handler_loop(
-                        &[uffd],
+                        &thread_uffd_registry,
                         &thread_stop_event,
                         &thread_exit_evt,
                         source,
                         served_bitmap,
                         &ready_tx,
-                        &thread_prefault_complete,
                         background_fetch_pages,
                     );
 
@@ -1346,7 +1455,7 @@ impl MemoryManager {
             result_rx,
             handle,
             fault_socket_fd,
-            prefault_complete,
+            uffd_registry,
         });
 
         Ok(())
@@ -1388,11 +1497,16 @@ impl MemoryManager {
         }
     }
 
+    pub(crate) fn uffd_registry(&self) -> Option<Arc<UffdRegistry>> {
+        let uffd_handler = self.uffd_handler.as_ref()?;
+        Some(Arc::clone(&uffd_handler.uffd_registry))
+    }
+
     /// True while an on-demand (UFFD) restore is still faulting in guest RAM.
     pub fn restoring(&self) -> bool {
         self.uffd_handler
             .as_ref()
-            .is_some_and(|h| !h.prefault_complete.load(Ordering::Acquire))
+            .is_some_and(|h| !h.uffd_registry.is_done())
     }
 
     /// Poison a page that can no longer be restored. Exits if that's not
@@ -1417,21 +1531,26 @@ impl MemoryManager {
         }
     }
 
-    /// Serve UFFD faults from every userfaultfd in `uffds` via `source`,
-    /// prefaulting one page per idle iteration through the first one. Once
+    /// Serve UFFD faults from every userfaultfd received through
+    /// `uffd_registry` via `source`, prefaulting one page per idle iteration
+    /// through the first one, which `uffd_registry` must hold already. Once
     /// `source` fails, poison each faulted page instead.
-    #[expect(clippy::needless_pass_by_value, clippy::too_many_arguments)]
+    ///
+    /// A userfaultfd received with the id of an earlier one replaces it. Once
+    /// all pages are present, `uffd_registry.done` is written.
+    #[expect(clippy::needless_pass_by_value)]
     fn uffd_handler_loop(
-        uffds: &[Uffd],
+        uffd_registry: &UffdRegistry,
         stop_event: &EventFd,
         exit_evt: &EventFd,
         mut source: Box<dyn UffdMemorySource>,
         served_bitmap: Vec<AtomicBitmap>,
         ready_tx: &SyncSender<()>,
-        prefault_complete: &AtomicBool,
         background_fetch_pages: bool,
     ) -> Result<(), io::Error> {
-        let vmm_uffd = &uffds[0];
+        let mut uffds = uffd_registry.drain_new_uffds();
+        assert!(!uffds.is_empty());
+        let (_, vmm_uffd) = &uffds[0];
         let ranges = vmm_uffd.ranges();
 
         let total_pages: u64 = ranges.iter().map(UffdRange::num_pages).sum();
@@ -1451,6 +1570,7 @@ impl MemoryManager {
         let prefault_start = time::Instant::now();
 
         const EVENT_STOP: u64 = u64::MAX;
+        const EVENT_NEW_UFFD: u64 = u64::MAX - 1;
 
         let epoll_fd = epoll::create(true).map_err(io::Error::other)?;
         // SAFETY: epoll_fd is valid and owned by this scope.
@@ -1464,7 +1584,15 @@ impl MemoryManager {
         )
         .map_err(io::Error::other)?;
 
-        for (idx, uffd) in uffds.iter().enumerate() {
+        epoll::ctl(
+            epoll_fd,
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            uffd_registry.new_uffd_evt.as_raw_fd(),
+            epoll::Event::new(epoll::Events::EPOLLIN, EVENT_NEW_UFFD),
+        )
+        .map_err(io::Error::other)?;
+
+        for (idx, (_, uffd)) in uffds.iter().enumerate() {
             epoll::ctl(
                 epoll_fd,
                 epoll::ControlOptions::EPOLL_CTL_ADD,
@@ -1476,7 +1604,7 @@ impl MemoryManager {
 
         ready_tx.send(()).ok();
 
-        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); uffds.len() + 1];
+        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); uffds.len() + 2];
         loop {
             // Block only when prefault is done; otherwise poll non-blocking
             // so we can advance prefault between faults.
@@ -1499,6 +1627,47 @@ impl MemoryManager {
                 return Ok(());
             }
 
+            if events
+                .iter()
+                .take(num_events)
+                .any(|event| event.data == EVENT_NEW_UFFD)
+            {
+                uffd_registry.new_uffd_evt.read().ok();
+                for (id, uffd) in uffd_registry.drain_new_uffds() {
+                    let idx =
+                        if let Some(idx) = uffds.iter().position(|(uffd_id, _)| *uffd_id == id) {
+                            // Its process remapped guest memory, as on a device reset
+                            epoll::ctl(
+                                epoll_fd,
+                                epoll::ControlOptions::EPOLL_CTL_DEL,
+                                uffds[idx].1.fd().as_raw_fd(),
+                                epoll::Event::new(epoll::Events::empty(), 0),
+                            )
+                            .map_err(io::Error::other)?;
+                            uffds[idx].1 = uffd;
+                            idx
+                        } else {
+                            uffds.push((id, uffd));
+                            uffds.len() - 1
+                        };
+                    epoll::ctl(
+                        epoll_fd,
+                        epoll::ControlOptions::EPOLL_CTL_ADD,
+                        uffds[idx].1.fd().as_raw_fd(),
+                        epoll::Event::new(epoll::Events::EPOLLIN, idx as u64),
+                    )
+                    .map_err(io::Error::other)?;
+                }
+                events.resize(
+                    uffds.len() + 2,
+                    epoll::Event::new(epoll::Events::empty(), 0),
+                );
+                continue;
+            }
+
+            let (_, vmm_uffd) = &uffds[0];
+            let ranges = vmm_uffd.ranges();
+
             let mut ready_uffd = None;
             for event in events.iter().take(num_events) {
                 let idx = event.data as usize;
@@ -1511,7 +1680,7 @@ impl MemoryManager {
             }
 
             if let Some(idx) = ready_uffd {
-                let fault_uffd = &uffds[idx];
+                let (_, fault_uffd) = &uffds[idx];
                 // SAFETY: UffdMsg is a plain repr(C) struct, safe to zero-init.
                 let mut msg: uffd::UffdMsg = unsafe { zeroed() };
                 // SAFETY: reading a uffd_msg-sized struct from the valid uffd fd.
@@ -1697,13 +1866,23 @@ impl MemoryManager {
                 &pages_loading,
             ) {
                 Ok(0) => {
+                    let mut new_uffds = uffd_registry.new_uffds.lock().unwrap();
+                    uffds.append(&mut new_uffds);
+                    // Every page is present, so the faults still queued on
+                    // the other userfaultfds only need waking up.
+                    for (_, uffd) in &uffds[1..] {
+                        for range in uffd.ranges() {
+                            uffd::wake(uffd.fd(), range.host_addr, range.length)?;
+                        }
+                    }
+                    uffd_registry.done.write(1)?;
+
                     let elapsed = prefault_start.elapsed();
                     info!(
                         "UFFD handler: prefault done in {elapsed:.3?} — \
                          prefaulted={pages_prefaulted} served={pages_served} \
                          total={total_pages}"
                     );
-                    prefault_complete.store(true, Ordering::Release);
                     return Ok(());
                 }
                 Ok(prefaulted) => pages_prefaulted += prefaulted,
