@@ -28,7 +28,10 @@ use super::header::{
 use super::qcow_raw_file::QcowRawFile;
 use super::refcount::RefCount;
 pub(crate) use super::util::MAX_NESTING_DEPTH;
-use super::util::{L1_TABLE_OFFSET_MASK, L2_TABLE_OFFSET_MASK, div_round_up_u64};
+use super::util::{
+    L1_TABLE_OFFSET_MASK, compressed_cluster_range_is_valid, div_round_up_u64,
+    l2_entry_compressed_cluster_layout, l2_entry_is_compressed, l2_entry_std_cluster_addr,
+};
 use super::vec_cache::{CacheMap, VecCache};
 use super::{metadata, refcount};
 use crate::aligned_file::AlignedFile;
@@ -625,21 +628,29 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
 
                 // Read the L2 table and find all referenced data clusters.
                 let l2_table = raw_file
-                    .read_pointer_table(
-                        l2_addr_disk,
-                        cluster_size / size_of::<u64>() as u64,
-                        Some(L2_TABLE_OFFSET_MASK),
-                    )
+                    .read_pointer_table(l2_addr_disk, cluster_size / size_of::<u64>() as u64, None)
                     .map_err(Error::ReadingPointers)?;
-                for data_cluster_addr in l2_table {
-                    if data_cluster_addr != 0 {
-                        add_ref(
-                            refcounts,
-                            cluster_size,
-                            data_cluster_addr,
-                            max_refcount,
-                            refcount_bits,
-                        )?;
+                for entry in l2_table {
+                    let (first, last) = if l2_entry_is_compressed(entry) {
+                        let (addr, size) =
+                            l2_entry_compressed_cluster_layout(entry, header.cluster_bits);
+                        let max_valid = (refcounts.len() as u64 - 1) * cluster_size;
+                        if !compressed_cluster_range_is_valid(addr, size, cluster_size, max_valid) {
+                            return Err(Error::InvalidOffset(addr));
+                        }
+                        (
+                            raw_file.cluster_address(addr),
+                            raw_file.cluster_address(addr + size as u64 - 1),
+                        )
+                    } else {
+                        let addr = l2_entry_std_cluster_addr(entry);
+                        if addr == 0 {
+                            continue;
+                        }
+                        (addr, addr)
+                    };
+                    for addr in (first..=last).step_by(cluster_size as usize) {
+                        add_ref(refcounts, cluster_size, addr, max_refcount, refcount_bits)?;
                     }
                 }
             }
@@ -1700,6 +1711,33 @@ mod tests {
         // After rebuild the first cluster (header) must have refcount > 0.
         let refcount = disk.metadata().cluster_refcount(0).unwrap();
         assert!(refcount > 0, "header cluster refcount should be set");
+    }
+
+    #[test]
+    fn rebuild_refcounts_for_compressed_clusters() {
+        let cluster_size = 1u64 << 16;
+        let header = QcowHeader::create_for_size_and_path(3, 2 * cluster_size, None).unwrap();
+        let file = AlignedFile::new(TempFile::new().unwrap().into_file(), false);
+        header.write_to(&file).unwrap();
+        file.set_len(8 * cluster_size).unwrap();
+        let mut raw = QcowRawFile::from(file, cluster_size, 16).unwrap();
+        raw.write_pointer_table_direct(header.l1_table_offset, [4 * cluster_size].iter())
+            .unwrap();
+        // One unaligned extent and one spanning two host clusters.
+        let entries = [
+            util::COMPRESSED_FLAG | (1 << 54) | (5 * cluster_size + 1),
+            util::COMPRESSED_FLAG | (4 << 54) | (7 * cluster_size - 512),
+        ];
+        raw.write_pointer_table_direct(4 * cluster_size, entries.iter())
+            .unwrap();
+        let refcount_table_offset = header.refcount_table_offset;
+        super::rebuild_refcounts(&mut raw, header).unwrap();
+        let refblock = raw
+            .read_pointer_table(refcount_table_offset, 1, None)
+            .unwrap()[0];
+        let counts = raw.read_refcount_block(refblock).unwrap();
+        assert_eq!(&counts[..8], &[1; 8]);
+        assert!(counts[8..].iter().all(|&count| count == 0));
     }
 
     #[test]
