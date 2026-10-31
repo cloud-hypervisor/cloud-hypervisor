@@ -26,6 +26,7 @@ use libc::{EINVAL, EIO};
 use vmm_sys_util::write_zeroes::WriteZeroesAt;
 
 use super::decoder::Decoder;
+use super::header::{MAX_QCOW_FILE_SIZE, MAX_RAM_POINTER_TABLE_SIZE};
 use super::qcow_raw_file::QcowRawFile;
 use super::refcount::RefCount;
 use super::util::{
@@ -1055,10 +1056,24 @@ impl QcowState {
             return Err(io::Error::other("shrinking QCOW2 images is not supported"));
         }
 
+        if new_size > MAX_QCOW_FILE_SIZE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                super::Error::FileTooBig(new_size),
+            ));
+        }
+
         let cluster_size = self.raw_file.cluster_size();
         let entries_per_cluster = cluster_size / size_of::<u64>() as u64;
         let new_clusters = div_round_up_u64(new_size, cluster_size);
-        let needed_l1_entries = div_round_up_u64(new_clusters, entries_per_cluster) as u32;
+        let needed_l1_entries = div_round_up_u64(new_clusters, entries_per_cluster);
+        if needed_l1_entries > MAX_RAM_POINTER_TABLE_SIZE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                super::Error::TooManyL1Entries(needed_l1_entries),
+            ));
+        }
+        let needed_l1_entries = needed_l1_entries as u32;
 
         if needed_l1_entries > self.header.l1_size {
             self.grow_l1_table(needed_l1_entries)?;
@@ -1498,6 +1513,40 @@ mod tests {
         assert!(!offsets.overlaps(512, 512, 512, None));
         assert!(offsets.overlaps(1536, 512, 512, None));
         assert!(offsets.overlaps(u64::MAX, 1, 512, None));
+    }
+
+    #[test]
+    fn oversized_resize_does_not_modify_the_image() {
+        use std::fs;
+        use std::io::ErrorKind;
+
+        let cluster_size = 512;
+        let temp = super::super::QcowTempDisk::new_with_cluster_bits(
+            8 * cluster_size,
+            None,
+            false,
+            true,
+            false,
+            9,
+        )
+        .unwrap()
+        .into_tempfile();
+        let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+        let (mut state, _, _) = super::super::parser::parse_qcow(raw, 0, true).unwrap();
+        let before = fs::read(temp.as_path()).unwrap();
+        let old_size = state.header.size;
+        for new_size in [
+            super::MAX_QCOW_FILE_SIZE + 512,
+            1 << 47, // Requires 2^32 L1 entries with 512-byte clusters.
+            (super::MAX_RAM_POINTER_TABLE_SIZE + 1) * cluster_size * (cluster_size / 8),
+        ] {
+            assert_eq!(
+                state.resize(new_size).unwrap_err().kind(),
+                ErrorKind::InvalidInput
+            );
+            assert_eq!(state.header.size, old_size);
+            assert_eq!(fs::read(temp.as_path()).unwrap(), before);
+        }
     }
 
     #[test]
