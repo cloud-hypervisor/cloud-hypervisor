@@ -792,6 +792,11 @@ impl Request {
             return Ok(0);
         }
 
+        // Not every failure picks a status, e.g. a failed external mapping.
+        if result.is_err() && status == VIRTIO_IOMMU_S_OK {
+            status = VIRTIO_IOMMU_S_DEVERR;
+        }
+
         let status_desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
 
         // The status MUST always be writable
@@ -821,15 +826,16 @@ impl Request {
         };
         reply.extend_from_slice(tail.as_slice());
 
-        // Make sure we return the result of the request to the guest before
-        // we return a potential error internally.
         desc_chain
             .memory()
             .write_slice(reply.as_slice(), status_desc.addr())
             .map_err(Error::GuestMemory)?;
 
-        // Return the error if the result was not Ok().
-        result?;
+        // The status written above reports the failure. The used length must
+        // still cover it, as a driver ignores the reply of a 0 length response.
+        if let Err(e) = result {
+            warn!("Failed to process virtio-iommu request: {e:?}");
+        }
 
         Ok(reply_len)
     }
@@ -1465,11 +1471,19 @@ mod tests {
     use std::sync::{Arc, RwLock, Weak};
 
     use seccompiler::SeccompAction;
+    use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
+    use virtio_queue::QueueT;
     use vm_device::dma_mapping::ExternalDmaMapping;
+    use vm_memory::{ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
+    use vm_virtio::queue::testing::VirtQueue as GuestQ;
     use vmm_sys_util::eventfd::{EFD_NONBLOCK, EventFd};
 
-    use super::{Domain, Iommu, IommuMapping, Mapping};
-    use crate::DmaRemapping;
+    use super::{
+        Domain, Iommu, IommuMapping, Mapping, Request, VIRTIO_IOMMU_S_DEVERR, VIRTIO_IOMMU_S_INVAL,
+        VIRTIO_IOMMU_T_DETACH, VIRTIO_IOMMU_T_UNMAP, VirtioIommuReqDetach, VirtioIommuReqHead,
+        VirtioIommuReqTail, VirtioIommuReqUnmap,
+    };
+    use crate::{DmaRemapping, GuestMemoryMmap};
 
     /// Test stub for VfioDmaMapping.
     struct MockMapping;
@@ -1481,6 +1495,19 @@ mod tests {
 
         fn unmap(&self, _iova: u64, _size: u64) -> Result<(), io::Error> {
             Ok(())
+        }
+    }
+
+    /// Test stub for a VfioDmaMapping that fails to unmap.
+    struct FailingUnmapMapping;
+
+    impl ExternalDmaMapping for FailingUnmapMapping {
+        fn map(&self, _iova: u64, _gpa: u64, _size: u64) -> Result<(), io::Error> {
+            Ok(())
+        }
+
+        fn unmap(&self, _iova: u64, _size: u64) -> Result<(), io::Error> {
+            Err(io::Error::other("unmap failed"))
         }
     }
 
@@ -1589,5 +1616,77 @@ mod tests {
     fn reject_unmapped_base() {
         let m = iommu_mapping(&[(0x1000, 0x4000, 0x1000)]);
         m.translate_gva(0, 0x2500, 0x10).unwrap_err();
+    }
+
+    const REQ_ADDR: u64 = 0x2000;
+    const TAIL_ADDR: u64 = 0x3000;
+    const TAIL_LEN: usize = size_of::<VirtioIommuReqTail>();
+
+    /// Submits a request made of `type_` and `body`, and returns the used
+    /// length and the status a driver would get back for it.
+    fn process_request<T: ByteValued>(
+        type_: u8,
+        body: T,
+        mapping: &Arc<IommuMapping>,
+        ext_mapping: &BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
+    ) -> (usize, u8) {
+        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let vq = GuestQ::new(GuestAddress(0x1000), &mem, 2);
+        let head_len = size_of::<VirtioIommuReqHead>();
+        let head = VirtioIommuReqHead {
+            type_,
+            ..Default::default()
+        };
+        mem.write_obj(head, GuestAddress(REQ_ADDR)).unwrap();
+        mem.write_obj(body, GuestAddress(REQ_ADDR + head_len as u64))
+            .unwrap();
+        let req_len = (head_len + size_of::<T>()) as u32;
+        vq.dtable[0].set(REQ_ADDR, req_len, VRING_DESC_F_NEXT as u16, 1);
+        vq.dtable[1].set(TAIL_ADDR, TAIL_LEN as u32, VRING_DESC_F_WRITE as u16, 0);
+        vq.avail.ring[0].set(0);
+        vq.avail.idx.set(1);
+
+        let mut queue = vq.create_queue();
+        let mem_atomic = GuestMemoryAtomic::new(mem.clone());
+        let mut desc_chain = queue.pop_descriptor_chain(mem_atomic.memory()).unwrap();
+        // An error ends up as a 0 length response in the used queue.
+        let used_len = Request::parse(&mut desc_chain, mapping, ext_mapping, (0, 0), &[], None)
+            .unwrap_or_default();
+
+        (used_len, mem.read_obj(GuestAddress(TAIL_ADDR)).unwrap())
+    }
+
+    #[test]
+    fn rejected_request_is_reported_to_the_driver() {
+        // Endpoint 0 is attached to domain 0, not to domain 1.
+        let mapping = Arc::new(iommu_mapping(&[]));
+        let detach = VirtioIommuReqDetach {
+            domain: 1,
+            endpoint: 0,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            process_request(VIRTIO_IOMMU_T_DETACH, detach, &mapping, &BTreeMap::new()),
+            (TAIL_LEN, VIRTIO_IOMMU_S_INVAL)
+        );
+    }
+
+    #[test]
+    fn failed_external_unmap_is_reported_to_the_driver() {
+        let mapping = Arc::new(iommu_mapping(&[(0x1000, 0x4000, 0x1000)]));
+        let mut ext_mapping: BTreeMap<u32, Arc<dyn ExternalDmaMapping>> = BTreeMap::new();
+        ext_mapping.insert(0, Arc::new(FailingUnmapMapping));
+        let unmap = VirtioIommuReqUnmap {
+            domain: 0,
+            virt_start: 0x1000,
+            virt_end: 0x1fff,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            process_request(VIRTIO_IOMMU_T_UNMAP, unmap, &mapping, &ext_mapping),
+            (TAIL_LEN, VIRTIO_IOMMU_S_DEVERR)
+        );
     }
 }
