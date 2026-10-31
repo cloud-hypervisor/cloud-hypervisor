@@ -542,15 +542,7 @@ impl QcowMetadata {
 
     #[cfg(test)]
     pub(super) fn cluster_refcount(&self, address: u64) -> io::Result<u64> {
-        let mut inner = self.inner.write().unwrap();
-        let QcowState {
-            refcounts,
-            raw_file,
-            ..
-        } = &mut *inner;
-        refcounts
-            .get_cluster_refcount(raw_file, address)
-            .map_err(|e| io::Error::other(format!("get_cluster_refcount: {e}")))
+        self.inner.write().unwrap().cluster_refcount(address)
     }
 }
 
@@ -1113,7 +1105,11 @@ impl QcowState {
             if *l2_addr != 0 {
                 let refcount = self
                     .refcounts
-                    .get_cluster_refcount(&mut self.raw_file, *l2_addr)
+                    .get_cluster_refcount(
+                        &mut self.raw_file,
+                        *l2_addr,
+                        MetadataLayout::new(&self.header, &self.l2_offsets),
+                    )
                     .map_err(|e| {
                         io::Error::other(format!("failed to get refcount during resize: {e}"))
                     })?;
@@ -1241,9 +1237,17 @@ impl QcowState {
 
     fn cluster_refcount(&mut self, cluster_addr: u64) -> io::Result<u64> {
         self.refcounts
-            .get_cluster_refcount(&mut self.raw_file, cluster_addr)
+            .get_cluster_refcount(
+                &mut self.raw_file,
+                cluster_addr,
+                MetadataLayout::new(&self.header, &self.l2_offsets),
+            )
             .map_err(|e| {
-                if matches!(e, refcount::Error::RefblockUnaligned(_)) {
+                if matches!(
+                    e,
+                    refcount::Error::RefblockUnaligned(_)
+                        | refcount::Error::InvalidRefblockOffset(_)
+                ) {
                     self.set_corrupt_bit_best_effort();
                 }
                 io::Error::new(
@@ -1273,6 +1277,7 @@ impl QcowState {
                 address,
                 refcount,
                 new_cluster.take(),
+                MetadataLayout::new(&self.header, &self.l2_offsets),
             ) {
                 Ok(None) => {
                     refcount_set = true;
@@ -1310,7 +1315,10 @@ impl QcowState {
                 Err(refcount::Error::RefcountOverflow { .. }) => {
                     return Err(io::Error::from_raw_os_error(EINVAL));
                 }
-                Err(refcount::Error::RefblockUnaligned(_)) => {
+                Err(
+                    refcount::Error::RefblockUnaligned(_)
+                    | refcount::Error::InvalidRefblockOffset(_),
+                ) => {
                     self.set_corrupt_bit_best_effort();
                     return Err(io::Error::from_raw_os_error(EIO));
                 }
@@ -1337,8 +1345,9 @@ impl QcowState {
             )?;
             l2_table.mark_clean();
         }
+        let layout = MetadataLayout::new(&self.header, &self.l2_offsets);
         // Write the modified refcount blocks.
-        self.refcounts.flush_blocks(&mut self.raw_file)?;
+        self.refcounts.flush_blocks(&mut self.raw_file, layout)?;
         // Sync metadata and data clusters.
         self.raw_file.file_mut().sync_all()?;
 
@@ -1353,7 +1362,7 @@ impl QcowState {
                         Ok(0)
                     } else {
                         let refcount = refcounts
-                            .get_cluster_refcount(raw_file, l2_addr)
+                            .get_cluster_refcount(raw_file, l2_addr, layout)
                             .map_err(|e| io::Error::other(super::Error::GettingRefcount(e)))?;
                         Ok(l1_entry_make(l2_addr, refcount == 1))
                     }

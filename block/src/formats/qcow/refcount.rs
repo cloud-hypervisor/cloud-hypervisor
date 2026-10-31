@@ -9,18 +9,41 @@ use std::{io, result};
 use libc::EINVAL;
 use thiserror::Error;
 
-use super::metadata::ClusterOffsets;
+use super::metadata::{ClusterOffsets, MetadataLayout};
 use super::qcow_raw_file::QcowRawFile;
 use super::util::cluster_addr_is_valid;
 use super::vec_cache::{CacheMap, Cacheable, VecCache};
+
+fn refblock_addr_is_valid(
+    addr: u64,
+    cluster_size: u64,
+    max_valid: u64,
+    offsets: &ClusterOffsets,
+    layout: MetadataLayout<'_>,
+    exclude: Option<u64>,
+) -> bool {
+    cluster_addr_is_valid(addr, cluster_size, max_valid)
+        && !layout.overlaps(addr, cluster_size, None)
+        && !offsets.is_shared(addr)
+        && !offsets.overlaps(addr, cluster_size, cluster_size, exclude)
+}
 
 fn write_refcount_block(
     raw_file: &mut QcowRawFile,
     addr: u64,
     block: &VecCache<u64>,
     max_valid: u64,
+    offsets: &ClusterOffsets,
+    layout: MetadataLayout<'_>,
 ) -> io::Result<()> {
-    if !cluster_addr_is_valid(addr, raw_file.cluster_size(), max_valid) {
+    if !refblock_addr_is_valid(
+        addr,
+        raw_file.cluster_size(),
+        max_valid,
+        offsets,
+        layout,
+        Some(addr),
+    ) {
         return Err(io::Error::from_raw_os_error(EINVAL));
     }
     raw_file.write_refcount_block(addr, block.get_values())
@@ -37,6 +60,8 @@ pub enum Error {
     /// `RefblockUnaligned` - Refcount block offset is not cluster aligned.
     #[error("Refcount block offset {0:#x} is not cluster aligned")]
     RefblockUnaligned(u64),
+    #[error("Invalid refcount block offset {0:#x}")]
+    InvalidRefblockOffset(u64),
     /// `NeedCluster` - Handle this error by reading the cluster and calling the function again.
     #[error("Cluster with addr={0} needs to be read")]
     NeedCluster(u64),
@@ -151,6 +176,7 @@ impl RefCount {
         cluster_address: u64,
         refcount: u64,
         mut new_cluster: Option<(u64, VecCache<u64>)>,
+        layout: MetadataLayout<'_>,
     ) -> Result<Option<u64>> {
         if refcount > self.max_refcount {
             return Err(Error::RefcountOverflow {
@@ -163,6 +189,30 @@ impl RefCount {
         let (table_index, block_index) = self.get_refcount_index(cluster_address);
 
         let block_addr_disk = *self.ref_table.get(table_index).ok_or(Error::InvalidIndex)?;
+        if block_addr_disk != 0
+            && !refblock_addr_is_valid(
+                block_addr_disk,
+                self.cluster_size,
+                self.max_valid_cluster_offset,
+                &self.block_offsets,
+                layout,
+                Some(block_addr_disk),
+            )
+        {
+            return Err(Error::InvalidRefblockOffset(block_addr_disk));
+        }
+        if let Some((addr, _)) = &new_cluster
+            && !refblock_addr_is_valid(
+                *addr,
+                self.cluster_size,
+                self.max_valid_cluster_offset,
+                &self.block_offsets,
+                layout,
+                (*addr == block_addr_disk).then_some(*addr),
+            )
+        {
+            return Err(Error::InvalidRefblockOffset(*addr));
+        }
 
         // Fill the cache if this block isn't yet there.
         if !self.refblock_cache.contains_key(table_index) {
@@ -171,10 +221,11 @@ impl RefCount {
                 self.set_block_addr(table_index, addr);
                 let ref_table = &self.ref_table;
                 let max_valid = self.max_valid_cluster_offset;
+                let offsets = &self.block_offsets;
                 self.refblock_cache
                     .insert(table_index, table, |index, evicted| {
                         let addr = ref_table[index];
-                        write_refcount_block(raw_file, addr, &evicted, max_valid)
+                        write_refcount_block(raw_file, addr, &evicted, max_valid, offsets, layout)
                     })
                     .map_err(Error::EvictingRefCounts)?;
             } else {
@@ -205,13 +256,19 @@ impl RefCount {
 
     /// Flush the dirty refcount blocks. This must be done before flushing the table that points to
     /// the blocks.
-    pub(super) fn flush_blocks(&mut self, raw_file: &mut QcowRawFile) -> io::Result<()> {
+    pub(super) fn flush_blocks(
+        &mut self,
+        raw_file: &mut QcowRawFile,
+        layout: MetadataLayout<'_>,
+    ) -> io::Result<()> {
         for (table_index, block) in self.refblock_cache.iter_mut().filter(|(_k, v)| v.dirty()) {
             write_refcount_block(
                 raw_file,
                 self.ref_table[*table_index],
                 block,
                 self.max_valid_cluster_offset,
+                &self.block_offsets,
+                layout,
             )?;
             block.mark_clean();
         }
@@ -236,6 +293,7 @@ impl RefCount {
         &mut self,
         raw_file: &mut QcowRawFile,
         address: u64,
+        layout: MetadataLayout<'_>,
     ) -> Result<u64> {
         let (table_index, block_index) = self.get_refcount_index(address);
         let block_addr_disk = *self.ref_table.get(table_index).ok_or(Error::InvalidIndex)?;
@@ -245,6 +303,16 @@ impl RefCount {
         if block_addr_disk & (self.cluster_size - 1) != 0 {
             return Err(Error::RefblockUnaligned(block_addr_disk));
         }
+        if !refblock_addr_is_valid(
+            block_addr_disk,
+            self.cluster_size,
+            self.max_valid_cluster_offset,
+            &self.block_offsets,
+            layout,
+            Some(block_addr_disk),
+        ) {
+            return Err(Error::InvalidRefblockOffset(block_addr_disk));
+        }
         if !self.refblock_cache.contains_key(table_index) {
             let table = VecCache::from_vec(
                 raw_file
@@ -253,10 +321,11 @@ impl RefCount {
             );
             let ref_table = &self.ref_table;
             let max_valid = self.max_valid_cluster_offset;
+            let offsets = &self.block_offsets;
             self.refblock_cache
                 .insert(table_index, table, |index, evicted| {
                     let addr = ref_table[index];
-                    write_refcount_block(raw_file, addr, &evicted, max_valid)
+                    write_refcount_block(raw_file, addr, &evicted, max_valid, offsets, layout)
                 })
                 .map_err(Error::EvictingRefCounts)?;
         }
@@ -283,6 +352,7 @@ mod tests {
         image: TestImage,
         raw_file: QcowRawFile,
         refs: RefCount,
+        header: super::super::QcowHeader,
     }
 
     impl RefcountFixture {
@@ -300,42 +370,62 @@ mod tests {
             )
             .unwrap();
 
+            let mut header =
+                super::super::QcowHeader::create_for_size_path_and_cluster_bits(3, 512, None, 9)
+                    .unwrap();
+            header.l1_table_offset = 4 * cluster_size;
+            header.l1_size = 1;
+            header.refcount_table_offset = cluster_size;
+            header.refcount_table_clusters = 1;
+
             Self {
                 image,
                 raw_file,
                 refs,
+                header,
             }
         }
     }
 
     #[test]
     fn invalid_refcount_writeback_targets_are_rejected() {
+        use super::super::metadata::{ClusterOffsets, MetadataLayout};
         use super::super::vec_cache::VecCache;
 
         let cluster_size = 512;
         let block_entries = cluster_size * 8 / 16;
+        let l2_offsets = ClusterOffsets::new(&[5 * cluster_size]);
         for (target, addr) in [
             ("header", 0),
             ("unaligned header", 1),
             ("unaligned cluster", cluster_size + 1),
             ("out of range", 3 * block_entries * cluster_size),
+            ("refcount table", cluster_size),
+            ("L1 table", 4 * cluster_size),
+            ("L2 table", 5 * cluster_size),
+            ("shared refcount block", 6 * cluster_size),
         ] {
             for path in WritebackPath::ALL {
                 let RefcountFixture {
                     image: temp,
                     mut raw_file,
                     mut refs,
+                    header,
                 } = RefcountFixture::new();
+                let layout = MetadataLayout::new(&header, &l2_offsets);
                 refs.set_block_addr(0, addr);
                 refs.set_block_addr(1, 3 * cluster_size);
+                refs.set_block_addr(2, 6 * cluster_size);
                 refs.refblock_cache = dirty_table_cache(0, block_entries as usize);
                 let before = temp.snapshot();
 
                 let err = match path {
-                    WritebackPath::Flush => refs.flush_blocks(&mut raw_file).unwrap_err(),
-                    WritebackPath::ReadEviction => match refs
-                        .get_cluster_refcount(&mut raw_file, block_entries * cluster_size)
-                    {
+                    WritebackPath::Flush => refs.flush_blocks(&mut raw_file, layout).unwrap_err(),
+                    WritebackPath::ReadEviction => match refs.get_cluster_refcount(
+                        &mut raw_file,
+                        block_entries * cluster_size,
+                        layout,
+                    ) {
                         Err(super::Error::EvictingRefCounts(err)) => err,
                         result => panic!("expected eviction error, got {result:?}"),
                     },
@@ -344,6 +434,7 @@ mod tests {
                         block_entries * cluster_size,
                         1,
                         Some((3 * cluster_size, VecCache::new(block_entries as usize))),
+                        layout,
                     ) {
                         Err(super::Error::EvictingRefCounts(err)) => err,
                         result => panic!("expected eviction error, got {result:?}"),
@@ -352,6 +443,54 @@ mod tests {
                 assert_eq!(err.raw_os_error(), Some(libc::EINVAL), "{target}, {path:?}");
                 before.assert_unchanged(&temp);
             }
+        }
+    }
+
+    #[test]
+    fn invalid_refcount_blocks_are_rejected_before_loading_or_relocation() {
+        use super::super::metadata::{ClusterOffsets, MetadataLayout};
+        use super::super::vec_cache::VecCache;
+
+        let cluster_size = 512;
+        let block_entries = cluster_size * 8 / 16;
+        let l2_offsets = ClusterOffsets::new(&[5 * cluster_size]);
+        for (target, addr) in [
+            ("refcount table", cluster_size),
+            ("L1 table", 4 * cluster_size),
+            ("L2 table", 5 * cluster_size),
+        ] {
+            let RefcountFixture {
+                image: _temp,
+                raw_file: mut raw,
+                mut refs,
+                header,
+            } = RefcountFixture::new();
+            let layout = MetadataLayout::new(&header, &l2_offsets);
+            refs.set_block_addr(0, addr);
+            let result = refs.get_cluster_refcount(&mut raw, 0, layout);
+            assert!(
+                matches!(result, Err(super::Error::InvalidRefblockOffset(a)) if a == addr),
+                "{target}: {result:?}"
+            );
+            let result = refs.set_cluster_refcount(&mut raw, 0, 1, None, layout);
+            assert!(
+                matches!(result, Err(super::Error::InvalidRefblockOffset(a)) if a == addr),
+                "{target}: {result:?}"
+            );
+            refs.set_block_addr(0, 0);
+            let result = refs.set_cluster_refcount(
+                &mut raw,
+                0,
+                1,
+                Some((addr, VecCache::new(block_entries as usize))),
+                layout,
+            );
+            assert!(
+                matches!(result, Err(super::Error::InvalidRefblockOffset(a)) if a == addr),
+                "{target}: {result:?}"
+            );
+            assert_eq!(refs.ref_table[0], 0);
+            assert!(!refs.refblock_cache.contains_key(0));
         }
     }
 
