@@ -354,9 +354,15 @@ impl Vhdx {
                         .map_err(VhdxIoError::ResizeFile)?;
                     self.disk_spec.image_size = new_size;
 
+                    self.aligned
+                        .write_all_at(
+                            &buf[write_count..(write_count + sector.free_bytes as usize)],
+                            file_offset + sector.block_offset,
+                        )
+                        .map_err(VhdxIoError::WriteSectorBlock)?;
+
                     let new_bat_entry =
                         file_offset | (bat::PAYLOAD_BLOCK_FULLY_PRESENT & bat::BAT_STATE_BIT_MASK);
-                    self.bat_entries[sector.bat_index as usize] = BatEntry(new_bat_entry);
                     BatEntry::write_bat_entry(
                         &self.aligned,
                         bat_offset,
@@ -364,16 +370,7 @@ impl Vhdx {
                         new_bat_entry,
                     )
                     .map_err(VhdxIoError::WriteBat)?;
-
-                    // The BAT entry addresses the start of the payload block;
-                    // the sector's data lives at its own offset within that
-                    // block, not at the block base.
-                    self.aligned
-                        .write_all_at(
-                            &buf[write_count..(write_count + sector.free_bytes as usize)],
-                            file_offset + sector.block_offset,
-                        )
-                        .map_err(VhdxIoError::WriteSectorBlock)?;
+                    self.bat_entries[sector.bat_index as usize] = BatEntry(new_bat_entry);
                 }
                 bat::PAYLOAD_BLOCK_FULLY_PRESENT => {
                     self.check_payload_block_offset(bat_entry & bat::BAT_FILE_OFF_MASK)?;
@@ -512,6 +509,26 @@ mod tests {
         vhdx.aligned = AlignedFile::new(file, false);
         vhdx.write_all_at(&[0xa5; 512], 0).unwrap();
         assert!(!vhdx.first_write);
+    }
+
+    #[test]
+    fn failed_bat_write_does_not_publish_allocation() {
+        let tf = create_dynamic_vhdx(16, None);
+        let mut vhdx = open_vhdx(tf.as_path()).unwrap();
+        let old_entry = vhdx.bat_entries[0].0;
+        let bat_offset = vhdx.regions.bat_entry.file_offset;
+        vhdx.regions.bat_entry.file_offset = u64::MAX;
+        assert!(vhdx.write_all_at(&[0xa5; 512], 0).is_err());
+        assert_eq!(vhdx.bat_entries[0].0, old_entry);
+        vhdx.regions.bat_entry.file_offset = bat_offset;
+        vhdx.write_all_at(&[0x5a; 512], 512).unwrap();
+        vhdx.flush().unwrap();
+
+        let reopened = open_vhdx(tf.as_path()).unwrap();
+        let mut data = [0; 1024];
+        reopened.read_at(&mut data, 0).unwrap();
+        assert_eq!(data[..512], [0; 512]);
+        assert_eq!(data[512..], [0x5a; 512]);
     }
 
     #[test]
