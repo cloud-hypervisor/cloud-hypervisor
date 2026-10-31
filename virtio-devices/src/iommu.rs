@@ -397,7 +397,19 @@ impl Request {
         let mut reply: Vec<u8> = Vec::new();
         let mut status = VIRTIO_IOMMU_S_OK;
         let mut hdr_len = 0;
-        let mut unrecognised_type = false;
+
+        // Unknown request types must leave the reply buffer untouched and
+        // report a used length of zero.
+        if !matches!(
+            req_head.type_,
+            VIRTIO_IOMMU_T_ATTACH
+                | VIRTIO_IOMMU_T_DETACH
+                | VIRTIO_IOMMU_T_MAP
+                | VIRTIO_IOMMU_T_UNMAP
+                | VIRTIO_IOMMU_T_PROBE
+        ) {
+            return Ok(0);
+        }
 
         let result = (|| {
             match req_head.type_ {
@@ -782,19 +794,10 @@ impl Request {
 
                     hdr_len = reply.len() as u32;
                 }
-                _ => {
-                    unrecognised_type = true;
-                    return Err(Error::InvalidRequest);
-                }
+                _ => unreachable!(),
             }
             Ok(())
         })();
-
-        // virtio spec: unrecognised request types must not have the reply
-        // buffer written and must report a used length of zero.
-        if unrecognised_type {
-            return Ok(0);
-        }
 
         let status_desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
 
@@ -1469,11 +1472,18 @@ mod tests {
     use std::sync::{Arc, RwLock, Weak};
 
     use seccompiler::SeccompAction;
+    use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
+    use virtio_queue::QueueT;
     use vm_device::dma_mapping::ExternalDmaMapping;
+    use vm_memory::{ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
+    use vm_virtio::queue::testing::VirtQueue;
     use vmm_sys_util::eventfd::{EFD_NONBLOCK, EventFd};
 
-    use super::{Domain, Iommu, IommuMapping, Mapping};
-    use crate::DmaRemapping;
+    use super::{
+        Domain, Error, Iommu, IommuMapping, Mapping, Request, VirtioIommuReqDetach,
+        VirtioIommuReqHead, VirtioIommuReqTail,
+    };
+    use crate::{DmaRemapping, GuestMemoryMmap};
 
     /// Test stub for VfioDmaMapping.
     struct MockMapping;
@@ -1593,5 +1603,56 @@ mod tests {
     fn reject_unmapped_base() {
         let m = iommu_mapping(&[(0x1000, 0x4000, 0x1000)]);
         m.translate_gva(0, 0x2500, 0x10).unwrap_err();
+    }
+
+    const TAIL_LEN: usize = size_of::<VirtioIommuReqTail>();
+    const INITIAL_STATUS: u8 = 0xa5;
+
+    fn process_request<T: ByteValued>(
+        type_: u8,
+        body: T,
+        mapping: &Arc<IommuMapping>,
+        ext_mapping: &BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
+    ) -> (Result<usize, Error>, u8) {
+        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let vq = VirtQueue::new(GuestAddress(0x1000), &mem, 2);
+        let req_addr = GuestAddress(0x2000);
+        let tail_addr = GuestAddress(0x3000);
+        let head = VirtioIommuReqHead {
+            type_,
+            ..Default::default()
+        };
+        mem.write_obj(head, req_addr).unwrap();
+        mem.write_obj(
+            body,
+            GuestAddress(req_addr.0 + size_of::<VirtioIommuReqHead>() as u64),
+        )
+        .unwrap();
+        mem.write_obj(INITIAL_STATUS, tail_addr).unwrap();
+        let req_len = (size_of::<VirtioIommuReqHead>() + size_of::<T>()) as u32;
+        vq.dtable[0].set(req_addr.0, req_len, VRING_DESC_F_NEXT as u16, 1);
+        vq.dtable[1].set(tail_addr.0, TAIL_LEN as u32, VRING_DESC_F_WRITE as u16, 0);
+        vq.avail.ring[0].set(0);
+        vq.avail.idx.set(1);
+
+        let mut queue = vq.create_queue();
+        let mem_atomic = GuestMemoryAtomic::new(mem.clone());
+        let mut desc_chain = queue.pop_descriptor_chain(mem_atomic.memory()).unwrap();
+        let result = Request::parse(&mut desc_chain, mapping, ext_mapping, (0, 0), &[], None);
+        (result, mem.read_obj(tail_addr).unwrap())
+    }
+
+    #[test]
+    fn unknown_request_leaves_reply_untouched() {
+        let mapping = Arc::new(iommu_mapping(&[]));
+        let (len, status) = process_request(
+            0xff,
+            VirtioIommuReqDetach::default(),
+            &mapping,
+            &BTreeMap::new(),
+        );
+        assert_eq!(len.unwrap(), 0);
+        assert_eq!(status, INITIAL_STATUS);
+        assert_eq!(mapping.endpoints.read().unwrap().get(&0), Some(&0));
     }
 }
