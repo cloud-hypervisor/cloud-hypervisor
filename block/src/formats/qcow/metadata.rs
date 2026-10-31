@@ -1077,9 +1077,27 @@ impl QcowState {
 
         // Allocate contiguous clusters at file end for new L1 table
         let file_size = self.raw_file.physical_size()?;
-        let new_l1_offset = self.raw_file.cluster_address(file_size + cluster_size - 1);
-
-        let new_file_end = new_l1_offset + new_l1_clusters * cluster_size;
+        let new_l1_offset = self.raw_file.cluster_address(
+            file_size
+                .checked_add(cluster_size - 1)
+                .ok_or_else(|| io::Error::from_raw_os_error(EINVAL))?,
+        );
+        let new_l1_size_bytes = new_l1_clusters * cluster_size;
+        if MetadataLayout::new(&self.header, &self.l2_offsets).overlaps_metadata(
+            new_l1_offset,
+            new_l1_size_bytes,
+            None,
+            &self.refcounts,
+        ) {
+            self.set_corrupt_bit_best_effort();
+            return Err(io::Error::from_raw_os_error(EIO));
+        }
+        let new_file_end = new_l1_offset
+            .checked_add(new_l1_size_bytes)
+            .ok_or_else(|| io::Error::from_raw_os_error(EINVAL))?;
+        if new_file_end - cluster_size > self.refcounts.max_valid_cluster_offset() {
+            return Err(io::Error::from_raw_os_error(libc::ENOSPC));
+        }
         self.raw_file.file_mut().set_len(new_file_end)?;
 
         // Set refcounts for the contiguous range
@@ -1748,6 +1766,41 @@ mod tests {
                 inner.get_new_cluster(None).unwrap_err().raw_os_error(),
                 Some(libc::EIO)
             );
+        }
+    }
+
+    #[test]
+    fn l1_growth_rejects_metadata_overlap_before_extending_the_file() {
+        let MetadataFixture {
+            image: _image,
+            mut state,
+        } = MetadataFixture::with_flushed_cluster(64 << 16);
+        let file_len = state.raw_file.physical_size().unwrap();
+        let cluster_size = state.raw_file.cluster_size();
+        state.header.refcount_table_clusters = (file_len / cluster_size + 1) as u32;
+        let err = state.grow_l1_table(state.header.l1_size + 1).unwrap_err();
+        assert_eq!(err.raw_os_error(), Some(libc::EIO));
+        assert_eq!(state.raw_file.physical_size().unwrap(), file_len);
+    }
+
+    #[test]
+    fn l1_growth_respects_refcount_coverage() {
+        let cluster_size = 1 << 16;
+        let entries_per_cluster = cluster_size / 8;
+        for (extra_clusters, l1_entries) in [(0, 2), (1, entries_per_cluster + 1)] {
+            let MetadataFixture { image, mut state } =
+                MetadataFixture::with_flushed_cluster(64 * cluster_size);
+            limit_growth(&mut state, extra_clusters);
+            let before = image.snapshot();
+            let old_size = state.header.size;
+
+            let err = state
+                .resize(l1_entries * entries_per_cluster * cluster_size)
+                .unwrap_err();
+            assert_eq!(err.raw_os_error(), Some(libc::ENOSPC));
+            assert_eq!(state.header.size, old_size);
+            assert!(!state.header.is_corrupt());
+            before.assert_unchanged(&image);
         }
     }
 
