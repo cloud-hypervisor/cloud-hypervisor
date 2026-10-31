@@ -842,8 +842,6 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
     const ACPI_IORT_SMMU_V3_DEVICEID_VALID: u32 = 1 << 4;
     const ACPI_IORT_ATS_SUPPORTED: u32 = 1 << 0;
     const ACPI_IORT_REVISION: u8 = 6;
-    const ACPI_IORT_RMR_MSI_IOVA_BASE: u64 = 0x0800_0000;
-    const ACPI_IORT_RMR_MSI_IOVA_LENGTH: u64 = 0x0010_0000;
 
     let num_rmr = smmus
         .iter()
@@ -992,8 +990,8 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
             });
         }
         iort.append(IortRmrMemRangeDescriptor {
-            base_address: ACPI_IORT_RMR_MSI_IOVA_BASE,
-            length: ACPI_IORT_RMR_MSI_IOVA_LENGTH,
+            base_address: layout::ACPI_IORT_RMR_MSI_IOVA_BASE.raw_value(),
+            length: layout::ACPI_IORT_RMR_MSI_IOVA_LENGTH,
             _reserved: 0,
         });
         iort.append_slice(&vec![0u8; padding]);
