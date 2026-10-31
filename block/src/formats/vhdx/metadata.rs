@@ -17,6 +17,7 @@ const METADATA_MAX_ENTRIES: u16 = 2047;
 // The size including the table header and entries
 const METADATA_TABLE_MAX_SIZE: usize = METADATA_ENTRY_SIZE * (METADATA_MAX_ENTRIES as usize + 1);
 
+const METADATA_FLAGS_IS_VIRTUAL_DISK: u32 = 0x02;
 const METADATA_FLAGS_IS_REQUIRED: u32 = 0x04;
 
 pub(super) const BLOCK_SIZE_MIN: u32 = 1 << 20; // 1 MiB
@@ -204,7 +205,15 @@ impl DiskSpec {
                 return Err(VhdxMetadataError::InvalidMetadataItem);
             };
 
-            if (metadata_entry.flag_bits & METADATA_FLAGS_IS_REQUIRED) == 0 {
+            let expected_flags = if matches!(
+                presence,
+                METADATA_FILE_PARAMETER_PRESENT | METADATA_PARENT_LOCATOR_PRESENT
+            ) {
+                METADATA_FLAGS_IS_REQUIRED
+            } else {
+                METADATA_FLAGS_IS_REQUIRED | METADATA_FLAGS_IS_VIRTUAL_DISK
+            };
+            if metadata_entry.flag_bits != expected_flags {
                 return Err(VhdxMetadataError::UnsupportedFlag);
             }
             if metadata_presence & presence != 0 {
@@ -483,5 +492,31 @@ mod tests {
             DiskSpec::new(&file, &region),
             Err(VhdxMetadataError::DuplicateMetadataItem)
         ));
+    }
+
+    #[test]
+    fn known_metadata_flags_are_checked() {
+        let (file, region) = metadata_region();
+        for (guid, flags) in [
+            (METADATA_FILE_PARAMETER, 4u32),
+            (METADATA_VIRTUAL_DISK_SIZE, 6),
+            (METADATA_VIRTUAL_DISK_ID, 6),
+            (METADATA_LOGICAL_SECTOR_SIZE, 6),
+            (METADATA_PHYSICAL_SECTOR_SIZE, 6),
+        ] {
+            let (entry_offset, _) = metadata_item(&file, &region, guid);
+            let flags_offset = entry_offset + 24;
+            for bit in [1, 2, 4, 8, 1 << 31] {
+                file.write_all_at(&(flags ^ bit).to_le_bytes(), flags_offset)
+                    .unwrap();
+                assert!(matches!(
+                    DiskSpec::new(&file, &region),
+                    Err(VhdxMetadataError::UnsupportedFlag)
+                ));
+            }
+            file.write_all_at(&flags.to_le_bytes(), flags_offset)
+                .unwrap();
+        }
+        DiskSpec::new(&file, &region).unwrap();
     }
 }
