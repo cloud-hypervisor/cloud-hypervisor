@@ -500,6 +500,10 @@ impl QcowHeader {
                     feature_table,
                 )));
             }
+            let non_default_compression = !matches!(header.compression_type, CompressionType::Zlib);
+            if features.contains(IncompatFeatures::COMPRESSION) != non_default_compression {
+                return Err(Error::InvalidCompressionFeature);
+            }
         }
 
         if matches!(version, 2 | 3) {
