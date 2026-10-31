@@ -48,21 +48,7 @@ pub enum Error {
 }
 type Result<T> = anyhow::Result<T, Error>;
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
-pub enum MemberType {
-    Request,
-    Response,
-    Error,
-    Cap,
-}
-
 pub trait Ptm {
-    // Get Member Type
-    fn get_member_type(&self) -> MemberType;
-
-    // Set Member Type
-    fn set_member_type(&mut self, mem: MemberType);
-
     // Convert PTM Request to bytes to be sent to tpm
     fn ptm_to_request(&self) -> Vec<u8>;
 
@@ -88,10 +74,6 @@ impl Ptm for PtmResult {
         Vec::new()
     }
 
-    fn get_member_type(&self) -> MemberType {
-        MemberType::Response
-    }
-
     fn update_ptm_with_response(&mut self, buf: &[u8]) -> Result<()> {
         let expected_len = 4;
         let len = buf.len();
@@ -104,8 +86,6 @@ impl Ptm for PtmResult {
         *self = u32::from_be_bytes(buf[..].try_into().unwrap());
         Ok(())
     }
-
-    fn set_member_type(&mut self, _mem: MemberType) {}
 
     fn set_result_code(&mut self, res: u32) {
         *self = res;
@@ -125,10 +105,6 @@ impl Ptm for PtmCap {
         Vec::new()
     }
 
-    fn get_member_type(&self) -> MemberType {
-        MemberType::Cap
-    }
-
     fn update_ptm_with_response(&mut self, buf: &[u8]) -> Result<()> {
         let expected_len = 8;
         let len = buf.len();
@@ -140,8 +116,6 @@ impl Ptm for PtmCap {
         *self = u64::from_be_bytes(buf[..].try_into().unwrap());
         Ok(())
     }
-
-    fn set_member_type(&mut self, _mem: MemberType) {}
 
     fn set_result_code(&mut self, _res: u32) {}
 
@@ -158,7 +132,6 @@ pub struct PtmEstResp {
 
 #[derive(Debug)]
 pub struct PtmEst {
-    member: MemberType,
     pub resp: PtmEstResp,
     pub result_code: PtmResult,
 }
@@ -166,7 +139,6 @@ pub struct PtmEst {
 impl PtmEst {
     pub fn new() -> Self {
         Self {
-            member: MemberType::Response,
             result_code: 0,
             resp: PtmEstResp { bit: 0 },
         }
@@ -186,10 +158,6 @@ impl Ptm for PtmEst {
         Vec::new()
     }
 
-    fn get_member_type(&self) -> MemberType {
-        self.member
-    }
-
     fn update_ptm_with_response(&mut self, buf: &[u8]) -> Result<()> {
         let expected_len = 8;
         let len = buf.len();
@@ -202,8 +170,6 @@ impl Ptm for PtmEst {
         self.resp.bit = buf[4];
         Ok(())
     }
-
-    fn set_member_type(&mut self, _mem: MemberType) {}
 
     fn set_result_code(&mut self, res: u32) {
         self.result_code = res;
@@ -218,7 +184,6 @@ impl Ptm for PtmEst {
 
 #[derive(Debug)]
 pub struct PtmInit {
-    pub member: MemberType,
     /* request */
     pub init_flags: u32,
     /* response */
@@ -234,7 +199,6 @@ impl Default for PtmInit {
 impl PtmInit {
     pub fn new() -> Self {
         Self {
-            member: MemberType::Request,
             init_flags: 0,
             result_code: 0,
         }
@@ -248,10 +212,6 @@ impl Ptm for PtmInit {
         buf
     }
 
-    fn get_member_type(&self) -> MemberType {
-        self.member
-    }
-
     fn update_ptm_with_response(&mut self, buf: &[u8]) -> Result<()> {
         let expected_len = 4;
         let len = buf.len();
@@ -260,13 +220,8 @@ impl Ptm for PtmInit {
                 "Response for Init cmd is of incorrect length. Got {len} expected {expected_len}."
             )));
         }
-        self.set_member_type(MemberType::Response);
         self.set_result_code(u32::from_be_bytes(buf[..].try_into().unwrap()));
         Ok(())
-    }
-
-    fn set_member_type(&mut self, mem: MemberType) {
-        self.member = mem;
     }
 
     fn set_result_code(&mut self, res: u32) {
@@ -302,7 +257,6 @@ pub struct PtmSBSResp {
 
 #[derive(Debug)]
 pub struct PtmSetBufferSize {
-    pub mem: MemberType,
     /* request */
     pub req: PtmSBSReq,
     /* response */
@@ -313,7 +267,6 @@ pub struct PtmSetBufferSize {
 impl PtmSetBufferSize {
     pub fn new(req_buffsize: u32) -> Self {
         Self {
-            mem: MemberType::Request,
             req: PtmSBSReq {
                 buffersize: req_buffsize,
             },
@@ -337,10 +290,6 @@ impl Ptm for PtmSetBufferSize {
         buf
     }
 
-    fn get_member_type(&self) -> MemberType {
-        self.mem
-    }
-
     fn update_ptm_with_response(&mut self, buf: &[u8]) -> Result<()> {
         let expected_len = 16;
         let len = buf.len();
@@ -349,7 +298,6 @@ impl Ptm for PtmSetBufferSize {
                 "Response for CmdSetBufferSize cmd is of incorrect length. Got {len} expected {expected_len}."
             )));
         }
-        self.set_member_type(MemberType::Response);
         self.set_result_code(u32::from_be_bytes(buf[0..4].try_into().unwrap()));
 
         let bufsize = &buf[4..8];
@@ -362,10 +310,6 @@ impl Ptm for PtmSetBufferSize {
         self.resp.maxsize = u32::from_be_bytes(maxsize.try_into().unwrap());
 
         Ok(())
-    }
-
-    fn set_member_type(&mut self, mem: MemberType) {
-        self.mem = mem;
     }
 
     fn set_result_code(&mut self, res: u32) {
@@ -421,13 +365,10 @@ mod tests {
     /* PtmSetBufferSize Testing */
     fn test_ptmsetbuffersize() -> Result<()> {
         let mut psbs: PtmSetBufferSize = PtmSetBufferSize::new(1024);
-        // Member type should be Request after initialization
-        assert_eq!(psbs.get_member_type(), MemberType::Request);
         let buf: &[u8] = &[
             0, 0x12, 0x34, 0x56, 0, 0, 0, 0xA, 0, 0, 0, 0xB, 0, 0, 0, 0xC,
         ];
         psbs.update_ptm_with_response(buf)?;
-        assert_eq!(psbs.get_member_type(), MemberType::Response);
         assert_eq!(psbs.get_result_code(), 0x123456);
         assert_eq!(psbs.resp.bufsize, 0xA);
         assert_eq!(psbs.resp.minsize, 0xB);

@@ -895,23 +895,6 @@ jobs:
       - name: Run CVM (SEV-SNP) integration tests
         timeout-minutes: 20
         run: scripts/dev_cli.sh tests --integration-cvm --hypervisor kvm
-  # Rate-limiter host is not available
-  # integration-rate-limiter:
-  #   name: integration-rate-limiter
-  #   needs: [preflight, dco, quality, build]
-  #   if: >-
-  #     github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
-  #   runs-on: bare-metal-9950x
-  #   env:
-  #     AUTH_DOWNLOAD_TOKEN: ${{ secrets.AUTH_DOWNLOAD_TOKEN }}
-  #   steps:
-  #     - name: Code checkout
-  #       uses: actions/checkout@v7
-  #       with:
-  #         fetch-depth: 0
-  #     - name: Run rate-limiter integration tests
-  #       timeout-minutes: 20
-  #       run: scripts/dev_cli.sh tests --integration-rate-limiter
   virtio-villain:
     name: virtio-villain
     needs: [preflight, dco, quality, build]

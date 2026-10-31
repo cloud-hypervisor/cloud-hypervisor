@@ -1,8 +1,6 @@
 // Copyright 2023 Arm Limited (or its affiliates). All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-#![cfg_attr(fuzzing, allow(unexpected_cfgs))]
-
 #[cfg(fuzzing)]
 use std::sync::atomic::{AtomicU64, Ordering};
 

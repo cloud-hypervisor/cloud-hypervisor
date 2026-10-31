@@ -922,7 +922,6 @@ impl VcpuState {
 }
 
 impl CpuManager {
-    #[expect(unused_variables)]
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         config: &CpusConfig,
@@ -949,9 +948,6 @@ impl CpuManager {
         let mut vcpu_states = Vec::with_capacity(max_vcpus);
         vcpu_states.resize_with(max_vcpus, VcpuState::default);
         let vcpu_states = Arc::new(Mutex::new(vcpu_states));
-        let hypervisor_type = hypervisor.hypervisor_type();
-        #[cfg(target_arch = "x86_64")]
-        let cpu_vendor = hypervisor.get_cpu_vendor();
 
         #[cfg(target_arch = "x86_64")]
         if config.features.amx {

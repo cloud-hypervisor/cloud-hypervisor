@@ -31,7 +31,6 @@ use std::str::FromStr;
 use std::{cmp, io, mem, result};
 
 pub use aligned_file::AlignedFile;
-use formats::qcow;
 #[cfg(feature = "io_uring")]
 use io_uring::{IoUring, Probe, opcode};
 use libc::ioctl;
@@ -73,8 +72,6 @@ pub enum Error {
     InvalidDataLength,
     #[error("Request offset or length is not aligned to {0} bytes")]
     InvalidDataAlignment(u64),
-    #[error("Failure in qcow")]
-    QcowError(#[source] qcow::Error),
     #[error("The requested operation does not support multiple descriptors")]
     TooManyDescriptors,
     #[error("Request contains too many segments ({0}, max {MAX_DISCARD_WRITE_ZEROES_SEG})")]

@@ -10,6 +10,7 @@ use std::mem::size_of;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::{Arc, Once};
 
+use cloud_hypervisor_fuzz::FuzzCursor;
 use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
 use virtio_devices::net::{
@@ -113,62 +114,6 @@ const VIRTIO_NET_CTRL_RX_PROMISC: u8 = 0;
 const CTRL_QUEUE_EVENT_ID: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 const START_ANNOUNCEMENTS_EVENT_ID: u16 = CTRL_QUEUE_EVENT_ID + 1;
 const RETRY_ANNOUNCEMENTS_EVENT_ID: u16 = START_ANNOUNCEMENTS_EVENT_ID + 1;
-
-struct InputReader<'a> {
-    bytes: &'a [u8],
-    cursor: usize,
-}
-
-impl<'a> InputReader<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, cursor: 0 }
-    }
-
-    fn next_u8(&mut self) -> u8 {
-        if self.bytes.is_empty() {
-            return 0;
-        }
-        let b = self.bytes[self.cursor % self.bytes.len()];
-        self.cursor = self.cursor.wrapping_add(1);
-        b
-    }
-
-    fn next_u16(&mut self) -> u16 {
-        u16::from_le_bytes([self.next_u8(), self.next_u8()])
-    }
-
-    fn next_u32(&mut self) -> u32 {
-        u32::from_le_bytes([
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-        ])
-    }
-
-    fn next_u64(&mut self) -> u64 {
-        u64::from_le_bytes([
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-            self.next_u8(),
-        ])
-    }
-
-    fn next_bool(&mut self) -> bool {
-        self.next_u8() & 1 != 0
-    }
-
-    fn fill_slice(&mut self, out: &mut [u8]) {
-        for b in out {
-            *b = self.next_u8();
-        }
-    }
-}
 
 #[derive(Default)]
 struct FlakyAnnounceOps {
@@ -524,7 +469,7 @@ fn build_ctrl_queue_layout(queue_bytes: &mut [u8]) {
 
 fn write_ctrl_plane(
     mem: &GuestMemoryMmap,
-    input: &mut InputReader,
+    input: &mut FuzzCursor,
     announce_mode: CtrlAnnounceMode,
 ) -> bool {
     let mq_pairs = if input.next_bool() { 1_u16 } else { 0_u16 };
@@ -605,7 +550,7 @@ fn write_ctrl_plane(
             .is_ok()
 }
 
-fn exercise_announcer(input: &mut InputReader) {
+fn exercise_announcer(input: &mut FuzzCursor) {
     let Ok(announce) = AnnouncementState::new(true) else {
         return;
     };
@@ -636,7 +581,7 @@ fn exercise_announcer(input: &mut InputReader) {
     announce.reset();
 }
 
-fn exercise_api_surface(net: &mut virtio_devices::Net, input: &mut InputReader) {
+fn exercise_api_surface(net: &mut virtio_devices::Net, input: &mut FuzzCursor) {
     let _ = VirtioDevice::device_type(net);
     let _ = VirtioDevice::queue_max_sizes(net);
 
@@ -692,7 +637,7 @@ fn setup_virt_queues(base_addr: u64, event_idx: bool) -> Vec<Queue> {
 
 #[expect(clippy::too_many_arguments)]
 fn run_stateful_activation(
-    input: &mut InputReader,
+    input: &mut FuzzCursor,
     guest_mac: [u8; 6],
     guest_mac_addr: net_util::MacAddr,
     avail_features: u64,
@@ -1058,7 +1003,7 @@ fn new_direct_ctrl_handler(
     })
 }
 
-fn exercise_ctrl_handler_edges(input: &mut InputReader) {
+fn exercise_ctrl_handler_edges(input: &mut FuzzCursor) {
     let mem = match GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
         Ok(mem) => mem,
         Err(_) => return,
@@ -1455,7 +1400,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
     });
 
-    let mut input = InputReader::new(bytes);
+    let mut input = FuzzCursor::new(bytes);
 
     exercise_announcer(&mut input);
 

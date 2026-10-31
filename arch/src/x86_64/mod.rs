@@ -335,31 +335,6 @@ impl CpuidPatch {
             }
         }
     }
-
-    pub fn is_feature_enabled(
-        cpuid: &[CpuIdEntry],
-        function: u32,
-        index: u32,
-        reg: CpuidReg,
-        feature_bit: usize,
-    ) -> bool {
-        let mask = 1 << feature_bit;
-
-        for entry in cpuid {
-            if entry.function == function && entry.index == index {
-                let reg_val = match reg {
-                    CpuidReg::EAX => entry.eax,
-                    CpuidReg::EBX => entry.ebx,
-                    CpuidReg::ECX => entry.ecx,
-                    CpuidReg::EDX => entry.edx,
-                };
-
-                return (reg_val & mask) == mask;
-            }
-        }
-
-        false
-    }
 }
 
 /// Replaces all four registers of a CPUID leaf and subleaf.

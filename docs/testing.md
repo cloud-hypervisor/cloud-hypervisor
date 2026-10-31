@@ -136,7 +136,6 @@ The test scripts accept the following common arguments via
 | `--hypervisor kvm\|mshv` | Override the hypervisor (auto-detected from the host device node when omitted; also passed by dev_cli.sh). |
 | `--test-filter <name>`| Run only tests matching the filter.           |
 | `--test-exclude <name>`| Exclude tests matching the pattern.          |
-| `--build-guest-kernel`| Build the guest kernel from source instead of downloading a prebuilt binary. |
 
 **Example — run a single integration test:**
 
@@ -250,8 +249,7 @@ scripts/dev_cli.sh tests --integration [--libc musl|gnu]
 Runs `scripts/run_integration_tests_x86_64.sh`. The script
 automatically downloads and prepares all required workloads:
 
-- **Kernel:** `vmlinux-x86_64` (prebuilt or built from source with
-  `--build-guest-kernel`).
+- **Kernel:** `vmlinux-x86_64`.
 - **Firmware:** `hypervisor-fw` (rust-hypervisor-firmware).
 - **OVMF:** `CLOUDHV.fd`.
 - **Guest images:** Ubuntu Focal and Jammy cloud images in multiple

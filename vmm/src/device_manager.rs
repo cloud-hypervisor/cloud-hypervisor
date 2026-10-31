@@ -1692,7 +1692,6 @@ impl DeviceManager {
         &self.id_to_dev_info
     }
 
-    #[allow(unused_variables)]
     fn add_pci_devices(&mut self, snapshot: Option<&Snapshot>) -> DeviceManagerResult<()> {
         let iommu_id = String::from(IOMMU_DEVICE_NAME);
 
