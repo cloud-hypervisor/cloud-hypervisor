@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
-use std::io::{self, Seek, SeekFrom};
+use std::io::{self, Seek, SeekFrom, Write};
 use std::mem::{MaybeUninit, zeroed};
 use std::num::NonZeroUsize;
 use std::ops::{BitAnd, Not, Sub};
@@ -59,12 +59,15 @@ use crate::coredump::{
 use crate::migration::transport::SocketStream;
 use crate::migration::url_to_path;
 use crate::pagemap::PageMap;
-use crate::sparse::{clone_file_range, next_data_extent, write_region_sparse};
+use crate::sparse::{clone_file_range, link_file, next_data_extent, write_region_sparse};
 use crate::uffd::{
     self, FileUffdMemorySource, SocketUffdMemorySource, Uffd, UffdMemorySource, UffdRange,
 };
 use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
-use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID, prefault, userfaultfd};
+use crate::{
+    GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID, memory_diff, prefault,
+    userfaultfd,
+};
 
 struct UffdHandler {
     stop_event: EventFd,
@@ -80,6 +83,10 @@ const DEFAULT_MEMORY_ZONE: &str = "mem0";
 
 /// Filename used to store guest RAM in snapshot directories.
 pub const SNAPSHOT_FILENAME: &str = "memory-ranges";
+/// Filename used to store the changed guest pages in linked snapshot directories.
+pub const SNAPSHOT_DIFF_FILENAME: &str = "memory-ranges.diff.1";
+/// Filename of the hard link to the restore source in linked snapshot directories.
+pub const SNAPSHOT_BASE_FILENAME: &str = "memory-ranges.base";
 
 #[cfg(target_arch = "x86_64")]
 const X86_64_IRQ_BASE: u32 = 5;
@@ -271,6 +278,7 @@ pub struct MemoryManager {
     thp: bool,
     user_provided_zones: bool,
     snapshot_memory_ranges: MemoryRangeTable,
+    snapshot_memory_base: MemoryBase,
     cow_source: Option<CowSource>,
     memory_zones: MemoryZones,
     log_dirty: bool, // Enable dirty logging for created RAM regions
@@ -436,6 +444,16 @@ pub enum Error {
     /// Error reading from snapshot file
     #[error("Error reading from snapshot file")]
     SnapshotRead(#[source] io::Error),
+
+    /// Invalid memory diff file
+    #[error("Invalid memory diff file")]
+    SnapshotDiff(#[source] memory_diff::DiffError),
+
+    /// Memory diff files with on-demand restore
+    #[error(
+        "A snapshot with a memory diff file cannot be restored with memory_restore_mode=ondemand"
+    )]
+    SnapshotDiffOnDemand,
 
     // Error copying snapshot into region
     #[error("Error copying snapshot into region")]
@@ -2283,6 +2301,7 @@ impl MemoryManager {
             reserve: config.reserve,
             user_provided_zones,
             snapshot_memory_ranges: MemoryRangeTable::default(),
+            snapshot_memory_base: MemoryBase::Full,
             cow_source: None,
             memory_zones,
             guest_ram_mappings: Vec::new(),
@@ -2313,11 +2332,18 @@ impl MemoryManager {
         #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         if let Some(source_url) = source_url {
-            let mut memory_file_path = url_to_path(source_url).map_err(Error::Restore)?;
-            memory_file_path.push(String::from(SNAPSHOT_FILENAME));
+            let dir = url_to_path(source_url).map_err(Error::Restore)?;
 
             let mem_snapshot: MemoryManagerSnapshotData =
                 snapshot.to_state().map_err(Error::Restore)?;
+
+            let memory_file_path = match mem_snapshot.memory_base {
+                MemoryBase::Full => dir.join(SNAPSHOT_FILENAME),
+                MemoryBase::Linked if memory_restore_mode == MemoryRestoreMode::OnDemand => {
+                    return Err(Error::SnapshotDiffOnDemand);
+                }
+                MemoryBase::Linked => dir.join(SNAPSHOT_BASE_FILENAME),
+            };
 
             let mm = MemoryManager::new(
                 vm,
@@ -2345,6 +2371,14 @@ impl MemoryManager {
                         .lock()
                         .unwrap()
                         .fill_saved_regions(memory_file_path, &mem_snapshot.memory_ranges)?,
+                }
+
+                if mem_snapshot.memory_base == MemoryBase::Linked {
+                    apply_diff_file(
+                        &mm.lock().unwrap().guest_memory.memory(),
+                        &dir.join(SNAPSHOT_DIFF_FILENAME),
+                        &mem_snapshot.memory_ranges,
+                    )?;
                 }
             }
 
@@ -3179,6 +3213,31 @@ impl MemoryManager {
         Some(ranges)
     }
 
+    /// Hard links the copy-on-write restore source into `dir` as the base of
+    /// a linked snapshot, makes the next snapshot a linked one, and returns
+    /// the path of the link.
+    pub fn link_snapshot_base(&mut self, dir: &Path) -> anyhow::Result<PathBuf> {
+        let Some(source) = &self.cow_source else {
+            return Err(anyhow!(
+                "The VM was not restored with memory_restore_mode=copyonwrite"
+            ));
+        };
+        let ranges = self.memory_range_table(MemoryRangePolicy::SkipPersisted)?;
+        if ranges != source.ranges {
+            return Err(anyhow!("The guest memory layout changed since the restore"));
+        }
+        let path = dir.join(SNAPSHOT_BASE_FILENAME);
+        link_file(&source.file, &path).context("Error linking the restore source")?;
+        self.snapshot_memory_base = MemoryBase::Linked;
+
+        Ok(path)
+    }
+
+    /// Makes the next snapshot a full one again.
+    pub fn clear_snapshot_base(&mut self) {
+        self.snapshot_memory_base = MemoryBase::Full;
+    }
+
     pub fn snapshot_data(&self) -> MemoryManagerSnapshotData {
         MemoryManagerSnapshotData {
             memory_ranges: self.snapshot_memory_ranges.clone(),
@@ -3191,6 +3250,7 @@ impl MemoryManager {
             next_memory_slot: self.next_memory_slot.load(Ordering::SeqCst),
             selected_slot: self.selected_slot,
             next_hotplug_slot: self.next_hotplug_slot,
+            memory_base: self.snapshot_memory_base,
         }
     }
 
@@ -3673,6 +3733,16 @@ impl Drop for MemoryManager {
     }
 }
 
+/// Where a snapshot keeps its guest memory.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+enum MemoryBase {
+    /// `memory-ranges`, written by the snapshot
+    #[default]
+    Full,
+    /// `memory-ranges.base`, a hard link to the copy-on-write restore source
+    Linked,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct MemoryManagerSnapshotData {
     memory_ranges: MemoryRangeTable,
@@ -3685,6 +3755,8 @@ pub struct MemoryManagerSnapshotData {
     next_memory_slot: u32,
     selected_slot: usize,
     next_hotplug_slot: usize,
+    #[serde(default)]
+    memory_base: MemoryBase,
 }
 
 impl Snapshottable for MemoryManager {
@@ -3719,6 +3791,16 @@ impl Transportable for MemoryManager {
     ) -> result::Result<(), MigratableError> {
         if self.snapshot_memory_ranges.is_empty() {
             return Ok(());
+        }
+
+        if self.snapshot_memory_base == MemoryBase::Linked {
+            let source = self
+                .cow_source
+                .as_ref()
+                .context("Linked snapshot without a copy-on-write restore source")
+                .map_err(MigratableError::MigrateSend)?;
+            let dir = url_to_path(destination_url)?;
+            return write_diff_file(&self.guest_memory.memory(), source, &dir);
         }
 
         let mut memory_file_path = url_to_path(destination_url)?;
@@ -3904,13 +3986,13 @@ fn write_guest_range(
     Ok(())
 }
 
-// Writes the guest pages that no longer read from the restore source over
-// the clone of that source in `file`.
-fn write_private_pages(
+// Returns the guest ranges that no longer read from the restore source,
+// each with its offset in the memory file of that source.
+fn private_guest_ranges(
     guest_memory: &GuestMemoryMmap,
     source: &CowSource,
-    file: &mut File,
-) -> result::Result<(), MigratableError> {
+) -> result::Result<Vec<(u64, MemoryRange)>, MigratableError> {
+    let mut ranges = Vec::new();
     let mut file_offset: u64 = 0;
     for range in source.ranges.ranges() {
         let host_addr = guest_memory
@@ -3923,15 +4005,100 @@ fn write_private_pages(
             .context("Error reading the pagemap")
             .map_err(MigratableError::MigrateSend)?;
         for private in private_ranges {
-            write_guest_range(
-                guest_memory,
-                file,
+            ranges.push((
                 file_offset + private.start,
-                range.gpa + private.start,
-                private.end - private.start,
-            )?;
+                MemoryRange {
+                    gpa: range.gpa + private.start,
+                    length: private.end - private.start,
+                },
+            ));
         }
         file_offset += range.length;
+    }
+    Ok(ranges)
+}
+
+// Writes the guest pages that no longer read from the restore source over
+// the clone of that source in `file`.
+fn write_private_pages(
+    guest_memory: &GuestMemoryMmap,
+    source: &CowSource,
+    file: &mut File,
+) -> result::Result<(), MigratableError> {
+    for (file_offset, range) in private_guest_ranges(guest_memory, source)? {
+        write_guest_range(guest_memory, file, file_offset, range.gpa, range.length)?;
+    }
+    Ok(())
+}
+
+// Writes the guest pages that no longer read from the restore source to
+// the diff file of a linked snapshot in `dir`.
+fn write_diff_file(
+    guest_memory: &GuestMemoryMmap,
+    source: &CowSource,
+    dir: &Path,
+) -> result::Result<(), MigratableError> {
+    let entries: Vec<MemoryRange> = private_guest_ranges(guest_memory, source)?
+        .into_iter()
+        .map(|(_, range)| range)
+        .collect();
+
+    let path = dir.join(SNAPSHOT_DIFF_FILENAME);
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .with_context(|| format!("Error creating memory diff file {path:?}"))
+        .map_err(MigratableError::MigrateSend)?;
+    let header = memory_diff::encode_header(&entries);
+    file.write_all(&header)
+        .context("Error writing memory diff header")
+        .map_err(MigratableError::MigrateSend)?;
+    let mut file_offset = header.len() as u64;
+    for entry in &entries {
+        write_guest_range(
+            guest_memory,
+            &mut file,
+            file_offset,
+            entry.gpa,
+            entry.length,
+        )?;
+        file_offset += entry.length;
+    }
+    file.sync_all()
+        .context("Error syncing memory diff file")
+        .map_err(MigratableError::MigrateSend)?;
+    Ok(())
+}
+
+// Writes the pages of a memory diff file over restored guest memory, after
+// checking its header against the snapshot memory layout.
+fn apply_diff_file(
+    guest_memory: &GuestMemoryMmap,
+    path: &Path,
+    layout: &MemoryRangeTable,
+) -> Result<(), Error> {
+    let mut file = File::open(path).map_err(Error::SnapshotOpen)?;
+    let file_len = file.metadata().map_err(Error::SnapshotOpen)?.len();
+    let entries =
+        memory_diff::read_header(&mut file, file_len, layout).map_err(Error::SnapshotDiff)?;
+    for entry in entries {
+        let mut offset = 0;
+        while offset < entry.length {
+            let n = guest_memory
+                .read_volatile_from(
+                    GuestAddress(entry.gpa + offset),
+                    &mut file,
+                    (entry.length - offset) as usize,
+                )
+                .map_err(Error::SnapshotCopy)?;
+            if n == 0 {
+                return Err(Error::SnapshotRead(io::Error::from(
+                    io::ErrorKind::UnexpectedEof,
+                )));
+            }
+            offset += n as u64;
+        }
     }
     Ok(())
 }
@@ -4349,6 +4516,60 @@ mod tests {
     }
 
     #[test]
+    fn diff_file_restores_private_pages_over_the_base() {
+        let page = page_size();
+        let mut file = tempfile::tempfile().unwrap();
+        for i in 0..16u8 {
+            file.write_all(&vec![i + 1; page as usize]).unwrap();
+        }
+        let mut ranges = MemoryRangeTable::default();
+        ranges.push(MemoryRange {
+            gpa: 0,
+            length: 16 * page,
+        });
+
+        // The VM that is snapshotted
+        let before =
+            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), (16 * page) as usize)]).unwrap();
+        do_mmap_cow_saved_regions(&before, &file, &ranges, false).unwrap();
+        let source = CowSource {
+            file,
+            ranges,
+            pagemap: PageMap::open().unwrap(),
+        };
+        before.write_obj::<u8>(0x55, GuestAddress(page)).unwrap();
+        before
+            .write_obj::<u8>(0x77, GuestAddress(12 * page + 9))
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        write_diff_file(&before, &source, dir.path()).unwrap();
+
+        // The VM restored from the base and the diff
+        let after =
+            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), (16 * page) as usize)]).unwrap();
+        do_mmap_cow_saved_regions(&after, &source.file, &source.ranges, false).unwrap();
+        apply_diff_file(
+            &after,
+            &dir.path().join(SNAPSHOT_DIFF_FILENAME),
+            &source.ranges,
+        )
+        .unwrap();
+
+        let mut want = vec![0u8; (16 * page) as usize];
+        before.read_slice(&mut want, GuestAddress(0)).unwrap();
+        let mut got = vec![0u8; (16 * page) as usize];
+        after.read_slice(&mut got, GuestAddress(0)).unwrap();
+        assert!(got == want);
+
+        // Only the diff pages are private, the rest still read from the base
+        let host_addr = after.get_host_address(GuestAddress(0)).unwrap() as u64;
+        assert_eq!(
+            source.pagemap.private_ranges(host_addr, 16 * page).unwrap(),
+            vec![page..2 * page, 12 * page..13 * page]
+        );
+    }
+
+    #[test]
     fn cow_restore_rejects_file_backed_region() {
         let page = page_size();
         let backing = tempfile::tempfile().unwrap();
@@ -4400,5 +4621,29 @@ mod tests {
             do_mmap_cow_saved_regions(&gm, &file, &table, true).unwrap();
             assert_eq!(gm.read_obj::<u8>(GuestAddress(0)).unwrap(), 0xcd);
         }
+    }
+
+    #[test]
+    fn snapshot_state_without_memory_base_reads_as_full() {
+        let data = MemoryManagerSnapshotData {
+            memory_ranges: MemoryRangeTable::default(),
+            guest_ram_mappings: Vec::new(),
+            start_of_device_area: 0,
+            boot_ram: 0,
+            current_ram: 0,
+            arch_mem_regions: Vec::new(),
+            hotplug_slots: Vec::new(),
+            next_memory_slot: 0,
+            selected_slot: 0,
+            next_hotplug_slot: 0,
+            memory_base: MemoryBase::Linked,
+        };
+        let mut json = serde_json::to_value(&data).unwrap();
+        assert_eq!(json["memory_base"], "Linked");
+
+        // A snapshot from a release without the field
+        json.as_object_mut().unwrap().remove("memory_base");
+        let old: MemoryManagerSnapshotData = serde_json::from_value(json).unwrap();
+        assert_eq!(old.memory_base, MemoryBase::Full);
     }
 }

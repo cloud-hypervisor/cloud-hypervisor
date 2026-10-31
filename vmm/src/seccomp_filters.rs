@@ -799,6 +799,7 @@ fn vmm_thread_rules(
         (libc::SYS_landlock_create_ruleset, vec![]),
         (libc::SYS_landlock_add_rule, vec![]),
         (libc::SYS_landlock_restrict_self, vec![]),
+        (libc::SYS_linkat, vec![]),
         (libc::SYS_listen, vec![]),
         (libc::SYS_lseek, vec![]),
         (libc::SYS_madvise, vec![]),

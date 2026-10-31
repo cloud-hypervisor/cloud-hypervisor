@@ -17,7 +17,7 @@ use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender, channel};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
-use std::{any, io, mem, panic, path, process, result, thread};
+use std::{any, fs, io, mem, panic, path, process, result, thread};
 
 use anyhow::{Context, anyhow};
 #[cfg(feature = "dbus_api")]
@@ -50,8 +50,9 @@ use vmm_sys_util::signal::unblock_signal;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
 use crate::api::{
-    ApiRequest, ApiResponse, BalloonStatsResponse, MigrationMode, RequestHandler, TimeoutStrategy,
-    VmInfoResponse, VmReceiveMigrationData, VmSendMigrationData, VmmPingResponse,
+    ApiRequest, ApiResponse, BalloonStatsResponse, MigrationMode, RequestHandler,
+    SnapshotMemoryBase, TimeoutStrategy, VmInfoResponse, VmReceiveMigrationData,
+    VmSendMigrationData, VmSnapshotConfig, VmmPingResponse,
 };
 use crate::config::{MemoryRestoreMode, RestoreConfig, VmMemoryZoneUpdateData, add_to_config};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -69,7 +70,7 @@ use crate::migration::transport::{
 use crate::migration::worker::{
     MigrationSeccompFilters, MigrationWorker, MigrationWorkerHandle, MigrationWorkerResult,
 };
-use crate::migration::{recv_vm_config, recv_vm_state};
+use crate::migration::{recv_vm_config, recv_vm_state, url_to_path};
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::util::flatten_error_chain_to_string;
 use crate::vm::{Error as VmError, Vm, VmState};
@@ -95,6 +96,7 @@ mod igvm;
 pub mod interrupt;
 pub mod landlock;
 pub mod locked_unix_listener;
+pub mod memory_diff;
 pub mod memory_manager;
 pub mod migration;
 mod pagemap;
@@ -2628,7 +2630,7 @@ impl RequestHandler for Vmm {
         }
     }
 
-    fn vm_snapshot(&mut self, destination_url: &str) -> result::Result<(), VmError> {
+    fn vm_snapshot(&mut self, config: &VmSnapshotConfig) -> result::Result<(), VmError> {
         match self.vm {
             VmOwnership::Owned(ref mut vm) => {
                 if vm.restoring() {
@@ -2636,12 +2638,35 @@ impl RequestHandler for Vmm {
                 }
                 // Drain console_info so that FDs are not reused
                 let _ = self.console_info.take();
-                vm.snapshot()
+                let mut linked_base = None;
+                if config.memory_base == SnapshotMemoryBase::Link {
+                    let dir =
+                        url_to_path(&config.destination_url).map_err(VmError::SnapshotSend)?;
+                    match vm.link_snapshot_base(&dir) {
+                        Ok(path) => linked_base = Some(path),
+                        Err(e) => {
+                            warn!(
+                                "Snapshot: writing a full snapshot instead of a linked one: {e:#}"
+                            );
+                        }
+                    }
+                }
+                let result = vm
+                    .snapshot()
                     .map_err(VmError::Snapshot)
                     .and_then(|snapshot| {
-                        vm.send(&snapshot, destination_url)
+                        vm.send(&snapshot, &config.destination_url)
                             .map_err(VmError::SnapshotSend)
-                    })
+                    });
+                vm.clear_snapshot_base();
+                // Drop the link so a failed snapshot doesn't pin the restore source
+                if result.is_err()
+                    && let Some(path) = linked_base
+                    && let Err(e) = fs::remove_file(&path)
+                {
+                    warn!("Snapshot: error removing {}: {e}", path.display());
+                }
+                result
             }
             VmOwnership::Migration { .. } => Err(VmError::VmMigrating),
             VmOwnership::None => Err(VmError::VmNotRunning),

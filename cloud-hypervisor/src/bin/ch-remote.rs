@@ -503,12 +503,14 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
                 .map_err(Error::HttpApiClient)
         }
         Some("snapshot") => {
+            let snapshot_matches = matches.subcommand_matches("snapshot").unwrap();
             let snapshot_config = snapshot_config(
-                matches
-                    .subcommand_matches("snapshot")
-                    .unwrap()
+                snapshot_matches
                     .get_one::<String>("snapshot_config")
                     .unwrap(),
+                snapshot_matches
+                    .get_one::<String>("memory_base")
+                    .map(|x| x as &str),
             );
             simple_api_command(socket, "PUT", "snapshot", Some(&snapshot_config))
                 .map_err(Error::HttpApiClient)
@@ -730,12 +732,14 @@ fn dbus_api_do_command(matches: &ArgMatches, proxy: &DBusApi1ProxyBlocking<'_>) 
             proxy.api_vm_add_vsock(&vsock_config)
         }
         Some("snapshot") => {
+            let snapshot_matches = matches.subcommand_matches("snapshot").unwrap();
             let snapshot_config = snapshot_config(
-                matches
-                    .subcommand_matches("snapshot")
-                    .unwrap()
+                snapshot_matches
                     .get_one::<String>("snapshot_config")
                     .unwrap(),
+                snapshot_matches
+                    .get_one::<String>("memory_base")
+                    .map(|x| x as &str),
             );
             proxy.api_vm_snapshot(&snapshot_config)
         }
@@ -943,9 +947,13 @@ fn add_vsock_config(config: &str) -> Result<String, Error> {
     Ok(vsock_config)
 }
 
-fn snapshot_config(url: &str) -> String {
+fn snapshot_config(url: &str, memory_base: Option<&str>) -> String {
     let snapshot_config = api::VmSnapshotConfig {
         destination_url: String::from(url),
+        memory_base: match memory_base {
+            Some("link") => api::SnapshotMemoryBase::Link,
+            _ => api::SnapshotMemoryBase::Copy,
+        },
     };
 
     serde_json::to_string(&snapshot_config).unwrap()
@@ -1192,6 +1200,13 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
                     .index(1)
                     .required(true)
                     .help("<destination_url>"),
+            )
+            .arg(
+                Arg::new("memory_base")
+                    .long("memory-base")
+                    .help("From where the snapshot takes its guest memory (default: copy)")
+                    .value_parser(["copy", "link"])
+                    .num_args(1),
             ),
     ]
     .to_vec()
