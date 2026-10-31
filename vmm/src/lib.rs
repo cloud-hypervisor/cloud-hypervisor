@@ -74,8 +74,8 @@ use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::util::flatten_error_chain_to_string;
 use crate::vm::{Error as VmError, Vm, VmState};
 use crate::vm_config::{
-    DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
-    UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
+    DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, HotplugMethod, NetConfig,
+    PmemConfig, UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
 };
 
 mod acpi;
@@ -2947,6 +2947,30 @@ impl RequestHandler for Vmm {
     ) -> result::Result<(), VmError> {
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
+        {
+            // Validate the configuration change in a cloned configuration
+            let mut config = self.vm_config.as_ref().unwrap().lock().unwrap().clone();
+            if let Some(desired_vcpus) = desired_vcpus {
+                config.cpus.boot_vcpus = desired_vcpus;
+            }
+            if let Some(desired_ram) = desired_ram {
+                // A running VM stores the hotplugged virtio-mem memory separately
+                if matches!(self.vm, VmOwnership::Owned(_))
+                    && config.memory.hotplug_method == HotplugMethod::VirtioMem
+                {
+                    config.memory.hotplugged_size = desired_ram.checked_sub(config.memory.size);
+                } else {
+                    config.memory.size = desired_ram;
+                }
+            }
+            if let Some(desired_balloon) = desired_balloon
+                && let Some(balloon_config) = &mut config.balloon
+            {
+                balloon_config.size = desired_balloon;
+            }
+            config.validate().map_err(VmError::ConfigValidation)?;
+        }
+
         match self.vm {
             VmOwnership::Owned(ref mut vm) => vm
                 .resize(desired_vcpus, desired_ram, desired_balloon)
@@ -2983,6 +3007,26 @@ impl RequestHandler for Vmm {
 
     fn vm_resize_zone(&mut self, id: String, desired_ram: u64) -> result::Result<(), VmError> {
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
+
+        {
+            // Validate the configuration change in a cloned configuration
+            let mut config = self.vm_config.as_ref().unwrap().lock().unwrap().clone();
+            if let Some(zone) = config
+                .memory
+                .zones
+                .iter_mut()
+                .flatten()
+                .find(|zone| zone.id == id)
+            {
+                // A running VM stores the hotplugged zone memory separately
+                if matches!(self.vm, VmOwnership::Owned(_)) {
+                    zone.hotplugged_size = desired_ram.checked_sub(zone.size);
+                } else {
+                    zone.size = desired_ram;
+                }
+            }
+            config.validate().map_err(VmError::ConfigValidation)?;
+        }
 
         match self.vm {
             VmOwnership::Owned(ref mut vm) => {
@@ -3637,13 +3681,13 @@ mod tests {
     use arch::CpuProfileConfig;
 
     use super::*;
-    use crate::config::RestoredVfioConfig;
+    use crate::config::{RestoredVfioConfig, ValidationError};
     use crate::console_devices::ConsoleDeviceError;
     #[cfg(target_arch = "x86_64")]
     use crate::vm_config::DebugConsoleConfig;
     use crate::vm_config::{
-        CommonConsoleConfig, ConsoleConfig, ConsoleOutputMode, CoreScheduling, CpuFeatures,
-        CpusConfig, DeviceConfig, HotplugMethod, MemoryConfig, MemoryZoneConfig, PayloadConfig,
+        BalloonConfig, CommonConsoleConfig, ConsoleConfig, ConsoleOutputMode, CoreScheduling,
+        CpuFeatures, CpusConfig, DeviceConfig, MemoryConfig, MemoryZoneConfig, PayloadConfig,
         PciDeviceCommonConfig, PlatformConfig, RngConfig, SerialConfig,
     };
 
@@ -3900,6 +3944,73 @@ mod tests {
                 .clone()
                 .unwrap()[0],
             user_device_config
+        );
+    }
+
+    #[test]
+    fn test_vmm_vm_cold_resize_validates_config() {
+        let mut vmm = create_dummy_vmm();
+        let mut config = create_dummy_vm_config();
+        config.cpus.boot_vcpus = 2;
+        config.cpus.max_vcpus = 4;
+        config.disks = Some(vec![
+            DiskConfig::parse("path=/path/to_file,image_type=raw,num_queues=2").unwrap(),
+        ]);
+        config.balloon = Some(BalloonConfig::parse("size=128M").unwrap());
+        let _ = vmm.vm_create(config);
+        let config = vmm.vm_config.clone().unwrap();
+
+        assert!(matches!(
+            vmm.vm_resize(Some(1), None, None),
+            Err(VmError::ConfigValidation(ValidationError::TooManyQueues(
+                2, 1
+            )))
+        ));
+        assert_eq!(config.lock().unwrap().cpus.boot_vcpus, 2);
+
+        assert!(matches!(
+            vmm.vm_resize(None, None, Some(512 << 20)),
+            Err(VmError::ConfigValidation(
+                ValidationError::BalloonLargerThanRam(_, _)
+            ))
+        ));
+        assert_eq!(
+            config.lock().unwrap().balloon.as_ref().unwrap().size,
+            128 << 20
+        );
+
+        vmm.vm_resize(Some(4), None, Some(256 << 20)).unwrap();
+        assert_eq!(config.lock().unwrap().cpus.boot_vcpus, 4);
+        assert_eq!(
+            config.lock().unwrap().balloon.as_ref().unwrap().size,
+            256 << 20
+        );
+    }
+
+    #[test]
+    fn test_vmm_vm_cold_resize_zone_validates_config() {
+        let mut vmm = create_dummy_vmm();
+        let mut config = create_dummy_vm_config();
+        config.memory = MemoryConfig::parse("size=0", Some(vec!["id=mem0,size=512M"])).unwrap();
+        config.balloon = Some(BalloonConfig::parse("size=256M").unwrap());
+        let _ = vmm.vm_create(config);
+        let config = vmm.vm_config.clone().unwrap();
+
+        assert!(matches!(
+            vmm.vm_resize_zone("mem0".to_string(), 256 << 20),
+            Err(VmError::ConfigValidation(
+                ValidationError::BalloonLargerThanRam(_, _)
+            ))
+        ));
+        assert_eq!(
+            config.lock().unwrap().memory.zones.as_ref().unwrap()[0].size,
+            512 << 20
+        );
+
+        vmm.vm_resize_zone("mem0".to_string(), 1 << 30).unwrap();
+        assert_eq!(
+            config.lock().unwrap().memory.zones.as_ref().unwrap()[0].size,
+            1 << 30
         );
     }
 
