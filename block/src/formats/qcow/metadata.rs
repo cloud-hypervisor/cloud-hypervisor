@@ -396,11 +396,8 @@ impl Drop for QcowMetadata {
 }
 
 impl QcowState {
-    /// Fast path read mapping under read lock only. Returns None on cache
-    /// miss.
-    ///
-    /// All access here is through shared reference. CacheMap::get,
-    /// VecCache::get and index operations are all shared reference compatible.
+    /// Map a read without I/O. Returns None on a cache miss or when invalid
+    /// metadata needs to be marked corrupt under the write lock.
     fn try_map_read(
         &self,
         address: u64,
@@ -496,34 +493,11 @@ impl QcowState {
         // Populate cache if needed as this does I/O via the metadata raw file
         self.cache_l2_cluster(l1_index, l2_addr_disk)?;
 
-        let l2_index = self.l2_table_index(address) as usize;
-        let l2_entry = self.l2_cache.get(l1_index).unwrap()[l2_index];
-
-        if l2_entry_is_empty(l2_entry) {
-            Ok(self.unallocated_read_mapping(address, count, has_backing_file))
-        } else if l2_entry_is_compressed(l2_entry) {
-            let (host_offset, compressed_size) =
-                l2_entry_compressed_cluster_layout(l2_entry, self.header.cluster_bits);
-            let cluster_offset = self.raw_file.cluster_offset(address) as usize;
-            Ok(ClusterReadMapping::Compressed {
-                host_offset,
-                compressed_size,
-                cluster_offset,
-                length: count,
+        self.try_map_read(address, count, has_backing_file)?
+            .ok_or_else(|| {
+                self.set_corrupt_bit_best_effort();
+                io::Error::from_raw_os_error(EIO)
             })
-        } else if l2_entry_is_zero(l2_entry) {
-            Ok(ClusterReadMapping::Zero {
-                length: count as u64,
-            })
-        } else {
-            let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
-            self.reject_invalid_cluster_offset(cluster_addr)?;
-            let intra_offset = self.raw_file.cluster_offset(address);
-            Ok(ClusterReadMapping::Allocated {
-                offset: cluster_addr + intra_offset,
-                length: count as u64,
-            })
-        }
     }
 
     fn unallocated_read_mapping(
