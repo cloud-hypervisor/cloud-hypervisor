@@ -67,6 +67,10 @@ impl ClusterOffsets {
         }
     }
 
+    pub(super) fn is_shared(&self, addr: u64) -> bool {
+        self.0.get(&addr).is_some_and(|&count| count > 1)
+    }
+
     /// Excludes the caller's own metadata cluster, including shared references.
     pub(super) fn overlaps(
         &self,
@@ -162,15 +166,18 @@ fn ranges_overlap(addr: u64, size: u64, other: u64, other_size: u64) -> bool {
 fn write_l2_table(
     raw_file: &mut QcowRawFile,
     header: &mut QcowHeader,
+    l2_offsets: &ClusterOffsets,
     refcounts: &RefCount,
     addr: u64,
     table: &VecCache<u64>,
 ) -> io::Result<()> {
-    if !cluster_addr_is_valid(
-        addr,
-        raw_file.cluster_size(),
-        refcounts.max_valid_cluster_offset(),
-    ) {
+    if l2_offsets.is_shared(addr)
+        || !cluster_addr_is_valid(
+            addr,
+            raw_file.cluster_size(),
+            refcounts.max_valid_cluster_offset(),
+        )
+    {
         if let Err(e) = header.set_corrupt_bit(raw_file.file_mut()) {
             log::warn!("Failed to persist corrupt bit: {e}");
         }
@@ -684,6 +691,7 @@ impl QcowState {
         };
         let l2_index = self.l2_table_index(address) as usize;
 
+        self.reject_shared_l2_table_offset(l2_addr_disk)?;
         self.cache_l2_cluster_alloc(l1_index, l2_addr_disk)?;
 
         let l2_entry = self.l2_cache.get(l1_index).unwrap()[l2_index];
@@ -817,6 +825,17 @@ impl QcowState {
 
     // -- Cache and allocation operations requiring exclusive access --
 
+    fn reject_shared_l2_table_offset(&self, addr: u64) -> io::Result<()> {
+        if self.l2_offsets.is_shared(addr) {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "Writes to shared L2 tables are not supported",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     /// Populates the L2 cache for read operations without allocation.
     fn cache_l2_cluster(&mut self, l1_index: usize, l2_addr_disk: u64) -> io::Result<()> {
         if !self.l2_cache.contains_key(l1_index) {
@@ -851,12 +870,20 @@ impl QcowState {
             raw_file,
             header,
             l1_table,
+            l2_offsets,
             refcounts,
             l2_cache,
             ..
         } = self;
         l2_cache.insert(index, table, |index, evicted| {
-            write_l2_table(raw_file, header, refcounts, l1_table[index], &evicted)
+            write_l2_table(
+                raw_file,
+                header,
+                l2_offsets,
+                refcounts,
+                l1_table[index],
+                &evicted,
+            )
         })
     }
 
@@ -1105,6 +1132,7 @@ impl QcowState {
             None => return Err(io::Error::from_raw_os_error(EINVAL)),
         };
         let l2_index = self.l2_table_index(address) as usize;
+        self.reject_shared_l2_table_offset(l2_addr_disk)?;
         let dealloc_entry = if zero_marker {
             l2_entry_make_zero_plain()
         } else {
@@ -1257,6 +1285,7 @@ impl QcowState {
             write_l2_table(
                 &mut self.raw_file,
                 &mut self.header,
+                &self.l2_offsets,
                 &self.refcounts,
                 self.l1_table[*l1_index],
                 l2_table,
@@ -1390,8 +1419,10 @@ mod tests {
     #[test]
     fn metadata_offsets_track_relocation_and_duplicate_references() {
         let mut offsets = ClusterOffsets::new(&[512, 512, 1024]);
+        assert!(offsets.is_shared(512));
         assert!(!offsets.overlaps(512, 512, 512, Some(512)));
         offsets.replace(512, 1536);
+        assert!(!offsets.is_shared(512));
         assert!(!offsets.overlaps(512, 512, 512, Some(512)));
         assert!(offsets.overlaps(511, 2, 512, None));
         assert!(!offsets.overlaps(0, 512, 512, None));
@@ -1399,6 +1430,90 @@ mod tests {
         assert!(!offsets.overlaps(512, 512, 512, None));
         assert!(offsets.overlaps(1536, 512, 512, None));
         assert!(offsets.overlaps(u64::MAX, 1, 512, None));
+    }
+
+    #[test]
+    fn shared_l2_tables_allow_reads_but_reject_mutations() {
+        use std::fs::{self, OpenOptions};
+        use std::io::ErrorKind;
+        use std::os::unix::fs::FileExt;
+
+        let cluster_size = 1 << 16;
+        let l2_coverage = cluster_size * cluster_size / 8;
+        for shared_index in [1usize, 2] {
+            for writable in [false, true] {
+                let temp =
+                    super::super::QcowTempDisk::new(2 * l2_coverage, None, false, true, false)
+                        .unwrap()
+                        .into_tempfile();
+                // Include an alias beyond virtual coverage in the declared L1 table.
+                temp.as_file()
+                    .write_all_at(&((shared_index + 1) as u32).to_be_bytes(), 36)
+                    .unwrap();
+                let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+                let (mut state, _, _) = super::super::parser::parse_qcow(raw, 0, true).unwrap();
+                let super::ClusterWriteMapping::Allocated { offset: data_addr } =
+                    state.map_write(0, None).unwrap();
+                temp.as_file()
+                    .write_all_at(&[0xa5; 512], data_addr)
+                    .unwrap();
+                state.set_cluster_refcount(data_addr, 2).unwrap();
+                let l2_addr = state.l1_table[0];
+                state.set_cluster_refcount(l2_addr, 2).unwrap();
+                // Clear the copied flag on the shared data entry.
+                state.l2_cache.get_mut(0).unwrap()[0] = data_addr;
+                // Flush the contents before making the table shared on disk.
+                state.sync_caches().unwrap();
+                state.set_l2_table_addr(shared_index, l2_addr);
+                state.sync_caches().unwrap();
+                state
+                    .header
+                    .set_dirty_bit(state.raw_file.file_mut(), false)
+                    .unwrap();
+                drop(state);
+
+                let file = OpenOptions::new()
+                    .read(true)
+                    .write(writable)
+                    .open(temp.as_path())
+                    .unwrap();
+                let raw = crate::AlignedFile::new(file, false);
+                let (mut state, _, _) = super::super::parser::parse_qcow(raw, 0, true).unwrap();
+                state.l2_cache = super::super::vec_cache::CacheMap::new(1);
+                let before = fs::read(temp.as_path()).unwrap();
+                for address in [0, l2_coverage * shared_index as u64] {
+                    if address >= state.header.size {
+                        continue;
+                    }
+                    let super::ClusterReadMapping::Allocated { offset, .. } =
+                        state.map_read_with_populate(address, 512, false).unwrap()
+                    else {
+                        panic!("Shared L2 table did not map the data cluster");
+                    };
+                    assert_eq!(offset, data_addr);
+                    let mut data = [0; 512];
+                    temp.as_file().read_exact_at(&mut data, offset).unwrap();
+                    assert_eq!(data, [0xa5; 512]);
+                    assert_eq!(
+                        state.map_write(address, None).unwrap_err().kind(),
+                        ErrorKind::Unsupported
+                    );
+                    for (sparse, zero_marker) in [(false, false), (true, false), (true, true)] {
+                        assert_eq!(
+                            state
+                                .deallocate_cluster(address, sparse, zero_marker)
+                                .unwrap_err()
+                                .kind(),
+                            ErrorKind::Unsupported,
+                        );
+                    }
+                }
+                assert!(!state.header.is_corrupt());
+                assert_eq!(state.cluster_refcount(l2_addr).unwrap(), 2);
+                assert_eq!(state.cluster_refcount(data_addr).unwrap(), 2);
+                assert_eq!(fs::read(temp.as_path()).unwrap(), before);
+            }
+        }
     }
 
     #[test]
