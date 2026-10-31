@@ -362,7 +362,9 @@ impl VhdxHeader {
             (Some(header_1), None) => Ok((HEADER_1_START, header_1)),
             (None, Some(header_2)) => Ok((HEADER_2_START, header_2)),
             (Some(header_1), Some(header_2)) => {
-                if header_1.sequence_number >= header_2.sequence_number {
+                if header_1.sequence_number == header_2.sequence_number {
+                    Err(VhdxHeaderError::NoValidHeader)
+                } else if header_1.sequence_number > header_2.sequence_number {
                     Ok((HEADER_1_START, header_1))
                 } else {
                     Ok((HEADER_2_START, header_2))
@@ -489,6 +491,17 @@ mod tests {
         header.version = 1;
         Header::update_header(&file, &header, false, 0, HEADER_2_START).unwrap();
         VhdxHeader::new(&file).unwrap();
+    }
+
+    #[test]
+    fn equal_sequences_have_no_current_header() {
+        let tf = create_dynamic_vhdx(1, None);
+        let file = AlignedFile::new(tf.into_file(), false);
+        let header = Header::new(&file, HEADER_1_START).unwrap();
+        assert!(matches!(
+            VhdxHeader::current_header(Ok(header), Ok(header)),
+            Err(VhdxHeaderError::NoValidHeader)
+        ));
     }
 
     #[test]
