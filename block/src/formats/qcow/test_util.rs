@@ -6,6 +6,7 @@
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
+use std::ops::Range;
 use std::os::unix::fs::FileExt;
 use std::path::Path;
 
@@ -105,6 +106,32 @@ impl TestImage {
             options.sparse,
             options.use_io_uring,
         )
+    }
+
+    pub(super) fn write_header_u32(&self, field: usize, value: u32) {
+        self.as_file()
+            .write_all_at(&value.to_be_bytes(), field as u64)
+            .unwrap();
+    }
+
+    pub(super) fn write_header_u64(&self, field: usize, value: u64) {
+        write_u64_at(self.as_file(), field as u64, value);
+    }
+
+    pub(super) fn snapshot(&self) -> FileSnapshot {
+        self.snapshot_range(0..self.as_file().metadata().unwrap().len())
+    }
+
+    pub(super) fn snapshot_range(&self, range: Range<u64>) -> FileSnapshot {
+        let mut bytes = vec![0; usize::try_from(range.end - range.start).unwrap()];
+        self.as_file()
+            .read_exact_at(&mut bytes, range.start)
+            .unwrap();
+        FileSnapshot {
+            file_len: self.as_file().metadata().unwrap().len(),
+            offset: range.start,
+            bytes,
+        }
     }
 }
 
@@ -227,4 +254,31 @@ pub(super) fn compress_allocated_clusters(file: &mut File) {
     }
 
     file.flush().unwrap();
+}
+
+pub(super) struct FileSnapshot {
+    file_len: u64,
+    offset: u64,
+    bytes: Vec<u8>,
+}
+
+impl FileSnapshot {
+    #[track_caller]
+    pub(super) fn assert_unchanged(&self, image: &TestImage) {
+        assert_eq!(
+            image.as_file().metadata().unwrap().len(),
+            self.file_len,
+            "Image size changed"
+        );
+        let mut bytes = vec![0; self.bytes.len()];
+        image
+            .as_file()
+            .read_exact_at(&mut bytes, self.offset)
+            .unwrap();
+        assert_eq!(
+            bytes, self.bytes,
+            "Image contents changed at offset {:#x}",
+            self.offset
+        );
+    }
 }

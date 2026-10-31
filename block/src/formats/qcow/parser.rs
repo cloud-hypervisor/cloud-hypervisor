@@ -293,6 +293,16 @@ pub(crate) fn parse_qcow(
         ));
     }
 
+    let entries_per_cluster = cluster_size / size_of::<u64>() as u64;
+    let num_clusters = header.size.div_ceil(cluster_size);
+    let num_l2_clusters = num_clusters.div_ceil(entries_per_cluster);
+    if u64::from(header.l1_size) < num_l2_clusters {
+        return Err(BlockError::new(
+            BlockErrorKind::CorruptImage,
+            Error::InvalidL1TableSize(header.l1_size),
+        ));
+    }
+
     let direct_io = file.is_direct();
     // QCOW2 relative backing paths are resolved from the image that stores
     // them. Resolve only the config passed to BackingFile::new(), leaving the
@@ -412,28 +422,18 @@ pub(crate) fn parse_qcow(
         rebuild_refcounts(&mut raw_file, header.clone())?;
     }
 
-    let entries_per_cluster = cluster_size / size_of::<u64>() as u64;
-    let num_clusters = header.size.div_ceil(cluster_size);
-    let num_l2_clusters = num_clusters.div_ceil(entries_per_cluster);
-    let l1_clusters = num_l2_clusters.div_ceil(entries_per_cluster);
+    let l1_clusters = u64::from(header.l1_size).div_ceil(entries_per_cluster);
     let header_clusters = (size_of::<QcowHeader>() as u64).div_ceil(cluster_size);
-    if num_l2_clusters > MAX_RAM_POINTER_TABLE_SIZE {
-        return Err(BlockError::new(
-            BlockErrorKind::CorruptImage,
-            Error::TooManyL1Entries(num_l2_clusters),
-        ));
-    }
     let l1_table = VecCache::from_vec(
         raw_file
             .read_pointer_table(
                 header.l1_table_offset,
-                num_l2_clusters,
+                u64::from(header.l1_size),
                 Some(L1_TABLE_OFFSET_MASK),
             )
             .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ReadingHeader(e)))?,
     );
 
-    let num_clusters = header.size.div_ceil(cluster_size);
     let refcount_clusters = max_refcount_clusters(
         header.refcount_order,
         cluster_size as u32,
@@ -1017,6 +1017,28 @@ mod tests {
     }
 
     #[test]
+    fn undersized_l1_table_is_rejected_before_rebuilding() {
+        let size = 2 * ((1u64 << 16) * (1u64 << 16) / 8);
+        for l1_size in [0u32, 1] {
+            let temp = TestImage::new(size);
+            temp.write_header_u32(header_field::L1_SIZE, l1_size);
+            // Force a rebuild if header validation does not reject the image.
+            temp.write_header_u64(
+                header_field::INCOMPATIBLE_FEATURES,
+                IncompatFeatures::DIRTY.bits(),
+            );
+            let before = temp.snapshot();
+            let err = temp.open().unwrap_err();
+            assert_eq!(err.kind(), BlockErrorKind::CorruptImage);
+            assert!(matches!(
+                StdError::source(&err).and_then(|source| source.downcast_ref::<Error>()),
+                Some(Error::InvalidL1TableSize(value)) if *value == l1_size,
+            ));
+            before.assert_unchanged(&temp);
+        }
+    }
+
+    #[test]
     fn detect_image_type_recognizes_qcow2_magic() {
         let mut file = basic_file(&valid_header_v3());
         assert_eq!(detect_image_type(&mut file).unwrap(), ImageType::Qcow2);
@@ -1549,6 +1571,7 @@ mod tests {
         patch_u64(&mut header, header_field::SIZE, 1 << 40);
         // set cluster_bits
         patch_u32(&mut header, header_field::CLUSTER_BITS, 16);
+        patch_u32(&mut header, header_field::L1_SIZE, 2048);
         let disk = try_open_header(&header).expect("Failed to create file.");
         // Write a sentinel value near the end of the virtual disk.
         let value = 0x0000_0040_3f00_ffffu64;
