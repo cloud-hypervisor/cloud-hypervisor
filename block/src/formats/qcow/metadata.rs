@@ -542,15 +542,7 @@ impl QcowMetadata {
 
     #[cfg(test)]
     pub(super) fn cluster_refcount(&self, address: u64) -> io::Result<u64> {
-        let mut inner = self.inner.write().unwrap();
-        let QcowState {
-            refcounts,
-            raw_file,
-            ..
-        } = &mut *inner;
-        refcounts
-            .get_cluster_refcount(raw_file, address)
-            .map_err(|e| io::Error::other(format!("get_cluster_refcount: {e}")))
+        self.inner.write().unwrap().cluster_refcount(address)
     }
 }
 
@@ -1110,7 +1102,11 @@ impl QcowState {
             if *l2_addr != 0 {
                 let refcount = self
                     .refcounts
-                    .get_cluster_refcount(&mut self.raw_file, *l2_addr)
+                    .get_cluster_refcount(
+                        &mut self.raw_file,
+                        *l2_addr,
+                        MetadataLayout::new(&self.header, &self.l2_offsets),
+                    )
                     .map_err(|e| {
                         io::Error::other(format!("failed to get refcount during resize: {e}"))
                     })?;
@@ -1238,9 +1234,17 @@ impl QcowState {
 
     fn cluster_refcount(&mut self, cluster_addr: u64) -> io::Result<u64> {
         self.refcounts
-            .get_cluster_refcount(&mut self.raw_file, cluster_addr)
+            .get_cluster_refcount(
+                &mut self.raw_file,
+                cluster_addr,
+                MetadataLayout::new(&self.header, &self.l2_offsets),
+            )
             .map_err(|e| {
-                if matches!(e, refcount::Error::RefblockUnaligned(_)) {
+                if matches!(
+                    e,
+                    refcount::Error::RefblockUnaligned(_)
+                        | refcount::Error::InvalidRefblockOffset(_)
+                ) {
                     self.set_corrupt_bit_best_effort();
                 }
                 io::Error::new(
@@ -1270,6 +1274,7 @@ impl QcowState {
                 address,
                 refcount,
                 new_cluster.take(),
+                MetadataLayout::new(&self.header, &self.l2_offsets),
             ) {
                 Ok(None) => {
                     refcount_set = true;
@@ -1307,7 +1312,10 @@ impl QcowState {
                 Err(refcount::Error::RefcountOverflow { .. }) => {
                     return Err(io::Error::from_raw_os_error(EINVAL));
                 }
-                Err(refcount::Error::RefblockUnaligned(_)) => {
+                Err(
+                    refcount::Error::RefblockUnaligned(_)
+                    | refcount::Error::InvalidRefblockOffset(_),
+                ) => {
                     self.set_corrupt_bit_best_effort();
                     return Err(io::Error::from_raw_os_error(EIO));
                 }
@@ -1334,8 +1342,9 @@ impl QcowState {
             )?;
             l2_table.mark_clean();
         }
+        let layout = MetadataLayout::new(&self.header, &self.l2_offsets);
         // Write the modified refcount blocks.
-        self.refcounts.flush_blocks(&mut self.raw_file)?;
+        self.refcounts.flush_blocks(&mut self.raw_file, layout)?;
         // Sync metadata and data clusters.
         self.raw_file.file_mut().sync_all()?;
 
@@ -1350,7 +1359,7 @@ impl QcowState {
                         Ok(0)
                     } else {
                         let refcount = refcounts
-                            .get_cluster_refcount(raw_file, l2_addr)
+                            .get_cluster_refcount(raw_file, l2_addr, layout)
                             .map_err(|e| io::Error::other(super::Error::GettingRefcount(e)))?;
                         Ok(l1_entry_make(l2_addr, refcount == 1))
                     }
@@ -1877,10 +1886,7 @@ mod tests {
             .filter(|&(_, addr)| addr != 0)
             .collect();
         for (index, addr) in published {
-            let refcount = inner
-                .refcounts
-                .get_cluster_refcount(&mut inner.raw_file, addr)
-                .unwrap();
+            let refcount = inner.cluster_refcount(addr).unwrap();
             assert_ne!(
                 refcount, 0,
                 "L1[{index}] points at cluster {addr:#x} that the free list scan reclaims"
@@ -1933,10 +1939,7 @@ mod tests {
             .expect_err("the L2 relocation must fail with the allocator exhausted");
         assert_eq!(err.raw_os_error(), Some(libc::ENOSPC));
 
-        let refcount = inner
-            .refcounts
-            .get_cluster_refcount(&mut inner.raw_file, data_cluster)
-            .unwrap();
+        let refcount = inner.cluster_refcount(data_cluster).unwrap();
         assert_eq!(
             refcount, 0,
             "the data cluster of a failed write must not stay allocated"
@@ -2127,14 +2130,7 @@ mod tests {
             super::super::parser::parse_qcow(raw, 0, true).unwrap();
         assert_eq!(reopened.l1_table[0], live_l2);
 
-        let live_refcount = {
-            let super::QcowState {
-                refcounts,
-                raw_file,
-                ..
-            } = &mut reopened;
-            refcounts.get_cluster_refcount(raw_file, live_l2).unwrap()
-        };
+        let live_refcount = reopened.cluster_refcount(live_l2).unwrap();
         let live_marked_free = reopened.avail_clusters.contains(&live_l2);
         let next_allocation = reopened
             .get_new_cluster(None)
@@ -2176,19 +2172,8 @@ mod tests {
         assert_ne!(relocated_l2, 0);
         assert_ne!(relocated_l2, old_l2);
 
-        let (old_refcount, relocated_refcount) = {
-            let super::QcowState {
-                refcounts,
-                raw_file,
-                ..
-            } = &mut inner;
-            (
-                refcounts.get_cluster_refcount(raw_file, old_l2).unwrap(),
-                refcounts
-                    .get_cluster_refcount(raw_file, relocated_l2)
-                    .unwrap(),
-            )
-        };
+        let old_refcount = inner.cluster_refcount(old_l2).unwrap();
+        let relocated_refcount = inner.cluster_refcount(relocated_l2).unwrap();
         assert_eq!(
             old_refcount, 0,
             "successful relocation must release the old L2 refcount"
@@ -2240,14 +2225,7 @@ mod tests {
             .expect("zero-marker deallocation must allocate its metadata table");
         let live_l2 = inner.l1_table[0];
         assert_ne!(live_l2, 0);
-        let refcount = {
-            let super::QcowState {
-                refcounts,
-                raw_file,
-                ..
-            } = &mut inner;
-            refcounts.get_cluster_refcount(raw_file, live_l2).unwrap()
-        };
+        let refcount = inner.cluster_refcount(live_l2).unwrap();
         assert_eq!(refcount, 1);
     }
 
@@ -2350,17 +2328,7 @@ mod tests {
         let mut inner = open();
         assert_eq!(read_back(&mut inner), [0xa5; 16]);
         let data_cluster = offset & !(cluster_size - 1);
-        let super::QcowState {
-            ref mut refcounts,
-            ref mut raw_file,
-            ..
-        } = inner;
-        assert_eq!(
-            refcounts
-                .get_cluster_refcount(raw_file, data_cluster)
-                .unwrap(),
-            1
-        );
+        assert_eq!(inner.cluster_refcount(data_cluster).unwrap(), 1);
     }
 
     // A one-cluster refcount table of 512-byte clusters covers 8 MiB of the

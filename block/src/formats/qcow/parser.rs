@@ -484,9 +484,11 @@ pub(crate) fn parse_qcow(
         .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::GettingFileSize(e)))?
         .len();
     let mut avail_clusters = Vec::new();
+    let l2_offsets = super::metadata::ClusterOffsets::new(l1_table.get_values());
+    let layout = super::metadata::MetadataLayout::new(&header, &l2_offsets);
     for i in (0..file_size).step_by(cluster_size as usize) {
         let refcount = refcounts
-            .get_cluster_refcount(&mut raw_file, i)
+            .get_cluster_refcount(&mut raw_file, i, layout)
             .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::GettingRefcount(e)))?;
         if refcount == 0 {
             avail_clusters.push(i);
@@ -512,7 +514,6 @@ pub(crate) fn parse_qcow(
             .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
     }
 
-    let l2_offsets = super::metadata::ClusterOffsets::new(l1_table.get_values());
     let inner = metadata::QcowState {
         raw_file,
         header,
@@ -1808,7 +1809,12 @@ mod tests {
     /// Test RefcountOverflow error when exceeding max refcount value.
     #[test]
     fn refcount_overflow_returns_error() {
+        use super::metadata::{ClusterOffsets, MetadataLayout};
         use super::refcount::Error as RefcountError;
+
+        let header = QcowHeader::create_for_size_and_path(3, 0, None).unwrap();
+        let l2_offsets = ClusterOffsets::default();
+        let layout = MetadataLayout::new(&header, &l2_offsets);
 
         for (refcount_bits, max_val) in [(1u64, 1u64), (2, 3), (4, 15)] {
             let file = TempFile::new().unwrap().into_file();
@@ -1842,14 +1848,14 @@ mod tests {
             .unwrap();
 
             // Overflow should fail
-            let result = refcount.set_cluster_refcount(&mut qcow_raw, 0, max_val + 1, None);
+            let result = refcount.set_cluster_refcount(&mut qcow_raw, 0, max_val + 1, None, layout);
             assert!(
                 matches!(result, Err(RefcountError::RefcountOverflow { .. })),
                 "{refcount_bits}-bit: expected overflow error"
             );
 
             // Max value should not overflow
-            let result = refcount.set_cluster_refcount(&mut qcow_raw, 0, max_val, None);
+            let result = refcount.set_cluster_refcount(&mut qcow_raw, 0, max_val, None, layout);
             assert!(
                 !matches!(result, Err(RefcountError::RefcountOverflow { .. })),
                 "{refcount_bits}-bit: max value should not overflow"
