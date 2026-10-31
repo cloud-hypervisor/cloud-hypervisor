@@ -140,23 +140,10 @@ impl Header {
     fn update_header(
         f: &AlignedFile,
         current_header: &Header,
-        change_data_guid: bool,
         file_write_guid: u128,
         start: u64,
     ) -> Result<Header> {
         let mut buffer = [0u8; HEADER_SIZE as usize];
-        let data_write_guid = if change_data_guid {
-            Uuid::new_v4().as_u128()
-        } else {
-            current_header.data_write_guid
-        };
-
-        let file_write_guid = if file_write_guid == 0 {
-            current_header.file_write_guid
-        } else {
-            file_write_guid
-        };
-
         let sequence_number = current_header
             .sequence_number
             .checked_add(1)
@@ -167,7 +154,7 @@ impl Header {
             checksum: 0,
             sequence_number,
             file_write_guid,
-            data_write_guid,
+            data_write_guid: Uuid::new_v4().as_u128(),
             log_guid: current_header.log_guid,
             log_version: current_header.log_version,
             version: current_header.version,
@@ -376,13 +363,14 @@ impl VhdxHeader {
     pub(super) fn update(&mut self, f: &AlignedFile) -> Result<()> {
         let mut header = self.header;
         let mut offset = self.header_offset;
+        let file_write_guid = Uuid::new_v4().as_u128();
         for _ in 0..2 {
             offset = if offset == HEADER_1_START {
                 HEADER_2_START
             } else {
                 HEADER_1_START
             };
-            header = Header::update_header(f, &header, true, 0, offset)?;
+            header = Header::update_header(f, &header, file_write_guid, offset)?;
         }
         self.header = header;
         self.header_offset = offset;
@@ -482,14 +470,14 @@ mod tests {
         let file = AlignedFile::new(tf.into_file(), false);
         let mut header = Header::new(&file, HEADER_2_START).unwrap();
         header.version = 2;
-        Header::update_header(&file, &header, false, 0, HEADER_1_START).unwrap();
+        Header::update_header(&file, &header, header.file_write_guid, HEADER_1_START).unwrap();
         assert!(matches!(
             VhdxHeader::new(&file),
             Err(VhdxHeaderError::UnsupportedVersion(2))
         ));
         header.sequence_number += 2;
         header.version = 1;
-        Header::update_header(&file, &header, false, 0, HEADER_2_START).unwrap();
+        Header::update_header(&file, &header, header.file_write_guid, HEADER_2_START).unwrap();
         VhdxHeader::new(&file).unwrap();
     }
 
@@ -502,6 +490,23 @@ mod tests {
             VhdxHeader::current_header(Ok(header), Ok(header)),
             Err(VhdxHeaderError::NoValidHeader)
         ));
+    }
+
+    #[test]
+    fn header_update_changes_write_guids() {
+        let tf = create_dynamic_vhdx(1, None);
+        let file = AlignedFile::new(tf.into_file(), false);
+        let mut header = VhdxHeader::new(&file).unwrap();
+        let old = header.header;
+        header.update(&file).unwrap();
+        for offset in [HEADER_1_START, HEADER_2_START] {
+            let updated = Header::new(&file, offset).unwrap();
+            assert_ne!({ updated.file_write_guid }, { old.file_write_guid });
+            assert_ne!({ updated.data_write_guid }, { old.data_write_guid });
+            assert_eq!({ updated.file_write_guid }, {
+                header.header.file_write_guid
+            });
+        }
     }
 
     #[test]
