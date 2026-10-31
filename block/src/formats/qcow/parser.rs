@@ -540,7 +540,7 @@ pub(crate) fn parse_qcow(
     Ok((inner, backing_file, sparse))
 }
 
-fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockResult<()> {
+fn rebuild_refcounts(raw_file: &mut QcowRawFile, mut header: QcowHeader) -> BlockResult<()> {
     fn classify_error(err: Error) -> BlockError {
         let kind = match err {
             Error::InvalidOffset(_) | Error::InvalidClusterIndex => BlockErrorKind::CorruptImage,
@@ -730,16 +730,12 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
     // `ref_table` covers only the refblocks this rebuild produced.
     fn write_refblocks(
         refcounts: &[u64],
-        mut header: QcowHeader,
+        header: &QcowHeader,
         ref_table: &[u64],
         declared_table_entries: u64,
         raw_file: &mut QcowRawFile,
         refcount_block_entries: u64,
     ) -> Result<()> {
-        // Rewrite the header with lazy refcounts enabled while we are rebuilding the tables.
-        header.compatible_features |= COMPATIBLE_FEATURES_LAZY_REFCOUNTS;
-        header.write_to(raw_file.file_mut())?;
-
         for (i, refblock_addr) in ref_table.iter().enumerate() {
             // Write a block of refcounts to the location indicated by refblock_addr.
             let refblock_start = i * (refcount_block_entries as usize);
@@ -766,10 +762,6 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
                 declared_table_entries,
             )
             .map_err(Error::WritingHeader)?;
-
-        // Rewrite the header again, now with lazy refcounts disabled.
-        header.compatible_features &= !COMPATIBLE_FEATURES_LAZY_REFCOUNTS;
-        header.write_to(raw_file.file_mut())?;
 
         Ok(())
     }
@@ -878,10 +870,11 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
     )
     .map_err(classify_error)?;
 
-    // Write updated reference counts and point the reftable at them.
+    // Persist DIRTY before writing the rebuilt tables.
+    header.set_dirty_bit(raw_file.file_mut(), true)?;
     write_refblocks(
         &refcounts,
-        header,
+        &header,
         &ref_table,
         declared_table_entries,
         raw_file,
@@ -1687,6 +1680,23 @@ mod tests {
         // After rebuild the first cluster (header) must have refcount > 0.
         let refcount = disk.metadata().cluster_refcount(0).unwrap();
         assert!(refcount > 0, "header cluster refcount should be set");
+    }
+
+    #[test]
+    fn rebuild_refcounts_sets_dirty_and_preserves_compatible_features() {
+        let cluster_size = 1u64 << 16;
+        let mut header = QcowHeader::create_for_size_and_path(3, cluster_size, None).unwrap();
+        // Lazy refcounts and an unknown compatible feature.
+        header.compatible_features = 1 | (1 << 42);
+        let image = TestImage::from_header(&header);
+        let mut raw = image.qcow_raw(cluster_size, 16);
+        super::rebuild_refcounts(&mut raw, header.clone()).unwrap();
+        let updated = QcowHeader::new(raw.file()).unwrap();
+        assert_eq!(updated.compatible_features, header.compatible_features);
+        assert_eq!(
+            updated.incompatible_features,
+            IncompatFeatures::DIRTY.bits()
+        );
     }
 
     #[test]
