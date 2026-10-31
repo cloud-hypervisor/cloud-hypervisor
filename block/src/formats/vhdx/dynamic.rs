@@ -223,10 +223,10 @@ impl Vhdx {
         let (sector_index, sector_count) = self.sector_range(buf.len(), offset, "Write")?;
 
         if self.first_write {
-            self.first_write = false;
             self.vhdx_header
                 .update(&self.aligned)
                 .map_err(|e| IoError::other(format!("Failed to update VHDx header: {e}")))?;
+            self.first_write = false;
         }
 
         self.write_sectors(buf, sector_index, sector_count)
@@ -495,6 +495,22 @@ mod tests {
             assert_eq!(vhdx.read_at(&mut buf, 0).unwrap(), buf.len());
             assert!(buf.iter().all(|&byte| byte == 0), "state={state}");
         }
+    }
+
+    #[test]
+    fn failed_header_update_is_retried() {
+        let tf = create_dynamic_vhdx(1, None);
+        let mut vhdx = Vhdx::new(File::open(tf.as_path()).unwrap(), false).unwrap();
+        assert!(vhdx.write_all_at(&[0xa5; 512], 0).is_err());
+        assert!(vhdx.first_write);
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(tf.as_path())
+            .unwrap();
+        vhdx.aligned = AlignedFile::new(file, false);
+        vhdx.write_all_at(&[0xa5; 512], 0).unwrap();
+        assert!(!vhdx.first_write);
     }
 
     /// A VHDX image with an active log must be rejected until replay is
