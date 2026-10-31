@@ -48,6 +48,17 @@ pub(super) fn l2_entry_compressed_cluster_layout(l2_entry: u64, cluster_bits: u3
     (compressed_cluster_addr, compressed_cluster_size)
 }
 
+/// Validate a cluster-aligned offset outside the header.
+pub(super) fn cluster_addr_is_valid(
+    cluster_addr: u64,
+    cluster_size: u64,
+    max_valid_cluster_offset: u64,
+) -> bool {
+    cluster_addr >= cluster_size
+        && cluster_addr & (cluster_size - 1) == 0
+        && cluster_addr <= max_valid_cluster_offset
+}
+
 pub(super) fn compressed_cluster_range_is_valid(
     addr: u64,
     size: usize,
