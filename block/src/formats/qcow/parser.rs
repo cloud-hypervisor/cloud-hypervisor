@@ -489,7 +489,18 @@ pub(crate) fn parse_qcow(
     for i in (0..file_size).step_by(cluster_size as usize) {
         let refcount = refcounts
             .get_cluster_refcount(&mut raw_file, i, layout)
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::GettingRefcount(e)))?;
+            .map_err(|e| {
+                let kind = if matches!(
+                    e,
+                    refcount::Error::InvalidRefblockOffset(_)
+                        | refcount::Error::RefblockUnaligned(_)
+                ) {
+                    BlockErrorKind::CorruptImage
+                } else {
+                    BlockErrorKind::Io
+                };
+                BlockError::new(kind, Error::GettingRefcount(e))
+            })?;
         if refcount == 0 {
             avail_clusters.push(i);
         }
@@ -1056,6 +1067,23 @@ mod tests {
                 Some(Error::InvalidL1TableSize(value)) if *value == l1_size,
             ));
             assert_eq!(fs::read(temp.as_path()).unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn invalid_refcount_offsets_are_corrupt_images() {
+        for addr in [1u64, 1 << 16, 2 << 16] {
+            let temp = QcowTempDisk::new(1 << 16, None, false, true, false)
+                .unwrap()
+                .into_tempfile();
+            let mut table_offset = [0; 8];
+            temp.as_file().read_exact_at(&mut table_offset, 48).unwrap();
+            temp.as_file()
+                .write_all_at(&addr.to_be_bytes(), u64::from_be_bytes(table_offset))
+                .unwrap();
+            let file = OpenOptions::new().read(true).open(temp.as_path()).unwrap();
+            let err = QcowDisk::new(file, false, false, true, false).unwrap_err();
+            assert_eq!(err.kind(), BlockErrorKind::CorruptImage, "{err}");
         }
     }
 
