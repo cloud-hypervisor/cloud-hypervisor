@@ -423,6 +423,12 @@ pub(crate) fn parse_qcow(
         refcount_rebuild_required = true;
     }
 
+    if is_writable {
+        header
+            .clear_autoclear_features(raw_file.file_mut())
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
+    }
+
     // Skip refcount rebuilding for readonly files.
     if refcount_rebuild_required && is_writable {
         rebuild_refcounts(&mut raw_file, header.clone())?;
@@ -506,23 +512,11 @@ pub(crate) fn parse_qcow(
         }
     }
 
-    if is_writable {
-        if !IncompatFeatures::from_bits_truncate(header.incompatible_features)
+    if is_writable
+        && !IncompatFeatures::from_bits_truncate(header.incompatible_features)
             .contains(IncompatFeatures::DIRTY)
-        {
-            header
-                .set_dirty_bit(raw_file.file_mut(), true)
-                .map_err(|e| {
-                    BlockError::new(
-                        BlockErrorKind::Io,
-                        Error::WritingHeader(io::Error::other(e)),
-                    )
-                })?;
-        }
-
-        header
-            .clear_autoclear_features(raw_file.file_mut())
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
+    {
+        header.set_dirty_bit(raw_file.file_mut(), true)?;
     }
 
     let inner = metadata::QcowState {
