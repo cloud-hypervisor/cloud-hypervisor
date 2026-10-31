@@ -38,12 +38,16 @@ const MDR_GUID: [u8; 16] = [
 pub enum VhdxHeaderError {
     #[error("Region GUID is not unique")]
     DuplicateRegionEntry,
+    #[error("Failed to get file metadata")]
+    GetFileMetadata(#[source] io::Error),
     #[error("Checksum doesn't match for {0}")]
     InvalidChecksum(String),
     #[error("Invalid entry count")]
     InvalidEntryCount,
     #[error("Not a valid VHDx header")]
     InvalidHeaderSign,
+    #[error("Invalid region range")]
+    InvalidRegionRange,
     #[error("Not a valid VHDx region")]
     InvalidRegionSign,
     #[error("Not a VHDx file")]
@@ -224,6 +228,11 @@ impl RegionInfo {
     pub(super) fn new(f: &AlignedFile, region_start: u64, entry_count: u32) -> Result<RegionInfo> {
         let mut bat_entry: Option<RegionTableEntry> = None;
         let mut mdr_entry: Option<RegionTableEntry> = None;
+        let image_size = f
+            .file()
+            .metadata()
+            .map_err(VhdxHeaderError::GetFileMetadata)?
+            .len();
 
         let mut offset = 0;
         let mut region_entries = BTreeMap::new();
@@ -247,6 +256,13 @@ impl RegionInfo {
             let end = start.checked_add(entry.length as u64).ok_or(
                 VhdxHeaderError::RegionEntryOverflow(start, entry.length as usize),
             )?;
+            if start < 1 << 20
+                || !start.is_multiple_of(1 << 20)
+                || !entry.length.is_multiple_of(1 << 20)
+                || (entry.length != 0 && end > image_size)
+            {
+                return Err(VhdxHeaderError::InvalidRegionRange);
+            }
 
             for (region_ent_start, region_ent_end) in region_entries.values() {
                 if ranges_overlap(start, end, *region_ent_start, *region_ent_end) {
@@ -646,16 +662,36 @@ mod tests {
     }
 
     #[test]
+    fn region_ranges_are_validated() {
+        const MIB: u64 = 1 << 20;
+        let entries_at = REGION_TABLE_1_START + size_of::<RegionTableHeader>() as u64;
+        let file = region_file(
+            4 * MIB,
+            &[[0; 32], region_entry(MDR_GUID, 2 * MIB, MIB as u32)],
+        );
+        for (offset, length) in [(0, MIB), (MIB + 1, MIB), (MIB, MIB + 1), (4 * MIB, MIB)] {
+            file.write_all_at(&region_entry(BAT_GUID, offset, length as u32), entries_at)
+                .unwrap();
+            assert!(matches!(
+                RegionInfo::new(&file, REGION_TABLE_1_START, 2),
+                Err(VhdxHeaderError::InvalidRegionRange)
+            ));
+        }
+        file.write_all_at(&region_entry(BAT_GUID, 3 * MIB, MIB as u32), entries_at)
+            .unwrap();
+        RegionInfo::new(&file, REGION_TABLE_1_START, 2).unwrap();
+    }
+
+    #[test]
     fn test_region_info_rejects_overlapping_regions() {
         // BAT region [1 MiB, 3 MiB) and metadata region [2 MiB, 4 MiB) overlap
         // on [2 MiB, 3 MiB); per [MS-VHDX] all region objects must be
         // non-overlapping, so this image must be rejected.
         const MIB: u64 = 1024 * 1024;
         let region_start = REGION_TABLE_1_START;
-        let entries_at = region_start + size_of::<RegionTableHeader>() as u64;
 
         let af = region_file(
-            entries_at + 64 * 1024,
+            4 * MIB,
             &[
                 region_entry(BAT_GUID, MIB, (2 * MIB) as u32),
                 region_entry(MDR_GUID, 2 * MIB, (2 * MIB) as u32),
