@@ -406,7 +406,7 @@ fn get_cli_options_sorted(
             .help("enable/disable Landlock.")
             .action(ArgAction::SetTrue)
             .default_value("false")
-            .group("vm-config"),
+            .group("vmm-config"),
         Arg::new("landlock-rules")
             .long("landlock-rules")
             .help(LandlockConfig::SYNTAX)
@@ -1236,6 +1236,17 @@ mod tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+
+    #[test]
+    fn test_landlock_without_payload() {
+        // A VMM that receives its VM config later through vm.create can
+        // still confine its own threads.
+        let (default_vcpus, default_memory, default_rng) = prepare_default_values();
+        let cmd_arguments = create_app(default_vcpus, default_memory, default_rng)
+            .try_get_matches_from(["cloud-hypervisor", "--api-socket", "/tmp/api", "--landlock"])
+            .unwrap();
+        assert!(cmd_arguments.get_flag("landlock"));
     }
 
     fn get_vm_config_from_vec(args: &[&str]) -> VmConfig {
