@@ -163,6 +163,17 @@ fn ranges_overlap(addr: u64, size: u64, other: u64, other_size: u64) -> bool {
     }
 }
 
+fn l2_cluster_addr_is_valid(
+    addr: u64,
+    cluster_size: u64,
+    max_valid: u64,
+    layout: MetadataLayout<'_>,
+    refcounts: &RefCount,
+) -> bool {
+    cluster_addr_is_valid(addr, cluster_size, max_valid)
+        && !layout.overlaps_metadata(addr, cluster_size, Some(addr), refcounts)
+}
+
 fn write_l2_table(
     raw_file: &mut QcowRawFile,
     header: &mut QcowHeader,
@@ -172,10 +183,12 @@ fn write_l2_table(
     table: &VecCache<u64>,
 ) -> io::Result<()> {
     if l2_offsets.is_shared(addr)
-        || !cluster_addr_is_valid(
+        || !l2_cluster_addr_is_valid(
             addr,
             raw_file.cluster_size(),
             refcounts.max_valid_cluster_offset(),
+            MetadataLayout::new(header, l2_offsets),
+            refcounts,
         )
     {
         if let Err(e) = header.set_corrupt_bit(raw_file.file_mut()) {
@@ -823,6 +836,21 @@ impl QcowState {
         }
     }
 
+    fn reject_invalid_l2_table_offset(&mut self, addr: u64) -> io::Result<()> {
+        if l2_cluster_addr_is_valid(
+            addr,
+            self.raw_file.cluster_size(),
+            self.refcounts.max_valid_cluster_offset(),
+            MetadataLayout::new(&self.header, &self.l2_offsets),
+            &self.refcounts,
+        ) {
+            Ok(())
+        } else {
+            self.set_corrupt_bit_best_effort();
+            Err(io::Error::from_raw_os_error(EIO))
+        }
+    }
+
     // -- Cache and allocation operations requiring exclusive access --
 
     fn reject_shared_l2_table_offset(&self, addr: u64) -> io::Result<()> {
@@ -839,7 +867,7 @@ impl QcowState {
     /// Populates the L2 cache for read operations without allocation.
     fn cache_l2_cluster(&mut self, l1_index: usize, l2_addr_disk: u64) -> io::Result<()> {
         if !self.l2_cache.contains_key(l1_index) {
-            self.reject_invalid_cluster_offset(l2_addr_disk)?;
+            self.reject_invalid_l2_table_offset(l2_addr_disk)?;
             let l2_table =
                 VecCache::from_vec(self.raw_file.read_pointer_cluster(l2_addr_disk, None)?);
             self.insert_l2_table(l1_index, l2_table)?;
@@ -857,7 +885,7 @@ impl QcowState {
                 self.set_l2_table_addr(l1_index, new_addr);
                 VecCache::new(self.l2_entries as usize)
             } else {
-                self.reject_invalid_cluster_offset(l2_addr_disk)?;
+                self.reject_invalid_l2_table_offset(l2_addr_disk)?;
                 VecCache::from_vec(self.raw_file.read_pointer_cluster(l2_addr_disk, None)?)
             };
             self.insert_l2_table(l1_index, l2_table)?;
@@ -1592,6 +1620,10 @@ mod tests {
             "unaligned header",
             "unaligned cluster",
             "out of range",
+            "L1",
+            "refcount table",
+            "refcount block",
+            "shared L2",
         ] {
             for path in ["flush", "read eviction", "write eviction"] {
                 let (temp, mut inner) = test_state();
@@ -1599,11 +1631,19 @@ mod tests {
                 inner.l1_table.extend(2);
                 inner.set_l2_table_addr(1, l2_addr);
                 inner.sync_caches().unwrap();
+                let mut refblock = [0u8; 8];
+                temp.as_file()
+                    .read_exact_at(&mut refblock, inner.header.refcount_table_offset)
+                    .unwrap();
                 let addr = match target {
                     "header" => 0,
                     "unaligned header" => 1,
                     "unaligned cluster" => cluster_size + 1,
-                    _ => 1 << 50,
+                    "out of range" => 1 << 50,
+                    "L1" => inner.header.l1_table_offset,
+                    "refcount table" => inner.header.refcount_table_offset,
+                    "refcount block" => u64::from_be_bytes(refblock),
+                    _ => l2_addr,
                 };
                 // A single dirty entry makes eviction deterministic.
                 inner.l2_cache = super::super::vec_cache::CacheMap::new(1);
