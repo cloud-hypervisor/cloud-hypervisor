@@ -20,7 +20,6 @@ const FILE_START: u64 = 0; // The first element
 const HEADER_1_START: u64 = 64 * 1024; // Header 1 start in Bytes
 const HEADER_2_START: u64 = 128 * 1024; // Header 2 start in Bytes
 pub(super) const REGION_TABLE_1_START: u64 = 192 * 1024; // Region 1 start in Bytes
-const REGION_TABLE_2_START: u64 = 256 * 1024; // Region 2 start in Bytes
 
 const HEADER_SIZE: u64 = 4 * 1024; // Each header is 64 KiB, but only first 4 kiB contains info
 const REGION_SIZE: u64 = 64 * 1024; // Each region size is 64 KiB
@@ -310,7 +309,6 @@ pub(super) struct VhdxHeader {
     header: Header,
     header_offset: u64,
     region_table_1: RegionTableHeader,
-    _region_table_2: RegionTableHeader,
 }
 
 impl VhdxHeader {
@@ -329,7 +327,6 @@ impl VhdxHeader {
             header,
             header_offset,
             region_table_1: RegionTableHeader::new(f, REGION_TABLE_1_START)?,
-            _region_table_2: RegionTableHeader::new(f, REGION_TABLE_2_START)?,
         })
     }
 
@@ -522,6 +519,14 @@ mod tests {
         assert_ne!(header.header_offset, old_offset);
         let stored = Header::new(&file, header.header_offset).unwrap();
         assert_eq!({ stored.sequence_number }, u64::MAX);
+    }
+
+    #[test]
+    fn unused_region_table_does_not_prevent_open() {
+        let tf = create_dynamic_vhdx(1, None);
+        let file = AlignedFile::new(tf.into_file(), false);
+        file.write_all_at(&[0; 4], 256 * 1024).unwrap();
+        VhdxHeader::new(&file).unwrap();
     }
 
     #[test]
