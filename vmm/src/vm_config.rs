@@ -17,6 +17,7 @@ use block::ImageType;
 pub use block::fcntl::LockGranularityChoice;
 #[cfg(target_arch = "x86_64")]
 use devices::debug_console;
+use landlock::AccessFs;
 use log::{debug, warn};
 use net_util::MacAddr;
 use serde::de::{Error as DeError, Visitor};
@@ -500,7 +501,7 @@ pub struct DiskConfig {
 impl ApplyLandlock for DiskConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         if let Some(path) = &self.path {
-            landlock.add_rule_with_access(path, "rw")?;
+            landlock.add_rule_with_access(path, if self.readonly { "r" } else { "rw" })?;
         }
         Ok(())
     }
@@ -978,7 +979,7 @@ pub struct VsockConfig {
 impl ApplyLandlock for VsockConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         if let Some(parent) = self.socket.parent() {
-            landlock.add_rule_with_access(parent, "w")?;
+            landlock.add_rule(parent, AccessFs::MakeSock.into())?;
         }
 
         landlock.add_rule_with_access(&self.socket, "rw")?;

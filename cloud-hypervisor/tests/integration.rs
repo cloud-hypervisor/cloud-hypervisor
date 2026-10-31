@@ -4023,6 +4023,85 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg(target_arch = "x86_64")]
+    // Landlock must grant a readonly=on disk read access only. Re-adding the
+    // image with readonly=off must fail with EACCES, and re-adding it
+    // read-only must work. The read-only disk is unplugged first, so its
+    // shared lock cannot refuse the write lock instead of Landlock.
+    fn test_landlock_readonly_disk() {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let api_socket = temp_api_path(&guest.tmp_dir);
+        let ro_disk = guest.tmp_dir.as_path().join("ro.img");
+        let ro_disk = ro_disk.to_str().unwrap();
+        assert!(exec_host_command_status(&format!("truncate -s 16M {ro_disk}")).success());
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket])
+            .default_cpus()
+            .default_memory()
+            .default_kernel_cmdline()
+            .args(["--landlock"])
+            .default_disks()
+            .args([
+                "--disk",
+                format!("path={ro_disk},id=ro_disk,readonly=on,image_type=raw").as_str(),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            // The read-only disk is vdc, and the VMM can read it.
+            guest
+                .ssh_command("sudo dd if=/dev/vdc of=/dev/null bs=1M iflag=direct count=16")
+                .unwrap();
+
+            assert!(remote_command(
+                &api_socket,
+                "remove-device",
+                Some("ro_disk")
+            ));
+            assert!(wait_until(Duration::from_secs(10), || guest
+                .ssh_command("lsblk | grep -c vdc || true")
+                .is_ok_and(|s| s.trim().parse::<u32>().unwrap_or(1) == 0)));
+            // The guest drops vdc before the VMM closes the image on eject.
+            thread::sleep(Duration::new(5, 0));
+
+            let (cmd_success, _, cmd_stderr) = remote_command_w_output(
+                &api_socket,
+                "add-disk",
+                Some(format!("path={ro_disk},id=rw_disk,image_type=raw").as_str()),
+            );
+            let cmd_stderr = String::from_utf8_lossy(&cmd_stderr);
+            assert!(!cmd_success, "readonly=off re-add succeeded");
+            assert!(cmd_stderr.contains("Permission denied"), "{cmd_stderr}");
+
+            let (cmd_success, _, cmd_stderr) = remote_command_w_output(
+                &api_socket,
+                "add-disk",
+                Some(format!("path={ro_disk},id=ro_disk2,readonly=on,image_type=raw").as_str()),
+            );
+            assert!(cmd_success, "{}", String::from_utf8_lossy(&cmd_stderr));
+            assert!(wait_until(Duration::from_secs(10), || {
+                guest
+                    .ssh_command("lsblk | grep vdc | grep -c 16M")
+                    .is_ok_and(|s| s.trim().parse::<u32>().unwrap_or_default() == 1)
+            }));
+            guest
+                .ssh_command("sudo dd if=/dev/vdc of=/dev/null bs=1M iflag=direct count=16")
+                .unwrap();
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
     fn test_disk_resize() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
