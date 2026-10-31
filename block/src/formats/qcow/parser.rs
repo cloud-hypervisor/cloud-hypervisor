@@ -1120,7 +1120,7 @@ mod tests {
 
     #[test]
     fn header_with_invalid_v3_length_is_rejected() {
-        for bad in [V2_BARE_HEADER_SIZE, 0xffff_ffff] {
+        for bad in [V2_BARE_HEADER_SIZE, 105, 111, 0xffff_ffff] {
             let mut header = valid_header_v3();
             patch_u32(&mut header, header_field::HEADER_LENGTH, bad);
             let err = QcowHeader::new(&basic_file(&header)).unwrap_err();
