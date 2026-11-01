@@ -816,6 +816,15 @@ mod tests {
 
     use super::*;
 
+    /// Selects `key` with the correct byte order
+    fn select(fw_cfg: &mut FwCfg, key: u16) {
+        #[cfg(target_arch = "x86_64")] // port IO -> little endian
+        let key = key.to_le_bytes();
+        #[cfg(target_arch = "aarch64")] // MMIO -> big endian
+        let key = key.to_be_bytes();
+        fw_cfg.write(0, FW_CFG_SELECTOR_OFFSET, &key);
+    }
+
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_stage0_reserved_only_for_sev_snp() {
@@ -898,7 +907,7 @@ mod tests {
         let mut data = vec![0u8];
 
         let mut sig_iter = FW_CFG_SIGNATURE_CONTENT.into_iter();
-        fw_cfg.write(0, FW_CFG_SELECTOR_OFFSET, &[FW_CFG_SIGNATURE as u8, 0]);
+        select(&mut fw_cfg, FW_CFG_SIGNATURE);
         loop {
             if let Some(char) = sig_iter.next() {
                 fw_cfg.read(0, FW_CFG_DATA_OFFSET, &mut data);
@@ -924,7 +933,7 @@ mod tests {
         let mut data = vec![0u8];
 
         let mut cmdline_iter = cmdline.into_iter();
-        fw_cfg.write(0, FW_CFG_SELECTOR_OFFSET, &[FW_CFG_CMDLINE_DATA as u8, 0]);
+        select(&mut fw_cfg, FW_CFG_CMDLINE_DATA);
         loop {
             if let Some(char) = cmdline_iter.next() {
                 fw_cfg.read(0, FW_CFG_DATA_OFFSET, &mut data);
@@ -949,7 +958,7 @@ mod tests {
         fw_cfg.add_kernel_data(temp.as_file()).unwrap();
 
         let mut size = [0u8; size_of::<u32>()];
-        fw_cfg.write(0, FW_CFG_SELECTOR_OFFSET, &FW_CFG_KERNEL_SIZE.to_be_bytes());
+        select(&mut fw_cfg, FW_CFG_KERNEL_SIZE);
         fw_cfg.read(0, FW_CFG_DATA_OFFSET, &mut size);
         assert_eq!(u32::from_le_bytes(size), kernel.len() as u32);
 
@@ -978,7 +987,7 @@ mod tests {
         let mut data = vec![0u8];
 
         let mut initram_iter = (*initram_content).into_iter();
-        fw_cfg.write(0, FW_CFG_SELECTOR_OFFSET, &[FW_CFG_INITRD_DATA as u8, 0]);
+        select(&mut fw_cfg, FW_CFG_INITRD_DATA);
         loop {
             if let Some(char) = initram_iter.next() {
                 fw_cfg.read(0, FW_CFG_DATA_OFFSET, &mut data);
@@ -1008,7 +1017,7 @@ mod tests {
         let mut data = vec![0u8];
 
         // Select the first file item (FW_CFG_FILE_FIRST = 0x20)
-        fw_cfg.write(0, FW_CFG_SELECTOR_OFFSET, &[FW_CFG_FILE_FIRST as u8, 0]);
+        select(&mut fw_cfg, FW_CFG_FILE_FIRST);
         for &byte in expected.iter() {
             fw_cfg.read(0, FW_CFG_DATA_OFFSET, &mut data);
             assert_eq!(data[0], byte);
