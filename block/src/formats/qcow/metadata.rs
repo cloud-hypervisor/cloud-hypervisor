@@ -906,16 +906,26 @@ impl QcowState {
     /// L2 table, establishing its refcount ownership before L1 can reference it.
     fn cache_l2_cluster_alloc(&mut self, l1_index: usize, l2_addr_disk: u64) -> io::Result<()> {
         if !self.l2_cache.contains_key(l1_index) {
-            let l2_table = if l2_addr_disk == 0 {
+            let (l2_table, new_addr) = if l2_addr_disk == 0 {
                 // Set the new L2 table's refcount to 1 before the L1 entry points at it.
                 let new_addr = self.append_data_cluster(None)?;
-                self.set_l2_table_addr(l1_index, new_addr);
-                VecCache::new(self.l2_entries as usize)
+                (VecCache::new(self.l2_entries as usize), Some(new_addr))
             } else {
                 self.reject_invalid_l2_table_offset(l2_addr_disk)?;
-                VecCache::from_vec(self.raw_file.read_pointer_cluster(l2_addr_disk, None)?)
+                (
+                    VecCache::from_vec(self.raw_file.read_pointer_cluster(l2_addr_disk, None)?),
+                    None,
+                )
             };
-            self.insert_l2_table(l1_index, l2_table)?;
+            if let Err(err) = self.insert_l2_table(l1_index, l2_table) {
+                if let Some(addr) = new_addr {
+                    self.release_unreferenced_cluster(addr);
+                }
+                return Err(err);
+            }
+            if let Some(addr) = new_addr {
+                self.set_l2_table_addr(l1_index, addr);
+            }
         }
         Ok(())
     }
@@ -937,7 +947,7 @@ impl QcowState {
                 l2_offsets,
                 refcounts,
                 l1_table[index],
-                &evicted,
+                evicted,
             )
         })
     }
@@ -1496,7 +1506,7 @@ mod tests {
     use super::super::test_util::{
         TestImage, WritebackPath, compressed_l2_entry, dirty_table_cache, header_field, read_u64_at,
     };
-    use super::{ClusterOffsets, MetadataLayout};
+    use super::{Cacheable, ClusterOffsets, MetadataLayout};
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum MetadataTarget {
@@ -2087,6 +2097,24 @@ mod tests {
             assert!(!state.header.is_corrupt());
             before.assert_unchanged(&image);
         }
+    }
+
+    #[test]
+    fn failed_l2_cache_insert_does_not_publish_new_table() {
+        let cluster_size = 1 << 16;
+        let l2_coverage = cluster_size * (cluster_size / 8);
+        let MetadataFixture {
+            image: _image,
+            mut state,
+        } = MetadataFixture::with_flushed_cluster(2 * l2_coverage);
+        state.l2_cache = dirty_table_cache(0, state.l2_entries as usize);
+        state.set_l2_table_addr(0, state.header.l1_table_offset);
+
+        let err = state.cache_l2_cluster_alloc(1, 0).unwrap_err();
+        assert_eq!(err.raw_os_error(), Some(libc::EIO));
+        assert_eq!(state.l1_table[1], 0);
+        assert!(state.l2_cache.get(0).unwrap().dirty());
+        assert!(!state.l2_cache.contains_key(1));
     }
 
     // Regression for the ENOSPC unwind on the relocate-on-write path: when

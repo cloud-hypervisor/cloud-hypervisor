@@ -141,16 +141,17 @@ impl<T: Cacheable> CacheMap<T> {
     // Check if the refblock cache is full and we need to evict.
     pub(super) fn insert<F>(&mut self, index: usize, block: T, write_callback: F) -> io::Result<()>
     where
-        F: FnOnce(usize, T) -> io::Result<()>,
+        F: FnOnce(usize, &T) -> io::Result<()>,
     {
         if self.map.len() == self.capacity {
             // TODO(dgreid) - smarter eviction strategy.
             let to_evict = *self.map.iter().next().unwrap().0;
-            if let Some(evicted) = self.map.remove(&to_evict)
+            if let Some(evicted) = self.map.get(&to_evict)
                 && evicted.dirty()
             {
                 write_callback(to_evict, evicted)?;
             }
+            self.map.remove(&to_evict);
         }
         self.map.insert(index, block);
         Ok(())
@@ -166,6 +167,37 @@ mod tests {
         fn dirty(&self) -> bool {
             true
         }
+    }
+
+    #[test]
+    fn failed_writeback_keeps_dirty_entry() {
+        let mut cache = CacheMap::new(1);
+        let mut table = VecCache::new(1);
+        table[0] = 42;
+        cache.insert(0, table, |_, _| unreachable!()).unwrap();
+
+        let err = cache
+            .insert(1, VecCache::new(1), |index, table| {
+                assert_eq!(index, 0);
+                assert_eq!(table[0], 42);
+                Err(io::Error::from_raw_os_error(libc::ENOSPC))
+            })
+            .unwrap_err();
+        assert_eq!(err.raw_os_error(), Some(libc::ENOSPC));
+        assert_eq!(cache.get(0).unwrap()[0], 42);
+        assert!(cache.get(0).unwrap().dirty());
+        assert!(!cache.contains_key(1));
+
+        let mut written = None;
+        cache
+            .insert(1, VecCache::new(1), |index, table| {
+                written = Some((index, table[0]));
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(written, Some((0, 42)));
+        assert!(!cache.contains_key(0));
+        assert!(cache.contains_key(1));
     }
 
     #[test]
