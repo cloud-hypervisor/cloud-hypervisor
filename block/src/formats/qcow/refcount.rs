@@ -246,11 +246,8 @@ impl RefCount {
 mod tests {
     use std::io;
 
-    use vmm_sys_util::tempfile::TempFile;
-
-    use super::super::qcow_raw_file::QcowRawFile;
+    use super::super::test_util::TestImage;
     use super::RefCount;
-    use crate::aligned_file::AlignedFile;
 
     // A refcount table whose entry count, refcounts-per-block and cluster size
     // all come from the image can describe more clusters than a 64-bit byte
@@ -265,13 +262,11 @@ mod tests {
         let refcount_block_entries = cluster_size * 8 / refcount_bits;
         let refcount_table_entries: u64 = 1 << 20;
 
-        let temp = TempFile::new().unwrap();
-        temp.as_file()
-            .set_len(refcount_table_entries * size_of::<u64>() as u64 + cluster_size)
-            .unwrap();
-        let file = AlignedFile::new(temp.into_file(), false);
-        let mut raw_file = QcowRawFile::from(file, cluster_size, refcount_bits)
-            .expect("cluster size and refcount width are valid");
+        let image = TestImage::from_bytes(
+            &[],
+            refcount_table_entries * size_of::<u64>() as u64 + cluster_size,
+        );
+        let mut raw_file = image.qcow_raw(cluster_size, refcount_bits);
 
         let err = RefCount::new(
             &mut raw_file,

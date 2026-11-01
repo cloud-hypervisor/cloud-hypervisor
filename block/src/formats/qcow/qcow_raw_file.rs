@@ -416,8 +416,7 @@ mod tests {
     use std::io::Read;
     use std::os::unix::fs::FileExt;
 
-    use vmm_sys_util::tempfile::TempFile;
-
+    use super::super::test_util::TestImage;
     use super::*;
 
     fn be_bytes(entries: &[u64]) -> Vec<u8> {
@@ -442,19 +441,14 @@ mod tests {
     const FAR_OFFSET: u64 = 0x9000; // where the callback reads (refcount block)
     const FILE_LEN: u64 = 0x40000; // 256 KiB filler so all offsets are valid
 
-    fn make_qcow_raw() -> (TempFile, QcowRawFile) {
+    fn make_qcow_raw() -> (TestImage, QcowRawFile) {
         make_qcow_raw_bits(16)
     }
 
-    fn make_qcow_raw_bits(refcount_bits: u64) -> (TempFile, QcowRawFile) {
-        let temp_file = TempFile::new().unwrap();
-        temp_file.as_file().set_len(FILE_LEN).unwrap();
-
-        let file = temp_file.as_file().try_clone().unwrap();
-        let raw = AlignedFile::new(file, false);
-        let qcow_raw =
-            QcowRawFile::from(raw, CLUSTER_SIZE, refcount_bits).expect("QcowRawFile::from");
-        (temp_file, qcow_raw)
+    fn make_qcow_raw_bits(refcount_bits: u64) -> (TestImage, QcowRawFile) {
+        let image = TestImage::from_bytes(&[], FILE_LEN);
+        let raw = image.qcow_raw(CLUSTER_SIZE, refcount_bits);
+        (image, raw)
     }
 
     #[test]
