@@ -1201,18 +1201,65 @@ impl QcowState {
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_util::TestImage;
+
+    struct MetadataFixture {
+        image: TestImage,
+        state: super::QcowState,
+    }
+
+    impl MetadataFixture {
+        fn new(virtual_size: u64) -> Self {
+            let image = TestImage::new(virtual_size);
+            let state = open_state(&image);
+            Self { image, state }
+        }
+
+        fn with_flushed_cluster(virtual_size: u64) -> Self {
+            let mut fixture = Self::new(virtual_size);
+            fixture.state.map_write(0, None).unwrap();
+            fixture.state.sync_caches().unwrap();
+            fixture
+        }
+    }
+
+    // Return the raw state so dropping it can model an unclean close.
+    fn open_state(image: &TestImage) -> super::QcowState {
+        super::super::parser::parse_qcow(image.aligned_file(), 0, true)
+            .unwrap()
+            .0
+    }
+
+    // Restrict allocation without changing the free lists or flushing caches.
+    fn limit_growth(state: &mut super::QcowState, additional_clusters: u64) -> u64 {
+        let cluster_size = state.raw_file.cluster_size();
+        let file_clusters = state
+            .raw_file
+            .physical_size()
+            .unwrap()
+            .div_ceil(cluster_size);
+        state.refcounts = super::super::refcount::RefCount::new(
+            &mut state.raw_file,
+            state.header.refcount_table_offset,
+            1,
+            file_clusters + additional_clusters,
+            cluster_size,
+            1 << state.header.refcount_order,
+        )
+        .unwrap();
+        file_clusters
+    }
+
     // Regression for the ENOSPC unwind on the relocate-on-write path: when
     // the allocation for the relocated table fails, the still-referenced old
     // L2 table must not be left on the free lists (issue #8606).
     #[test]
     fn failed_l2_relocate_keeps_live_table_off_free_lists() {
         let cluster_size: u64 = 1 << 16;
-        let temp = super::super::QcowTempDisk::new(64 * cluster_size, None, false, true, false)
-            .unwrap()
-            .into_tempfile();
-        let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
-        let (mut inner, _backing, _sparse) =
-            super::super::parser::parse_qcow(raw, 0, true).unwrap();
+        let MetadataFixture {
+            image: _image,
+            state: mut inner,
+        } = MetadataFixture::new(64 * cluster_size);
 
         // Materialize an L2 table plus one data cluster, then flush so the
         // next write to the region takes the relocate-on-write path.
@@ -1227,22 +1274,7 @@ mod tests {
         // refcount horizon so the file cannot grow, and leave exactly enough
         // for the data cluster of the next write plus the refcount-block
         // relocation it triggers, but nothing for relocating its L2 table.
-        let file_clusters = inner
-            .raw_file
-            .file_mut()
-            .metadata()
-            .unwrap()
-            .len()
-            .div_ceil(cluster_size);
-        inner.refcounts = super::super::refcount::RefCount::new(
-            &mut inner.raw_file,
-            inner.header.refcount_table_offset,
-            1,
-            file_clusters,
-            cluster_size,
-            16,
-        )
-        .unwrap();
+        limit_growth(&mut inner, 0);
         let freed = super::mem::take(&mut inner.unref_clusters);
         assert!(
             !freed.is_empty(),
@@ -1278,35 +1310,14 @@ mod tests {
         let cluster_size: u64 = 1 << 16;
         // One L2 table's guest span, so the second write needs a new table.
         let l2_span = cluster_size * (cluster_size / 8);
-        let temp = super::super::QcowTempDisk::new(2 * l2_span, None, false, true, false)
-            .unwrap()
-            .into_tempfile();
-        let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
-        let (mut inner, _backing, _sparse) =
-            super::super::parser::parse_qcow(raw, 0, true).unwrap();
-
-        inner.map_write(0, None).expect("initial write");
-        inner.sync_caches().expect("flush");
+        let MetadataFixture {
+            image: _image,
+            state: mut inner,
+        } = MetadataFixture::with_flushed_cluster(2 * l2_span);
 
         // One reusable cluster: enough for the L2 table, none for the data
         // cluster the same write needs right after.
-        let file_clusters = inner
-            .raw_file
-            .file_mut()
-            .metadata()
-            .unwrap()
-            .len()
-            .div_ceil(cluster_size)
-            + 1;
-        inner.refcounts = super::super::refcount::RefCount::new(
-            &mut inner.raw_file,
-            inner.header.refcount_table_offset,
-            1,
-            file_clusters,
-            cluster_size,
-            16,
-        )
-        .unwrap();
+        limit_growth(&mut inner, 1);
         let mut freed = super::mem::take(&mut inner.unref_clusters);
         freed.retain(|&c| c != 0);
         assert!(
@@ -1340,10 +1351,7 @@ mod tests {
             .filter(|&(_, addr)| addr != 0)
             .collect();
         for (index, addr) in published {
-            let refcount = inner
-                .refcounts
-                .get_cluster_refcount(&mut inner.raw_file, addr)
-                .unwrap();
+            let refcount = inner.cluster_refcount(addr).unwrap();
             assert_ne!(
                 refcount, 0,
                 "L1[{index}] points at cluster {addr:#x} that the free list scan reclaims"
@@ -1356,35 +1364,15 @@ mod tests {
     #[test]
     fn failed_l2_relocate_returns_the_data_cluster() {
         let cluster_size: u64 = 1 << 16;
-        let temp = super::super::QcowTempDisk::new(64 * cluster_size, None, false, true, false)
-            .unwrap()
-            .into_tempfile();
-        let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
-        let (mut inner, _backing, _sparse) =
-            super::super::parser::parse_qcow(raw, 0, true).unwrap();
-
-        inner.map_write(0, None).expect("initial write");
-        inner.sync_caches().expect("flush");
+        let MetadataFixture {
+            image: _image,
+            state: mut inner,
+        } = MetadataFixture::with_flushed_cluster(64 * cluster_size);
 
         // Let the file grow by exactly two clusters: the data cluster of the
         // next write and the refcount block its accounting relocates. The L2
         // relocation that same write needs then hits the wall.
-        let file_clusters = inner
-            .raw_file
-            .file_mut()
-            .metadata()
-            .unwrap()
-            .len()
-            .div_ceil(cluster_size);
-        inner.refcounts = super::super::refcount::RefCount::new(
-            &mut inner.raw_file,
-            inner.header.refcount_table_offset,
-            1,
-            file_clusters + 2,
-            cluster_size,
-            16,
-        )
-        .unwrap();
+        let file_clusters = limit_growth(&mut inner, 2);
         inner.avail_clusters.clear();
         inner.unref_clusters.clear();
 
@@ -1396,10 +1384,7 @@ mod tests {
             .expect_err("the L2 relocation must fail with the allocator exhausted");
         assert_eq!(err.raw_os_error(), Some(libc::ENOSPC));
 
-        let refcount = inner
-            .refcounts
-            .get_cluster_refcount(&mut inner.raw_file, data_cluster)
-            .unwrap();
+        let refcount = inner.cluster_refcount(data_cluster).unwrap();
         assert_eq!(
             refcount, 0,
             "the data cluster of a failed write must not stay allocated"
@@ -1421,16 +1406,12 @@ mod tests {
 
         const COMPRESSED_FLAG: u64 = 1 << 62;
         let cluster_size: u64 = 1 << 16;
-        let temp = super::super::QcowTempDisk::new(64 * cluster_size, None, false, true, false)
-            .unwrap()
-            .into_tempfile();
+        let temp = TestImage::new(64 * cluster_size);
 
         // Seed an L2 table plus a data cluster, flush, then compress that data
         // cluster in place so re-writing it takes the compressed path.
         {
-            let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
-            let (mut inner, _backing, _sparse) =
-                super::super::parser::parse_qcow(raw, 0, true).unwrap();
+            let mut inner = open_state(&temp);
             inner
                 .map_write(0, Some(vec![0xab; cluster_size as usize]))
                 .expect("seed write");
@@ -1441,9 +1422,7 @@ mod tests {
         );
 
         // Re-open so the L2 cache reflects the on-disk compressed entry.
-        let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
-        let (mut inner, _backing, _sparse) =
-            super::super::parser::parse_qcow(raw, 0, true).unwrap();
+        let mut inner = open_state(&temp);
         let live_l2 = inner.l1_table[0];
         assert_ne!(live_l2, 0);
 
@@ -1460,22 +1439,7 @@ mod tests {
         // Cap file growth at the current horizon and leave exactly two free
         // clusters: enough for the write's data cluster and the refcount block
         // relocation it triggers, but nothing for relocating the L2 table.
-        let file_clusters = inner
-            .raw_file
-            .file_mut()
-            .metadata()
-            .unwrap()
-            .len()
-            .div_ceil(cluster_size);
-        inner.refcounts = super::super::refcount::RefCount::new(
-            &mut inner.raw_file,
-            inner.header.refcount_table_offset,
-            1,
-            file_clusters,
-            cluster_size,
-            16,
-        )
-        .unwrap();
+        limit_growth(&mut inner, 0);
         let mut free = super::mem::take(&mut inner.avail_clusters);
         free.retain(|&c| c != live_l2 && c != 0);
         assert!(free.len() >= 2, "need two free clusters for the budget");
@@ -1506,15 +1470,10 @@ mod tests {
 
         const CLUSTER_USED_FLAG: u64 = 1 << 63;
         let cluster_size: u64 = 1 << 16;
-        let temp = super::super::QcowTempDisk::new(64 * cluster_size, None, false, true, false)
-            .unwrap()
-            .into_tempfile();
-        let open = || {
-            let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
-            super::super::parser::parse_qcow(raw, 0, true).unwrap().0
-        };
-
-        let mut inner = open();
+        let MetadataFixture {
+            image: temp,
+            state: mut inner,
+        } = MetadataFixture::new(64 * cluster_size);
         inner.map_write(0, None).expect("seed write");
         let l2_table = inner.l1_table[0];
         super::QcowMetadata::new(inner).shutdown();
@@ -1522,7 +1481,7 @@ mod tests {
             .write_all_at(&CLUSTER_USED_FLAG.to_be_bytes(), l2_table)
             .unwrap();
 
-        let mut inner = open();
+        let mut inner = open_state(&temp);
         let err = inner
             .map_read_with_populate(0, 512, false)
             .expect_err("read mapped onto the header");
@@ -1536,14 +1495,10 @@ mod tests {
     #[test]
     fn fresh_l2_enospc_reopen_does_not_reuse_live_table() {
         let cluster_size: u64 = 1 << 16;
-        let temp = super::super::QcowTempDisk::new(4 * cluster_size, None, false, true, false)
-            .unwrap()
-            .into_tempfile();
+        let temp = TestImage::new(4 * cluster_size);
 
         let live_l2 = {
-            let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
-            let (mut inner, _backing, _sparse) =
-                super::super::parser::parse_qcow(raw, 0, true).unwrap();
+            let mut inner = open_state(&temp);
             assert_eq!(inner.l1_table[0], 0);
 
             // Add exactly two addressable clusters and cap file growth there. On
@@ -1558,16 +1513,7 @@ mod tests {
                 .file_mut()
                 .set_len(file_size + 2 * cluster_size)
                 .unwrap();
-            let file_clusters = (file_size + 2 * cluster_size) / cluster_size;
-            inner.refcounts = super::super::refcount::RefCount::new(
-                &mut inner.raw_file,
-                inner.header.refcount_table_offset,
-                1,
-                file_clusters,
-                cluster_size,
-                16,
-            )
-            .unwrap();
+            limit_growth(&mut inner, 0);
             inner.avail_clusters.clear();
             inner.unref_clusters.clear();
             inner.avail_clusters.push(file_size);
@@ -1585,19 +1531,10 @@ mod tests {
             live_l2
         };
 
-        let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
-        let (mut reopened, _backing, _sparse) =
-            super::super::parser::parse_qcow(raw, 0, true).unwrap();
+        let mut reopened = open_state(&temp);
         assert_eq!(reopened.l1_table[0], live_l2);
 
-        let live_refcount = {
-            let super::QcowState {
-                refcounts,
-                raw_file,
-                ..
-            } = &mut reopened;
-            refcounts.get_cluster_refcount(raw_file, live_l2).unwrap()
-        };
+        let live_refcount = reopened.cluster_refcount(live_l2).unwrap();
         let live_marked_free = reopened.avail_clusters.contains(&live_l2);
         let next_allocation = reopened
             .get_new_cluster(None)
@@ -1620,15 +1557,10 @@ mod tests {
     #[test]
     fn successful_l2_relocation_releases_old_table() {
         let cluster_size: u64 = 1 << 16;
-        let temp = super::super::QcowTempDisk::new(64 * cluster_size, None, false, true, false)
-            .unwrap()
-            .into_tempfile();
-        let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
-        let (mut inner, _backing, _sparse) =
-            super::super::parser::parse_qcow(raw, 0, true).unwrap();
-
-        inner.map_write(0, None).expect("initial write");
-        inner.sync_caches().expect("make the current L2 clean");
+        let MetadataFixture {
+            image: _image,
+            state: mut inner,
+        } = MetadataFixture::with_flushed_cluster(64 * cluster_size);
         let old_l2 = inner.l1_table[0];
         assert_ne!(old_l2, 0);
 
@@ -1639,19 +1571,8 @@ mod tests {
         assert_ne!(relocated_l2, 0);
         assert_ne!(relocated_l2, old_l2);
 
-        let (old_refcount, relocated_refcount) = {
-            let super::QcowState {
-                refcounts,
-                raw_file,
-                ..
-            } = &mut inner;
-            (
-                refcounts.get_cluster_refcount(raw_file, old_l2).unwrap(),
-                refcounts
-                    .get_cluster_refcount(raw_file, relocated_l2)
-                    .unwrap(),
-            )
-        };
+        let old_refcount = inner.cluster_refcount(old_l2).unwrap();
+        let relocated_refcount = inner.cluster_refcount(relocated_l2).unwrap();
         assert_eq!(
             old_refcount, 0,
             "successful relocation must release the old L2 refcount"
@@ -1690,12 +1611,10 @@ mod tests {
     #[test]
     fn zero_marker_fresh_l2_keeps_refcount_owner() {
         let cluster_size: u64 = 1 << 16;
-        let temp = super::super::QcowTempDisk::new(4 * cluster_size, None, false, true, false)
-            .unwrap()
-            .into_tempfile();
-        let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
-        let (mut inner, _backing, _sparse) =
-            super::super::parser::parse_qcow(raw, 0, true).unwrap();
+        let MetadataFixture {
+            image: _image,
+            state: mut inner,
+        } = MetadataFixture::new(4 * cluster_size);
         assert_eq!(inner.l1_table[0], 0);
 
         inner
@@ -1703,14 +1622,7 @@ mod tests {
             .expect("zero-marker deallocation must allocate its metadata table");
         let live_l2 = inner.l1_table[0];
         assert_ne!(live_l2, 0);
-        let refcount = {
-            let super::QcowState {
-                refcounts,
-                raw_file,
-                ..
-            } = &mut inner;
-            refcounts.get_cluster_refcount(raw_file, live_l2).unwrap()
-        };
+        let refcount = inner.cluster_refcount(live_l2).unwrap();
         assert_eq!(refcount, 1);
     }
 
@@ -1726,12 +1638,10 @@ mod tests {
         for (refcount, reused, old_refcount) in [(0, false, 0), (1, true, 1), (2, false, 1)] {
             // Boring setup: a zero entry that keeps its old host cluster, which
             // gets the refcount under test.
-            let temp = super::super::QcowTempDisk::new(4 * cluster_size, None, false, true, false)
-                .unwrap()
-                .into_tempfile();
-            let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
-            let (mut inner, _backing, _sparse) =
-                super::super::parser::parse_qcow(raw, 0, true).unwrap();
+            let MetadataFixture {
+                image: temp,
+                state: mut inner,
+            } = MetadataFixture::new(4 * cluster_size);
             let read_cluster = |addr| {
                 let mut buf = vec![0; cluster_size as usize];
                 temp.as_file().read_exact_at(&mut buf, addr).unwrap();
@@ -1770,13 +1680,7 @@ mod tests {
         use std::os::unix::fs::FileExt;
 
         let cluster_size: u64 = 1 << 16;
-        let temp = super::super::QcowTempDisk::new(64 * cluster_size, None, false, true, false)
-            .unwrap()
-            .into_tempfile();
-        let open = || {
-            let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
-            super::super::parser::parse_qcow(raw, 0, true).unwrap().0
-        };
+        let temp = TestImage::new(64 * cluster_size);
         let read_back = |inner: &mut super::QcowState| match inner
             .map_read_with_populate(0, 16, false)
             .unwrap()
@@ -1789,7 +1693,7 @@ mod tests {
             _ => panic!("guest cluster 0 is not allocated after reopen"),
         };
 
-        let mut inner = open();
+        let mut inner = open_state(&temp);
         // Limit for a 4 MiB image: two refcount blocks of 2 GiB each.
         let blocks_end = 2 * (cluster_size * 8 / 16) * cluster_size;
         inner.raw_file.file_mut().set_len(blocks_end).unwrap();
@@ -1806,24 +1710,14 @@ mod tests {
         temp.as_file().write_all_at(&[0xa5; 16], offset).unwrap();
         super::QcowMetadata::new(inner).shutdown();
 
-        assert_eq!(read_back(&mut open()), [0xa5; 16]);
+        assert_eq!(read_back(&mut open_state(&temp)), [0xa5; 16]);
 
         // Drop without shutdown() so the next open rebuilds the refcounts.
-        drop(open());
-        let mut inner = open();
+        drop(open_state(&temp));
+        let mut inner = open_state(&temp);
         assert_eq!(read_back(&mut inner), [0xa5; 16]);
         let data_cluster = offset & !(cluster_size - 1);
-        let super::QcowState {
-            ref mut refcounts,
-            ref mut raw_file,
-            ..
-        } = inner;
-        assert_eq!(
-            refcounts
-                .get_cluster_refcount(raw_file, data_cluster)
-                .unwrap(),
-            1
-        );
+        assert_eq!(inner.cluster_refcount(data_cluster).unwrap(), 1);
     }
 
     // A one-cluster refcount table of 512-byte clusters covers 8 MiB of the
@@ -1831,8 +1725,6 @@ mod tests {
     #[test]
     fn allocations_stay_within_the_declared_refcount_table() {
         use std::os::unix::fs::FileExt;
-
-        use vmm_sys_util::tempfile::TempFile;
 
         let cluster_size: u64 = 512;
         let size: u64 = 64 << 20;
@@ -1844,17 +1736,12 @@ mod tests {
         header.l1_table_offset = 2 * cluster_size;
         let l1_clusters = (u64::from(header.l1_size) * 8).div_ceil(cluster_size);
 
-        let temp = TempFile::new().unwrap();
-        let file = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
-        header.write_to(&file).unwrap();
+        let temp = TestImage::from_header(&header);
+        let file = temp.as_file();
         file.set_len((2 + l1_clusters) * cluster_size).unwrap();
-        let open = || {
-            let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
-            super::super::parser::parse_qcow(raw, 0, true).unwrap().0
-        };
 
         let capacity = 64 * (cluster_size * 8 / 16) * cluster_size;
-        let mut inner = open();
+        let mut inner = open_state(&temp);
         let mut guest = 0;
         let err = loop {
             match inner.map_write(guest, None) {
@@ -1875,7 +1762,7 @@ mod tests {
         assert_eq!(err.raw_os_error(), Some(libc::ENOSPC));
         super::QcowMetadata::new(inner).shutdown();
 
-        let mut inner = open();
+        let mut inner = open_state(&temp);
         let super::ClusterReadMapping::Allocated { offset, .. } = inner
             .map_read_with_populate(cluster_size, 8, false)
             .unwrap()
