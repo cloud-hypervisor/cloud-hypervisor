@@ -909,7 +909,7 @@ mod tests {
         DEFAULT_CLUSTER_BITS, DEFAULT_REFCOUNT_ORDER, HEADER_EXT_BACKING_FORMAT, HEADER_EXT_END,
         MAX_CLUSTER_BITS, MIN_CLUSTER_BITS, V2_BARE_HEADER_SIZE, V3_BARE_HEADER_SIZE,
     };
-    use super::super::test_util::{header_field, patch_u32, patch_u64};
+    use super::super::test_util::{DiskOptions, TestImage, header_field, patch_u32, patch_u64};
     use super::super::util::{self, ZERO_FLAG};
     use super::*;
     use crate::formats::qcow::{QcowDisk, QcowTempDisk};
@@ -981,41 +981,24 @@ mod tests {
     }
 
     fn basic_file(header: &[u8]) -> AlignedFile {
-        let disk_file: AlignedFile = AlignedFile::new(TempFile::new().unwrap().into_file(), false);
-        disk_file.write_all_at(header, 0).unwrap();
-        disk_file.set_len(0x1_0000_0000).unwrap();
-        disk_file
+        TestImage::from_bytes(header, 1 << 32).aligned_file()
     }
 
-    fn with_basic_file<F>(header: &[u8], mut testfn: F)
-    where
-        F: FnMut(AlignedFile),
-    {
-        testfn(basic_file(header)); // File closed when the function exits.
-    }
-
-    fn tempfile_with_header(header: &[u8]) -> TempFile {
-        let temp = TempFile::new().unwrap();
-        let mut file = temp.as_file().try_clone().unwrap();
-        file.write_all(header).unwrap();
-        file.set_len(0x1_0000_0000).unwrap();
-        file.sync_all().unwrap();
-        temp
+    fn image_with_header(header: &[u8]) -> TestImage {
+        let image = TestImage::from_bytes(header, 1 << 32);
+        image.as_file().sync_all().unwrap();
+        image
     }
 
     fn try_open_header(header: &[u8]) -> BlockResult<QcowDisk> {
-        let temp = tempfile_with_header(header);
-        let file = temp.into_file();
-        QcowDisk::new(file, false, false, true, false)
+        image_with_header(header).open()
     }
 
     fn try_open_qcow_header(header: &QcowHeader, backing_files: bool) -> BlockResult<QcowDisk> {
-        let temp = TempFile::new().unwrap();
-        let raw = AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
-        header.write_to(&raw).expect("write header");
-        drop(raw);
-        let file = temp.into_file();
-        QcowDisk::new(file, false, backing_files, true, false)
+        TestImage::from_header(header).open_with(DiskOptions {
+            backing_files,
+            ..Default::default()
+        })
     }
 
     #[test]
@@ -1067,18 +1050,15 @@ mod tests {
 
     #[test]
     fn header_read() {
-        with_basic_file(&valid_header_v2(), |disk_file: AlignedFile| {
-            let header = QcowHeader::new(&disk_file).expect("Failed to create Header.");
-            assert_eq!(header.version, 2);
+        for (bytes, version, header_size) in [
+            (valid_header_v2(), 2, V2_BARE_HEADER_SIZE),
+            (valid_header_v3(), 3, V3_BARE_HEADER_SIZE),
+        ] {
+            let header = QcowHeader::new(&basic_file(&bytes)).unwrap();
+            assert_eq!(header.version, version);
             assert_eq!(header.refcount_order, DEFAULT_REFCOUNT_ORDER);
-            assert_eq!(header.header_size, V2_BARE_HEADER_SIZE);
-        });
-        with_basic_file(&valid_header_v3(), |disk_file: AlignedFile| {
-            let header = QcowHeader::new(&disk_file).expect("Failed to create Header.");
-            assert_eq!(header.version, 3);
-            assert_eq!(header.refcount_order, DEFAULT_REFCOUNT_ORDER);
-            assert_eq!(header.header_size, V3_BARE_HEADER_SIZE);
-        });
+            assert_eq!(header.header_size, header_size);
+        }
     }
 
     #[test]
@@ -1823,10 +1803,8 @@ mod tests {
         );
     }
 
-    fn image_with_internal_snapshots(nb_snapshots: u32) -> TempFile {
-        let tf = QcowTempDisk::new(0x1_0000, None, false, true, false)
-            .unwrap()
-            .into_tempfile();
+    fn image_with_internal_snapshots(nb_snapshots: u32) -> TestImage {
+        let tf = TestImage::new(0x1_0000);
         tf.as_file()
             .write_all_at(
                 &nb_snapshots.to_be_bytes(),
@@ -1839,23 +1817,24 @@ mod tests {
     #[test]
     fn internal_snapshots_rejected_for_writable_open() {
         let tf = image_with_internal_snapshots(1);
-        let file = tf.as_file().try_clone().unwrap();
-        let err = QcowDisk::new(file, false, false, true, false).unwrap_err();
+        let err = tf.open().unwrap_err();
         assert_eq!(err.kind(), BlockErrorKind::UnsupportedFeature, "{err}");
     }
 
     #[test]
     fn internal_snapshots_allowed_readonly() {
         let tf = image_with_internal_snapshots(1);
-        let file = OpenOptions::new().read(true).open(tf.as_path()).unwrap();
-        QcowDisk::new(file, false, false, true, false).unwrap();
+        tf.open_with(DiskOptions {
+            read_only: true,
+            ..Default::default()
+        })
+        .unwrap();
     }
 
     #[test]
     fn no_snapshots_still_open_writable() {
         let tf = image_with_internal_snapshots(0);
-        let file = tf.as_file().try_clone().unwrap();
-        QcowDisk::new(file, false, false, true, false).unwrap();
+        tf.open().unwrap();
     }
 
     #[test]
@@ -1940,7 +1919,7 @@ mod tests {
     #[test]
     fn dirty_bit_set_on_open_cleared_on_close_v3() {
         // Test that the dirty bit is set when a v3 image is opened and cleared when it's closed
-        let temp = tempfile_with_header(&valid_header_v3());
+        let temp = image_with_header(&valid_header_v3());
         let path = temp.as_path().to_owned();
 
         assert_eq!(
@@ -1949,8 +1928,7 @@ mod tests {
             "Dirty bit should not be set initially"
         );
 
-        let file = temp.as_file().try_clone().unwrap();
-        let disk = QcowDisk::new(file, false, false, true, false).unwrap();
+        let disk = temp.open().unwrap();
 
         assert_ne!(
             read_incompat_features(&path) & IncompatFeatures::DIRTY.bits(),
@@ -1970,25 +1948,24 @@ mod tests {
     #[test]
     fn dirty_bit_not_used_for_v2() {
         // Test that v2 images don't use the dirty bit (no incompatible_features field)
-        let temp = tempfile_with_header(&valid_header_v2());
-        let disk = QcowDisk::new(temp.into_file(), false, false, true, false).unwrap();
+        let temp = image_with_header(&valid_header_v2());
+        let disk = temp.open().unwrap();
         assert_eq!(disk.metadata().header().version, 2);
     }
 
     #[test]
     fn dirty_bit_not_set_for_readonly_v3() {
         // Test that read-only v3 files don't set the dirty bit (e.g., backing files)
-        let temp = tempfile_with_header(&valid_header_v3());
+        let temp = image_with_header(&valid_header_v3());
         let temp_path = temp.as_path().to_owned();
 
-        let readonly_file = OpenOptions::new()
-            .read(true)
-            .write(false)
-            .open(&temp_path)
-            .unwrap();
-
         // Opening as a QcowDisk should not set the dirty bit for read-only files.
-        let _disk = QcowDisk::new(readonly_file, false, false, true, false).unwrap();
+        let _disk = temp
+            .open_with(DiskOptions {
+                read_only: true,
+                ..Default::default()
+            })
+            .unwrap();
 
         assert_eq!(
             read_incompat_features(&temp_path) & IncompatFeatures::DIRTY.bits(),
@@ -1999,7 +1976,7 @@ mod tests {
 
     #[test]
     fn autoclear_features_cleared_on_open() {
-        let temp = tempfile_with_header(&header_v3_with_autoclear_features(0xFFFF_FFFF_FFFF_FFFF));
+        let temp = image_with_header(&header_v3_with_autoclear_features(0xFFFF_FFFF_FFFF_FFFF));
         let path = temp.as_path().to_owned();
 
         assert_eq!(
@@ -2008,9 +1985,8 @@ mod tests {
             "Autoclear features should be set initially"
         );
 
-        let file = temp.as_file().try_clone().unwrap();
         {
-            let _disk = QcowDisk::new(file, false, false, true, false).unwrap();
+            let _disk = temp.open().unwrap();
         }
 
         assert_eq!(
@@ -2022,15 +1998,15 @@ mod tests {
 
     #[test]
     fn autoclear_features_not_cleared_for_readonly() {
-        let temp = tempfile_with_header(&header_v3_with_autoclear_features(0xFFFF_FFFF_FFFF_FFFF));
+        let temp = image_with_header(&header_v3_with_autoclear_features(0xFFFF_FFFF_FFFF_FFFF));
         let path = temp.as_path().to_owned();
 
-        let readonly_file = OpenOptions::new()
-            .read(true)
-            .write(false)
-            .open(&path)
+        let _disk = temp
+            .open_with(DiskOptions {
+                read_only: true,
+                ..Default::default()
+            })
             .unwrap();
-        let _disk = QcowDisk::new(readonly_file, false, false, true, false).unwrap();
         drop(_disk);
 
         assert_eq!(
@@ -2042,8 +2018,8 @@ mod tests {
 
     #[test]
     fn autoclear_features_v2_ignored() {
-        let temp = tempfile_with_header(&valid_header_v2());
-        let disk = QcowDisk::new(temp.into_file(), false, false, true, false).unwrap();
+        let temp = image_with_header(&valid_header_v2());
+        let disk = temp.open().unwrap();
         let header = disk.metadata().header();
         assert_eq!(header.version, 2);
         assert_eq!(header.autoclear_features, 0);
@@ -2064,15 +2040,13 @@ mod tests {
     fn corrupt_image_allowed_readonly() {
         // Test that a corrupt image can be opened read-only
         let header = header_v3_with_incompat_features(IncompatFeatures::CORRUPT.bits());
-        let temp = tempfile_with_header(&header);
+        let temp = image_with_header(&header);
 
-        let readonly_file = OpenOptions::new()
-            .read(true)
-            .write(false)
-            .open(temp.as_path())
-            .unwrap();
-
-        let disk = QcowDisk::new(readonly_file, false, false, true, false)
+        let disk = temp
+            .open_with(DiskOptions {
+                read_only: true,
+                ..Default::default()
+            })
             .expect("Corrupt image should be openable read-only");
 
         assert!(
