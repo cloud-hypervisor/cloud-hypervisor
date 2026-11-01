@@ -155,9 +155,10 @@ mod tests {
     use crate::error::BlockErrorKind;
     use crate::formats::qcow;
     use crate::formats::qcow::common::apply_dealloc_action;
-    use crate::formats::qcow::common::tests::compress_allocated_clusters;
     use crate::formats::qcow::metadata::{ClusterReadMapping, DeallocAction};
-    use crate::formats::qcow::test_util::{header_field, read_u64_at, write_u64_at};
+    use crate::formats::qcow::test_util::{
+        compress_allocated_clusters, header_field, read_u64_at, write_u64_at,
+    };
     use crate::formats::qcow::{
         BackingFileConfig, Error as QcowError, ImageType, QcowDisk, QcowHeader, QcowTempDisk,
     };
