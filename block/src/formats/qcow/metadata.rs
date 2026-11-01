@@ -1417,7 +1417,7 @@ mod tests {
                 .expect("seed write");
             inner.sync_caches().expect("flush");
         }
-        super::super::common::tests::compress_allocated_clusters(
+        super::super::test_util::compress_allocated_clusters(
             &mut temp.as_file().try_clone().unwrap(),
         );
 
