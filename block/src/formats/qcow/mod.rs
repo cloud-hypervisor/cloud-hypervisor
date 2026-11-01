@@ -18,6 +18,8 @@ mod metadata;
 mod parser;
 mod qcow_raw_file;
 mod refcount;
+#[cfg(test)]
+mod test_util;
 mod util;
 mod vec_cache;
 

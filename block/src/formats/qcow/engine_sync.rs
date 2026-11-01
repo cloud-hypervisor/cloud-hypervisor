@@ -140,7 +140,6 @@ impl AsyncIo for QcowSync {
 mod tests {
     use std::fs::{File, OpenOptions, create_dir};
     use std::io::Write;
-    use std::os::unix::fs::FileExt;
     use std::path::Path;
     use std::sync::Arc;
     use std::{env, thread};
@@ -158,32 +157,22 @@ mod tests {
     use crate::formats::qcow::common::apply_dealloc_action;
     use crate::formats::qcow::common::tests::compress_allocated_clusters;
     use crate::formats::qcow::metadata::{ClusterReadMapping, DeallocAction};
+    use crate::formats::qcow::test_util::{header_field, read_u64_at, write_u64_at};
     use crate::formats::qcow::{
         BackingFileConfig, Error as QcowError, ImageType, QcowDisk, QcowHeader, QcowTempDisk,
     };
     use crate::test_util::require_direct_io;
 
     const TEST_L1_L2_ADDR_MASK: u64 = 0x00ff_ffff_ffff_fe00;
-    const TEST_HEADER_L1_TABLE_OFFSET: u64 = 40;
     const TEST_CLUSTER_USED_FLAG: u64 = 1 << 63;
     const TEST_COMPRESSED_FLAG: u64 = 1 << 62;
     const TEST_ZERO_FLAG: u64 = 1;
     // Past the 16 TiB a one-cluster refcount table covers.
     const TEST_OUT_OF_BOUNDS_CLUSTER: u64 = 0x0000_2000_0000_0000;
 
-    fn read_be_u64_at(file: &mut File, offset: u64) -> u64 {
-        let mut bytes = [0u8; 8];
-        file.read_exact_at(&mut bytes, offset).unwrap();
-        u64::from_be_bytes(bytes)
-    }
-
-    fn write_be_u64_at(file: &mut File, offset: u64, value: u64) {
-        file.write_all_at(&value.to_be_bytes(), offset).unwrap();
-    }
-
     fn first_l2_entry_offset(file: &mut File) -> u64 {
-        let l1_table_offset = read_be_u64_at(file, TEST_HEADER_L1_TABLE_OFFSET);
-        let l1_entry = read_be_u64_at(file, l1_table_offset);
+        let l1_table_offset = read_u64_at(file, header_field::L1_TABLE_OFFSET as u64);
+        let l1_entry = read_u64_at(file, l1_table_offset);
         let l2_table_addr = l1_entry & TEST_L1_L2_ADDR_MASK;
         assert_ne!(l2_table_addr, 0);
         l2_table_addr
@@ -191,21 +180,21 @@ mod tests {
 
     fn set_low_bit_on_first_compressed_l2_entry(file: &mut File) {
         let l2_entry_offset = first_l2_entry_offset(file);
-        let l2_entry = read_be_u64_at(file, l2_entry_offset);
+        let l2_entry = read_u64_at(file, l2_entry_offset);
         assert_ne!(l2_entry & TEST_COMPRESSED_FLAG, 0);
-        write_be_u64_at(file, l2_entry_offset, l2_entry | TEST_ZERO_FLAG);
+        write_u64_at(file, l2_entry_offset, l2_entry | TEST_ZERO_FLAG);
         file.sync_all().unwrap();
     }
 
     fn set_first_l2_entry(file: &mut File, l2_entry: u64) {
         let l2_entry_offset = first_l2_entry_offset(file);
-        write_be_u64_at(file, l2_entry_offset, l2_entry);
+        write_u64_at(file, l2_entry_offset, l2_entry);
         file.sync_all().unwrap();
     }
 
     fn first_l2_entry(file: &mut File) -> u64 {
         let l2_entry_offset = first_l2_entry_offset(file);
-        read_be_u64_at(file, l2_entry_offset)
+        read_u64_at(file, l2_entry_offset)
     }
 
     fn qcow_header_is_corrupt(file: &File) -> bool {
@@ -2038,9 +2027,9 @@ mod tests {
         );
         writer.fsync(None).unwrap();
 
-        let mut inspect = temp.as_file().try_clone().unwrap();
-        let l1_table_offset = read_be_u64_at(&mut inspect, TEST_HEADER_L1_TABLE_OFFSET);
-        let new_l2 = read_be_u64_at(&mut inspect, l1_table_offset + 8) & TEST_L1_L2_ADDR_MASK;
+        let inspect = temp.as_file().try_clone().unwrap();
+        let l1_table_offset = read_u64_at(&inspect, header_field::L1_TABLE_OFFSET as u64);
+        let new_l2 = read_u64_at(&inspect, l1_table_offset + 8) & TEST_L1_L2_ADDR_MASK;
         assert_ne!(new_l2, old_host_offset);
     }
 
@@ -2256,9 +2245,9 @@ mod tests {
         assert_eq!(completion_tuple(&completion), (77, CLUSTER_SIZE as i32));
         aio.fsync(None).unwrap();
 
-        let mut inspect = file.try_clone().unwrap();
-        let l1_table_offset = read_be_u64_at(&mut inspect, TEST_HEADER_L1_TABLE_OFFSET);
-        let committed_l2 = read_be_u64_at(&mut inspect, l1_table_offset + 8) & TEST_L1_L2_ADDR_MASK;
+        let inspect = file.try_clone().unwrap();
+        let l1_table_offset = read_u64_at(&inspect, header_field::L1_TABLE_OFFSET as u64);
+        let committed_l2 = read_u64_at(&inspect, l1_table_offset + 8) & TEST_L1_L2_ADDR_MASK;
         assert_ne!(committed_l2, stale_punch_offset);
 
         // Queue A resumes. Completing the old action must not touch the new
