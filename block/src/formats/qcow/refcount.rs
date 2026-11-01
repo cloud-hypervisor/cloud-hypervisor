@@ -218,16 +218,16 @@ impl RefCount {
         if !self.refblock_cache.contains_key(table_index) {
             // Need a new cluster
             if let Some((addr, table)) = new_cluster.take() {
-                self.set_block_addr(table_index, addr);
                 let ref_table = &self.ref_table;
                 let max_valid = self.max_valid_cluster_offset;
                 let offsets = &self.block_offsets;
                 self.refblock_cache
                     .insert(table_index, table, |index, evicted| {
                         let addr = ref_table[index];
-                        write_refcount_block(raw_file, addr, &evicted, max_valid, offsets, layout)
+                        write_refcount_block(raw_file, addr, evicted, max_valid, offsets, layout)
                     })
                     .map_err(Error::EvictingRefCounts)?;
+                self.set_block_addr(table_index, addr);
             } else {
                 if block_addr_disk == 0 {
                     return Err(Error::NeedNewCluster);
@@ -325,7 +325,7 @@ impl RefCount {
             self.refblock_cache
                 .insert(table_index, table, |index, evicted| {
                     let addr = ref_table[index];
-                    write_refcount_block(raw_file, addr, &evicted, max_valid, offsets, layout)
+                    write_refcount_block(raw_file, addr, evicted, max_valid, offsets, layout)
                 })
                 .map_err(Error::EvictingRefCounts)?;
         }
@@ -346,7 +346,7 @@ mod tests {
 
     use super::super::qcow_raw_file::QcowRawFile;
     use super::super::test_util::{TestImage, WritebackPath, dirty_table_cache};
-    use super::RefCount;
+    use super::{Cacheable, RefCount};
 
     struct RefcountFixture {
         image: TestImage,
@@ -433,7 +433,7 @@ mod tests {
                         &mut raw_file,
                         block_entries * cluster_size,
                         1,
-                        Some((3 * cluster_size, VecCache::new(block_entries as usize))),
+                        Some((7 * cluster_size, VecCache::new(block_entries as usize))),
                         layout,
                     ) {
                         Err(super::Error::EvictingRefCounts(err)) => err,
@@ -441,6 +441,9 @@ mod tests {
                     },
                 };
                 assert_eq!(err.raw_os_error(), Some(libc::EINVAL), "{target}, {path:?}");
+                assert_eq!(refs.ref_table[1], 3 * cluster_size);
+                assert!(refs.refblock_cache.get(0).unwrap().dirty());
+                assert!(!refs.refblock_cache.contains_key(1));
                 before.assert_unchanged(&temp);
             }
         }
