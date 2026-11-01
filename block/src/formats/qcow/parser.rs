@@ -1676,11 +1676,9 @@ mod tests {
     #[test]
     fn refcount_subbyte_max_values() {
         for (bits, max_val) in [(1u64, 1u64), (2, 3), (4, 15)] {
-            let file = TempFile::new().unwrap().into_file();
             let cluster_size = 0x10000u64;
-            file.set_len(cluster_size * 2).unwrap();
-            let raw = AlignedFile::new(file, false);
-            let mut qcow_raw = QcowRawFile::from(raw, cluster_size, bits).unwrap();
+            let image = TestImage::from_bytes(&[], cluster_size * 2);
+            let mut qcow_raw = image.qcow_raw(cluster_size, bits);
 
             let entries = (cluster_size * 8 / bits) as usize;
             let mut table: Vec<u64> = (0..entries as u64).map(|i| i % (max_val + 1)).collect();
@@ -1706,11 +1704,9 @@ mod tests {
             (32, 0xFFFF_FFFFu64),
             (64, u64::MAX),
         ] {
-            let file = TempFile::new().unwrap().into_file();
             let cluster_size = 0x10000u64;
-            file.set_len(cluster_size * 2).unwrap();
-            let raw = AlignedFile::new(file, false);
-            let mut qcow_raw = QcowRawFile::from(raw, cluster_size, bits).unwrap();
+            let image = TestImage::from_bytes(&[], cluster_size * 2);
+            let mut qcow_raw = image.qcow_raw(cluster_size, bits);
 
             let entries = (cluster_size * 8 / bits) as usize;
             let mut table: Vec<u64> = vec![0; entries];
@@ -1733,13 +1729,10 @@ mod tests {
         use super::refcount::Error as RefcountError;
 
         for (refcount_bits, max_val) in [(1u64, 1u64), (2, 3), (4, 15)] {
-            let file = TempFile::new().unwrap().into_file();
             let cluster_size = 0x10000u64;
             let refcount_block_entries = cluster_size * 8 / refcount_bits;
-            file.set_len(cluster_size * 3).unwrap();
-
-            let raw = AlignedFile::new(file, false);
-            let mut qcow_raw = QcowRawFile::from(raw, cluster_size, refcount_bits).unwrap();
+            let image = TestImage::from_bytes(&[], cluster_size * 3);
+            let mut qcow_raw = image.qcow_raw(cluster_size, refcount_bits);
 
             // Set up refcount table pointing to refcount block
             let refcount_table_offset = cluster_size;

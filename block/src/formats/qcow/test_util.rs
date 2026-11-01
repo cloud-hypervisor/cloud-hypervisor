@@ -10,6 +10,7 @@ use std::path::Path;
 
 use vmm_sys_util::tempfile::TempFile;
 
+use super::qcow_raw_file::QcowRawFile;
 use super::{QcowDisk, QcowHeader, QcowTempDisk};
 use crate::aligned_file::AlignedFile;
 use crate::error::BlockResult;
@@ -75,6 +76,10 @@ impl TestImage {
 
     pub(super) fn aligned_file(&self) -> AlignedFile {
         AlignedFile::new(self.as_file().try_clone().unwrap(), false)
+    }
+
+    pub(super) fn qcow_raw(&self, cluster_size: u64, refcount_bits: u64) -> QcowRawFile {
+        QcowRawFile::from(self.aligned_file(), cluster_size, refcount_bits).unwrap()
     }
 
     pub(super) fn open(&self) -> BlockResult<QcowDisk> {
