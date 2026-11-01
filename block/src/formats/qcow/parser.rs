@@ -906,10 +906,10 @@ mod tests {
     use vmm_sys_util::tempfile::TempFile;
 
     use super::super::header::{
-        AUTOCLEAR_FEATURES_OFFSET, DEFAULT_CLUSTER_BITS, DEFAULT_REFCOUNT_ORDER,
-        HEADER_EXT_BACKING_FORMAT, HEADER_EXT_END, MAX_CLUSTER_BITS, MIN_CLUSTER_BITS,
-        V2_BARE_HEADER_SIZE, V3_BARE_HEADER_SIZE,
+        DEFAULT_CLUSTER_BITS, DEFAULT_REFCOUNT_ORDER, HEADER_EXT_BACKING_FORMAT, HEADER_EXT_END,
+        MAX_CLUSTER_BITS, MIN_CLUSTER_BITS, V2_BARE_HEADER_SIZE, V3_BARE_HEADER_SIZE,
     };
+    use super::super::test_util::{header_field, patch_u32, patch_u64};
     use super::super::util::{self, ZERO_FLAG};
     use super::*;
     use crate::formats::qcow::{QcowDisk, QcowTempDisk};
@@ -1049,7 +1049,7 @@ mod tests {
     #[test]
     fn header_with_unsupported_crypt_method_is_rejected() {
         for mut header in [valid_header_v2(), valid_header_v3()] {
-            header[32..36].copy_from_slice(&1u32.to_be_bytes());
+            patch_u32(&mut header, header_field::CRYPT_METHOD, 1);
             let err = QcowHeader::new(&basic_file(&header)).unwrap_err();
             assert!(matches!(err, Error::UnsupportedCryptMethod(1)), "{err:?}");
         }
@@ -1059,7 +1059,7 @@ mod tests {
     fn header_with_invalid_v3_length_is_rejected() {
         for bad in [V2_BARE_HEADER_SIZE, 0xffff_ffff] {
             let mut header = valid_header_v3();
-            header[100..104].copy_from_slice(&bad.to_be_bytes());
+            patch_u32(&mut header, header_field::HEADER_LENGTH, bad);
             let err = QcowHeader::new(&basic_file(&header)).unwrap_err();
             assert!(matches!(err, Error::InvalidHeaderLength(_)), "{err:?}");
         }
@@ -1098,8 +1098,16 @@ mod tests {
         }
 
         let mut expected = valid_header_v3();
-        expected[72..80].copy_from_slice(&IncompatFeatures::COMPRESSION.bits().to_be_bytes());
-        expected[100..104].copy_from_slice(&(V3_BARE_HEADER_SIZE + 8).to_be_bytes());
+        patch_u64(
+            &mut expected,
+            header_field::INCOMPATIBLE_FEATURES,
+            IncompatFeatures::COMPRESSION.bits(),
+        );
+        patch_u32(
+            &mut expected,
+            header_field::HEADER_LENGTH,
+            V3_BARE_HEADER_SIZE + 8,
+        );
         expected.extend_from_slice(&(1u64 << (64 - 8)).to_be_bytes());
         expected.extend_from_slice(&HEADER_EXT_END.to_be_bytes());
         expected.extend_from_slice(&0u32.to_be_bytes());
@@ -1290,7 +1298,10 @@ mod tests {
                 AlignedFile::new(TempFile::new().unwrap().into_file(), false);
             header.write_to(&disk_file).unwrap();
             disk_file
-                .write_all_at(&cluster_bits.to_be_bytes(), 20)
+                .write_all_at(
+                    &cluster_bits.to_be_bytes(),
+                    header_field::CLUSTER_BITS as u64,
+                )
                 .unwrap();
 
             let err = QcowHeader::new(&disk_file)
@@ -1497,14 +1508,14 @@ mod tests {
     #[test]
     fn invalid_refcount_order() {
         let mut header = valid_header_v3();
-        header[99] = 7;
+        patch_u32(&mut header, header_field::REFCOUNT_ORDER, 7);
         try_open_header(&header).expect_err("Invalid refcount order worked.");
     }
 
     #[test]
     fn invalid_cluster_bits() {
         let mut header = valid_header_v3();
-        header[23] = 3;
+        patch_u32(&mut header, header_field::CLUSTER_BITS, 3);
         try_open_header(&header).expect_err("Failed to create file.");
     }
 
@@ -1517,23 +1528,21 @@ mod tests {
     #[test]
     fn test_header_crazy_file_size_rejected() {
         let mut header = valid_header_v3();
-        header[24..32].copy_from_slice(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x1e]);
+        patch_u64(&mut header, header_field::SIZE, 0xffff_ffff_ffff_ff1e);
         try_open_header(&header).expect_err("Failed to create file.");
     }
 
     #[test]
     fn test_huge_l1_table() {
         let mut header = valid_header_v3();
-        header[36] = 0x12;
+        patch_u32(&mut header, header_field::L1_SIZE, 0x1200_0100);
         try_open_header(&header).expect_err("Failed to create file.");
     }
 
     #[test]
     fn test_header_1_tb_file_min_cluster() {
         let mut header = test_huge_header();
-        header[24] = 0;
-        header[26] = 1;
-        header[31] = 0;
+        patch_u64(&mut header, header_field::SIZE, 1 << 40);
         // 1 TB with the min cluster size makes the arrays too big, it should fail.
         try_open_header(&header).expect_err("Failed to create file.");
     }
@@ -1542,11 +1551,9 @@ mod tests {
     fn test_header_1_tb_file() {
         let mut header = test_huge_header();
         // reset to 1 TB size.
-        header[24] = 0;
-        header[26] = 1;
-        header[31] = 0;
+        patch_u64(&mut header, header_field::SIZE, 1 << 40);
         // set cluster_bits
-        header[23] = 16;
+        patch_u32(&mut header, header_field::CLUSTER_BITS, 16);
         let disk = try_open_header(&header).expect("Failed to create file.");
         // Write a sentinel value near the end of the virtual disk.
         let value = 0x0000_0040_3f00_ffffu64;
@@ -1556,14 +1563,22 @@ mod tests {
     #[test]
     fn test_header_huge_num_refcounts() {
         let mut header = valid_header_v3();
-        header[56..60].copy_from_slice(&[0x02, 0x00, 0xe8, 0xff]);
+        patch_u32(
+            &mut header,
+            header_field::REFCOUNT_TABLE_CLUSTERS,
+            0x200_e8ff,
+        );
         try_open_header(&header).expect_err("Created disk with crazy refcount clusters");
     }
 
     #[test]
     fn test_header_huge_refcount_offset() {
         let mut header = valid_header_v3();
-        header[48..56].copy_from_slice(&[0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x02, 0x00]);
+        patch_u64(
+            &mut header,
+            header_field::REFCOUNT_TABLE_OFFSET,
+            0x900_0000_0200,
+        );
         try_open_header(&header).expect_err("Created disk with crazy refcount offset");
     }
 
@@ -1606,7 +1621,7 @@ mod tests {
     fn refcount_all_orders() {
         for order in 0..=6u8 {
             let mut header = valid_header_v3();
-            header[99] = order;
+            patch_u32(&mut header, header_field::REFCOUNT_ORDER, u32::from(order));
             try_open_header(&header).expect("refcount order should work");
         }
     }
@@ -1616,7 +1631,7 @@ mod tests {
     fn refcount_all_orders_write_read() {
         for order in 0..=6u8 {
             let mut header = valid_header_v3();
-            header[99] = order;
+            patch_u32(&mut header, header_field::REFCOUNT_ORDER, u32::from(order));
             let disk = try_open_header(&header).unwrap();
             let test_data = b"test data for refcount";
 
@@ -1634,7 +1649,7 @@ mod tests {
     fn refcount_all_orders_overwrite() {
         for order in 0..=6u8 {
             let mut header = valid_header_v3();
-            header[99] = order;
+            patch_u32(&mut header, header_field::REFCOUNT_ORDER, u32::from(order));
             let disk = try_open_header(&header).unwrap();
 
             // Write then overwrite at offset 0.
@@ -1659,7 +1674,7 @@ mod tests {
     fn refcount_all_orders_l2_eviction() {
         for order in 0..=6u8 {
             let mut header = valid_header_v3();
-            header[99] = order;
+            patch_u32(&mut header, header_field::REFCOUNT_ORDER, u32::from(order));
             let disk = try_open_header(&header).unwrap();
 
             // L2 cache has 100 entries. Write to >100 regions to force eviction.
@@ -1787,16 +1802,14 @@ mod tests {
     // Helper to create a v3 header with specific incompatible feature bits set
     fn header_v3_with_incompat_features(features: u64) -> Vec<u8> {
         let mut header = valid_header_v3();
-        // incompatible_features is at offset 72, big-endian u64
-        header[72..80].copy_from_slice(&features.to_be_bytes());
+        patch_u64(&mut header, header_field::INCOMPATIBLE_FEATURES, features);
         header
     }
 
     // Helper to create a v3 header with specific autoclear feature bits set
     fn header_v3_with_autoclear_features(features: u64) -> Vec<u8> {
         let mut header = valid_header_v3();
-        let offset = AUTOCLEAR_FEATURES_OFFSET as usize;
-        header[offset..offset + 8].copy_from_slice(&features.to_be_bytes());
+        patch_u64(&mut header, header_field::AUTOCLEAR_FEATURES, features);
         header
     }
 
@@ -1814,9 +1827,11 @@ mod tests {
         let tf = QcowTempDisk::new(0x1_0000, None, false, true, false)
             .unwrap()
             .into_tempfile();
-        // nb_snapshots is at offset 60 in the v2/v3 header.
         tf.as_file()
-            .write_all_at(&nb_snapshots.to_be_bytes(), 60)
+            .write_all_at(
+                &nb_snapshots.to_be_bytes(),
+                header_field::NB_SNAPSHOTS as u64,
+            )
             .unwrap();
         tf
     }
@@ -1917,7 +1932,7 @@ mod tests {
     fn read_autoclear_features(path: &Path) -> u64 {
         let file = OpenOptions::new().read(true).open(path).unwrap();
         let mut buf = [0u8; 8];
-        file.read_exact_at(&mut buf, AUTOCLEAR_FEATURES_OFFSET)
+        file.read_exact_at(&mut buf, header_field::AUTOCLEAR_FEATURES as u64)
             .unwrap();
         u64::from_be_bytes(buf)
     }
@@ -2102,9 +2117,6 @@ mod tests {
         );
     }
 
-    // Offset of `refcount_table_clusters` in the qcow2 header.
-    const REFCOUNT_TABLE_CLUSTERS_OFFSET: u64 = 0x38;
-
     // Peak resident set size of this process, in bytes.
     fn peak_rss() -> u64 {
         use std::fs::read_to_string;
@@ -2141,7 +2153,7 @@ mod tests {
         file.as_file()
             .write_all_at(
                 &0x00ff_ffffu32.to_be_bytes(),
-                REFCOUNT_TABLE_CLUSTERS_OFFSET,
+                header_field::REFCOUNT_TABLE_CLUSTERS as u64,
             )
             .unwrap();
         // Clearing the first refcount table entry forces the rebuild on open.
@@ -2181,12 +2193,12 @@ mod tests {
         use std::os::unix::fs::FileExt;
 
         let mut header = valid_header_v3();
-        header[23] = 9; // cluster_bits
-        header[24..32].copy_from_slice(&(64u64 << 20).to_be_bytes()); // size
-        header[36..40].copy_from_slice(&2048u32.to_be_bytes()); // L1 size
-        header[40..48].copy_from_slice(&0x400u64.to_be_bytes()); // L1 table offset
-        header[48..56].copy_from_slice(&0x200u64.to_be_bytes()); // refcount table offset
-        header[56..60].copy_from_slice(&1u32.to_be_bytes()); // refcount table clusters
+        patch_u32(&mut header, header_field::CLUSTER_BITS, 9);
+        patch_u64(&mut header, header_field::SIZE, 64 << 20);
+        patch_u32(&mut header, header_field::L1_SIZE, 2048);
+        patch_u64(&mut header, header_field::L1_TABLE_OFFSET, 0x400);
+        patch_u64(&mut header, header_field::REFCOUNT_TABLE_OFFSET, 0x200);
+        patch_u32(&mut header, header_field::REFCOUNT_TABLE_CLUSTERS, 1);
         let temp = TempFile::new().unwrap();
         let file = temp.as_file();
         file.write_all_at(&header, 0).unwrap();
