@@ -369,18 +369,18 @@ fn get_cli_options_sorted(
             .value_parser(["exit-vmm", "shutdown-vm"])
             .default_value("exit-vmm")
             .group("vmm-config"),
-        #[cfg(feature = "igvm")]
-        Arg::new("igvm")
-            .long("igvm")
-            .help("Path to IGVM file to load.")
-            .num_args(1)
-            .group("vm-payload"),
         #[cfg(feature = "sev_snp")]
         Arg::new("host-data")
             .long("host-data")
             .help("Host specific data to SEV SNP guest")
             .num_args(1)
             .group("vm-config"),
+        #[cfg(feature = "igvm")]
+        Arg::new("igvm")
+            .long("igvm")
+            .help("Path to IGVM file to load.")
+            .num_args(1)
+            .group("vm-payload"),
         Arg::new("initramfs")
             .long("initramfs")
             .help("Path to initramfs image")
