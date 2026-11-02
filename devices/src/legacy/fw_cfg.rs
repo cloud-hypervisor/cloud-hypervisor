@@ -742,9 +742,6 @@ impl Aml for FwCfg {
 impl BusDevice for FwCfg {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
         match (offset, data.len()) {
-            (FW_CFG_SELECTOR_OFFSET, _) => {
-                error!("fw_cfg: selector register is write-only.");
-            }
             (FW_CFG_DATA_OFFSET, _) => self.read_data(data),
             (FW_CFG_DMA_HI_OFFSET, 4) => {
                 let addr = self.dma_address;
@@ -757,10 +754,8 @@ impl BusDevice for FwCfg {
                 data.copy_from_slice(&addr_lo.to_be_bytes());
             }
             (offset, _) => {
-                // Handle any address that cannot be associated with the fw_cfg protocol or reads of
-                // invalid size as unassigned read.
                 debug!(
-                    "fw_cfg: Unsupported {:#x}-byte read from unmapped address: base={:#x} + offset={:#x}.",
+                    "fw_cfg: Unsupported {:#x}-byte read from invalid address: base={:#x} + offset={:#x}.",
                     data.len(),
                     FW_CFG_ADDRESS_BASE,
                     offset
@@ -1272,6 +1267,7 @@ mod tests {
             QEMU_DMA_REGISTER_REGION.start() - 1, /* End of the QEMU mapping hole. */
             QEMU_DMA_REGISTER_REGION.end() + 1,   /* First address succeeding the mapped region */
             QEMU_IO_REGISTER_REGION.end() + 1,    /* Start of the QEMU mapping hole. */
+            FW_CFG_SELECTOR_OFFSET,               /* SELECTOR is write-only */
         ];
 
         for address in invalid_addresses {
