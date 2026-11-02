@@ -8,6 +8,8 @@
 // Custom harness to run performance tests
 mod micro_bench_block;
 mod performance_tests;
+#[path = "../../cloud-hypervisor/tests/common/mod.rs"]
+pub mod test_utils;
 mod util;
 
 use std::process::{self, Command};

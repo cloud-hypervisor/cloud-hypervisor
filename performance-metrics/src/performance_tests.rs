@@ -11,6 +11,7 @@ use std::{fs, panic, thread};
 use test_infra::{Error as InfraError, *};
 use thiserror::Error;
 
+use crate::test_utils::QemuImgCommand;
 use crate::{ImageFormat, PerformanceTestControl, PerformanceTestOverrides, mean};
 
 #[derive(Error, Debug)]
@@ -35,61 +36,75 @@ pub(crate) const QCOW2_ZLIB_IMG: &str = "/var/tmp/ch-blk-io-test-zlib.qcow2";
 pub(crate) const QCOW2_ZSTD_IMG: &str = "/var/tmp/ch-blk-io-test-zstd.qcow2";
 
 pub(crate) fn init_tests(overrides: &PerformanceTestOverrides) {
-    let mut cmd = format!("dd if=/dev/zero of={BLK_IO_TEST_IMG} bs=1M count=4096");
-
-    if let Some(o) = overrides.test_image_format {
-        match o {
-            ImageFormat::Raw => { /* Nothing to do */ }
-            ImageFormat::Qcow2 => {
-                cmd =
-                    format!("qemu-img create -f qcow2 -o preallocation=full {BLK_IO_TEST_IMG} 4G");
-            }
-            ImageFormat::Vhd => {
-                cmd = format!("qemu-img create -f vpc -o subformat=fixed {BLK_IO_TEST_IMG} 4G");
-            }
-            ImageFormat::Vhdx => {
-                cmd = format!("qemu-img create -f vhdx -o subformat=fixed {BLK_IO_TEST_IMG} 4G");
-            }
-        }
+    let image_options = match overrides.test_image_format {
+        None | Some(ImageFormat::Raw) => None,
+        Some(ImageFormat::Qcow2) => Some(("qcow2", "preallocation=full")),
+        Some(ImageFormat::Vhd) => Some(("vpc", "subformat=fixed")),
+        Some(ImageFormat::Vhdx) => Some(("vhdx", "subformat=fixed")),
+    };
+    if let Some((format, options)) = image_options {
+        QemuImgCommand::new()
+            .create(format, options)
+            .args(&[BLK_IO_TEST_IMG, "4G"])
+            .run("Failed to create block IO test image");
+    } else {
+        let cmd = format!("dd if=/dev/zero of={BLK_IO_TEST_IMG} bs=1M count=4096");
+        assert!(exec_host_command_output(&cmd).status.success());
     }
 
-    assert!(exec_host_command_output(&cmd).status.success());
-
     // QCOW2 backing file for backing file tests
-    cmd = format!("qemu-img create -f qcow2 -o preallocation=full {QCOW2_BACKING_FILE} 4G");
-    assert!(exec_host_command_output(&cmd).status.success());
+    QemuImgCommand::new()
+        .create("qcow2", "preallocation=full")
+        .args(&[QCOW2_BACKING_FILE, "4G"])
+        .run("Failed to create QCOW2 backing image");
 
     // QCOW2 overlay with QCOW2 backing
-    cmd = format!(
-        "qemu-img create -f qcow2 -b {QCOW2_BACKING_FILE} -F qcow2 {OVERLAY_WITH_QCOW2_BACKING} 4G"
-    );
-    assert!(exec_host_command_output(&cmd).status.success());
+    QemuImgCommand::new()
+        .create("qcow2", "")
+        .args(&[
+            "-b",
+            QCOW2_BACKING_FILE,
+            "-F",
+            "qcow2",
+            OVERLAY_WITH_QCOW2_BACKING,
+            "4G",
+        ])
+        .run("Failed to create overlay with QCOW2 backing");
 
     // RAW backing file for backing file tests
-    cmd = format!("dd if=/dev/zero of={RAW_BACKING_FILE} bs=1M count=4096");
+    let cmd = format!("dd if=/dev/zero of={RAW_BACKING_FILE} bs=1M count=4096");
     assert!(exec_host_command_output(&cmd).status.success());
 
     // QCOW2 overlay with RAW backing
-    cmd = format!(
-        "qemu-img create -f qcow2 -b {RAW_BACKING_FILE} -F raw {OVERLAY_WITH_RAW_BACKING} 4G"
-    );
-    assert!(exec_host_command_output(&cmd).status.success());
+    QemuImgCommand::new()
+        .create("qcow2", "")
+        .args(&[
+            "-b",
+            RAW_BACKING_FILE,
+            "-F",
+            "raw",
+            OVERLAY_WITH_RAW_BACKING,
+            "4G",
+        ])
+        .run("Failed to create overlay with raw backing");
 
     // Standalone QCOW2 image with no backing file
-    cmd = format!("qemu-img create -f qcow2 -o preallocation=full {QCOW2_UNCOMPRESSED_IMG} 4G");
-    assert!(exec_host_command_output(&cmd).status.success());
+    QemuImgCommand::new()
+        .create("qcow2", "preallocation=full")
+        .args(&[QCOW2_UNCOMPRESSED_IMG, "4G"])
+        .run("Failed to create uncompressed QCOW2 image");
 
     // Zlib compressed QCOW2 image, convert populates actual compressed clusters
-    cmd = format!(
-        "qemu-img convert -f qcow2 -O qcow2 -c -o compression_type=zlib {QCOW2_UNCOMPRESSED_IMG} {QCOW2_ZLIB_IMG}"
-    );
-    assert!(exec_host_command_output(&cmd).status.success());
+    QemuImgCommand::new()
+        .convert("qcow2", "qcow2", "compression_type=zlib")
+        .args(&["-c", QCOW2_UNCOMPRESSED_IMG, QCOW2_ZLIB_IMG])
+        .run("Failed to create Zlib compressed QCOW2 image");
 
     // Zstd compressed QCOW2 image, convert populates actual compressed clusters
-    cmd = format!(
-        "qemu-img convert -f qcow2 -O qcow2 -c -o compression_type=zstd {QCOW2_UNCOMPRESSED_IMG} {QCOW2_ZSTD_IMG}"
-    );
-    assert!(exec_host_command_output(&cmd).status.success());
+    QemuImgCommand::new()
+        .convert("qcow2", "qcow2", "compression_type=zstd")
+        .args(&["-c", QCOW2_UNCOMPRESSED_IMG, QCOW2_ZSTD_IMG])
+        .run("Failed to create Zstd compressed QCOW2 image");
 }
 
 pub(crate) fn cleanup_tests() {
