@@ -213,7 +213,8 @@ impl Serial {
     }
 
     fn highest_pending_interrupt(&self) -> u8 {
-        if self.interrupt_identification & IIR_RECV_BIT != 0 && self.is_recv_intr_enabled() {
+        // Received data stays pending until the guest has read all of it.
+        if self.is_recv_intr_enabled() && !self.in_buffer.is_empty() {
             IIR_RECV_BIT
         } else if self.interrupt_identification & IIR_THR_BIT != 0 && self.is_thr_intr_enabled() {
             IIR_THR_BIT
@@ -233,7 +234,6 @@ impl Serial {
 
     fn recv_data(&mut self) -> Result<()> {
         if self.is_recv_intr_enabled() {
-            self.add_intr_bit(IIR_RECV_BIT);
             self.trigger_interrupt()?;
         }
         self.line_status |= LSR_DATA_BIT;
@@ -314,7 +314,6 @@ impl BusDevice for Serial {
             DLAB_LOW if self.is_dlab_set() => self.baud_divisor as u8,
             DLAB_HIGH if self.is_dlab_set() => (self.baud_divisor >> 8) as u8,
             DATA => {
-                self.del_intr_bit(IIR_RECV_BIT);
                 if self.in_buffer.len() <= 1 {
                     self.line_status &= !LSR_DATA_BIT;
                 }
@@ -322,13 +321,10 @@ impl BusDevice for Serial {
             }
             IER => self.interrupt_enable,
             IIR => {
-                // Received data stays pending until the guest has read all of it.
-                if self.is_recv_intr_enabled() && !self.in_buffer.is_empty() {
-                    self.add_intr_bit(IIR_RECV_BIT);
-                }
                 let highest_pending_interrupt = self.highest_pending_interrupt();
-                if highest_pending_interrupt != IIR_NONE_BIT {
-                    self.del_intr_bit(highest_pending_interrupt);
+                // Reading the IIR clears only THR empty, as on a 16550.
+                if highest_pending_interrupt == IIR_THR_BIT {
+                    self.del_intr_bit(IIR_THR_BIT);
                 }
                 highest_pending_interrupt | IIR_FIFO_BITS
             }
