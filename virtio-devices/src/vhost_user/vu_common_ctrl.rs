@@ -8,7 +8,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
-use std::{ffi, fs, io, slice};
+use std::{ffi, fs, io};
 
 use log::{error, info};
 use vhost::vhost_kern::vhost_binding::VHOST_VRING_F_LOG;
@@ -27,7 +27,9 @@ use vhost::{
 use virtio_queue::desc::RawDescriptor;
 use virtio_queue::{Queue, QueueT};
 use vm_memory::guest_memory::Error as MmapError;
-use vm_memory::{Address, FileOffset, GuestAddress, GuestMemoryBackend, GuestMemoryRegion};
+use vm_memory::{
+    Address, FileOffset, GuestAddress, GuestMemoryBackend, GuestMemoryRegion, VolatileMemory,
+};
 use vm_migration::protocol::MemoryRangeTable;
 use vmm_sys_util::epoll::{ControlOperation, Epoll, EpollEvent, EventSet};
 use vmm_sys_util::eventfd::EventFd;
@@ -864,20 +866,12 @@ impl VhostUserHandle {
         // region. The previous region is returned and processed to create the
         // bitmap representing the dirty pages.
         if let Some(region) = self.update_log_base(last_ram_addr)? {
-            // Be careful with the size, as it was based on u8, meaning we must
-            // divide it by 8.
-            let len = region.size() / 8;
-            // SAFETY: region is of size len
-            let bitmap: &[u64] = unsafe {
-                // Cast the pointer to u64
-                let ptr = region.as_ptr().cast();
-                slice::from_raw_parts(ptr, len)
-            };
-            Ok(MemoryRangeTable::from_dirty_bitmap(
-                bitmap.iter().copied(),
-                0,
-                4096,
-            ))
+            // The backend still has this region mapped and a misbehaving one
+            // can keep writing to it, so copy the log out with volatile reads
+            // instead of borrowing the shared mapping as a slice.
+            let mut bitmap = vec![0u64; region.size() / size_of::<u64>()];
+            region.as_volatile_slice().copy_to(&mut bitmap);
+            Ok(MemoryRangeTable::from_dirty_bitmap(bitmap, 0, 4096))
         } else {
             Err(Error::MissingShmLogRegion)
         }
