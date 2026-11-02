@@ -228,8 +228,8 @@ mod tests {
         let bytes = descriptor("../../../../tmp/victim");
         let (file, path) = image_file("vmdk", bytes.as_bytes()).expect("scratch image");
         let err = Vmdk::open(file, Some(&path), &OpenConfig::default())
-            .err()
-            .expect("a descriptor escaping the scratch directory must be refused");
+            .map(|_| ())
+            .expect_err("a descriptor escaping the scratch directory must be refused");
         assert_eq!(err.kind(), BlockErrorKind::UnsupportedFeature);
         assert!(
             !Path::new("/tmp/victim").exists(),
@@ -381,8 +381,8 @@ mod tests {
         drop(disk);
 
         let err = open(LIMIT + 1)
-            .err()
-            .expect("a descriptor over 1 MiB must be refused");
+            .map(|_| ())
+            .expect_err("a descriptor over 1 MiB must be refused");
         let cause = err
             .downcast_ref::<std::io::Error>()
             .expect("the engine's descriptor read error");

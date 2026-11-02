@@ -6,6 +6,9 @@
 
 pub mod qcow2;
 pub mod qcow2_chain;
+#[cfg(test)]
+#[path = "../../../../cloud-hypervisor/tests/common/mod.rs"]
+pub mod test_utils;
 pub mod vhd;
 pub mod vhdx;
 pub mod vmdk;
