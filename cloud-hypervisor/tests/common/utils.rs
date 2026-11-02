@@ -17,6 +17,8 @@ use test_infra::*;
 use vmm_sys_util::tempdir::TempDir;
 use wait_timeout::ChildExt;
 
+use crate::common::qemu_img::QemuImg;
+
 const QCOW2_INCOMPATIBLE_FEATURES_OFFSET: u64 = 72;
 // 10MB is our maximum accepted overhead.
 pub(crate) const MAXIMUM_VMM_OVERHEAD_KB: u32 = 10 * 1024;
@@ -976,7 +978,7 @@ pub(crate) fn disk_check_consistency(
     initial_backing_checksum: Option<(PathBuf, String, u32)>,
 ) {
     let path = resolve_disk_path(path_or_image_name);
-    let output = run_qemu_img(&path, &["check"], None);
+    let output = run_qemu_img(&path, &["check"], None, "qemu-img check failed");
 
     assert!(
         output.status.success(),
@@ -994,7 +996,12 @@ pub(crate) fn disk_check_consistency(
 
     if let Some((backing_path, format, initial_checksum)) = initial_backing_checksum {
         if format.parse::<QcowImageType>().ok() != Some(QcowImageType::Raw) {
-            let output = run_qemu_img(&backing_path, &["check"], None);
+            let output = run_qemu_img(
+                &backing_path,
+                &["check"],
+                None,
+                "qemu-img check of backing file failed",
+            );
 
             assert!(
                 output.status.success(),
@@ -1012,21 +1019,27 @@ pub(crate) fn disk_check_consistency(
     }
 }
 
-pub(crate) fn run_qemu_img(path: &Path, args: &[&str], trailing_args: Option<&[&str]>) -> Output {
-    let mut cmd = Command::new("qemu-img");
-    cmd.arg(args[0])
-        .args(&args[1..])
-        .arg(path.to_str().unwrap());
-    if let Some(extra) = trailing_args {
-        cmd.args(extra);
-    }
-    cmd.output().unwrap()
+pub(crate) fn run_qemu_img(
+    path: &Path,
+    args: &[&str],
+    trailing_args: Option<&[&str]>,
+    context: &str,
+) -> Output {
+    QemuImg::new()
+        .args(args)
+        .arg(path)
+        .args(trailing_args.unwrap_or_default())
+        .run(context)
 }
 
 fn get_image_info(path: &Path) -> Option<serde_json::Value> {
-    let output = run_qemu_img(path, &["info", "-U", "--output=json"], None);
+    let output = run_qemu_img(
+        path,
+        &["info", "-U", "--output=json"],
+        None,
+        "qemu-img info failed",
+    );
 
-    output.status.success().then_some(())?;
     serde_json::from_slice(&output.stdout).ok()
 }
 

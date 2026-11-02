@@ -2,5 +2,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+pub(crate) mod qemu_img;
 pub(crate) mod tests_wrappers;
 pub(crate) mod utils;
