@@ -737,7 +737,7 @@ impl VhostUserHandle {
     fn update_log_base(&mut self, last_ram_addr: u64) -> Result<Option<Arc<MmapRegion>>> {
         // Create the memfd
         let fd = memfd_create(
-            &ffi::CString::new("vhost_user_dirty_log").unwrap(),
+            c"vhost_user_dirty_log",
             libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING,
         )
         .map_err(Error::MemfdCreate)?;
