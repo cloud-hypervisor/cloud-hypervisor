@@ -266,11 +266,17 @@ impl BlockEpollHandler {
                 return Err(Error::QueueDuplicatedHeadIndex);
             }
 
-            let mut request = match Request::parse(&mut desc_chain, self.access_platform.as_deref())
-            {
+            let result = Request::parse(&mut desc_chain, self.access_platform.as_deref());
+            let mut request = match result {
                 Ok(r) => r,
-                Err(e) => {
+                Err((e, status_addr)) => {
                     warn!("Failed to parse virtio-blk request at head {head}: {e}");
+                    if let Some(status_addr) = status_addr {
+                        desc_chain
+                            .memory()
+                            .write_obj(VIRTIO_BLK_S_IOERR as u8, status_addr)
+                            .map_err(Error::RequestStatus)?;
+                    }
                     queue
                         .add_used(desc_chain.memory(), head, 0)
                         .map_err(Error::QueueAddUsed)?;
@@ -1376,13 +1382,14 @@ impl Migratable for Block {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::io::Result as IoResult;
+    use std::io::{self, Result as IoResult};
     use std::path::Path;
     use std::sync::{Mutex, mpsc};
 
     use block::async_io::{AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
     use hypervisor::Vm;
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
+    use virtio_queue::desc::split::Descriptor;
     use vm_memory::GuestAddress;
     use vm_virtio::queue::testing::VirtQueue as GuestQ;
     use vmm_sys_util::eventfd::EFD_NONBLOCK;
@@ -1623,6 +1630,94 @@ mod tests {
         assert_eq!(status, [VIRTIO_BLK_S_IOERR as u8, 0xff, 0xff, 0xff]);
     }
 
+    fn used_len(vq: &GuestQ<'_, GuestMemory>, mem: &GuestMemory) -> u32 {
+        mem.read_obj(GuestAddress(vq.used.ring[0].location.0 + 4))
+            .unwrap()
+    }
+
+    /// Processes the chain `descs`, which holds a read request that fails to
+    /// parse, and returns the 4 bytes at `probe`, poisoned with 0xff before.
+    fn process_rejected(descs: &[Descriptor], probe: u64) -> [u8; 4] {
+        let mem = GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let vq = GuestQ::new(GuestAddress(0x1000), &mem, 4);
+        mem.write_obj(VIRTIO_BLK_T_IN, GuestAddress(REQ_HDR_ADDR))
+            .unwrap();
+        mem.write_slice(&[0xff; 4], GuestAddress(probe)).unwrap();
+        for (i, desc) in descs.iter().enumerate() {
+            vq.dtable[i].set(desc.addr().0, desc.len(), desc.flags(), desc.next());
+        }
+        vq.avail.ring[0].set(0);
+        vq.avail.idx.set(1);
+
+        let mut handler = make_handler(vq.create_queue(), &mem, 0);
+        handler.process_queue_submit().unwrap();
+
+        // A rejected request is returned with used length 0.
+        assert_eq!(vq.used.idx.get(), 1);
+        assert_eq!(used_len(&vq, &mem), 0);
+        let mut bytes = [0u8; 4];
+        mem.read_slice(&mut bytes, GuestAddress(probe)).unwrap();
+        bytes
+    }
+
+    #[test]
+    fn parse_failure_reports_ioerr() {
+        let next = VRING_DESC_F_NEXT as u16;
+        let write = VRING_DESC_F_WRITE as u16;
+        let status = process_rejected(
+            &[
+                Descriptor::new(REQ_HDR_ADDR, 16, next, 1),
+                // The data buffer lides outside the guest memory
+                Descriptor::new(0x1_0000_0000, 4096, next | write, 2),
+                Descriptor::new(REQ_STATUS_ADDR, 1, write, 0),
+            ],
+            REQ_STATUS_ADDR,
+        );
+        assert_eq!(status, [VIRTIO_BLK_S_IOERR as u8, 0xff, 0xff, 0xff]);
+    }
+
+    #[test]
+    fn parse_failure_past_the_status_reports_ioerr() {
+        let status = process_rejected(
+            &[
+                Descriptor::new(REQ_HDR_ADDR, 16, VRING_DESC_F_NEXT as u16, 1),
+                Descriptor::new(REQ_STATUS_ADDR, 1, VRING_DESC_F_WRITE as u16, 0),
+            ],
+            REQ_STATUS_ADDR,
+        );
+        assert_eq!(status, [VIRTIO_BLK_S_IOERR as u8, 0xff, 0xff, 0xff]);
+    }
+
+    #[test]
+    fn parse_failure_leaves_a_device_readable_status_alone() {
+        let next = VRING_DESC_F_NEXT as u16;
+        let write = VRING_DESC_F_WRITE as u16;
+        let status = process_rejected(
+            &[
+                Descriptor::new(REQ_HDR_ADDR, 16, next, 1),
+                Descriptor::new(0x1_0000_0000, 4096, next | write, 2),
+                Descriptor::new(REQ_STATUS_ADDR, 1, 0, 0),
+            ],
+            REQ_STATUS_ADDR,
+        );
+        assert_eq!(status, [0xff; 4]);
+    }
+
+    #[test]
+    fn parse_failure_leaves_a_truncated_chain_alone() {
+        let next = VRING_DESC_F_NEXT as u16;
+        let write = VRING_DESC_F_WRITE as u16;
+        let data = process_rejected(
+            &[
+                Descriptor::new(REQ_HDR_ADDR, 16, next, 1),
+                Descriptor::new(0x1_0000_0000, 4096, next | write, 2),
+                Descriptor::new(REQ_DATA_ADDR, 512, next | write, 9),
+            ],
+            REQ_DATA_ADDR,
+        );
+        assert_eq!(data, [0xff; 4]);
+    }
+
     // Completes every write in full and fails every fsync.
     struct FailingFsync(EventFd, Vec<AsyncIoCompletion>);
     impl AsyncIo for FailingFsync {
@@ -1810,6 +1905,46 @@ mod tests {
         assert_eq!(
             completion_status(VIRTIO_BLK_T_IN, -libc::EIO),
             (VIRTIO_BLK_S_IOERR as u8, 1)
+        );
+    }
+
+    #[derive(Debug)]
+    struct Offset;
+    impl AccessPlatform for Offset {
+        fn translate_gva(&self, base: u64, _size: u64) -> IoResult<u64> {
+            base.checked_sub(0x8000_0000)
+                .ok_or_else(|| io::Error::other("unmapped"))
+        }
+        fn translate_gpa(&self, base: u64, _size: u64) -> IoResult<u64> {
+            Ok(base + 0x8000_0000)
+        }
+    }
+
+    #[test]
+    fn parse_failure_reports_ioerr_through_access_platform() {
+        let mem = GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let vq = GuestQ::new(GuestAddress(0x1000), &mem, 4);
+        mem.write_obj(VIRTIO_BLK_T_IN, GuestAddress(REQ_HDR_ADDR))
+            .unwrap();
+        mem.write_slice(&[0xff; 4], GuestAddress(REQ_STATUS_ADDR))
+            .unwrap();
+        let next = VRING_DESC_F_NEXT as u16;
+        let write = VRING_DESC_F_WRITE as u16;
+        vq.dtable[0].set(0x8000_0000 + REQ_HDR_ADDR, 16, next, 1);
+        vq.dtable[1].set(0x1_0000_0000, 4096, next | write, 2);
+        vq.dtable[2].set(0x8000_0000 + REQ_STATUS_ADDR, 1, write, 0);
+        vq.avail.ring[0].set(0);
+        vq.avail.idx.set(1);
+
+        let mut handler = make_handler(vq.create_queue(), &mem, 0);
+        handler.access_platform = Some(Arc::new(Offset));
+        handler.process_queue_submit().unwrap();
+
+        assert_eq!(vq.used.idx.get(), 1);
+        assert_eq!(used_len(&vq, &mem), 0);
+        assert_eq!(
+            mem.read_obj::<u8>(GuestAddress(REQ_STATUS_ADDR)).unwrap(),
+            VIRTIO_BLK_S_IOERR as u8
         );
     }
 }
