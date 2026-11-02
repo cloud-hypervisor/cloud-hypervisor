@@ -28,9 +28,9 @@ use super::decoder::Decoder;
 use super::qcow_raw_file::QcowRawFile;
 use super::refcount::RefCount;
 use super::util::{
-    div_round_up_u64, l1_entry_make, l2_entry_compressed_cluster_layout, l2_entry_is_compressed,
-    l2_entry_is_empty, l2_entry_is_zero, l2_entry_make_std, l2_entry_make_zero,
-    l2_entry_make_zero_plain, l2_entry_std_cluster_addr,
+    l1_entry_make, l2_entry_compressed_cluster_layout, l2_entry_is_compressed, l2_entry_is_empty,
+    l2_entry_is_zero, l2_entry_make_std, l2_entry_make_zero, l2_entry_make_zero_plain,
+    l2_entry_std_cluster_addr,
 };
 use super::vec_cache::{CacheMap, Cacheable, VecCache};
 use super::{QcowHeader, refcount};
@@ -835,8 +835,8 @@ impl QcowState {
 
         let cluster_size = self.raw_file.cluster_size();
         let entries_per_cluster = cluster_size / size_of::<u64>() as u64;
-        let new_clusters = div_round_up_u64(new_size, cluster_size);
-        let needed_l1_entries = div_round_up_u64(new_clusters, entries_per_cluster) as u32;
+        let new_clusters = new_size.div_ceil(cluster_size);
+        let needed_l1_entries = new_clusters.div_ceil(entries_per_cluster) as u32;
 
         if needed_l1_entries > self.header.l1_size {
             self.grow_l1_table(needed_l1_entries)?;
@@ -860,7 +860,7 @@ impl QcowState {
         let cluster_size = self.raw_file.cluster_size();
 
         let new_l1_bytes = new_l1_size as u64 * size_of::<u64>() as u64;
-        let new_l1_clusters = div_round_up_u64(new_l1_bytes, cluster_size);
+        let new_l1_clusters = new_l1_bytes.div_ceil(cluster_size);
 
         // Allocate contiguous clusters at file end for new L1 table
         let file_size = self.raw_file.physical_size()?;
@@ -907,7 +907,7 @@ impl QcowState {
 
         // Free old L1 table clusters
         let old_l1_bytes = old_l1_size as u64 * size_of::<u64>() as u64;
-        let old_l1_clusters = div_round_up_u64(old_l1_bytes, cluster_size);
+        let old_l1_clusters = old_l1_bytes.div_ceil(cluster_size);
         for i in 0..old_l1_clusters {
             let cluster_addr = old_l1_offset + i * cluster_size;
             // Best effort: the old L1 clusters are no longer reachable,
