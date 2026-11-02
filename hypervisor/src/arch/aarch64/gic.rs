@@ -30,7 +30,7 @@ pub enum Error {
 }
 pub type Result<T> = result::Result<T, Error>;
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct VgicConfig {
     pub vcpu_count: u64,
     pub dist_addr: u64,
@@ -49,6 +49,17 @@ pub enum GicState {
     Kvm(Gicv3ItsState),
     #[cfg(feature = "mshv")]
     MshvGicV2M(MshvGicV2MState),
+}
+
+impl GicState {
+    pub fn dist_addr(&self) -> Option<u64> {
+        match *self {
+            #[cfg(feature = "kvm")]
+            GicState::Kvm(ref state) => state.dist_addr(),
+            #[cfg(feature = "mshv")]
+            GicState::MshvGicV2M(_) => None,
+        }
+    }
 }
 
 impl<'de> Deserialize<'de> for GicState {
@@ -110,6 +121,9 @@ pub trait Vgic: Send + Sync {
 
     /// Returns the MSI reg property of the device
     fn msi_properties(&self) -> [u64; 2];
+
+    /// Returns the VGIC configuration used to create this device
+    fn config(&self) -> VgicConfig;
 
     /// Save the state of GICv3ITS.
     fn state(&self) -> Result<GicState>;

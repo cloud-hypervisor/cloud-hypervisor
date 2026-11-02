@@ -119,6 +119,14 @@ pub struct Gicv3ItsState {
     its_cwriter: u64,
     its_creadr: u64,
     its_baser: [u64; 8],
+    #[serde(default)]
+    dist_addr: Option<u64>,
+}
+
+impl Gicv3ItsState {
+    pub fn dist_addr(&self) -> Option<u64> {
+        self.dist_addr
+    }
 }
 
 impl From<GicState> for Gicv3ItsState {
@@ -330,6 +338,20 @@ impl Vgic for KvmGicV3Its {
         [self.msi_addr, self.msi_size]
     }
 
+    fn config(&self) -> VgicConfig {
+        VgicConfig {
+            vcpu_count: self.vcpu_count,
+            dist_addr: self.dist_addr,
+            dist_size: self.dist_size,
+            redists_addr: self.redists_addr,
+            redists_size: self.redists_size,
+            msi_addr: self.msi_addr,
+            msi_size: self.msi_size,
+            nr_irqs: 0,
+            maintenance_irq: None,
+        }
+    }
+
     /// Save the state of GICv3ITS.
     fn state(&self) -> Result<GicState> {
         let gicr_typers = get_gicr_typers(self.vcpu_count);
@@ -392,6 +414,7 @@ impl Vgic for KvmGicV3Its {
             its_cwriter: its_cwriter_state,
             its_creadr: its_creadr_state,
             its_baser: its_baser_state,
+            dist_addr: Some(self.dist_addr),
         }
         .into();
 
