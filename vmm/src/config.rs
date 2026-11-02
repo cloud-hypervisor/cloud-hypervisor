@@ -3963,10 +3963,10 @@ impl VmConfig {
                 numa_node.validate()?;
                 if let Some(memory_zones) = &numa_node.memory_zones {
                     for memory_zone in memory_zones.iter() {
-                        if used_numa_node_memory_zones.contains_key(memory_zone) {
+                        if let Some(previous_node) = used_numa_node_memory_zones.get(memory_zone) {
                             return Err(ValidationError::MemoryZoneReused(
                                 memory_zone.to_string(),
-                                *used_numa_node_memory_zones.get(memory_zone).unwrap(),
+                                *previous_node,
                                 numa_node.guest_numa_id,
                             ));
                         }
@@ -3985,10 +3985,10 @@ impl VmConfig {
                                 numa_node.guest_numa_id,
                             ));
                         }
-                        if used_pci_segments.contains_key(pci_segment) {
+                        if let Some(previous_node) = used_pci_segments.get(pci_segment) {
                             return Err(ValidationError::PciSegmentReused(
                                 *pci_segment,
-                                *used_pci_segments.get(pci_segment).unwrap(),
+                                *previous_node,
                                 numa_node.guest_numa_id,
                             ));
                         }
