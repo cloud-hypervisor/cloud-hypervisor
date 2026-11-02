@@ -165,8 +165,8 @@ pub fn restore_signatures(image: &mut [u8]) {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::process::Command;
 
+    use super::super::qemu_img::QemuImg;
     use super::*;
     use crate::disk_engine::image::{image_memfd, template_memfd};
     use crate::disk_engine::selftest::assert_template_is_sound;
@@ -218,12 +218,12 @@ mod tests {
     }
 
     // qemu-img locks the file, so each test uses its own name.
-    fn qemu_vhdx(name: &str) -> Option<Vec<u8>> {
+    fn qemu_vhdx(name: &str) -> Vec<u8> {
         let dir = std::env::temp_dir().join("vhdx-mutator-check");
-        let _ = fs::create_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("Failed to create VHDX fixture directory");
         let path = dir.join(format!("{name}.vhdx"));
         let _ = fs::remove_file(&path);
-        let status = Command::new("qemu-img")
+        QemuImg::new()
             .args([
                 "create",
                 "-f",
@@ -233,9 +233,8 @@ mod tests {
             ])
             .arg(&path)
             .arg("16M")
-            .status()
-            .ok()?;
-        status.success().then(|| fs::read(&path).ok())?
+            .run("Failed to create VHDX fuzz fixture");
+        fs::read(&path).expect("Failed to read VHDX fixture")
     }
 
     fn open_result(bytes: &[u8]) -> Result<(), String> {
@@ -248,10 +247,7 @@ mod tests {
     // A repaired checksum must let an unconstrained byte mutation open.
     #[test]
     fn repair_makes_a_mutated_structure_open_again() {
-        let Some(seed) = qemu_vhdx("checksum-repair") else {
-            eprintln!("skipping: qemu-img unavailable");
-            return;
-        };
+        let seed = qemu_vhdx("checksum-repair");
         assert!(open_result(&seed).is_ok(), "the unmodified seed must open");
 
         for (label, offset) in [
@@ -292,10 +288,7 @@ mod tests {
     // Restoring the signatures before the checksums rescues a mutated one.
     #[test]
     fn restoring_the_signatures_rescues_a_mutated_image() {
-        let Some(seed) = qemu_vhdx("signature-restore") else {
-            eprintln!("skipping: qemu-img unavailable");
-            return;
-        };
+        let seed = qemu_vhdx("signature-restore");
 
         for (label, offsets) in [
             ("file type identifier", vec![0]),
@@ -331,10 +324,7 @@ mod tests {
     // Signature and checksum rejections must be separately reachable.
     #[test]
     fn the_unrepaired_fractions_reach_distinct_rejections() {
-        let Some(seed) = qemu_vhdx("rejection-branches") else {
-            eprintln!("skipping: qemu-img unavailable");
-            return;
-        };
+        let seed = qemu_vhdx("rejection-branches");
 
         // seed % 8 == 0: signatures left mutated, checksums repaired.
         let mut signature_branch = seed.clone();

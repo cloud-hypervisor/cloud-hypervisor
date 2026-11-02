@@ -253,54 +253,39 @@ pub fn fuzz_chain(bytes: &[u8]) -> Corpus {
 
 #[cfg(test)]
 mod tests {
-    use std::process::Command;
-
     use block::async_io::{AsyncIoOperation, OwnedIoBuffer};
 
+    use super::super::qemu_img::QemuImg;
     use super::*;
 
     /// Byte the backing image is filled with.
     const PATTERN: u8 = 0xa5;
 
     /// Builds a two image chain with `qemu-img`. The base holds [`PATTERN`].
-    fn qemu_chain() -> Option<(Vec<u8>, Vec<u8>)> {
+    fn qemu_chain() -> (Vec<u8>, Vec<u8>) {
         let dir = std::env::temp_dir().join("qcow2-chain-check");
-        let _ = fs::create_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("Failed to create QCOW2 fixture directory");
         for name in ["source.raw", "base.qcow2", "top.qcow2"] {
             let _ = fs::remove_file(dir.join(name));
         }
 
-        fs::write(dir.join("source.raw"), vec![PATTERN; 1 << 20]).ok()?;
-        let qemu = |args: &[&str]| -> Option<bool> {
-            Some(
-                Command::new("qemu-img")
-                    .current_dir(&dir)
-                    .args(args)
-                    .status()
-                    .ok()?
-                    .success(),
-            )
-        };
-        if !qemu(&["convert", "-O", "qcow2", "source.raw", "base.qcow2"])?
-            || !qemu(&[
-                "create",
-                "-f",
-                "qcow2",
-                "-F",
-                "qcow2",
-                "-b",
-                "base.qcow2",
-                "top.qcow2",
-                "1M",
-            ])?
-        {
-            return None;
-        }
+        fs::write(dir.join("source.raw"), vec![PATTERN; 1 << 20])
+            .expect("Failed to write raw backing fixture");
+        QemuImg::new()
+            .args(["convert", "-O", "qcow2"])
+            .arg(dir.join("source.raw"))
+            .arg(dir.join("base.qcow2"))
+            .run("Failed to create QCOW2 backing fixture");
+        QemuImg::new()
+            .args(["create", "-f", "qcow2", "-F", "qcow2", "-b", "base.qcow2"])
+            .arg(dir.join("top.qcow2"))
+            .arg("1M")
+            .run("Failed to create QCOW2 overlay fixture");
 
-        Some((
-            fs::read(dir.join("top.qcow2")).ok()?,
-            fs::read(dir.join("base.qcow2")).ok()?,
-        ))
+        (
+            fs::read(dir.join("top.qcow2")).expect("Failed to read QCOW2 overlay fixture"),
+            fs::read(dir.join("base.qcow2")).expect("Failed to read QCOW2 backing fixture"),
+        )
     }
 
     /// Builds a minimal v3 header naming `name` as its backing file.
@@ -413,8 +398,8 @@ mod tests {
             ..OpenConfig::default()
         };
         let err = Qcow2Chain::open(file, Some(&path), &config)
-            .err()
-            .expect("a backing name escaping the scratch directory must be refused");
+            .map(|_| ())
+            .expect_err("a backing name escaping the scratch directory must be refused");
         assert_eq!(err.kind(), BlockErrorKind::UnsupportedFeature);
         assert!(
             !victim.exists(),
@@ -425,10 +410,7 @@ mod tests {
     // A plain name must still open and read through to the backing image.
     #[test]
     fn open_accepts_a_plain_backing_name_and_reads_through_it() {
-        let Some((top, backing)) = qemu_chain() else {
-            eprintln!("skipping: qemu-img unavailable");
-            return;
-        };
+        let (top, backing) = qemu_chain();
         assert_eq!(
             Qcow2Chain::backing_name(&top),
             BackingName::Safe("base.qcow2".to_string()),
