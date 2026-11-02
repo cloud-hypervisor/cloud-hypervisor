@@ -423,6 +423,7 @@ mod tests {
     use super::*;
     use crate::formats::vhdx::bat::PAYLOAD_BLOCK_FULLY_PRESENT;
     use crate::formats::vhdx::test_util::create_dynamic_vhdx;
+    use crate::test_util::qemu_img::QemuImg;
 
     const VHDX_HEADER_1_OFFSET: u64 = 0x10000;
     const VHDX_HEADER_2_OFFSET: u64 = 0x20000;
@@ -447,10 +448,7 @@ mod tests {
     fn active_log_is_rejected() {
         use crc_any::CRC;
 
-        let Some(tf) = create_dynamic_vhdx(16) else {
-            eprintln!("skipping active_log_is_rejected: qemu-img unavailable");
-            return;
-        };
+        let tf = create_dynamic_vhdx(16);
 
         let file = fs::OpenOptions::new()
             .read(true)
@@ -480,10 +478,7 @@ mod tests {
     /// BAT update both land at unaligned host offsets) and read back intact.
     #[test]
     fn unaligned_write_is_rmw() {
-        let Some(tf) = create_dynamic_vhdx(16) else {
-            eprintln!("skipping unaligned_write_is_rmw: qemu-img unavailable");
-            return;
-        };
+        let tf = create_dynamic_vhdx(16);
 
         let mut vhdx = open_vhdx(tf.as_path());
 
@@ -507,10 +502,7 @@ mod tests {
 
     #[test]
     fn header_update_survives_reopen() {
-        let Some(tf) = create_dynamic_vhdx(16) else {
-            eprintln!("skipping header_update_survives_reopen: qemu-img unavailable");
-            return;
-        };
+        let tf = create_dynamic_vhdx(16);
 
         let data = [0xa5u8; 512];
         {
@@ -527,10 +519,7 @@ mod tests {
 
     #[test]
     fn read_misaligned_buffer_is_rejected() {
-        let Some(tf) = create_dynamic_vhdx(16) else {
-            eprintln!("skipping read_misaligned_buffer_is_rejected: qemu-img unavailable");
-            return;
-        };
+        let tf = create_dynamic_vhdx(16);
 
         let vhdx = open_vhdx(tf.as_path());
 
@@ -541,10 +530,7 @@ mod tests {
 
     #[test]
     fn write_misaligned_buffer_is_rejected() {
-        let Some(tf) = create_dynamic_vhdx(16) else {
-            eprintln!("skipping write_misaligned_buffer_is_rejected: qemu-img unavailable");
-            return;
-        };
+        let tf = create_dynamic_vhdx(16);
 
         let mut vhdx = open_vhdx(tf.as_path());
 
@@ -555,12 +541,10 @@ mod tests {
 
     #[test]
     fn payload_block_ending_at_region_boundary_is_accepted() {
-        use std::process::Command;
-
         use vmm_sys_util::tempfile::TempFile;
 
         let tf = TempFile::new().unwrap();
-        let status = Command::new("qemu-img")
+        QemuImg::new()
             .args([
                 "create",
                 "-f",
@@ -570,9 +554,7 @@ mod tests {
             ])
             .arg(tf.as_path())
             .arg("16M")
-            .status()
-            .unwrap();
-        assert!(status.success());
+            .run("Failed to create VHDX boundary test image");
 
         let mut vhdx = open_vhdx(tf.as_path());
         assert_eq!(vhdx.disk_spec.block_size, 1 << 20);
@@ -589,12 +571,10 @@ mod tests {
 
     #[test]
     fn read_write_with_bat_entry_overlapping_log_region_is_rejected() {
-        use std::process::Command;
-
         use vmm_sys_util::tempfile::TempFile;
 
         let tf = TempFile::new().unwrap();
-        let status = Command::new("qemu-img")
+        QemuImg::new()
             .args([
                 "create",
                 "-f",
@@ -604,9 +584,7 @@ mod tests {
             ])
             .arg(tf.as_path())
             .arg("16M")
-            .status()
-            .unwrap();
-        assert!(status.success());
+            .run("Failed to create VHDX log overlap test image");
 
         let mut vhdx = open_vhdx(tf.as_path());
         let (log_offset, _) = vhdx.vhdx_header.log_region().unwrap();
@@ -628,12 +606,10 @@ mod tests {
 
     #[test]
     fn read_write_with_bat_entry_overlapping_bat_region_is_rejected() {
-        use std::process::Command;
-
         use vmm_sys_util::tempfile::TempFile;
 
         let tf = TempFile::new().unwrap();
-        let status = Command::new("qemu-img")
+        QemuImg::new()
             .args([
                 "create",
                 "-f",
@@ -643,9 +619,7 @@ mod tests {
             ])
             .arg(tf.as_path())
             .arg("16M")
-            .status()
-            .unwrap();
-        assert!(status.success());
+            .run("Failed to create VHDX BAT overlap test image");
 
         let mut vhdx = open_vhdx(tf.as_path());
         let bat_start = vhdx.bat_entry.file_offset;
@@ -671,10 +645,7 @@ mod tests {
 
     #[test]
     fn open_with_bat_entry_past_eof_is_rejected() {
-        let Some(tf) = create_dynamic_vhdx(16) else {
-            eprintln!("skipping open_with_bat_entry_past_eof_is_rejected: qemu-img unavailable");
-            return;
-        };
+        let tf = create_dynamic_vhdx(16);
 
         let vhdx = open_vhdx(tf.as_path());
         let bat_offset = vhdx.bat_entry.file_offset;
@@ -700,12 +671,7 @@ mod tests {
 
     #[test]
     fn write_with_bat_entry_in_header_area_is_rejected() {
-        let Some(tf) = create_dynamic_vhdx(16) else {
-            eprintln!(
-                "skipping write_with_bat_entry_in_header_area_is_rejected: qemu-img unavailable"
-            );
-            return;
-        };
+        let tf = create_dynamic_vhdx(16);
 
         let mut vhdx = open_vhdx(tf.as_path());
 
@@ -731,12 +697,7 @@ mod tests {
 
     #[test]
     fn read_with_bat_entry_in_header_area_is_rejected() {
-        let Some(tf) = create_dynamic_vhdx(16) else {
-            eprintln!(
-                "skipping read_with_bat_entry_in_header_area_is_rejected: qemu-img unavailable"
-            );
-            return;
-        };
+        let tf = create_dynamic_vhdx(16);
 
         let mut vhdx = open_vhdx(tf.as_path());
 
@@ -754,12 +715,7 @@ mod tests {
 
     #[test]
     fn write_with_bat_entry_overlapping_metadata_region_is_rejected() {
-        let Some(tf) = create_dynamic_vhdx(16) else {
-            eprintln!(
-                "skipping write_with_bat_entry_overlapping_metadata_region_is_rejected: qemu-img unavailable"
-            );
-            return;
-        };
+        let tf = create_dynamic_vhdx(16);
 
         let mut vhdx = open_vhdx(tf.as_path());
         let mdr_offset = vhdx.mdr_entry.file_offset;
@@ -788,12 +744,7 @@ mod tests {
 
     #[test]
     fn read_with_bat_entry_overlapping_metadata_region_is_rejected() {
-        let Some(tf) = create_dynamic_vhdx(16) else {
-            eprintln!(
-                "skipping read_with_bat_entry_overlapping_metadata_region_is_rejected: qemu-img unavailable"
-            );
-            return;
-        };
+        let tf = create_dynamic_vhdx(16);
 
         let mut vhdx = open_vhdx(tf.as_path());
         let mdr_offset = vhdx.mdr_entry.file_offset;
@@ -809,10 +760,7 @@ mod tests {
 
     #[test]
     fn read_misaligned_offset_is_rejected() {
-        let Some(tf) = create_dynamic_vhdx(16) else {
-            eprintln!("skipping read_misaligned_offset_is_rejected: qemu-img unavailable");
-            return;
-        };
+        let tf = create_dynamic_vhdx(16);
 
         let vhdx = open_vhdx(tf.as_path());
         let sector = vhdx.disk_spec.logical_sector_size as usize;
@@ -824,10 +772,7 @@ mod tests {
 
     #[test]
     fn write_misaligned_offset_is_rejected() {
-        let Some(tf) = create_dynamic_vhdx(16) else {
-            eprintln!("skipping write_misaligned_offset_is_rejected: qemu-img unavailable");
-            return;
-        };
+        let tf = create_dynamic_vhdx(16);
 
         let mut vhdx = open_vhdx(tf.as_path());
         let sector = vhdx.disk_spec.logical_sector_size as usize;
@@ -850,12 +795,7 @@ mod tests {
 
     #[test]
     fn write_allocating_a_block_honours_the_sector_offset() {
-        let Some(tf) = create_dynamic_vhdx(16) else {
-            eprintln!(
-                "skipping write_allocating_a_block_honours_the_sector_offset: qemu-img unavailable"
-            );
-            return;
-        };
+        let tf = create_dynamic_vhdx(16);
 
         let mut vhdx = open_vhdx(tf.as_path());
         let sector = vhdx.disk_spec.logical_sector_size as usize;

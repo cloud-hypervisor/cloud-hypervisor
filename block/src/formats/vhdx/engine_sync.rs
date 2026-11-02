@@ -130,19 +130,15 @@ mod tests {
         (sync, size)
     }
 
-    /// Builds a `VhdxSync` from a fresh 1 MiB dynamic VHDX, or `None`
-    /// if `qemu-img` is unavailable to generate one.
-    fn setup() -> Option<(VhdxSync, u64)> {
-        let tf = create_dynamic_vhdx(1)?;
-        Some(make_vhdx_sync(&tf))
+    /// Builds a `VhdxSync` from a fresh 1 MiB dynamic VHDX.
+    fn setup() -> (VhdxSync, u64) {
+        let tf = create_dynamic_vhdx(1);
+        make_vhdx_sync(&tf)
     }
 
     #[test]
     fn sync_rejects_read_straddling_logical_size() {
-        let Some((mut sync, size)) = setup() else {
-            eprintln!("skipping: qemu-img unavailable");
-            return;
-        };
+        let (mut sync, size) = setup();
 
         let op = AsyncIoOperation::read_to_vec(
             (size - 512) as i64,
@@ -157,10 +153,7 @@ mod tests {
 
     #[test]
     fn sync_rejects_write_straddling_logical_size() {
-        let Some((mut sync, size)) = setup() else {
-            eprintln!("skipping: qemu-img unavailable");
-            return;
-        };
+        let (mut sync, size) = setup();
 
         let op = AsyncIoOperation::write_from_vec(
             (size - 512) as i64,
@@ -175,10 +168,7 @@ mod tests {
 
     #[test]
     fn sync_accepts_operation_exactly_filling_logical_size() {
-        let Some((mut sync, size)) = setup() else {
-            eprintln!("skipping: qemu-img unavailable");
-            return;
-        };
+        let (mut sync, size) = setup();
 
         let op =
             AsyncIoOperation::read_to_vec(0, OwnedIoBuffer::from_vec(vec![0u8; size as usize]), 1);
@@ -187,10 +177,7 @@ mod tests {
 
     #[test]
     fn sync_accepts_operation_at_last_sector() {
-        let Some((mut sync, size)) = setup() else {
-            eprintln!("skipping: qemu-img unavailable");
-            return;
-        };
+        let (mut sync, size) = setup();
 
         // VHDX operates in 512-byte sectors; read exactly the last sector.
         let op = AsyncIoOperation::read_to_vec(

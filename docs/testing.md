@@ -197,6 +197,8 @@ cargo test --lib --bins --target <target> --release --workspace
 cargo test --doc --target <target> --release --workspace
 ```
 
+Disk image unit tests require `qemu-img`. A missing executable or a failed command fails the test.
+
 The container is _not_ fully privileged. It receives `--device
 /dev/kvm` (or `/dev/mshv`), `--device /dev/net/tun`, and `--cap-add
 net_admin` so that tests requiring a hypervisor device or TAP
