@@ -11,6 +11,9 @@ use vmm_sys_util::tempfile::TempFile;
 
 use crate::aligned_buffer::AlignedBuffer;
 
+#[path = "../../cloud-hypervisor/tests/common/mod.rs"]
+pub mod shared;
+
 /// Returns whether the filesystem supports O_DIRECT reads.
 pub(crate) fn direct_io_supported() -> bool {
     let Ok(tmp) = TempFile::new() else {

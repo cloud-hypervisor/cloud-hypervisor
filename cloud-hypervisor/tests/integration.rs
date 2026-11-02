@@ -28,7 +28,11 @@ use vmm_sys_util::tempdir::TempDir;
 use vmm_sys_util::tempfile::TempFile;
 use wait_timeout::ChildExt;
 
-mod common;
+pub mod common {
+    include!("common/mod.rs");
+    pub(crate) mod tests_wrappers;
+    pub(crate) mod utils;
+}
 use common::tests_wrappers::*;
 use common::utils::*;
 

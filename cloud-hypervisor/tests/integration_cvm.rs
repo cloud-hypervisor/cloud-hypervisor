@@ -9,7 +9,11 @@
 // hence have known dead-code. This annotation silences dead-code
 // related warnings for our quality workflow to pass.
 #![allow(dead_code)]
-mod common;
+pub mod common {
+    include!("common/mod.rs");
+    pub(crate) mod tests_wrappers;
+    pub(crate) mod utils;
+}
 
 #[cfg(feature = "sev_snp")]
 mod common_cvm {
