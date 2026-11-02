@@ -579,7 +579,6 @@ jobs:
       matrix:
         rust:
           - stable
-          - "1.89.0" # MSRV — keep quoted.
     env:
       CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
     steps:
