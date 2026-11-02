@@ -379,7 +379,7 @@ impl BlocksState {
         let mut bitmap: Vec<u64> = Vec::new();
         let mut i = 0;
         for (j, bit) in self.bitmap.iter().enumerate() {
-            if j % 64 == 0 {
+            if j.is_multiple_of(64) {
                 bitmap.push(0);
 
                 if j != 0 {
