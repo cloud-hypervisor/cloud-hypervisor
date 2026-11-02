@@ -1351,8 +1351,9 @@ mod tests {
         let commands = get_cli_commands_sorted();
 
         // check commands itself are sorted
-        let iter = commands.iter().zip(commands.iter().skip(1));
-        for (command, next) in iter {
+        for pair in commands.windows(2) {
+            let command = &pair[0];
+            let next = &pair[1];
             assert_ne!(
                 command.get_name().cmp(next.get_name()),
                 Ordering::Greater,
