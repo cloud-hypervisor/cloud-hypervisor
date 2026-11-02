@@ -33,6 +33,7 @@ pub mod common {
     pub(crate) mod tests_wrappers;
     pub(crate) mod utils;
 }
+use common::QemuImgCommand;
 use common::tests_wrappers::*;
 use common::utils::*;
 
@@ -1074,33 +1075,29 @@ mod common_parallel {
         // Create test image based on configuration and capture backing checksum if applicable
         let initial_backing_checksum = match *image_config {
             QcowTestImageConfig::Simple(size) => {
-                Command::new("qemu-img")
-                    .arg("create")
-                    .args(["-f", "qcow2"])
-                    .arg(test_image_path.to_str().unwrap())
-                    .arg(size)
-                    .output()
-                    .expect("Failed to create QCOW2 test image");
+                QemuImgCommand::new()
+                    .create("qcow2", "")
+                    .args(&[test_image_path.to_str().unwrap(), size])
+                    .run("Failed to create QCOW2 test image");
                 None
             }
             QcowTestImageConfig::WithBacking => {
                 let backing_path = guest.tmp_dir.as_path().join("backing.qcow2");
-                Command::new("qemu-img")
-                    .arg("create")
-                    .args(["-f", "qcow2"])
-                    .arg(backing_path.to_str().unwrap())
-                    .arg("256M")
-                    .output()
-                    .expect("Failed to create backing QCOW2");
+                QemuImgCommand::new()
+                    .create("qcow2", "")
+                    .args(&[backing_path.to_str().unwrap(), "256M"])
+                    .run("Failed to create backing QCOW2");
 
-                Command::new("qemu-img")
-                    .arg("create")
-                    .args(["-f", "qcow2"])
-                    .args(["-b", backing_path.to_str().unwrap()])
-                    .args(["-F", "qcow2"])
-                    .arg(test_image_path.to_str().unwrap())
-                    .output()
-                    .expect("Failed to create overlay QCOW2");
+                QemuImgCommand::new()
+                    .create("qcow2", "")
+                    .args(&[
+                        "-b",
+                        backing_path.to_str().unwrap(),
+                        "-F",
+                        "qcow2",
+                        test_image_path.to_str().unwrap(),
+                    ])
+                    .run("Failed to create overlay QCOW2");
 
                 compute_backing_checksum(&test_image_path)
             }
@@ -1744,12 +1741,12 @@ mod common_parallel {
 
     // Direct=on data disk on a 4k sector loop FS, aligned O_DIRECT round trip.
     fn _test_virtio_block_direct_io_data_disk_4k(image_type: ImageType) {
-        let (qemu_fmt, qemu_extra): (&str, &[&str]) = match image_type {
-            ImageType::Raw => ("raw", &[]),
-            ImageType::Qcow2 => ("qcow2", &[]),
-            ImageType::FixedVhd => ("vpc", &["-o", "subformat=fixed"]),
-            ImageType::Vhdx => ("vhdx", &[]),
-            ImageType::FlatVmdk => ("vmdk", &["-o", "subformat=monolithicFlat"]),
+        let (qemu_fmt, qemu_options) = match image_type {
+            ImageType::Raw => ("raw", ""),
+            ImageType::Qcow2 => ("qcow2", ""),
+            ImageType::FixedVhd => ("vpc", "subformat=fixed"),
+            ImageType::Vhdx => ("vhdx", ""),
+            ImageType::FlatVmdk => ("vmdk", "subformat=monolithicFlat"),
             ImageType::Unknown => panic!("unsupported image_type {image_type}"),
         };
         let image_type_str = image_type.to_string();
@@ -1792,9 +1789,10 @@ mod common_parallel {
         );
 
         let test_disk = mnt_dir.join(format!("data.{image_type_str}"));
-        let mut create_args: Vec<&str> = vec!["create", "-f", qemu_fmt];
-        create_args.extend_from_slice(qemu_extra);
-        let res = run_qemu_img(&test_disk, &create_args, Some(&["64M"]));
+        let res = QemuImgCommand::new()
+            .create(qemu_fmt, qemu_options)
+            .args(&[test_disk.to_str().unwrap(), "64M"])
+            .run("qemu-img create failed");
         assert!(res.status.success(), "qemu-img create failed: {res:?}");
 
         let vmdk_backing = if matches!(image_type, ImageType::FlatVmdk) {
@@ -1900,7 +1898,10 @@ mod common_parallel {
         // not from the backend.
         let test_disk = guest.tmp_dir.as_path().join(format!("lbs-test.{ext}"));
         let test_disk_path = test_disk.to_str().unwrap().to_owned();
-        let res = run_qemu_img(&test_disk, &["create", "-f", qemu_fmt], Some(&["64M"]));
+        let res = QemuImgCommand::new()
+            .create(qemu_fmt, "")
+            .args(&[test_disk_path.as_str(), "64M"])
+            .run("qemu-img create failed");
         assert!(res.status.success(), "qemu-img create failed: {res:?}");
 
         let direct_opt = if direct { ",direct=on" } else { "" };
@@ -2242,16 +2243,14 @@ mod common_parallel {
         vhd_file_path.push(JAMMY_IMAGE_NAME_VHD);
 
         // Generate VHD file from RAW file
-        Command::new("qemu-img")
-            .arg("convert")
-            .arg("-p")
-            .args(["-f", "raw"])
-            .args(["-O", "vpc"])
-            .args(["-o", "subformat=fixed"])
-            .arg(raw_file_path.to_str().unwrap())
-            .arg(vhd_file_path.to_str().unwrap())
-            .output()
-            .expect("Expect generating VHD image from RAW image");
+        QemuImgCommand::new()
+            .convert("raw", "vpc", "subformat=fixed")
+            .args(&[
+                "-p",
+                raw_file_path.to_str().unwrap(),
+                vhd_file_path.to_str().unwrap(),
+            ])
+            .run("Expect generating VHD image from RAW image");
         let guest = make_virtio_block_guest(
             &GuestFactory::new_regular_guest_factory(),
             JAMMY_IMAGE_NAME_VHD,
@@ -2270,15 +2269,14 @@ mod common_parallel {
         vhdx_file_path.push(JAMMY_IMAGE_NAME_VHDX);
 
         // Generate dynamic VHDX file from RAW file
-        Command::new("qemu-img")
-            .arg("convert")
-            .arg("-p")
-            .args(["-f", "raw"])
-            .args(["-O", "vhdx"])
-            .arg(raw_file_path.to_str().unwrap())
-            .arg(vhdx_file_path.to_str().unwrap())
-            .output()
-            .expect("Expect generating dynamic VHDx image from RAW image");
+        QemuImgCommand::new()
+            .convert("raw", "vhdx", "")
+            .args(&[
+                "-p",
+                raw_file_path.to_str().unwrap(),
+                vhdx_file_path.to_str().unwrap(),
+            ])
+            .run("Expect generating dynamic VHDx image from RAW image");
         let guest = make_virtio_block_guest(
             &GuestFactory::new_regular_guest_factory(),
             JAMMY_IMAGE_NAME_VHDX,
@@ -4279,14 +4277,10 @@ mod common_parallel {
         let test_disk_path = guest.tmp_dir.as_path().join("resize-test.qcow2");
 
         // Create a 16MB QCOW2 disk image
-        assert!(
-            exec_host_command_output(&format!(
-                "qemu-img create -f qcow2 {} 16M",
-                test_disk_path.to_str().unwrap()
-            ))
-            .status
-            .success()
-        );
+        QemuImgCommand::new()
+            .create("qcow2", "")
+            .args(&[test_disk_path.to_str().unwrap(), "16M"])
+            .run("Failed to create QCOW2 resize test image");
 
         let mut cmd = GuestCommand::new(&guest);
 
@@ -4522,18 +4516,10 @@ mod common_parallel {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         let test_disk_path = guest.tmp_dir.as_path().join("test.img");
 
-        let output = exec_host_command_output(
-            format!(
-                "qemu-img create -f raw {} 16M",
-                test_disk_path.to_str().unwrap()
-            )
-            .as_str(),
-        );
-        if !output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            panic!("qemu-img command failed\nstdout\n{stdout}\nstderr\n{stderr}");
-        }
+        QemuImgCommand::new()
+            .create("raw", "")
+            .args(&[test_disk_path.to_str().unwrap(), "16M"])
+            .run("qemu-img command failed");
 
         let loop_dev = create_loop_device(test_disk_path.to_str().unwrap(), 4096, 5);
         _test_virtio_block_topology(&guest, &loop_dev);
@@ -4749,11 +4735,9 @@ mod common_parallel {
 
     // Helper function to count zero flagged regions in QCOW2 image
     fn count_qcow2_zero_regions(test_disk_path: &str) -> Option<usize> {
-        let res =
-            exec_host_command_output(&format!("qemu-img map --output=json -U {test_disk_path}"));
-        if !res.status.success() {
-            return None;
-        }
+        let res = QemuImgCommand::new()
+            .map(test_disk_path)
+            .run("Failed to get QCOW2 zero regions");
 
         let out = String::from_utf8_lossy(&res.stdout);
         let map_json = serde_json::from_str::<serde_json::Value>(&out).ok()?;
@@ -4858,18 +4842,11 @@ mod common_parallel {
             .as_path()
             .join(format!("discard_test.{}", format_name.to_lowercase()));
 
-        let mut cmd = format!("qemu-img create -f {qemu_img_format} ");
-        if !extra_create_args.is_empty() {
-            cmd.push_str(&extra_create_args.join(" "));
-            cmd.push(' ');
-        }
-        cmd.push_str(&format!("{} 2G", test_disk_path.to_str().unwrap()));
-
-        let res = exec_host_command_output(&cmd);
-        assert!(
-            res.status.success(),
-            "Failed to create {format_name} test image"
-        );
+        QemuImgCommand::new()
+            .create(qemu_img_format, "")
+            .args(extra_create_args)
+            .args(&[test_disk_path.to_str().unwrap(), "2G"])
+            .run(&format!("Failed to create {format_name} test image"));
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
@@ -5156,7 +5133,10 @@ mod common_parallel {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let test_disk_path = guest.tmp_dir.as_path().join("loop_discard_test.raw");
-        let res = run_qemu_img(&test_disk_path, &["create", "-f", "raw"], Some(&["128M"]));
+        let res = QemuImgCommand::new()
+            .create("raw", "")
+            .args(&[test_disk_path.to_str().unwrap(), "128M"])
+            .run("Failed to create raw backing image");
         assert!(
             res.status.success(),
             "Failed to create raw backing image: {}",
@@ -5252,7 +5232,10 @@ mod common_parallel {
         let origin_path = guest.tmp_dir.as_path().join("dm_origin.raw");
         let cow_path = guest.tmp_dir.as_path().join("dm_cow.raw");
 
-        let res = run_qemu_img(&origin_path, &["create", "-f", "raw"], Some(&["128M"]));
+        let res = QemuImgCommand::new()
+            .create("raw", "")
+            .args(&[origin_path.to_str().unwrap(), "128M"])
+            .run("Failed to create origin image");
         assert!(
             res.status.success(),
             "Failed to create origin image: {}",
@@ -5439,18 +5422,11 @@ mod common_parallel {
             .as_path()
             .join(format!("fstrim_test.{}", format_name.to_lowercase()));
 
-        let mut cmd = format!("qemu-img create -f {qemu_img_format} ");
-        if !extra_create_args.is_empty() {
-            cmd.push_str(&extra_create_args.join(" "));
-            cmd.push(' ');
-        }
-        cmd.push_str(&format!("{} 2G", test_disk_path.to_str().unwrap()));
-
-        let res = exec_host_command_output(&cmd);
-        assert!(
-            res.status.success(),
-            "Failed to create {format_name} test image"
-        );
+        QemuImgCommand::new()
+            .create(qemu_img_format, "")
+            .args(extra_create_args)
+            .args(&[test_disk_path.to_str().unwrap(), "2G"])
+            .run(&format!("Failed to create {format_name} test image"));
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
@@ -5731,10 +5707,10 @@ mod common_parallel {
         let test_disk_path = guest.tmp_dir.as_path().join("sparse_off_test.qcow2");
         let test_disk_path = test_disk_path.to_str().unwrap();
 
-        let res = exec_host_command_output(&format!(
-            "qemu-img create -f qcow2 {test_disk_path} {TEST_DISK_SIZE}"
-        ));
-        assert!(res.status.success(), "Failed to create QCOW2 test image");
+        QemuImgCommand::new()
+            .create("qcow2", "")
+            .args(&[test_disk_path, TEST_DISK_SIZE])
+            .run("Failed to create QCOW2 test image");
 
         let zero_regions_before = count_qcow2_zero_regions(test_disk_path)
             .expect("Failed to get initial zero regions count");
@@ -13039,16 +13015,10 @@ mod windows {
             let _ = fs::remove_file(&img);
 
             // Create an image file
-            let out = Command::new("qemu-img")
-                .args([
-                    "create",
-                    "-f",
-                    "raw",
-                    img.to_str().unwrap(),
-                    format!("{sz}m").as_str(),
-                ])
-                .output()
-                .expect("qemu-img command failed")
+            let out = QemuImgCommand::new()
+                .create("raw", "")
+                .args(&[img.to_str().unwrap(), &format!("{sz}m")])
+                .run("qemu-img command failed")
                 .stdout;
             println!("{out:?}");
 
