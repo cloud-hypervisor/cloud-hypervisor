@@ -4354,9 +4354,7 @@ impl VmConfig {
             return;
         }
 
-        self.preserved_fds
-            .get_or_insert_with(HashSet::new)
-            .extend(fds);
+        self.preserved_fds.get_or_insert_default().extend(fds);
     }
 
     #[cfg(feature = "sev_snp")]
