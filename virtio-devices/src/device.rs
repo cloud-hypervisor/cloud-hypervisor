@@ -319,6 +319,7 @@ impl VirtioCommon {
         queues: &[(u16, Queue, EventFd)],
         interrupt_cb: Arc<dyn VirtioInterrupt>,
     ) -> ActivateResult {
+        let _paused = self.paused.lock().unwrap();
         self.check_access_platform()?;
 
         if queues.len() < self.min_queues.into() {
@@ -395,7 +396,11 @@ impl VirtioCommon {
     where
         F: FnOnce() -> Result<(), EpollHelperError> + Send + 'static,
     {
-        // Scope the borrow of `workers` so it ends before the reset() below.
+        // Serialize with pause(), but do not hold the lock while the new
+        // worker starts: startup only contends on this lock with pause().
+        {
+            let _paused = self.paused.lock().unwrap();
+        }
         let res = {
             let Some(workers) = self.workers.as_mut() else {
                 error!("spawn_worker called before activate()");
@@ -473,29 +478,22 @@ impl Pausable for VirtioCommon {
             VirtioDeviceType::from(self.device_type)
         );
 
-        // If already paused, return early to avoid deadlock waiting on barrier
-        // for worker threads that are already parked.
-        let was_paused = {
-            let mut paused = self.paused.lock().unwrap();
-            let was = *paused;
-            *paused = true;
-            was
-        };
-        if was_paused {
+        // Hold this lock until the pause is complete. spawn_worker() takes the
+        // same lock, so no worker can start in the middle of a pause.
+        let mut paused = self.paused.lock().unwrap();
+        if *paused {
             return Ok(());
         }
+        *paused = true;
 
         if let Some(pause_evt) = &self.pause_evt {
-            pause_evt
-                .write(1)
-                .map_err(|e| MigratableError::Pause(e.into()))?;
-
-            // Wait for all threads to acknowledge the pause before going
-            // any further. This is exclusively performed when pause_evt
-            // eventfd is Some(), as this means the virtio device has been
-            // activated. One specific case where the device can be paused
-            // while it hasn't been yet activated is snapshot/restore.
-            self.paused_sync.as_ref().unwrap().wait();
+            let workers = self.workers.as_ref().map_or(0, |w| w.threads.len());
+            if workers > 0 {
+                pause_evt
+                    .write(workers as u64)
+                    .map_err(|e| MigratableError::Pause(e.into()))?;
+                self.paused_sync.as_ref().unwrap().wait();
+            }
         }
 
         Ok(())
