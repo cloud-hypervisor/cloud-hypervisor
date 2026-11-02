@@ -53,7 +53,7 @@ pub struct MshvClockData {
 impl fmt::Display for VcpuMshvState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let expected_num_msrs = self.msrs.len();
-        let mut msr_entries = vec![vec![0; 2]; expected_num_msrs];
+        let mut msr_entries = vec![[0; 2]; expected_num_msrs];
 
         for (i, entry) in self.msrs.iter().enumerate() {
             msr_entries[i][1] = entry.data;
