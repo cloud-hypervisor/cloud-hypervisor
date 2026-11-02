@@ -15,7 +15,8 @@ use std::io::Error as IoError;
 use std::net::IpAddr;
 use std::os::raw::c_uint;
 use std::os::unix::io::{FromRawFd, RawFd};
-use std::{io, mem, net, result};
+use std::os::unix::net::UnixDatagram;
+use std::{io, net, result};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -79,18 +80,17 @@ impl VirtioNetConfig {
 /// Create a sockaddr_in from an IPv4 address, and expose it as
 /// an opaque sockaddr suitable for usage by socket ioctls.
 fn create_sockaddr(ip_addr: net::Ipv4Addr) -> libc::sockaddr {
-    let addr_in = libc::sockaddr_in {
-        sin_family: libc::AF_INET as u16,
-        sin_port: 0,
-        sin_addr: libc::in_addr {
-            // Use network byte order (big endian).
-            s_addr: ip_addr.to_bits().to_be(),
-        },
-        sin_zero: [0; 8],
-    };
+    // sa_data carries the sockaddr_in fields that follow sin_family: the
+    // port, the address in network byte order and the sin_zero padding.
+    let mut sa_data = [0 as libc::c_char; 14];
+    for (byte, octet) in sa_data[2..6].iter_mut().zip(ip_addr.octets()) {
+        *byte = octet as libc::c_char;
+    }
 
-    // SAFETY: addr_in can be safely transmute to sockaddr
-    unsafe { mem::transmute(addr_in) }
+    libc::sockaddr {
+        sa_family: libc::AF_INET as libc::sa_family_t,
+        sa_data,
+    }
 }
 
 fn create_inet_socket(addr: IpAddr) -> Result<net::UdpSocket> {
@@ -109,15 +109,8 @@ fn create_inet_socket(addr: IpAddr) -> Result<net::UdpSocket> {
     Ok(unsafe { net::UdpSocket::from_raw_fd(sock) })
 }
 
-fn create_unix_socket() -> Result<net::UdpSocket> {
-    // SAFETY: we check the return value.
-    let sock = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_DGRAM, 0) };
-    if sock < 0 {
-        return Err(Error::CreateSocket(IoError::last_os_error()));
-    }
-
-    // SAFETY: nothing else will use or hold onto the raw sock fd.
-    Ok(unsafe { net::UdpSocket::from_raw_fd(sock) })
+fn create_unix_socket() -> Result<UnixDatagram> {
+    UnixDatagram::unbound().map_err(Error::CreateSocket)
 }
 
 pub fn vnet_hdr_len() -> usize {

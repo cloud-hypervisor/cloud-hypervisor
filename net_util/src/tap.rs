@@ -11,7 +11,7 @@ use std::io::{Error as IoError, Read, Result as IoResult, Write};
 use std::net::{IpAddr, Ipv6Addr};
 use std::os::raw::*;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
-use std::{mem, result, str};
+use std::{result, str};
 
 use libc::{__c_anonymous_ifr_ifru, IFNAMSIZ, ifreq};
 use thiserror::Error;
@@ -341,8 +341,9 @@ impl Tap {
                 };
 
                 let ifreq = libc::in6_ifreq {
-                    // SAFETY: addr can be safely transmuted to in6_addr
-                    ifr6_addr: unsafe { mem::transmute::<[u8; 16], libc::in6_addr>(addr.octets()) },
+                    ifr6_addr: libc::in6_addr {
+                        s6_addr: addr.octets(),
+                    },
                     ifr6_prefixlen: prefixlen as u32,
                     ifr6_ifindex: ifindex,
                 };
