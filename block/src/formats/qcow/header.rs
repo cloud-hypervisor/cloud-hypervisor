@@ -19,7 +19,6 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 use super::decoder::{Decoder, ZlibDecoder, ZstdDecoder};
 use super::parser::{Error, Result};
-use super::util::{div_round_up_u32, div_round_up_u64};
 use crate::aligned_file::AlignedFile;
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 
@@ -558,10 +557,10 @@ impl QcowHeader {
 
         // L2 blocks are always one cluster long. They contain cluster_size/sizeof(u64) addresses.
         let entries_per_cluster: u32 = cluster_size / size_of::<u64>() as u32;
-        let num_clusters: u32 = div_round_up_u64(size, u64::from(cluster_size)) as u32;
-        let num_l2_clusters: u32 = div_round_up_u32(num_clusters, entries_per_cluster);
-        let l1_clusters: u32 = div_round_up_u32(num_l2_clusters, entries_per_cluster);
-        let header_clusters = div_round_up_u32(size_of::<QcowHeader>() as u32, cluster_size);
+        let num_clusters: u32 = size.div_ceil(u64::from(cluster_size)) as u32;
+        let num_l2_clusters: u32 = num_clusters.div_ceil(entries_per_cluster);
+        let l1_clusters: u32 = num_l2_clusters.div_ceil(entries_per_cluster);
+        let header_clusters = (size_of::<QcowHeader>() as u32).div_ceil(cluster_size);
         Ok(QcowHeader {
             magic: QCOW_MAGIC,
             version,
@@ -591,10 +590,7 @@ impl QcowHeader {
                     num_clusters + l1_clusters + num_l2_clusters + header_clusters,
                 ) as u32;
                 // The refcount table needs to store the offset of each refcount cluster.
-                div_round_up_u32(
-                    max_refcount_clusters * size_of::<u64>() as u32,
-                    cluster_size,
-                )
+                (max_refcount_clusters * size_of::<u64>() as u32).div_ceil(cluster_size)
             },
             nb_snapshots: 0,
             snapshots_offset: 0,
@@ -733,8 +729,8 @@ pub(super) fn max_refcount_clusters(
     // Use u64 as the product of the u32 inputs can overflow.
     let refcount_bits = 0x01u64 << u64::from(refcount_order);
     let cluster_bits = u64::from(cluster_size) * 8;
-    let for_data = div_round_up_u64(u64::from(num_clusters) * refcount_bits, cluster_bits);
-    let for_refcounts = div_round_up_u64(for_data * refcount_bits, cluster_bits);
+    let for_data = (u64::from(num_clusters) * refcount_bits).div_ceil(cluster_bits);
+    let for_refcounts = (for_data * refcount_bits).div_ceil(cluster_bits);
     for_data + for_refcounts
 }
 

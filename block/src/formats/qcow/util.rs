@@ -72,13 +72,3 @@ pub(super) fn l2_entry_make_zero_plain() -> u64 {
 pub(super) fn l1_entry_make(cluster_addr: u64, refcount_is_one: bool) -> u64 {
     (cluster_addr & L1_TABLE_OFFSET_MASK) | (refcount_is_one as u64 * CLUSTER_USED_FLAG)
 }
-
-/// Ceiling of the division of `dividend`/`divisor`.
-pub(super) fn div_round_up_u32(dividend: u32, divisor: u32) -> u32 {
-    dividend / divisor + u32::from(!dividend.is_multiple_of(divisor))
-}
-
-/// Ceiling of the division of `dividend`/`divisor`.
-pub(super) fn div_round_up_u64(dividend: u64, divisor: u64) -> u64 {
-    dividend / divisor + u64::from(!dividend.is_multiple_of(divisor))
-}
