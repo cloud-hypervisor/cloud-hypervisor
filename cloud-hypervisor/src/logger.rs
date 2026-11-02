@@ -142,8 +142,7 @@ fn parse_format(fmt: &str) -> Result<Vec<Token>, Error> {
     while let Some(c) = chars.next() {
         match c {
             '{' => {
-                if chars.peek() == Some(&'{') {
-                    chars.next();
+                if chars.next_if_eq(&'{').is_some() {
                     literal.push('{');
                     continue;
                 }
@@ -164,8 +163,7 @@ fn parse_format(fmt: &str) -> Result<Vec<Token>, Error> {
                 tokens.push(name.parse()?);
             }
             '}' => {
-                if chars.peek() == Some(&'}') {
-                    chars.next();
+                if chars.next_if_eq(&'}').is_some() {
                     literal.push('}');
                 } else {
                     return Err(Error::UnmatchedBrace);
