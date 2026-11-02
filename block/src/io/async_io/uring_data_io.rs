@@ -10,7 +10,7 @@ use std::{io, mem};
 
 use io_uring::register::Restriction;
 use io_uring::{IoUring, opcode, squeue, types};
-use log::{error, warn};
+use log::{debug, error, warn};
 use vmm_sys_util::eventfd::EventFd;
 
 use super::common::{duplicate_user_data_error, validate_batch};
@@ -19,19 +19,53 @@ use super::{AsyncIoCompletion, AsyncIoOperation, CompletionCommon};
 // Linux UAPI constant for enabling a ring created with IORING_SETUP_R_DISABLED
 const IORING_REGISTER_ENABLE_RINGS: u8 = 12;
 
+/// The submission queue entry of an accepted operation.
+enum PendingKind {
+    /// Owned read or write operation.
+    Data {
+        fd: RawFd,
+        op: AsyncIoOperation,
+        // Whether the operation is being reissued after completing with a
+        // transient error. Reissued operations are submitted with
+        // `IOSQE_ASYNC`.
+        reissue: bool,
+    },
+    /// Prebuilt metadata operation (fsync or NOP) without caller-owned buffers.
+    Kernel { entry: squeue::Entry },
+}
+
+/// An operation accepted by the ring that waits for submission queue capacity.
+struct PendingOperation {
+    user_data: u64,
+    kind: PendingKind,
+}
+
+/// An operation whose SQEs were published and whose completion is outstanding.
+struct InFlightOperation {
+    fd: RawFd,
+    op: AsyncIoOperation,
+    // Whether the operation was already reissued once after completing with
+    // `-EAGAIN` or `-EINTR`.
+    reissued: bool,
+}
+
 /// `io_uring` wrapper for async I/O.
 ///
 /// Holds the `IoUring` and tracks the ops that are pending.
 pub struct UringDataIo {
     io_uring: IoUring,
-    // `in_flight` tracks every user_data value accepted by the kernel. Owned
-    // data operations store `Some(op)` so their iovecs and backing buffers
+    // `in_flight` tracks every user_data value accepted by the kernel. Data
+    // operations store `Some(in_flight)` so their iovecs and backing buffers
     // remain valid until completion; metadata operations store `None`.
-    in_flight: HashMap<u64, Option<AsyncIoOperation>>,
+    in_flight: HashMap<u64, Option<InFlightOperation>>,
     // `pending` holds operations accepted but not yet published to the
     // submission queue because it was full. Completion processing publishes
     // them as ring capacity frees up.
-    pending: VecDeque<(RawFd, AsyncIoOperation)>,
+    pending: VecDeque<PendingOperation>,
+    // RWF_* flags applied to data operations, set by tests to force
+    // deterministic completions.
+    #[cfg(test)]
+    rw_flags: i32,
     completions: CompletionCommon,
     // `needs_submit_retry` is set when SQEs have been published to the ring,
     // but the submit syscall failed (or only partially succeeded) before
@@ -54,7 +88,9 @@ impl UringDataIo {
             Restriction::sqe_op(opcode::Readv::CODE),
             Restriction::sqe_op(opcode::Writev::CODE),
             Restriction::sqe_op(opcode::Fsync::CODE),
-            Restriction::sqe_flags_allowed(0),
+            // IOSQE_ASYNC is needed to reissue operations that completed
+            // with a transient error through io-wq in blocking mode.
+            Restriction::sqe_flags_allowed(squeue::Flags::ASYNC.bits()),
         ])?;
         io_uring.submitter().register_enable_rings()?;
 
@@ -62,6 +98,8 @@ impl UringDataIo {
             io_uring,
             in_flight: HashMap::new(),
             pending: VecDeque::new(),
+            #[cfg(test)]
+            rw_flags: 0,
             completions,
             needs_submit_retry: false,
         })
@@ -77,45 +115,26 @@ impl UringDataIo {
         self.submit_batch(fd, vec![op])
     }
 
-    fn reserve_user_data(&mut self, user_data: u64) -> io::Result<()> {
+    fn ensure_user_data_available(&self, user_data: u64) -> io::Result<()> {
         if self.in_flight.contains_key(&user_data)
-            || self
-                .pending
-                .iter()
-                .any(|(_, op)| op.user_data() == user_data)
+            || self.pending.iter().any(|p| p.user_data == user_data)
         {
             return Err(duplicate_user_data_error(user_data));
         }
-        self.in_flight.insert(user_data, None);
 
         Ok(())
     }
 
-    fn submit_kernel_entry(&mut self, user_data: u64, entry: &squeue::Entry) -> io::Result<()> {
-        self.reserve_user_data(user_data)?;
+    fn submit_kernel_entry(&mut self, user_data: u64, entry: squeue::Entry) -> io::Result<()> {
+        self.ensure_user_data_available(user_data)?;
 
-        let (submitter, mut sq, _) = self.io_uring.split();
-        // SAFETY: the entry has no caller-owned buffer. `user_data` is retained
-        // in `in_flight` until the CQE is consumed.
-        if let Err(e) = unsafe { sq.push(entry) } {
-            self.in_flight.remove(&user_data);
-            return Err(io::Error::other(format!("Submission queue is full: {e:?}")));
-        }
-        sq.sync();
-
-        match submitter.submit() {
-            Ok(_) => {
-                sq.sync();
-                // A partial submission leaves the remaining SQEs published;
-                // they are retried from next_completion().
-                self.needs_submit_retry = !sq.is_empty();
-            }
-            Err(e) => {
-                self.needs_submit_retry = true;
-                warn!("io_uring submit failed after SQE was published: {e}");
-                self.completions.notifier().write(1).unwrap();
-            }
-        }
+        // The entry has no caller-owned buffer, so it is safe to retain it
+        // until the submission queue has room.
+        self.pending.push_back(PendingOperation {
+            user_data,
+            kind: PendingKind::Kernel { entry },
+        });
+        self.flush_pending();
 
         Ok(())
     }
@@ -135,15 +154,20 @@ impl UringDataIo {
         validate_batch(
             |user_data| {
                 self.in_flight.contains_key(&user_data)
-                    || self
-                        .pending
-                        .iter()
-                        .any(|(_, op)| op.user_data() == user_data)
+                    || self.pending.iter().any(|p| p.user_data == user_data)
             },
             &batch,
         )?;
 
-        self.pending.extend(batch.into_iter().map(|op| (fd, op)));
+        self.pending
+            .extend(batch.into_iter().map(|op| PendingOperation {
+                user_data: op.user_data(),
+                kind: PendingKind::Data {
+                    fd,
+                    op,
+                    reissue: false,
+                },
+            }));
         self.flush_pending();
 
         Ok(())
@@ -161,23 +185,51 @@ impl UringDataIo {
                 return;
             }
 
+            #[cfg(test)]
+            let rw_flags = self.rw_flags;
+            #[cfg(not(test))]
+            let rw_flags = 0;
+
             let mut queued = 0;
             while queued < available {
-                let Some((fd, op)) = self.pending.pop_front() else {
+                let Some(pending) = self.pending.pop_front() else {
                     break;
                 };
-                let user_data = op.user_data();
-                let entry = Self::build_entry(fd, &op);
-                self.in_flight.insert(user_data, Some(op));
+                let user_data = pending.user_data;
+                let (entry, in_flight) = match pending.kind {
+                    PendingKind::Data { fd, op, reissue } => {
+                        let entry = Self::build_entry(fd, &op, reissue, rw_flags);
+                        (
+                            entry,
+                            Some(InFlightOperation {
+                                fd,
+                                op,
+                                reissued: reissue,
+                            }),
+                        )
+                    }
+                    PendingKind::Kernel { entry } => (entry, None),
+                };
+                self.in_flight.insert(user_data, in_flight);
                 // SAFETY: the SQ capacity was checked above. Every iovec's
                 // pointer is retained in self.in_flight before the SQ tail is
                 // advanced by sync or drop. in_flight only drops the memory
-                // after a completion.
+                // after a completion. Kernel entries hold no caller memory.
                 if let Err(e) = unsafe { sq.push(&entry) } {
                     // The ring state changed unexpectedly after the capacity
                     // check. Requeue the operation and retry it later.
-                    let op = self.in_flight.remove(&user_data).flatten().unwrap();
-                    self.pending.push_front((fd, op));
+                    let requeued = match self.in_flight.remove(&user_data).flatten() {
+                        Some(in_flight) => PendingKind::Data {
+                            fd: in_flight.fd,
+                            op: in_flight.op,
+                            reissue: in_flight.reissued,
+                        },
+                        None => PendingKind::Kernel { entry },
+                    };
+                    self.pending.push_front(PendingOperation {
+                        user_data,
+                        kind: requeued,
+                    });
                     warn!("io_uring submission queue became full after capacity check: {e:?}");
                     break;
                 }
@@ -209,32 +261,45 @@ impl UringDataIo {
         }
     }
 
-    fn build_entry(fd: RawFd, op: &AsyncIoOperation) -> squeue::Entry {
+    fn build_entry(
+        fd: RawFd,
+        op: &AsyncIoOperation,
+        force_async: bool,
+        rw_flags: i32,
+    ) -> squeue::Entry {
         let iovecs = op.iovecs();
         let fd = types::Fd(fd);
-        if op.is_read() {
+        let entry = if op.is_read() {
             opcode::Readv::new(fd, iovecs.as_ptr(), iovecs.len() as u32)
                 .offset(op.offset() as u64)
+                .rw_flags(rw_flags)
                 .build()
                 .user_data(op.user_data())
         } else {
             opcode::Writev::new(fd, iovecs.as_ptr(), iovecs.len() as u32)
                 .offset(op.offset() as u64)
+                .rw_flags(rw_flags)
                 .build()
                 .user_data(op.user_data())
+        };
+
+        if force_async {
+            entry.flags(squeue::Flags::ASYNC)
+        } else {
+            entry
         }
     }
 
     /// Submits an io_uring NOP carrying `user_data`.
     pub fn submit_nop(&mut self, user_data: u64) -> io::Result<()> {
-        self.submit_kernel_entry(user_data, &opcode::Nop::new().build().user_data(user_data))
+        self.submit_kernel_entry(user_data, opcode::Nop::new().build().user_data(user_data))
     }
 
     /// Submits an fsync operation carrying `user_data`.
     pub fn submit_fsync(&mut self, fd: RawFd, user_data: u64) -> io::Result<()> {
         self.submit_kernel_entry(
             user_data,
-            &opcode::Fsync::new(types::Fd(fd))
+            opcode::Fsync::new(types::Fd(fd))
                 .build()
                 .user_data(user_data),
         )
@@ -251,7 +316,8 @@ impl UringDataIo {
     /// Returns the next kernel or injected completion if one is available.
     ///
     /// Consuming a kernel completion returns ownership of any buffer retained
-    /// by the corresponding operation.
+    /// by the corresponding operation. A data operation that completes with
+    /// `-EAGAIN` or `-EINTR` is reissued once instead of being returned.
     pub fn next_completion(&mut self) -> Option<AsyncIoCompletion> {
         if self.needs_submit_retry {
             let submit_result = self.io_uring.submitter().submit();
@@ -265,21 +331,52 @@ impl UringDataIo {
             }
         }
 
-        self.flush_pending();
+        loop {
+            self.flush_pending();
 
-        if let Some(entry) = self.io_uring.completion().next() {
+            let Some(entry) = self.io_uring.completion().next() else {
+                return self.completions.next_completed();
+            };
             let user_data = entry.user_data();
+            let result = entry.result();
+
+            if (result == -libc::EAGAIN || result == -libc::EINTR)
+                && let Some(Some(in_flight)) = self.in_flight.remove(&user_data)
+            {
+                if !in_flight.reissued {
+                    // Before Linux 6.14 io_uring can complete an O_DIRECT
+                    // read with -EAGAIN when iomap fails to map an extent.
+                    // Reissue through io-wq in blocking mode, where it
+                    // cannot fail the same way, and only report the error
+                    // if that retry also fails.
+                    self.pending.push_front(PendingOperation {
+                        user_data,
+                        kind: PendingKind::Data {
+                            fd: in_flight.fd,
+                            op: in_flight.op,
+                            reissue: true,
+                        },
+                    });
+                    debug!(
+                        "Reissuing io_uring request {user_data:#x} after {}",
+                        io::Error::from_raw_os_error(-result)
+                    );
+                    continue;
+                }
+
+                // The retry also failed; report it through the normal path.
+                self.in_flight.insert(user_data, Some(in_flight));
+            }
+
             return Some(AsyncIoCompletion::new(
                 user_data,
-                entry.result(),
+                result,
                 self.in_flight
                     .remove(&user_data)
                     .flatten()
-                    .and_then(AsyncIoOperation::into_completion_buffer),
+                    .and_then(|op| op.op.into_completion_buffer()),
             ));
         }
-
-        self.completions.next_completed()
     }
 }
 
@@ -335,6 +432,7 @@ impl Drop for UringDataIo {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
     use std::thread::sleep;
     use std::time::Duration;
@@ -363,7 +461,7 @@ mod tests {
         let socket = opcode::Socket::new(libc::AF_UNIX, libc::SOCK_STREAM, 0)
             .build()
             .user_data(1);
-        data_io.submit_kernel_entry(1, &socket).unwrap();
+        data_io.submit_kernel_entry(1, socket).unwrap();
         let completion = wait_for_completion(&mut data_io);
         if completion.result >= 0 {
             // SAFETY: IORING_OP_SOCKET returned a new owned descriptor.
@@ -374,7 +472,7 @@ mod tests {
         let connect = opcode::Connect::new(types::Fd(-1), ptr::null(), 0)
             .build()
             .user_data(2);
-        data_io.submit_kernel_entry(2, &connect).unwrap();
+        data_io.submit_kernel_entry(2, connect).unwrap();
         assert_eq!(wait_for_completion(&mut data_io).result, -libc::EACCES);
     }
 
@@ -383,12 +481,20 @@ mod tests {
         let mut data_io = UringDataIo::new(8).unwrap();
         let nop = opcode::Nop::new()
             .build()
-            .flags(squeue::Flags::ASYNC)
+            .flags(squeue::Flags::IO_DRAIN)
             .user_data(1);
-        data_io.submit_kernel_entry(1, &nop).unwrap();
+        data_io.submit_kernel_entry(1, nop).unwrap();
         assert_eq!(wait_for_completion(&mut data_io).result, -libc::EACCES);
 
-        data_io.submit_nop(2).unwrap();
+        // IOSQE_ASYNC is allowed for reissued operations.
+        let async_nop = opcode::Nop::new()
+            .build()
+            .flags(squeue::Flags::ASYNC)
+            .user_data(2);
+        data_io.submit_kernel_entry(2, async_nop).unwrap();
+        assert_eq!(wait_for_completion(&mut data_io).result, 0);
+
+        data_io.submit_nop(3).unwrap();
         assert_eq!(wait_for_completion(&mut data_io).result, 0);
     }
 
@@ -496,15 +602,89 @@ mod tests {
     fn uring_rejects_duplicate_user_data_while_pending() {
         let mut data_io = UringDataIo::new(1).unwrap();
         // Simulate an operation that could not be published to the ring yet.
-        data_io.pending.push_back((
-            0,
-            AsyncIoOperation::read_to_vec(0, OwnedIoBuffer::from_vec(vec![0; 512]), 7),
-        ));
+        data_io.pending.push_back(super::PendingOperation {
+            user_data: 7,
+            kind: super::PendingKind::Data {
+                fd: 0,
+                op: AsyncIoOperation::read_to_vec(0, OwnedIoBuffer::from_vec(vec![0; 512]), 7),
+                reissue: false,
+            },
+        });
 
         let duplicate = AsyncIoOperation::read_to_vec(0, OwnedIoBuffer::from_vec(vec![0; 512]), 7);
         assert_eq!(
             data_io.submit_batch(0, vec![duplicate]).unwrap_err().kind(),
             io::ErrorKind::AlreadyExists
         );
+    }
+
+    #[test]
+    fn uring_publishes_queued_metadata_operation() {
+        let mut data_io = UringDataIo::new(1).unwrap();
+        data_io.pending.push_back(super::PendingOperation {
+            user_data: 5,
+            kind: super::PendingKind::Kernel {
+                entry: opcode::Nop::new().build().user_data(5),
+            },
+        });
+
+        let completion = wait_for_completion(&mut data_io);
+        assert_eq!(completion.user_data, 5);
+        assert_eq!(completion.result, 0);
+        assert!(data_io.in_flight.is_empty());
+        assert!(data_io.pending.is_empty());
+    }
+
+    #[test]
+    fn uring_reissues_operation_after_eagain() {
+        let (reader, mut writer) = io::pipe().unwrap();
+        let mut data_io = UringDataIo::new(8).unwrap();
+        // RWF_NOWAIT makes a read of an empty pipe complete with -EAGAIN.
+        data_io.rw_flags = libc::RWF_NOWAIT;
+
+        data_io
+            .submit_operation(
+                reader.as_raw_fd(),
+                AsyncIoOperation::read_to_vec(0, OwnedIoBuffer::from_vec(vec![0; 4]), 9),
+            )
+            .unwrap();
+        // Written after the first attempt, so only the reissue can read it.
+        writer.write_all(b"data").unwrap();
+
+        let completion = wait_for_completion(&mut data_io);
+        if completion.result == -libc::EOPNOTSUPP {
+            eprintln!("skipping: RWF_NOWAIT not supported on pipes");
+            return;
+        }
+        assert_eq!(completion.user_data, 9);
+        assert_eq!(completion.result, 4);
+        assert_eq!(completion.buffer.unwrap().as_slice(), b"data");
+        assert!(data_io.in_flight.is_empty());
+        assert!(data_io.pending.is_empty());
+    }
+
+    #[test]
+    fn uring_delivers_eagain_after_reissue() {
+        let (reader, _writer) = io::pipe().unwrap();
+        let mut data_io = UringDataIo::new(8).unwrap();
+        data_io.rw_flags = libc::RWF_NOWAIT;
+
+        data_io
+            .submit_operation(
+                reader.as_raw_fd(),
+                AsyncIoOperation::read_to_vec(0, OwnedIoBuffer::from_vec(vec![0; 4]), 3),
+            )
+            .unwrap();
+
+        let completion = wait_for_completion(&mut data_io);
+        if completion.result == -libc::EOPNOTSUPP {
+            eprintln!("skipping: RWF_NOWAIT not supported on pipes");
+            return;
+        }
+        assert_eq!(completion.user_data, 3);
+        assert_eq!(completion.result, -libc::EAGAIN);
+        assert!(completion.buffer.is_some());
+        assert!(data_io.in_flight.is_empty());
+        assert!(data_io.pending.is_empty());
     }
 }
