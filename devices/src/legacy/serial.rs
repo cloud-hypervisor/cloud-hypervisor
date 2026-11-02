@@ -212,6 +212,16 @@ impl Serial {
         }
     }
 
+    fn highest_pending_interrupt(&self) -> u8 {
+        if self.interrupt_identification & IIR_RECV_BIT != 0 && self.is_recv_intr_enabled() {
+            IIR_RECV_BIT
+        } else if self.interrupt_identification & IIR_THR_BIT != 0 && self.is_thr_intr_enabled() {
+            IIR_THR_BIT
+        } else {
+            IIR_NONE_BIT
+        }
+    }
+
     fn raise_thr_empty_interrupt(&mut self) -> Result<()> {
         let pending = (self.interrupt_identification & IIR_THR_BIT) != 0;
         if self.is_thr_intr_enabled() && !pending {
@@ -232,10 +242,6 @@ impl Serial {
 
     fn trigger_interrupt(&mut self) -> io::Result<()> {
         self.interrupt.trigger(0)
-    }
-
-    fn iir_reset(&mut self) {
-        self.interrupt_identification = DEFAULT_INTERRUPT_IDENTIFICATION;
     }
 
     fn handle_write(&mut self, offset: u8, v: u8) -> Result<()> {
@@ -320,9 +326,11 @@ impl BusDevice for Serial {
                 if self.is_recv_intr_enabled() && !self.in_buffer.is_empty() {
                     self.add_intr_bit(IIR_RECV_BIT);
                 }
-                let v = self.interrupt_identification | IIR_FIFO_BITS;
-                self.iir_reset();
-                v
+                let highest_pending_interrupt = self.highest_pending_interrupt();
+                if highest_pending_interrupt != IIR_NONE_BIT {
+                    self.del_intr_bit(highest_pending_interrupt);
+                }
+                highest_pending_interrupt | IIR_FIFO_BITS
             }
             LCR => self.line_control,
             MCR => self.modem_control,
@@ -602,6 +610,31 @@ mod tests {
         let mut data = [0u8];
         serial.read(0, IIR as u64, &mut data[..]);
         assert_eq!(data[0] & !IIR_FIFO_BITS, IIR_THR_BIT);
+    }
+
+    #[test]
+    fn serial_iir_reports_highest_priority() {
+        let intr_evt = EventFd::new(EFD_NONBLOCK).unwrap();
+        let mut serial = Serial::new_sink(
+            String::from(SERIAL_NAME),
+            Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
+            None,
+        );
+
+        // Received data and THR empty pending at the same time.
+        serial.write(0, IER as u64, &[IER_RECV_BIT | IER_THR_BIT]);
+        serial.queue_input_bytes(b"a").unwrap();
+
+        // IIR reports received data first and leaves THR empty pending.
+        let mut data = [0u8];
+        serial.read(0, IIR as u64, &mut data[..]);
+        assert_eq!(data[0] & !IIR_FIFO_BITS, IIR_RECV_BIT);
+        serial.read(0, DATA as u64, &mut data[..]);
+        assert_eq!(data[0], b'a');
+        serial.read(0, IIR as u64, &mut data[..]);
+        assert_eq!(data[0] & !IIR_FIFO_BITS, IIR_THR_BIT);
+        serial.read(0, IIR as u64, &mut data[..]);
+        assert_eq!(data[0] & !IIR_FIFO_BITS, IIR_NONE_BIT);
     }
 
     #[test]
