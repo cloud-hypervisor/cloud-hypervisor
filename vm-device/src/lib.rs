@@ -13,7 +13,7 @@ mod bus;
 pub mod dma_mapping;
 pub mod interrupt;
 
-pub use self::bus::{Bus, BusDevice, BusDeviceSync, Error as BusError};
+pub use self::bus::{BUS_UNASSIGNED_READ_VALUE, Bus, BusDevice, BusDeviceSync, Error as BusError};
 
 #[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
 pub enum PciBarType {

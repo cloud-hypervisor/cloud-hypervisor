@@ -15,7 +15,7 @@ use std::{convert, io, ptr, result};
 use thiserror::Error;
 
 const BUS_DEFAULT_READ_VALUE: u8 = 0x00;
-const BUS_UNASSIGNED_READ_VALUE: u8 = 0xff;
+pub const BUS_UNASSIGNED_READ_VALUE: u8 = 0xff;
 
 /// Trait for devices that respond to reads or writes in an arbitrary address space.
 ///
