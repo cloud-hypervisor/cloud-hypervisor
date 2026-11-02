@@ -418,10 +418,10 @@ impl VmReceiveMigrationData {
             .convert::<TupleList<String, u64>>("vfio_fds")
             .map_err(VmReceiveMigrationConfigError::ParseError)?
             .map(|v| {
-                v.0.iter()
+                v.0.into_iter()
                     .map(|Tuple(id, fd)| RestoredVfioConfig {
-                        id: id.clone(),
-                        fd: Some(*fd as RawFd),
+                        id,
+                        fd: Some(fd as RawFd),
                     })
                     .collect()
             });
@@ -433,11 +433,8 @@ impl VmReceiveMigrationData {
             .convert::<TupleList<String, u32>>("zone_updates")
             .map_err(VmReceiveMigrationConfigError::ParseError)?
             .map_or(Vec::new(), |v| {
-                v.0.iter()
-                    .map(|Tuple(id, host_numa_node)| VmMemoryZoneUpdateData {
-                        id: id.clone(),
-                        host_numa_node: *host_numa_node,
-                    })
+                v.0.into_iter()
+                    .map(|Tuple(id, host_numa_node)| VmMemoryZoneUpdateData { id, host_numa_node })
                     .collect()
             });
 
