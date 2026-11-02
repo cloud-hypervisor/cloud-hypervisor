@@ -812,7 +812,7 @@ impl Block {
                 let disk_size = disk_image
                     .logical_size()
                     .map_err(|e| io::Error::other(format!("Failed getting disk size: {e}")))?;
-                if disk_size % SECTOR_SIZE != 0 {
+                if !disk_size.is_multiple_of(SECTOR_SIZE) {
                     warn!(
                         "Disk size {disk_size} is not a multiple of sector size {SECTOR_SIZE}; \
                  the remainder will not be visible to the guest."
