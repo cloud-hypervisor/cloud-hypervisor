@@ -2397,7 +2397,7 @@ impl MemoryManager {
         hugepage_size: Option<u64>,
     ) -> Result<FileOffset, Error> {
         let fd = Self::memfd_create(
-            &ffi::CString::new("ch_ram").unwrap(),
+            c"ch_ram",
             libc::MFD_CLOEXEC
                 | libc::MFD_ALLOW_SEALING
                 | if hugepages {
