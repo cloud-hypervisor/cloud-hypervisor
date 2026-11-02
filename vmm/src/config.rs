@@ -3199,11 +3199,11 @@ impl RestoreConfig {
             .convert::<TupleList<String, Vec<u64>>>("net_fds")
             .map_err(Error::ParseRestore)?
             .map(|v| {
-                v.0.iter()
+                v.0.into_iter()
                     .map(|Tuple(id, fds)| RestoredNetConfig {
-                        id: id.clone(),
+                        id,
                         num_fds: fds.len(),
-                        fds: Some(fds.iter().map(|e| *e as RawFd).collect()),
+                        fds: Some(fds.into_iter().map(|e| e as RawFd).collect()),
                     })
                     .collect()
             });
@@ -3211,10 +3211,10 @@ impl RestoreConfig {
             .convert::<TupleList<String, u64>>("vfio_fds")
             .map_err(Error::ParseRestore)?
             .map(|v| {
-                v.0.iter()
+                v.0.into_iter()
                     .map(|Tuple(id, fd)| RestoredVfioConfig {
-                        id: id.clone(),
-                        fd: Some(*fd as RawFd),
+                        id,
+                        fd: Some(fd as RawFd),
                     })
                     .collect()
             });
@@ -3231,11 +3231,8 @@ impl RestoreConfig {
             .convert::<TupleList<String, u32>>("zone_updates")
             .map_err(Error::ParseRestore)?
             .map_or(Vec::new(), |v| {
-                v.0.iter()
-                    .map(|Tuple(id, host_numa_node)| VmMemoryZoneUpdateData {
-                        id: id.clone(),
-                        host_numa_node: *host_numa_node,
-                    })
+                v.0.into_iter()
+                    .map(|Tuple(id, host_numa_node)| VmMemoryZoneUpdateData { id, host_numa_node })
                     .collect()
             });
 
