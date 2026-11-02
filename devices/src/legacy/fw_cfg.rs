@@ -29,7 +29,7 @@ use bitfield_struct::bitfield;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::bootparam::boot_params;
 use log::{debug, error};
-use vm_device::BusDevice;
+use vm_device::{BUS_UNASSIGNED_READ_VALUE, BusDevice};
 #[cfg(target_arch = "x86_64")]
 use vm_memory::ByteValued;
 use vm_memory::bitmap::AtomicBitmap;
@@ -756,11 +756,16 @@ impl BusDevice for FwCfg {
                 let addr_lo = (addr & 0xffff_ffff) as u32;
                 data.copy_from_slice(&addr_lo.to_be_bytes());
             }
-            _ => {
+            (offset, _) => {
+                // Handle any address that cannot be associated with the fw_cfg protocol or reads of
+                // invalid size as unassigned read.
                 debug!(
-                    "fw_cfg: read from unknown offset {offset:#x}: {:#x} bytes.",
-                    data.len()
+                    "fw_cfg: Unsupported {:#x}-byte read from unmapped address: base={:#x} + offset={:#x}.",
+                    data.len(),
+                    FW_CFG_ADDRESS_BASE,
+                    offset
                 );
+                data.fill(BUS_UNASSIGNED_READ_VALUE);
             }
         }
     }
@@ -811,6 +816,7 @@ impl BusDevice for FwCfg {
 mod tests {
     use std::ffi::CString;
     use std::io::Write;
+    use std::ops::RangeInclusive;
 
     use vmm_sys_util::tempfile::TempFile;
 
@@ -1244,5 +1250,35 @@ mod tests {
         assert_eq!(run_dma(&mut fw_cfg, &mem, skip, 0), 0);
         assert_eq!(run_dma(&mut fw_cfg, &mem, skip, 2), 0);
         assert_eq!(fw_cfg.data_offset, 6);
+    }
+
+    #[test]
+    fn test_invalid_reads_behave_as_unassigned_reads() {
+        // QEMU uses two separately mapped regions instead of a single contiguous one as CH does.
+        #[cfg(target_arch = "x86_64")]
+        const QEMU_IO_REGISTER_REGION: RangeInclusive<u64> =
+            FW_CFG_SELECTOR_OFFSET..=FW_CFG_DATA_OFFSET;
+        #[cfg(target_arch = "aarch64")]
+        const QEMU_IO_REGISTER_REGION: RangeInclusive<u64> =
+            FW_CFG_DATA_OFFSET..=FW_CFG_SELECTOR_OFFSET + 1;
+        const QEMU_DMA_REGISTER_REGION: RangeInclusive<u64> =
+            FW_CFG_DMA_HI_OFFSET..=FW_CFG_DMA_LO_OFFSET + 3;
+
+        let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(GuestMemoryMmap::new()));
+        // QEMU maps the fw_cfg SELECTOR/DATA and DMA registers separately, leaving a gap between
+        // them. CH maps both in one contiguous region, so reads from this gap must be treated
+        // as unassigned. The addresses below are invalid reads chosen from that gap.
+        let invalid_addresses = [
+            QEMU_DMA_REGISTER_REGION.start() - 1, /* End of the QEMU mapping hole. */
+            QEMU_DMA_REGISTER_REGION.end() + 1,   /* First address succeeding the mapped region */
+            QEMU_IO_REGISTER_REGION.end() + 1,    /* Start of the QEMU mapping hole. */
+        ];
+
+        for address in invalid_addresses {
+            let mut buff = [0xCD; 1];
+            fw_cfg.read(0, address, &mut buff);
+            assert_eq!(fw_cfg.data_offset, 0);
+            assert_eq!(buff, [BUS_UNASSIGNED_READ_VALUE], "Address={address:#x}");
+        }
     }
 }
