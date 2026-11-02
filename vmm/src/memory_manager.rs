@@ -1204,11 +1204,10 @@ impl MemoryManager {
             saved_regions.ranges().len()
         );
 
-        if saved_regions
-            .ranges()
-            .iter()
-            .any(|range| range.gpa % base_page_size != 0 || range.length % base_page_size != 0)
-        {
+        if saved_regions.ranges().iter().any(|range| {
+            !range.gpa.is_multiple_of(base_page_size)
+                || !range.length.is_multiple_of(base_page_size)
+        }) {
             return Err(UffdError::UnalignedRanges.into());
         }
 

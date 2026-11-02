@@ -3532,7 +3532,7 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::PmemFileSetLen)?
         };
 
-        if size % 0x20_0000 != 0 {
+        if !size.is_multiple_of(0x20_0000) {
             return Err(DeviceManagerError::PmemSizeNotAligned);
         }
 

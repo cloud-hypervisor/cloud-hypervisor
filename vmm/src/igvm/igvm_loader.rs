@@ -537,7 +537,7 @@ pub(crate) fn load_igvm(
                 parameter_area_index,
                 initial_data,
             } => {
-                debug_assert!(number_of_bytes % HV_PAGE_SIZE == 0);
+                debug_assert!(number_of_bytes.is_multiple_of(HV_PAGE_SIZE));
                 debug_assert!(
                     initial_data.is_empty() || initial_data.len() as u64 == *number_of_bytes
                 );
@@ -690,7 +690,7 @@ pub(crate) fn load_igvm(
                 compatibility_mask: _,
                 parameter_area_index,
             }) => {
-                debug_assert!(gpa % HV_PAGE_SIZE == 0);
+                debug_assert!(gpa.is_multiple_of(HV_PAGE_SIZE));
 
                 let area = parameter_areas
                     .get_mut(parameter_area_index)
