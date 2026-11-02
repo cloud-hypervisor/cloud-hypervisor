@@ -17,7 +17,7 @@ use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, Mutex};
 use std::time::{Duration, Instant};
 use std::{io, mem, result, thread};
 
@@ -666,7 +666,7 @@ impl BlockEpollHandler {
 
     fn run(
         &mut self,
-        paused: &AtomicBool,
+        paused: &Mutex<bool>,
         paused_sync: &Barrier,
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
@@ -913,7 +913,7 @@ impl Block {
                 paused_sync: Some(Arc::new(Barrier::new(num_queues as usize + 1))),
                 queue_sizes: vec![queue_size; num_queues as usize],
                 min_queues: 1,
-                paused: Arc::new(AtomicBool::new(paused)),
+                paused: Arc::new(Mutex::new(paused)),
                 ..Default::default()
             },
             id,
@@ -1088,7 +1088,7 @@ impl Block {
 
         let nsectors = new_size / SECTOR_SIZE;
 
-        let was_paused = self.common.paused.load(Ordering::SeqCst);
+        let was_paused = *self.common.paused.lock().unwrap();
         self.common.pause().map_err(Error::Pause)?;
 
         self.disk_nsectors.store(nsectors, Ordering::SeqCst);

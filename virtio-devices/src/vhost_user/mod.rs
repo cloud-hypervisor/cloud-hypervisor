@@ -273,7 +273,7 @@ pub struct VhostUserEpollHandler<S: VhostUserFrontendReqHandler> {
 impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
     pub fn run(
         &mut self,
-        paused: &AtomicBool,
+        paused: &Mutex<bool>,
         paused_sync: &Barrier,
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;

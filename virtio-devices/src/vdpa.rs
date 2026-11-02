@@ -4,7 +4,6 @@
 //
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{io, result};
 
@@ -191,7 +190,7 @@ impl Vdpa {
                 avail_features,
                 acked_features,
                 min_queues: num_queues,
-                paused: Arc::new(AtomicBool::new(paused)),
+                paused: Arc::new(Mutex::new(paused)),
                 ..Default::default()
             },
             id,
@@ -491,7 +490,7 @@ impl Pausable for Vdpa {
     }
 
     fn resume(&mut self) -> result::Result<(), MigratableError> {
-        if !self.common.paused.load(Ordering::SeqCst) {
+        if !*self.common.paused.lock().unwrap() {
             return Ok(());
         }
 

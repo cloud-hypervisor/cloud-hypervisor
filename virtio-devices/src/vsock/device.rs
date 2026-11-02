@@ -10,8 +10,7 @@
 
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Barrier, RwLock};
+use std::sync::{Arc, Barrier, Mutex, RwLock};
 use std::{fs, io, result};
 
 use anyhow::anyhow;
@@ -204,7 +203,7 @@ where
 
     fn run(
         &mut self,
-        paused: &AtomicBool,
+        paused: &Mutex<bool>,
         paused_sync: &Barrier,
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
@@ -396,7 +395,7 @@ where
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 queue_sizes: QUEUE_SIZES.to_vec(),
                 min_queues: NUM_QUEUES,
-                paused: Arc::new(AtomicBool::new(paused)),
+                paused: Arc::new(Mutex::new(paused)),
                 ..Default::default()
             },
             id,

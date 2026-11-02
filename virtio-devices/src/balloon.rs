@@ -17,7 +17,6 @@
 use std::io::{self, Write};
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
-use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Barrier, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -672,7 +671,7 @@ impl BalloonEpollHandler {
 
     fn run(
         &mut self,
-        paused: &AtomicBool,
+        paused: &Mutex<bool>,
         paused_sync: &Barrier,
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
@@ -881,7 +880,7 @@ impl Balloon {
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 queue_sizes,
                 min_queues: MIN_NUM_QUEUES,
-                paused: Arc::new(AtomicBool::new(paused)),
+                paused: Arc::new(Mutex::new(paused)),
                 ..Default::default()
             },
             id,

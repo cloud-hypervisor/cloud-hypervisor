@@ -165,7 +165,7 @@ since the backend only supports {backend_num_queues}\n",
                     queue_sizes: request_queue_sizes,
                     paused_sync: Some(Arc::new(Barrier::new(2))),
                     min_queues: 1,
-                    paused: Arc::new(AtomicBool::new(paused)),
+                    paused: Arc::new(Mutex::new(paused)),
                     ..Default::default()
                 },
                 vu: Some(Arc::new(Mutex::new(vu))),

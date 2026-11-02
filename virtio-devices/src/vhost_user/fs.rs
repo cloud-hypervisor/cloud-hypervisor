@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::result;
-use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
 
 use event_monitor::event;
@@ -192,7 +191,7 @@ impl Fs {
                     queue_sizes: vec![queue_size; num_queues as usize],
                     paused_sync: Some(Arc::new(Barrier::new(2))),
                     min_queues: 1,
-                    paused: Arc::new(AtomicBool::new(paused)),
+                    paused: Arc::new(Mutex::new(paused)),
                     ..Default::default()
                 },
                 vu: Some(Arc::new(Mutex::new(vu))),

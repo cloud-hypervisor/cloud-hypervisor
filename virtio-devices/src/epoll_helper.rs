@@ -10,8 +10,7 @@
 
 use std::fs::File;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
-use std::sync::Barrier;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Barrier, Mutex};
 use std::{io, result, thread};
 
 use log::debug;
@@ -150,7 +149,7 @@ impl EpollHelper {
 
     pub fn run(
         &mut self,
-        paused: &AtomicBool,
+        paused: &Mutex<bool>,
         paused_sync: &Barrier,
         handler: &mut dyn EpollHelperHandler,
     ) -> result::Result<(), EpollHelperError> {
@@ -160,7 +159,7 @@ impl EpollHelper {
     #[cfg(not(fuzzing))]
     pub fn run_with_timeout(
         &mut self,
-        paused: &AtomicBool,
+        paused: &Mutex<bool>,
         paused_sync: &Barrier,
         handler: &mut dyn EpollHelperHandler,
         timeout: i32,
@@ -173,7 +172,7 @@ impl EpollHelper {
         // to be in a paused state. This is helpful for the restore code path
         // as the device thread should not start processing anything before the
         // device has been resumed.
-        while paused.load(Ordering::SeqCst) {
+        while *paused.lock().unwrap() {
             thread::park();
         }
 
@@ -225,7 +224,12 @@ impl EpollHelper {
                         // We loop here to handle spurious park() returns.
                         // Until we have not resumed, the paused boolean will
                         // be true.
-                        while paused.load(Ordering::SeqCst) {
+                        loop {
+                            let guard = paused.lock().unwrap();
+                            if !*guard {
+                                break;
+                            }
+                            drop(guard);
                             thread::park();
                         }
 
@@ -247,7 +251,7 @@ impl EpollHelper {
     // and return when no epoll events are active
     pub fn run_with_timeout(
         &mut self,
-        paused: &AtomicBool,
+        paused: &Mutex<bool>,
         paused_sync: &Barrier,
         handler: &mut dyn EpollHelperHandler,
         _timeout: i32,
@@ -306,7 +310,12 @@ impl EpollHelper {
                         // We loop here to handle spurious park() returns.
                         // Until we have not resumed, the paused boolean will
                         // be true.
-                        while paused.load(Ordering::SeqCst) {
+                        loop {
+                            let guard = paused.lock().unwrap();
+                            if !*guard {
+                                break;
+                            }
+                            drop(guard);
                             thread::park();
                         }
 

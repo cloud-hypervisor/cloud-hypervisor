@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::mem::offset_of;
-use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
 use std::{io, result};
 
@@ -214,7 +213,7 @@ impl Blk {
                     acked_features,
                     paused_sync: Some(Arc::new(Barrier::new(2))),
                     min_queues: DEFAULT_QUEUE_NUMBER,
-                    paused: Arc::new(AtomicBool::new(paused)),
+                    paused: Arc::new(Mutex::new(paused)),
                     ..Default::default()
                 },
                 vu: Some(Arc::new(Mutex::new(vu))),

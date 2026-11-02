@@ -9,8 +9,8 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::num::Wrapping;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::sync::{Arc, Barrier};
+use std::sync::atomic::AtomicU8;
+use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result, thread};
 
 use anyhow::anyhow;
@@ -223,13 +223,13 @@ pub struct WorkerThreads {
     /// shared kill event, a single write wakes all of them.
     kill_evt: EventFd,
     // true if the device is paused.
-    paused: Arc<AtomicBool>,
+    paused: Arc<Mutex<bool>>,
     // The running worker thread's handles.
     threads: Vec<thread::JoinHandle<()>>,
 }
 
 impl WorkerThreads {
-    fn new(kill_evt: EventFd, paused: Arc<AtomicBool>) -> Self {
+    fn new(kill_evt: EventFd, paused: Arc<Mutex<bool>>) -> Self {
         WorkerThreads {
             kill_evt,
             paused,
@@ -260,7 +260,7 @@ impl Drop for WorkerThreads {
     fn drop(&mut self) {
         // Signal the workers to exit, wake any parked so they observe it, then join.
         let _ = self.kill_evt.write(1);
-        self.paused.store(false, Ordering::SeqCst);
+        *self.paused.lock().unwrap() = false;
         self.unpark();
         for t in self.threads.drain(..) {
             if let Err(e) = t.join() {
@@ -277,7 +277,7 @@ pub struct VirtioCommon {
     pub acked_features: u64,
     pub interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     pub pause_evt: Option<EventFd>,
-    pub paused: Arc<AtomicBool>,
+    pub paused: Arc<Mutex<bool>>,
     pub paused_sync: Option<Arc<Barrier>>,
     pub workers: Option<WorkerThreads>,
     pub queue_sizes: Vec<u16>,
@@ -370,7 +370,7 @@ impl VirtioCommon {
 
         // Clear paused explicitly; the workers' Drop does so too, but only
         // when they exist, and reset may run before activate().
-        self.paused.store(false, Ordering::SeqCst);
+        *self.paused.lock().unwrap() = false;
 
         // Dropping the workers signals kill_evt, unparks any thread parked
         // for migration, and joins them.
@@ -475,7 +475,13 @@ impl Pausable for VirtioCommon {
 
         // If already paused, return early to avoid deadlock waiting on barrier
         // for worker threads that are already parked.
-        if self.paused.swap(true, Ordering::SeqCst) {
+        let was_paused = {
+            let mut paused = self.paused.lock().unwrap();
+            let was = *paused;
+            *paused = true;
+            was
+        };
+        if was_paused {
             return Ok(());
         }
 
@@ -500,7 +506,7 @@ impl Pausable for VirtioCommon {
             "Resuming virtio-{}",
             VirtioDeviceType::from(self.device_type)
         );
-        self.paused.store(false, Ordering::SeqCst);
+        *self.paused.lock().unwrap() = false;
         if let Some(workers) = &self.workers {
             workers.unpark();
         }
@@ -721,12 +727,12 @@ mod tests {
             pause_evt: Some(EventFd::new(EFD_NONBLOCK).unwrap()),
             ..Default::default()
         };
-        common.paused.store(true, Ordering::SeqCst);
+        *common.paused.lock().unwrap() = true;
         assert!(common.workers.is_none());
 
         common.reset();
 
-        assert!(!common.paused.load(Ordering::SeqCst));
+        assert!(!*common.paused.lock().unwrap());
         assert!(common.pause_evt.is_none());
     }
 }

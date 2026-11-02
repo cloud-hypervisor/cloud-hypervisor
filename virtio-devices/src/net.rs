@@ -13,7 +13,7 @@ use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU64, Ordering};
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
@@ -85,7 +85,7 @@ impl NetCtrlEpollHandler {
 
     pub fn run_ctrl(
         &mut self,
-        paused: &AtomicBool,
+        paused: &Mutex<bool>,
         paused_sync: &Barrier,
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
@@ -324,7 +324,7 @@ impl NetEpollHandler {
 
     fn run(
         &mut self,
-        paused: &AtomicBool,
+        paused: &Mutex<bool>,
         paused_sync: &Barrier,
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
@@ -634,7 +634,7 @@ impl Net {
                 queue_sizes,
                 paused_sync: Some(Arc::new(Barrier::new((num_queues / 2) as usize + 1))),
                 min_queues: 2,
-                paused: Arc::new(AtomicBool::new(paused)),
+                paused: Arc::new(Mutex::new(paused)),
                 ..Default::default()
             },
             id,

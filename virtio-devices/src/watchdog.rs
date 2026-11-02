@@ -10,7 +10,6 @@ use std::io::{self, Read};
 #[cfg(fuzzing)]
 use std::mem;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
-use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
 use std::time::Instant;
 use std::{ptr, result};
@@ -128,7 +127,7 @@ impl WatchdogEpollHandler {
 
     fn run(
         &mut self,
-        paused: &AtomicBool,
+        paused: &Mutex<bool>,
         paused_sync: &Barrier,
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
@@ -254,7 +253,7 @@ impl Watchdog {
                 avail_features,
                 acked_features,
                 min_queues: 1,
-                paused: Arc::new(AtomicBool::new(paused)),
+                paused: Arc::new(Mutex::new(paused)),
                 ..Default::default()
             },
             id,
