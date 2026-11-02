@@ -30,8 +30,6 @@ use arch::aarch64::cache::{CacheTopologyInfo, read_cache_topology};
 #[cfg(target_arch = "x86_64")]
 use arch::x86_64::cpu_profile::{CpuProfile, CpuProfileLoadError};
 use arch::{EntryPoint, NumaNodes, layout};
-#[cfg(target_arch = "aarch64")]
-use devices::gic::Gic;
 use devices::interrupt_controller::InterruptController;
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
@@ -1909,8 +1907,7 @@ impl CpuManager {
 
                 madt.append(gicc);
             }
-            let vgic_config = Gic::create_default_config(self.config.boot_vcpus.into())
-                .expect("the GIC was created with this vCPU count");
+            let vgic_config = vgic.lock().unwrap().config();
 
             // GIC Distributor structure. See section 5.2.12.15 in ACPI spec.
             let gicd = GicD {

@@ -1652,9 +1652,12 @@ impl DeviceManager {
     /// Guest address of the vITS GITS_TRANSLATER register.
     #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
     fn vits_doorbell(&self) -> u64 {
-        let vcpus = self.config.lock().unwrap().cpus.boot_vcpus;
-        gic::Gic::create_default_config(vcpus.into())
-            .expect("the GIC was created with this vCPU count")
+        self.interrupt_controller
+            .as_ref()
+            .expect("the GIC was created before PCI devices")
+            .lock()
+            .unwrap()
+            .config()
             .msi_addr
             + 0x1_0040
     }
@@ -1662,9 +1665,13 @@ impl DeviceManager {
     fn get_msi_iova_space(&mut self) -> (u64, u64) {
         #[cfg(target_arch = "aarch64")]
         {
-            let vcpus = self.config.lock().unwrap().cpus.boot_vcpus;
-            let vgic_config = gic::Gic::create_default_config(vcpus.into())
-                .expect("the GIC was created with this vCPU count");
+            let vgic_config = self
+                .interrupt_controller
+                .as_ref()
+                .expect("the GIC was created before PCI devices")
+                .lock()
+                .unwrap()
+                .config();
             (
                 vgic_config.msi_addr,
                 vgic_config.msi_addr + vgic_config.msi_size - 1,
@@ -1825,6 +1832,10 @@ impl DeviceManager {
         &mut self,
         snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<Arc<Mutex<dyn InterruptController>>> {
+        let id = String::from(gic::GIC_SNAPSHOT_ID);
+        let vgic_state =
+            state_from_id(snapshot, id.as_str()).map_err(DeviceManagerError::RestoreGetState)?;
+
         let maintenance_irq = self
             .cpu_manager
             .lock()
@@ -1838,6 +1849,7 @@ impl DeviceManager {
                     as Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
                 Arc::clone(&self.address_manager.vm),
                 maintenance_irq,
+                vgic_state.as_ref(),
             )
             .map_err(DeviceManagerError::CreateInterruptController)?,
         ));
@@ -1845,8 +1857,7 @@ impl DeviceManager {
         self.interrupt_controller = Some(Arc::clone(&interrupt_controller));
 
         // Restore the vGic if this is in the process of restoration
-        let id = String::from(gic::GIC_SNAPSHOT_ID);
-        if let Some(vgic_snapshot) = snapshot_from_id(snapshot, &id) {
+        if vgic_state.is_some() {
             // PMU support is optional. Nothing should be impacted if the PMU initialization failed.
             if self
                 .cpu_manager
@@ -1858,9 +1869,6 @@ impl DeviceManager {
                 info!("Failed to initialize PMU");
             }
 
-            let vgic_state = vgic_snapshot
-                .to_state()
-                .map_err(DeviceManagerError::RestoreGetState)?;
             interrupt_controller
                 .lock()
                 .unwrap()
