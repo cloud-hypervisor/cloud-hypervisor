@@ -3961,7 +3961,7 @@ impl VmConfig {
             let mut used_pci_segments = HashMap::new();
             for numa_node in numa.iter() {
                 numa_node.validate()?;
-                if let Some(memory_zones) = numa_node.memory_zones.clone() {
+                if let Some(memory_zones) = &numa_node.memory_zones {
                     for memory_zone in memory_zones.iter() {
                         if used_numa_node_memory_zones.contains_key(memory_zone) {
                             return Err(ValidationError::MemoryZoneReused(
@@ -3975,7 +3975,7 @@ impl VmConfig {
                     }
                 }
 
-                if let Some(pci_segments) = numa_node.pci_segments.clone() {
+                if let Some(pci_segments) = &numa_node.pci_segments {
                     for pci_segment in pci_segments.iter() {
                         if *pci_segment >= num_pci_segments {
                             return Err(ValidationError::InvalidPciSegment(*pci_segment));
