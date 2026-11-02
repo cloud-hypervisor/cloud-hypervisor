@@ -19,7 +19,7 @@ pub mod aligned_file;
 pub mod formats;
 mod sparse;
 #[cfg(test)]
-pub(crate) mod test_util;
+pub mod test_util;
 use std::fmt::{self, Debug};
 use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom};
