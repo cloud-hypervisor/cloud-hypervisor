@@ -4333,12 +4333,10 @@ impl VmConfig {
         }
 
         // Remove if vsock device
-        if let Some(vsock) = self.vsock.as_ref()
-            && vsock.pci_common.id.as_deref() == Some(id)
-        {
-            self.vsock = None;
-            removed = true;
-        }
+        removed |= self
+            .vsock
+            .take_if(|vsock| vsock.pci_common.id.as_deref() == Some(id))
+            .is_some();
 
         removed
     }
@@ -5853,6 +5851,26 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             }
         );
         Ok(())
+    }
+
+    #[test]
+    fn test_remove_vsock_device() {
+        let mut config: VmConfig = serde_json::from_str("{}").unwrap();
+        assert!(!config.remove_device("vsock0"));
+
+        config.vsock = Some(VsockConfig::parse("cid=3,socket=/tmp/vsock,id=vsock0").unwrap());
+        assert!(!config.remove_device("vsock1"));
+        assert_eq!(
+            config.vsock.as_ref().unwrap().pci_common.id.as_deref(),
+            Some("vsock0")
+        );
+        assert!(config.remove_device("vsock0"));
+        assert!(config.vsock.is_none());
+        assert!(!config.remove_device("vsock0"));
+
+        config.vsock = Some(VsockConfig::parse("cid=3,socket=/tmp/vsock").unwrap());
+        assert!(!config.remove_device("vsock0"));
+        assert!(config.vsock.is_some());
     }
 
     #[test]
