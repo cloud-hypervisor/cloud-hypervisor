@@ -4282,63 +4282,62 @@ impl VmConfig {
         // Remove if VFIO device
         if let Some(devices) = self.devices.as_mut() {
             let len = devices.len();
-            devices.retain(|dev| dev.pci_common.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            devices.retain(|dev| dev.pci_common.id.as_deref() != Some(id));
             removed |= devices.len() != len;
         }
 
         // Remove if VFIO user device
         if let Some(user_devices) = self.user_devices.as_mut() {
             let len = user_devices.len();
-            user_devices.retain(|dev| dev.pci_common.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            user_devices.retain(|dev| dev.pci_common.id.as_deref() != Some(id));
             removed |= user_devices.len() != len;
         }
 
         // Remove if disk device
         if let Some(disks) = self.disks.as_mut() {
             let len = disks.len();
-            disks.retain(|dev| dev.pci_common.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            disks.retain(|dev| dev.pci_common.id.as_deref() != Some(id));
             removed |= disks.len() != len;
         }
 
         // Remove if fs device
         if let Some(fs) = self.fs.as_mut() {
             let len = fs.len();
-            fs.retain(|dev| dev.pci_common.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            fs.retain(|dev| dev.pci_common.id.as_deref() != Some(id));
             removed |= fs.len() != len;
         }
 
         // Remove if generic vhost-user device
         if let Some(generic_vhost_user) = self.generic_vhost_user.as_mut() {
             let len = generic_vhost_user.len();
-            generic_vhost_user
-                .retain(|dev| dev.pci_common.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            generic_vhost_user.retain(|dev| dev.pci_common.id.as_deref() != Some(id));
             removed |= generic_vhost_user.len() != len;
         }
 
         // Remove if net device
         if let Some(net) = self.net.as_mut() {
             let len = net.len();
-            net.retain(|dev| dev.pci_common.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            net.retain(|dev| dev.pci_common.id.as_deref() != Some(id));
             removed |= net.len() != len;
         }
 
         // Remove if pmem device
         if let Some(pmem) = self.pmem.as_mut() {
             let len = pmem.len();
-            pmem.retain(|dev| dev.pci_common.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            pmem.retain(|dev| dev.pci_common.id.as_deref() != Some(id));
             removed |= pmem.len() != len;
         }
 
         // Remove if vDPA device
         if let Some(vdpa) = self.vdpa.as_mut() {
             let len = vdpa.len();
-            vdpa.retain(|dev| dev.pci_common.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            vdpa.retain(|dev| dev.pci_common.id.as_deref() != Some(id));
             removed |= vdpa.len() != len;
         }
 
         // Remove if vsock device
         if let Some(vsock) = self.vsock.as_ref()
-            && vsock.pci_common.id.as_ref().map(|id| id.as_ref()) == Some(id)
+            && vsock.pci_common.id.as_deref() == Some(id)
         {
             self.vsock = None;
             removed = true;
