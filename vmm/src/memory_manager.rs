@@ -188,13 +188,23 @@ impl MemoryZone {
 pub type MemoryZones = HashMap<String, MemoryZone>;
 
 #[derive(Clone, Serialize, Deserialize)]
-struct GuestRamMapping {
+pub struct GuestRamMapping {
     slot: u32,
     gpa: u64,
     size: u64,
     zone_id: String,
     virtio_mem: bool,
     file_offset: u64,
+}
+
+impl GuestRamMapping {
+    pub fn gpa(&self) -> u64 {
+        self.gpa
+    }
+
+    pub fn set_file_offset(&mut self, file_offset: u64) {
+        self.file_offset = file_offset;
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -2489,8 +2499,11 @@ impl MemoryManager {
         // The duplication of mmap_flags ORing here is unfortunate but it also makes
         // the complexity of the handling clear.
         let fo = if let Some(f) = existing_memory_file {
-            // It must be MAP_SHARED as we wouldn't already have an FD
-            mmap_flags |= libc::MAP_SHARED;
+            mmap_flags |= if shared || hugepages {
+                libc::MAP_SHARED
+            } else {
+                libc::MAP_PRIVATE
+            };
             Some(FileOffset::new(f, file_offset))
         } else if let Some(backing_file) = backing_file {
             if shared {
@@ -3195,6 +3208,40 @@ impl MemoryManager {
         }
     }
 
+    pub(crate) fn memory_cow_diff(&self) -> result::Result<MemoryRangeTable, MigratableError> {
+        let pagemap = PageMap::open()
+            .context("Error opening pagemap for memory diff")
+            .map_err(MigratableError::MigrateSend)?;
+        let ranges = self.memory_range_table(MemoryRangePolicy::Full)?;
+        let memory = self.guest_memory.memory();
+        let mut private = MemoryRangeTable::default();
+        for range in ranges.ranges() {
+            let address = memory
+                .get_host_address(GuestAddress(range.gpa))
+                .context("Error locating guest memory")
+                .map_err(MigratableError::MigrateSend)?;
+            for extent in pagemap
+                .private_ranges_exact(address as u64, range.length)
+                .context("Error reading private page ranges")
+                .map_err(MigratableError::MigrateSend)?
+            {
+                private.push(MemoryRange {
+                    gpa: range.gpa + extent.start,
+                    length: extent.end - extent.start,
+                });
+            }
+        }
+        Ok(private)
+    }
+
+    pub(crate) fn is_memory_cow(&self) -> bool {
+        let memory = self.guest_memory.memory();
+        memory.iter().next().is_some()
+            && memory.iter().all(|region| {
+                region.flags() & libc::MAP_PRIVATE != 0 && region.file_offset().is_some()
+            })
+    }
+
     pub fn memory_slot_fds(&self) -> HashMap<u32, RawFd> {
         let mut memory_slot_fds = HashMap::new();
         for guest_ram_mapping in &self.guest_ram_mappings {
@@ -3686,6 +3733,12 @@ pub struct MemoryManagerSnapshotData {
     next_memory_slot: u32,
     selected_slot: usize,
     next_hotplug_slot: usize,
+}
+
+impl MemoryManagerSnapshotData {
+    pub fn guest_ram_mappings_mut(&mut self) -> &mut [GuestRamMapping] {
+        &mut self.guest_ram_mappings
+    }
 }
 
 impl Snapshottable for MemoryManager {
