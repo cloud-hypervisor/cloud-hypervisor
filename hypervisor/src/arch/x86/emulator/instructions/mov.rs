@@ -183,7 +183,7 @@ impl<T: CpuStateManager> InstructionHandler<T> for Mov_rm32_r32 {
 
 pub(crate) struct Mov_rm64_imm32;
 impl<T: CpuStateManager> InstructionHandler<T> for Mov_rm64_imm32 {
-    mov_rm_imm!(u32);
+    mov_rm_imm!(u64);
 }
 
 pub(crate) struct Mov_rm64_r64;
@@ -360,6 +360,23 @@ mod tests {
             .read_reg(Register::RAX)
             .unwrap();
         assert_eq!(rax, imm32 as u64);
+    }
+
+    #[test]
+    // mov qword ptr [rax],0xffffffff80000000
+    fn test_mov_m64_imm32() {
+        let rax: u64 = 0x100;
+        let ip: u64 = 0x1000;
+        let cpu_id = 0;
+        // A negative immediate, so the upper half must be sign-extended.
+        let insn = [0x48, 0xc7, 0x00, 0x00, 0x00, 0x00, 0x80];
+        let mut vmm = MockVmm::new(ip, vec![(Register::RAX, rax)], None);
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap();
+
+        let mut memory: [u8; 8] = [0; 8];
+        vmm.read_memory(rax, &mut memory).unwrap();
+
+        assert_eq!(u64::from_le_bytes(memory), 0xffff_ffff_8000_0000);
     }
 
     #[test]
