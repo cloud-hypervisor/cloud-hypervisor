@@ -18,7 +18,7 @@ const KVM_DEV_ARM_VGIC_V3_MPIDR_SHIFT: u32 = 32;
 const KVM_DEV_ARM_VGIC_V3_MPIDR_MASK: u64 = 0xffffffff << KVM_DEV_ARM_VGIC_V3_MPIDR_SHIFT as u64;
 
 const ICC_CTLR_EL1_PRIBITS_SHIFT: u32 = 8;
-const ICC_CTLR_EL1_PRIBITS_MASK: u32 = 7 << ICC_CTLR_EL1_PRIBITS_SHIFT;
+const ICC_CTLR_EL1_PRIBITS_MASK: u64 = 7 << ICC_CTLR_EL1_PRIBITS_SHIFT;
 
 macro_rules! arm64_vgic_sys_reg {
     ($name: tt, $op0: tt, $op1: tt, $crn: tt, $crm: tt, $op2: expr) => {
@@ -81,7 +81,7 @@ static VGIC_ICC_REGS: &[u64] = &[
     SYS_ICC_AP1R3_EL1,
 ];
 
-fn icc_attr_set(gic: &DeviceFd, offset: u64, typer: u64, val: u32) -> Result<()> {
+fn icc_attr_set(gic: &DeviceFd, offset: u64, typer: u64, val: u64) -> Result<()> {
     let gic_icc_attr = kvm_device_attr {
         group: KVM_DEV_ARM_VGIC_GRP_CPU_SYSREGS,
         attr: ((typer & KVM_DEV_ARM_VGIC_V3_MPIDR_MASK) | offset), // this needs the mpidr
@@ -96,7 +96,7 @@ fn icc_attr_set(gic: &DeviceFd, offset: u64, typer: u64, val: u32) -> Result<()>
     Ok(())
 }
 
-fn icc_attr_get(gic: &DeviceFd, offset: u64, typer: u64) -> Result<u32> {
+fn icc_attr_get(gic: &DeviceFd, offset: u64, typer: u64) -> Result<u64> {
     let mut val = 0;
 
     let mut gic_icc_attr = kvm_device_attr {
@@ -106,7 +106,8 @@ fn icc_attr_get(gic: &DeviceFd, offset: u64, typer: u64) -> Result<u32> {
         flags: 0,
     };
 
-    // SAFETY: gic_icc_attr.addr is safe to write to.
+    // SAFETY: gic_icc_attr.addr points to a writable u64, as required by
+    // KVM_DEV_ARM_VGIC_GRP_CPU_SYSREGS, and remains valid during the ioctl.
     unsafe { gic.get_device_attr(&mut gic_icc_attr) }.map_err(|e| {
         Error::GetDeviceAttribute(HypervisorDeviceError::GetDeviceAttribute(e.into()))
     })?;
@@ -115,8 +116,8 @@ fn icc_attr_get(gic: &DeviceFd, offset: u64, typer: u64) -> Result<u32> {
 }
 
 /// Get ICC registers.
-pub(super) fn get_icc_regs(gic: &DeviceFd, gicr_typer: &[u64]) -> Result<Vec<u32>> {
-    let mut state: Vec<u32> = Vec::new();
+pub(super) fn get_icc_regs(gic: &DeviceFd, gicr_typer: &[u64]) -> Result<Vec<u64>> {
+    let mut state: Vec<u64> = Vec::new();
     // We need this for the ICC_AP<m>R<n>_EL1 registers.
     let mut num_priority_bits = 0;
 
@@ -164,7 +165,7 @@ pub(super) fn get_icc_regs(gic: &DeviceFd, gicr_typer: &[u64]) -> Result<Vec<u32
 }
 
 /// Set ICC registers.
-pub(super) fn set_icc_regs(gic: &DeviceFd, gicr_typer: &[u64], state: &[u32]) -> Result<()> {
+pub(super) fn set_icc_regs(gic: &DeviceFd, gicr_typer: &[u64], state: &[u64]) -> Result<()> {
     let mut num_priority_bits = 0;
     let mut idx = 0;
     for ix in gicr_typer {
