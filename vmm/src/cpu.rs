@@ -99,6 +99,8 @@ use crate::coredump::{
 use crate::gdb::{Debuggable, DebuggableError, get_raw_tid};
 #[cfg(all(feature = "sev_snp", feature = "mshv"))]
 use crate::igvm::HV_PAGE_SIZE;
+#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+use crate::migration::get_vm_snapshot;
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 #[cfg(target_arch = "x86_64")]
 use crate::vm::physical_bits;
@@ -1628,11 +1630,21 @@ impl CpuManager {
         false
     }
 
+    /// Create the boot vCPUs from an optional VM snapshot.
     pub fn create_boot_vcpus(
         &mut self,
         snapshot: Option<&Snapshot>,
     ) -> Result<Vec<Arc<Mutex<Vcpu>>>> {
         trace_scoped!("create_boot_vcpus");
+
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+        if let Some(snapshot) = snapshot {
+            // Later snapshots and hotplugged CPUs must use the saved CPU features.
+            self.cpuid = get_vm_snapshot(snapshot)
+                .map_err(|e| Error::VcpuCreate(e.into()))?
+                .common_cpuid;
+        }
+        let snapshot = snapshot_from_id(snapshot, CPU_MANAGER_SNAPSHOT_ID);
 
         let num_vcpus = self.boot_vcpus();
         #[cfg(all(feature = "kvm", feature = "sev_snp"))]
@@ -3506,6 +3518,8 @@ impl BusDevice for AcpiCpuHotplugController {
 #[cfg(test)]
 mod tests {
     use std::convert::Infallible;
+    use std::result::Result;
+    use std::sync::{Arc, Mutex};
 
     use anyhow::anyhow;
     use arch::layout;
@@ -3515,9 +3529,9 @@ mod tests {
     use hypervisor::arch::x86::{FpuState, LapicState};
     use hypervisor::{HypervisorVmConfig, StandardRegisters};
     use linux_loader::loader::bootparam::setup_header;
-    use vm_migration::MigratableError;
+    use vm_migration::{MigratableError, Snapshot, Snapshottable};
 
-    use crate::cpu::parallel_map;
+    use crate::cpu::{CpuManager, parallel_map};
 
     #[test]
     fn test_parallel_map() {
@@ -3626,6 +3640,159 @@ mod tests {
         // expect.
         let entry_vec = vcpu.boot_msr_entries();
         assert_eq!(entry_vec[9], msrs.as_slice()[0]);
+    }
+
+    fn create_test_cpu_manager(max_vcpus: u32) -> Arc<Mutex<CpuManager>> {
+        use hypervisor::kvm::KvmHypervisor;
+        use hypervisor::{HypervisorVmError, VmOps};
+        use seccompiler::SeccompAction;
+        use vmm_sys_util::eventfd::EventFd;
+
+        use crate::vm_config::CpusConfig;
+
+        // The vCPUs stay paused throughout the test, so no guest I/O is needed.
+        struct UnusedVmOps;
+        impl VmOps for UnusedVmOps {
+            fn guest_mem_write(&self, _gpa: u64, _buf: &[u8]) -> Result<usize, HypervisorVmError> {
+                unreachable!()
+            }
+            fn guest_mem_read(
+                &self,
+                _gpa: u64,
+                _buf: &mut [u8],
+            ) -> Result<usize, HypervisorVmError> {
+                unreachable!()
+            }
+            fn mmio_read(&self, _gpa: u64, _data: &mut [u8]) -> Result<(), HypervisorVmError> {
+                unreachable!()
+            }
+            fn mmio_write(&self, _gpa: u64, _data: &[u8]) -> Result<(), HypervisorVmError> {
+                unreachable!()
+            }
+            fn pio_read(&self, _port: u64, _data: &mut [u8]) -> Result<(), HypervisorVmError> {
+                unreachable!()
+            }
+            fn pio_write(&self, _port: u64, _data: &[u8]) -> Result<(), HypervisorVmError> {
+                unreachable!()
+            }
+        }
+
+        let hv = KvmHypervisor::new().unwrap();
+        let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
+        vm.create_irq_chip().unwrap();
+        CpuManager::new(
+            &CpusConfig {
+                max_vcpus,
+                ..Default::default()
+            },
+            vm,
+            EventFd::new(libc::EFD_NONBLOCK).unwrap(),
+            EventFd::new(libc::EFD_NONBLOCK).unwrap(),
+            EventFd::new(libc::EFD_NONBLOCK).unwrap(),
+            #[cfg(feature = "guest_debug")]
+            EventFd::new(libc::EFD_NONBLOCK).unwrap(),
+            hv,
+            SeccompAction::Allow,
+            Arc::new(UnusedVmOps),
+            &Default::default(),
+            #[cfg(feature = "sev_snp")]
+            false,
+            #[cfg(feature = "igvm")]
+            false,
+        )
+        .unwrap()
+    }
+
+    fn snapshot_cpu_manager(manager: &mut CpuManager) -> Result<Snapshot, MigratableError> {
+        use crate::vm::VmSnapshot;
+
+        let mut snapshot = Snapshot::new_from_state(&VmSnapshot {
+            clock: None,
+            common_cpuid: manager.common_cpuid(),
+        })?;
+        snapshot.add_snapshot(manager.id(), manager.snapshot()?);
+        Ok(snapshot)
+    }
+
+    #[test]
+    fn test_restore_preserves_cpu_model() {
+        use hypervisor::CpuState;
+        use hypervisor::arch::x86::CpuIdEntry;
+        use hypervisor::kvm::VcpuKvmState;
+
+        use crate::CPU_MANAGER_SNAPSHOT_ID;
+        use crate::migration::get_vm_snapshot;
+
+        let (source_cpuid, snapshot) = {
+            let source = create_test_cpu_manager(2);
+            let mut source = source.lock().unwrap();
+            let host_cpuid = source.common_cpuid();
+            let mut source_cpuid = host_cpuid.clone();
+            // Model a source host with one fewer feature, without needing two hosts.
+            let features = source_cpuid
+                .iter_mut()
+                .find(|entry| entry.function == 7 && entry.index == 0)
+                .unwrap();
+            assert_ne!(features.ebx, 0);
+            features.ebx &= features.ebx - 1;
+            arch::CpuidFeatureEntry::check_cpuid_compatibility(&source_cpuid, &host_cpuid).unwrap();
+            assert!(
+                arch::CpuidFeatureEntry::check_cpuid_compatibility(&host_cpuid, &source_cpuid)
+                    .is_err()
+            );
+
+            source.cpuid = source_cpuid.clone();
+            let vcpus = source.create_boot_vcpus(None).unwrap();
+            source
+                .configure_vcpu(&mut vcpus[0].lock().unwrap(), None)
+                .unwrap();
+            (source_cpuid, snapshot_cpu_manager(&mut source).unwrap())
+        };
+
+        let restored = create_test_cpu_manager(2);
+        let mut restored = restored.lock().unwrap();
+        restored.create_boot_vcpus(Some(&snapshot)).unwrap();
+        // Re-snapshotting must work even if no CPU has been hotplugged yet.
+        assert_eq!(restored.common_cpuid(), source_cpuid);
+        restored.start_restored_vcpus().unwrap();
+        let resize_result = restored.resize(2);
+        let snapshot_result = snapshot_cpu_manager(&mut restored);
+        // Join the paused threads before making assertions, including on failure.
+        restored.shutdown().unwrap();
+        assert!(resize_result.unwrap());
+        let resnapshot = snapshot_result.unwrap();
+        assert_eq!(
+            get_vm_snapshot(&resnapshot).unwrap().common_cpuid,
+            source_cpuid
+        );
+        let features = |cpuid: &[CpuIdEntry]| {
+            cpuid
+                .iter()
+                .find(|entry| entry.function == 7 && entry.index == 0)
+                .copied()
+                .unwrap()
+        };
+        for cpu_id in 0..2 {
+            let state: VcpuKvmState = resnapshot.snapshots[CPU_MANAGER_SNAPSHOT_ID].snapshots
+                [&cpu_id.to_string()]
+                .to_state::<CpuState>()
+                .unwrap()
+                .into();
+            assert_eq!(
+                features(&state.cpuid),
+                features(&source_cpuid),
+                "vCPU {cpu_id}"
+            );
+            // The shared features must not overwrite the new CPU's APIC ID.
+            let apic_id = state
+                .cpuid
+                .iter()
+                .find(|entry| entry.function == 1)
+                .unwrap()
+                .ebx
+                >> 24;
+            assert_eq!(apic_id, cpu_id);
+        }
     }
 
     #[test]
