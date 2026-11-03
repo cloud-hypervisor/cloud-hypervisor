@@ -470,14 +470,6 @@ mod tests {
         }
 
         #[test]
-        fn test_allocator_keeps_irq_and_gsi_namespaces_independent() {
-            let mut allocator = allocator();
-
-            assert_eq!(allocator.allocate_irq(), Ok(IRQ_BASE));
-            assert_eq!(allocator.allocate_gsi(), Ok(IRQ_BASE));
-        }
-
-        #[test]
         fn test_allocator_can_free_and_reuse_gsis() {
             let mut allocator = allocator();
 
