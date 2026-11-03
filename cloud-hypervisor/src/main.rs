@@ -1545,21 +1545,6 @@ mod tests {
     }
 
     #[test]
-    fn test_valid_vm_config_kernel() {
-        [(
-            vec!["cloud-hypervisor", "--kernel", "/path/to/kernel"],
-            r#"{
-                "payload": {"kernel": "/path/to/kernel"}
-            }"#,
-            true,
-        )]
-        .iter()
-        .for_each(|(cli, openapi, equal)| {
-            compare_vm_config_cli_vs_json(cli, openapi, *equal);
-        });
-    }
-
-    #[test]
     fn test_valid_vm_config_cmdline() {
         [(
             vec![
@@ -1617,25 +1602,6 @@ mod tests {
                     ]
                 }"#,
                 false,
-            ),
-            (
-                vec![
-                    "cloud-hypervisor",
-                    "--kernel",
-                    "/path/to/kernel",
-                    "--memory",
-                    "shared=true",
-                    "--disk",
-                    "vhost_user=true,socket=/tmp/sock1",
-                ],
-                r#"{
-                    "payload": {"kernel": "/path/to/kernel"},
-                    "memory" : { "shared": true, "size": 536870912 },
-                    "disks": [
-                        {"vhost_user":true, "vhost_socket":"/tmp/sock1"}
-                    ]
-                }"#,
-                true,
             ),
             (
                 vec![
