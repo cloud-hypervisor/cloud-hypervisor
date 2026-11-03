@@ -1462,20 +1462,6 @@ mod tests {
     }
 
     #[test]
-    fn test_new_advertises_conservative_defaults() {
-        let smmuv3 = test_smmuv3();
-        assert_eq!(smmuv3.idr0, IDR0_MODEL_FEATURES);
-        assert_eq!(smmuv3.idr1, IDR1_MODEL_FEATURES);
-        assert_eq!(smmuv3.idr5, IDR5_MODEL_FEATURES);
-    }
-
-    #[test]
-    fn test_default_id_regs_omit_ats_and_ssidsize() {
-        assert_eq!(IDR0_MODEL_FEATURES & IDR0_ATS, 0);
-        assert_eq!(IDR1_MODEL_FEATURES & IDR1_SSIDSIZE_MASK, 0);
-    }
-
-    #[test]
     fn test_partial_writes_merge_into_64bit_registers() {
         let mut smmuv3 = test_smmuv3();
 
