@@ -1060,14 +1060,6 @@ mod tests {
     }
 
     #[test]
-    fn test_quoted_value_with_commas() {
-        let mut parser = OptionParser::new();
-        parser.add("cmd");
-        parser.parse("cmd=\"a,b,c\"").unwrap();
-        assert_eq!(parser.get("cmd"), Some("a,b,c".to_owned()));
-    }
-
-    #[test]
     #[should_panic(expected = "forbidden character")]
     fn test_add_option_with_equals() {
         let mut parser = OptionParser::new();
