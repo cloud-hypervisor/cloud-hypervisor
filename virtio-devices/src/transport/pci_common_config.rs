@@ -391,6 +391,16 @@ impl VirtioPciCommonConfig {
             0x00 => self.device_feature_select = value,
             0x08 => self.driver_feature_select = value,
             0x0c => {
+                // Virtio 1.4, 3.1.1: features are fixed once FEATURES_OK is
+                // set. Enabled queues were set up for the features accepted
+                // at that point and stay enabled until reset, even if the
+                // driver clears FEATURES_OK again.
+                if self.driver_status.load(Ordering::Acquire) & DEVICE_FEATURES_OK as u8 != 0
+                    || queues.iter().any(|q| q.ready())
+                {
+                    debug!("Cannot change driver features after feature negotiation");
+                    return;
+                }
                 if self.driver_feature_select < 2 {
                     let mut locked_device = self.device.lock().unwrap();
                     locked_device
@@ -465,7 +475,7 @@ impl Snapshottable for VirtioPciCommonConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ActivateResult, ActivationContext};
+    use crate::{ActivateResult, ActivationContext, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER};
 
     struct DummyDevice(u32);
     const QUEUE_SIZE: u16 = 256;
@@ -712,5 +722,42 @@ mod tests {
             ],
             addresses
         );
+    }
+
+    struct FeatureDevice(u64);
+
+    impl VirtioDevice for FeatureDevice {
+        fn device_type(&self) -> u32 {
+            0
+        }
+        fn queue_max_sizes(&self) -> &[u16] {
+            QUEUE_SIZES
+        }
+        fn activate(&mut self, _context: ActivationContext) -> ActivateResult {
+            Ok(())
+        }
+        fn ack_features(&mut self, value: u64) {
+            self.0 |= value;
+        }
+    }
+
+    #[test]
+    fn driver_features_are_fixed_after_negotiation() {
+        let device = Arc::new(Mutex::new(FeatureDevice(0)));
+        let mut regs = make_regs(0);
+        regs.device = Arc::clone(&device) as Arc<Mutex<dyn VirtioDevice>>;
+        let mut queues = vec![Queue::new(QUEUE_SIZE).unwrap()];
+        let status = (DEVICE_ACKNOWLEDGE | DEVICE_DRIVER) as u8;
+
+        regs.write(0x14, &[status], &mut queues);
+        regs.write(0x0c, &1u32.to_le_bytes(), &mut queues);
+        regs.write(0x14, &[status | DEVICE_FEATURES_OK as u8], &mut queues);
+        regs.write(0x0c, &2u32.to_le_bytes(), &mut queues);
+        assert_eq!(device.lock().unwrap().0, 1);
+
+        regs.write(0x1c, &1u16.to_le_bytes(), &mut queues);
+        regs.write(0x14, &[status], &mut queues);
+        regs.write(0x0c, &2u32.to_le_bytes(), &mut queues);
+        assert_eq!(device.lock().unwrap().0, 1);
     }
 }
