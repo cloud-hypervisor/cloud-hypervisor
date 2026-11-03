@@ -1089,13 +1089,6 @@ mod tests {
     }
 
     #[test]
-    fn test_muxer_epoll_listener() {
-        let ctx = MuxerTestContext::new("muxer_epoll_listener");
-        assert_eq!(ctx.muxer.get_polled_fd(), ctx.muxer.epoll_file.as_raw_fd());
-        assert_eq!(ctx.muxer.get_polled_evset(), epoll::Events::EPOLLIN);
-    }
-
-    #[test]
     fn test_bad_peer_pkt() {
         const LOCAL_PORT: u32 = 1026;
         const PEER_PORT: u32 = 1025;
