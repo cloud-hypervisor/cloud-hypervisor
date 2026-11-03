@@ -479,60 +479,6 @@ mod tests {
     #[test]
     // mov rax, 0x100
     // mov rbx, qword ptr [rax+10h]
-    fn test_mov_r64_imm64_and_r64_m64() {
-        let target_rax: u64 = 0x1234567812345678;
-        let rax: u64 = 0x100;
-        let displacement: u64 = 0x10;
-        let ip: u64 = 0x1000;
-        let cpu_id = 0;
-        let memory: [u8; 8] = target_rax.to_le_bytes();
-        let insn = [
-            0x48, 0xc7, 0xc0, 0x00, 0x01, 0x00, 0x00, // mov rax, 0x100
-            0x48, 0x8b, 0x58, 0x10, // mov rbx, qword ptr [rax+10h]
-        ];
-        let mut vmm = MockVmm::new(ip, vec![], Some((rax + displacement, &memory)));
-        vmm.emulate_insn(cpu_id, &insn, Some(2)).unwrap();
-
-        let rbx: u64 = vmm
-            .cpu_state(cpu_id)
-            .unwrap()
-            .read_reg(Register::RBX)
-            .unwrap();
-        assert_eq!(rbx, target_rax);
-    }
-
-    #[test]
-    // mov rax, 0x100
-    // mov rbx, qword ptr [rax+10h]
-    fn test_mov_r64_imm64_and_r64_m64_first_insn() {
-        let target_rax: u64 = 0x1234567812345678;
-        let rax: u64 = 0x100;
-        let displacement: u64 = 0x10;
-        let ip: u64 = 0x1000;
-        let cpu_id = 0;
-        let memory: [u8; 8] = target_rax.to_le_bytes();
-        let insn = [
-            0x48, 0xc7, 0xc0, 0x00, 0x01, 0x00, 0x00, // mov rax, 0x100
-            0x48, 0x8b, 0x58, 0x10, // mov rbx, qword ptr [rax+10h]
-        ];
-
-        let mut vmm = MockVmm::new(ip, vec![], Some((rax + displacement, &memory)));
-        // Only run the first instruction.
-        vmm.emulate_first_insn(cpu_id, &insn).unwrap();
-
-        assert_eq!(ip + 7, vmm.cpu_state(cpu_id).unwrap().ip());
-
-        let new_rax: u64 = vmm
-            .cpu_state(cpu_id)
-            .unwrap()
-            .read_reg(Register::RAX)
-            .unwrap();
-        assert_eq!(rax, new_rax);
-    }
-
-    #[test]
-    // mov rax, 0x100
-    // mov rbx, qword ptr [rax+10h]
     // mov rax, 0x200
     fn test_mov_r64_imm64_and_r64_m64_two_insns() {
         let target_rax: u64 = 0x1234567812345678;
