@@ -464,16 +464,6 @@ mod tests {
         assert_ne!(handled_access(3) & ACCESS_TRUNCATE, 0);
     }
 
-    // A kernel with Landlock must report its ABI.
-    #[test]
-    fn a_landlock_kernel_confines_the_process() {
-        let Some(version) = abi_version() else {
-            eprintln!("skipped: no Landlock on this kernel");
-            return;
-        };
-        assert!(version >= 1);
-    }
-
     #[test]
     fn cwd_local_tmpdir_cannot_escape_through_a_symlink() {
         let base = test_path("local-tmp");

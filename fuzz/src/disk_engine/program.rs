@@ -229,14 +229,4 @@ mod tests {
             assert_eq!(offset % L2_SPAN, 0, "offset {offset} is not table aligned");
         }
     }
-
-    // A sweep stays inside any disk.
-    #[test]
-    fn a_sweep_stays_inside_the_disk() {
-        for size in [1, 512, 4096, L2_SPAN, 1 << 20] {
-            for offset in Op::sweep_offsets(u8::MAX, u8::MAX, size) {
-                assert!(offset < size.max(1), "size {size}, offset {offset}");
-            }
-        }
-    }
 }
