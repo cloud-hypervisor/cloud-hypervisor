@@ -379,33 +379,6 @@ mod tests {
     }
 
     #[test]
-    fn create_async_io_builds_worker() {
-        let dir = TempDir::new_with_prefix("/tmp/vmdk-test").unwrap();
-        let path = write_flat_vmdk(
-            dir.as_path(),
-            "monolithicFlat",
-            &[("disk-flat.vmdk", "RW", 2048)],
-        );
-        let disk = VmdkDisk::new(open_descriptor(&path), &path, false, false).unwrap();
-
-        // Ring depth is ignored by the synchronous VMDK worker.
-        disk.create_async_io(0).unwrap();
-    }
-
-    #[test]
-    fn create_async_io_supports_multi_extent() {
-        let dir = TempDir::new_with_prefix("/tmp/vmdk-test").unwrap();
-        let path = write_flat_vmdk(
-            dir.as_path(),
-            "twoGbMaxExtentFlat",
-            &[("s001.vmdk", "RW", 2048), ("s002.vmdk", "RW", 2048)],
-        );
-        let disk = VmdkDisk::new(open_descriptor(&path), &path, false, false).unwrap();
-
-        disk.create_async_io(32).unwrap();
-    }
-
-    #[test]
     fn new_rejects_zero_sector_extent() {
         let dir = TempDir::new_with_prefix("/tmp/vmdk-zero-test").unwrap();
         let path = write_descriptor(

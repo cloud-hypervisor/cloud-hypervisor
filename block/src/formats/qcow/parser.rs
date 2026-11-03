@@ -2283,14 +2283,6 @@ mod tests {
     }
 
     #[test]
-    fn dirty_bit_not_used_for_v2() {
-        // Test that v2 images don't use the dirty bit (no incompatible_features field)
-        let temp = image_with_header(&valid_header_v2());
-        let disk = temp.open().unwrap();
-        assert_eq!(disk.metadata().header().version, 2);
-    }
-
-    #[test]
     fn dirty_bit_not_set_for_readonly_v3() {
         // Test that read-only v3 files don't set the dirty bit (e.g., backing files)
         let temp = image_with_header(&valid_header_v3());

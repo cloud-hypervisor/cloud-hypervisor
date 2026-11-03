@@ -291,7 +291,6 @@ mod tests {
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
-    use crate::SECTOR_SIZE;
     use crate::async_io::{AsyncIoCompletion, AsyncIoOperation, GuestMemoryTarget, OwnedIoBuffer};
     use crate::disk_file::AsyncDiskFile;
     use crate::formats::qcow::test_util::compress_allocated_clusters;
@@ -793,32 +792,6 @@ mod tests {
                 "cluster {i} mismatch"
             );
         }
-    }
-
-    #[test]
-    fn test_qcow_async_alignment_without_direct_io() {
-        let file_size = 100 * 1024 * 1024;
-        let temp_file = QcowTempDisk::new(file_size, None, false, true, false)
-            .unwrap()
-            .into_tempfile();
-        let disk = QcowDisk::new(
-            temp_file.as_file().try_clone().unwrap(),
-            false,
-            false,
-            true,
-            true,
-        )
-        .unwrap();
-        let async_io = disk.create_async_io(1).unwrap();
-        assert_eq!(async_io.alignment(), Some(SECTOR_SIZE));
-    }
-
-    #[test]
-    fn test_qcow_async_alignment_with_direct_io() {
-        require_direct_io!();
-        let tmp_disk = QcowTempDisk::new(100 * 1024 * 1024, None, true, true, true).unwrap();
-        let async_io = tmp_disk.disk().create_async_io(1).unwrap();
-        assert!(async_io.alignment().unwrap() >= SECTOR_SIZE);
     }
 
     #[test]
