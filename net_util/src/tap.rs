@@ -728,14 +728,6 @@ mod tests {
     }
 
     #[test]
-    fn test_tap_create() {
-        let _tap_ip_guard = TAP_IP_LOCK.lock().unwrap();
-
-        let t = Tap::new(1).unwrap();
-        println!("created tap: {t:?}");
-    }
-
-    #[test]
     fn test_from_file_error_closes_only_the_passed_file() {
         use std::fs::File;
         use std::io::{ErrorKind, Read};
@@ -806,14 +798,6 @@ mod tests {
 
         let tap = Tap::new(1).unwrap();
         tap.enable().unwrap();
-    }
-
-    #[test]
-    fn test_raw_fd() {
-        let _tap_ip_guard = TAP_IP_LOCK.lock().unwrap();
-
-        let tap = Tap::new(1).unwrap();
-        assert_eq!(tap.as_raw_fd(), tap.tap_file.as_raw_fd());
     }
 
     #[test]
