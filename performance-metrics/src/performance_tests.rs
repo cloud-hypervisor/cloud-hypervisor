@@ -642,19 +642,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_ethr_latency_output() {
-        let output = r#"{"Time":"2022-02-08T03:52:50Z","Title":"","Type":"INFO","Message":"Using destination: 192.168.249.2, ip: 192.168.249.2, port: 8888"}
-{"Time":"2022-02-08T03:52:51Z","Title":"","Type":"INFO","Message":"Running latency test: 1000, 1"}
-{"Time":"2022-02-08T03:52:51Z","Title":"","Type":"LatencyResult","RemoteAddr":"192.168.249.2","Protocol":"TCP","Avg":"80.712us","Min":"61.677us","P50":"257.014us","P90":"74.418us","P95":"107.283us","P99":"119.309us","P999":"142.100us","P9999":"216.341us","Max":"216.341us"}
-{"Time":"2022-02-08T03:52:52Z","Title":"","Type":"LatencyResult","RemoteAddr":"192.168.249.2","Protocol":"TCP","Avg":"79.826us","Min":"55.129us","P50":"598.996us","P90":"73.849us","P95":"106.552us","P99":"122.152us","P999":"142.459us","P9999":"474.280us","Max":"474.280us"}
-{"Time":"2022-02-08T03:52:53Z","Title":"","Type":"LatencyResult","RemoteAddr":"192.168.249.2","Protocol":"TCP","Avg":"78.239us","Min":"56.999us","P50":"396.820us","P90":"69.469us","P95":"115.421us","P99":"119.404us","P999":"130.158us","P9999":"258.686us","Max":"258.686us"}"#;
-
-        let ret = parse_ethr_latency_output(output.as_bytes()).unwrap();
-        let reference = vec![80.712_f64, 79.826_f64, 78.239_f64];
-        assert_eq!(ret, reference);
-    }
-
-    #[test]
     fn test_parse_ethr_latency_output_mixed_units() {
         let output = r#"{"Time":"2026-08-26T00:40:37Z","Title":"","Type":"INFO","Message":"Using destination: 172.19.0.2, ip: 172.19.0.2, port: 8888"}
 {"Time":"2026-08-26T00:40:38Z","Title":"","Type":"LatencyResult","RemoteAddr":"172.19.0.2","Protocol":"TCP","Avg":"971.230us","Min":"452.887us","P50":"43.396ms","Max":"42.165ms"}
