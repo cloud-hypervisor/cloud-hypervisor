@@ -833,7 +833,7 @@ impl Default for RateLimiter {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::{fmt, thread};
+    use std::thread;
 
     use super::*;
 
@@ -874,17 +874,6 @@ pub(crate) mod tests {
             let self_guard = self.inner.lock().unwrap();
             let other_guard = other.inner.lock().unwrap();
             self_guard.bandwidth == other_guard.bandwidth && self_guard.ops == other_guard.ops
-        }
-    }
-
-    impl fmt::Debug for RateLimiter {
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            let guard = self.inner.lock().unwrap();
-            write!(
-                f,
-                "RateLimiter {{ bandwidth: {:?}, ops: {:?} }}",
-                guard.bandwidth, guard.ops
-            )
         }
     }
 
@@ -1189,19 +1178,6 @@ pub(crate) mod tests {
         thread::sleep(Duration::from_millis(10));
         l.event_handler().unwrap();
         assert!(!l.is_blocked());
-    }
-
-    #[test]
-    fn test_rate_limiter_debug() {
-        let l = RateLimiter::new(1, 2, 3, 4, 5, 6).unwrap();
-        assert_eq!(
-            format!("{l:?}"),
-            format!(
-                "RateLimiter {{ bandwidth: {:?}, ops: {:?} }}",
-                l.bandwidth(),
-                l.ops()
-            ),
-        );
     }
 
     fn burst_reduce(bucket: &mut TokenBucket, tokens: u64, elapsed_ms: u64) -> BucketReduction {
