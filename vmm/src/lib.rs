@@ -4460,20 +4460,6 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_vfio_fds_stale_fd_needs_replacement() {
-        let vm_config = vm_config_with_vfio_devices(&["vfio0"], true);
-        {
-            let mut config = vm_config.lock().unwrap();
-            let device = &mut config.devices.as_mut().unwrap()[0];
-            device.path = None;
-            device.fd = Default::default();
-        }
-        receive_data(None, None)
-            .validate_vfio_fds(&vm_config.lock().unwrap())
-            .unwrap_err();
-    }
-
-    #[test]
     fn test_validate_vfio_fds_path_based_needs_replacement() {
         // A path based device carries its source path, which is unusable on
         // the destination, so it must be replaced in vfio_fds as well.

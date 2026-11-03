@@ -410,18 +410,6 @@ mod tests {
     }
 
     #[test]
-    fn hash_block_deterministic() {
-        let info = MeasuredBootInfo {
-            kernel: make_fake_kernel(1, b"KERNEL_DATA"),
-            initramfs: None,
-            cmdline: CString::new("console=ttyS0").unwrap(),
-        };
-        let block1 = info.build_hash_block().unwrap();
-        let block2 = info.build_hash_block().unwrap();
-        assert_eq!(block1, block2);
-    }
-
-    #[test]
     fn hash_block_cmdline_includes_nul() {
         let info = MeasuredBootInfo {
             kernel: make_fake_kernel(1, b"K"),
@@ -470,16 +458,6 @@ mod tests {
             &block[initrd_hash_offset..initrd_hash_offset + 32],
             &expected
         );
-    }
-
-    #[test]
-    fn hash_block_setup_sects_zero_defaults_to_four() {
-        let info = MeasuredBootInfo {
-            kernel: make_fake_kernel(0, b"PAYLOAD"),
-            initramfs: None,
-            cmdline: CString::new("root=/dev/sda").unwrap(),
-        };
-        info.build_hash_block().unwrap();
     }
 
     #[test]

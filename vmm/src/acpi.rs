@@ -176,27 +176,6 @@ struct PciDeviceHandle {
 const _: () = assert!(size_of::<PciDeviceHandle>() == 16);
 
 impl GenericInitiatorAffinity {
-    #[cfg(test)]
-    fn from_acpi_device(hid: u64, uid: u32, proximity_domain: u32) -> Self {
-        let mut device_handle = [0u8; 16];
-        // ACPI 6.6 Section 5.2.16.6: ACPI device handle
-        // Bytes 0-7: Hardware ID (HID) as 64-bit value
-        // Bytes 8-11: Unique ID (UID) as 32-bit value
-        device_handle[0..8].copy_from_slice(&hid.to_le_bytes());
-        device_handle[8..12].copy_from_slice(&uid.to_le_bytes());
-        // Bytes 12-15: Reserved
-        GenericInitiatorAffinity {
-            type_: 5,
-            length: 32,
-            _reserved1: 0,
-            device_handle_type: 0, // 0 = ACPI
-            proximity_domain,
-            device_handle,
-            flags: 1,
-            _reserved2: 0,
-        }
-    }
-
     fn from_pci_bdf(bdf: PciBdf, proximity_domain: u32) -> Self {
         let handle = PciDeviceHandle {
             segment: bdf.segment(),
@@ -1563,50 +1542,5 @@ mod tests {
         // Flags at offset 24-27 (u32 little-endian)
         assert_eq!(bytes[24], 1);
         // Reserved at offset 28-31
-    }
-
-    #[test]
-    fn test_generic_initiator_acpi_device_handle() {
-        // Test ACPI device handle (device_handle_type=0) for completeness
-        // This validates HID and UID encoding per ACPI 6.6 Section 5.2.16.6
-        let hid: u64 = 0x0123456789ABCDEF;
-        let uid: u32 = 0x12345678;
-        let proximity_domain = 2;
-
-        let gi = GenericInitiatorAffinity::from_acpi_device(hid, uid, proximity_domain);
-
-        // Verify structure fields
-        assert_eq!(gi.type_, 5, "Type must be 5 for Generic Initiator");
-        assert_eq!(gi.length, 32, "Length must be 32 bytes");
-        assert_eq!(gi._reserved1, 0, "Reserved field must be 0");
-        assert_eq!(
-            gi.device_handle_type, 0,
-            "Device handle type must be 0 for ACPI per ACPI 6.6 spec"
-        );
-        // Copy packed fields to local variables to avoid unaligned references
-        let gi_proximity_domain = gi.proximity_domain;
-        let gi_flags = gi.flags;
-        let gi_reserved2 = gi._reserved2;
-        assert_eq!(
-            gi_proximity_domain, proximity_domain,
-            "Proximity domain must match input"
-        );
-        assert_eq!(gi_flags, 1, "Flags must be 1 (enabled)");
-        assert_eq!(gi_reserved2, 0, "Reserved field must be 0");
-
-        // Verify ACPI device handle encoding
-        // Expected format per ACPI 6.6 Section 5.2.16.6:
-        // Bytes 0-7: HID (64-bit, little-endian)
-        // Bytes 8-11: UID (32-bit, little-endian)
-        // Bytes 12-15: Reserved
-        let expected_handle: [u8; 16] = [
-            0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x01, // HID
-            0x78, 0x56, 0x34, 0x12, // UID
-            0, 0, 0, 0, // Reserved
-        ];
-        assert_eq!(
-            gi.device_handle, expected_handle,
-            "Device handle must encode HID and UID correctly"
-        );
     }
 }
