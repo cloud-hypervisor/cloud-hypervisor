@@ -204,7 +204,21 @@ const MPOL_BIND: u32 = 2;
 const MPOL_MF_STRICT: u32 = 1;
 const MPOL_MF_MOVE: u32 = 1 << 1;
 
+// Reserve 64 MiB for platform MMIO devices (e.g. ACPI control devices) and
+// the emulated SMMUv3s with their Tegra241 CMDQVs.
+#[cfg(target_arch = "aarch64")]
+const PLATFORM_DEVICE_AREA_SIZE: u64 = 64 << 20;
+#[cfg(target_arch = "aarch64")]
+const PLATFORM_DEVICE_AREA_SIZE_LEGACY: u64 = 1 << 20;
+
+// Snapshots taken before the area grew.
+#[cfg(target_arch = "aarch64")]
+fn legacy_platform_device_area_size() -> u64 {
+    PLATFORM_DEVICE_AREA_SIZE_LEGACY
+}
+
 // Reserve 1 MiB for platform MMIO devices (e.g. ACPI control devices)
+#[cfg(not(target_arch = "aarch64"))]
 const PLATFORM_DEVICE_AREA_SIZE: u64 = 1 << 20;
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -362,6 +376,8 @@ pub struct MemoryManager {
     memory_slot_allocator: Arc<MemorySlotAllocator>,
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
+    #[cfg(target_arch = "aarch64")]
+    platform_device_area_size: u64,
     end_of_ram_area: GuestAddress,
     pub vm: Arc<dyn hypervisor::Vm>,
     hotplug_slots: Vec<HotPlugState>,
@@ -2251,8 +2267,15 @@ impl MemoryManager {
             (((mmio_address_space_size) >> 16) << 16),
             mmio_address_space_size
         );
+        // The guest's PCI window is fixed at boot, so a restored VM keeps the
+        // area size it booted with.
+        #[cfg(target_arch = "aarch64")]
+        let platform_device_area_size =
+            restore_data.map_or(PLATFORM_DEVICE_AREA_SIZE, |d| d.platform_device_area_size);
+        #[cfg(not(target_arch = "aarch64"))]
+        let platform_device_area_size = PLATFORM_DEVICE_AREA_SIZE;
         let start_of_platform_device_area =
-            GuestAddress(mmio_address_space_size - PLATFORM_DEVICE_AREA_SIZE);
+            GuestAddress(mmio_address_space_size - platform_device_area_size);
         let end_of_device_area = start_of_platform_device_area.unchecked_sub(1);
 
         let (ram_size, zones, allow_mem_hotplug) =
@@ -2441,7 +2464,7 @@ impl MemoryManager {
                 GuestAddress(0),
                 1 << 16,
                 start_of_platform_device_area,
-                PLATFORM_DEVICE_AREA_SIZE,
+                platform_device_area_size,
                 #[cfg(target_arch = "x86_64")]
                 &[GsiApic::new(
                     X86_64_IRQ_BASE,
@@ -2480,6 +2503,8 @@ impl MemoryManager {
             memory_slot_allocator,
             start_of_device_area,
             end_of_device_area,
+            #[cfg(target_arch = "aarch64")]
+            platform_device_area_size,
             end_of_ram_area,
             vm,
             hotplug_slots,
@@ -3264,6 +3289,8 @@ impl MemoryManager {
             next_memory_slot: self.next_memory_slot.load(Ordering::SeqCst),
             selected_slot: self.selected_slot,
             next_hotplug_slot: self.next_hotplug_slot,
+            #[cfg(target_arch = "aarch64")]
+            platform_device_area_size: self.platform_device_area_size,
         }
     }
 
@@ -3767,6 +3794,9 @@ pub struct MemoryManagerSnapshotData {
     next_memory_slot: u32,
     selected_slot: usize,
     next_hotplug_slot: usize,
+    #[cfg(target_arch = "aarch64")]
+    #[serde(default = "legacy_platform_device_area_size")]
+    platform_device_area_size: u64,
 }
 
 impl Snapshottable for MemoryManager {
@@ -4110,6 +4140,33 @@ fn do_mmap_cow_saved_regions(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn snapshot_without_platform_device_area_size_restores_legacy() {
+        use super::MemoryManagerSnapshotData;
+
+        let mut value = serde_json::to_value(MemoryManagerSnapshotData {
+            memory_ranges: Default::default(),
+            guest_ram_mappings: Vec::new(),
+            start_of_device_area: 0,
+            boot_ram: 0,
+            current_ram: 0,
+            arch_mem_regions: Vec::new(),
+            hotplug_slots: Vec::new(),
+            next_memory_slot: 0,
+            selected_slot: 0,
+            next_hotplug_slot: 0,
+            platform_device_area_size: 64 << 20,
+        })
+        .unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("platform_device_area_size");
+        let data: MemoryManagerSnapshotData = serde_json::from_value(value).unwrap();
+        assert_eq!(data.platform_device_area_size, 1 << 20);
+    }
+
     #[test]
     fn guest_ram_stays_clear_of_reserved() {
         use arch::RegionType;
