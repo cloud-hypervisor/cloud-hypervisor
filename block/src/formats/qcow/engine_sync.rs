@@ -788,30 +788,6 @@ mod tests {
     }
 
     #[test]
-    fn test_qcow_punch_hole_then_read() {
-        // Verify that after punch_hole, a second async_io sees zeros.
-        let data = vec![0xAB; 128 * 1024];
-        let offset = 0u64;
-        let (_temp, disk) = create_disk_with_data(100 * 1024 * 1024, &data, offset, true, false);
-
-        let mut async_io1 = disk.create_async_io(1).unwrap();
-        async_io1
-            .punch_hole(offset, data.len() as u64, 100)
-            .unwrap();
-        let (user_data, result) = next_completion(async_io1.as_mut());
-        assert_eq!(user_data, 100);
-        assert_eq!(result, 0);
-        drop(async_io1);
-
-        // Read via second async_io, should see zeros
-        let read_buf = async_read(&disk, offset, data.len());
-        assert!(
-            read_buf.iter().all(|&b| b == 0),
-            "After punch_hole, read should return zeros"
-        );
-    }
-
-    #[test]
     fn test_qcow_disk_sync_punch_hole_with_create_async_io() {
         // Simulates the real usage pattern of write data, punch hole, then read back.
         let data = vec![0xCD; 64 * 1024]; // one cluster

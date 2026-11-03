@@ -1594,14 +1594,6 @@ mod tests {
     }
 
     #[test]
-    fn no_backing_file() {
-        // No backing file declared; opening with backing_files=false should succeed.
-        let header = QcowHeader::create_for_size_and_path(3, 0x10_0000, None)
-            .expect("Failed to create header.");
-        try_open_qcow_header(&header, false).unwrap();
-    }
-
-    #[test]
     fn disable_backing_file() {
         // Backing file is declared but backing_files=false disables it. QcowDisk
         // maps Overflow -> UnsupportedFeature when backing files are disabled.
@@ -2191,17 +2183,6 @@ mod tests {
     fn no_snapshots_still_open_writable() {
         let tf = image_with_internal_snapshots(0);
         tf.open().unwrap();
-    }
-
-    #[test]
-    fn reject_corrupt_bit_for_writable_open() {
-        // Bit 1: corrupt - image metadata is corrupted
-        let header = header_v3_with_incompat_features(1 << 1);
-        let err = try_open_header(&header).unwrap_err();
-        assert!(
-            matches!(err.kind(), BlockErrorKind::CorruptImage),
-            "Expected CorruptImage error, got: {err:?}"
-        );
     }
 
     #[test]

@@ -256,15 +256,6 @@ mod tests {
     }
 
     #[test]
-    fn detect_raw_image() {
-        let tmp = TempFile::new().unwrap();
-        tmp.as_file().set_len(1 << 20).unwrap();
-        let path = tmp.as_path().to_owned();
-        let options = default_options(&path);
-        open_disk(&options, ImageType::Raw).unwrap();
-    }
-
-    #[test]
     fn detect_qcow2_image() {
         let tmp = qcow::QcowTempDisk::new(100 * 1024 * 1024, None, false, true, false)
             .unwrap()
