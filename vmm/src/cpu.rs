@@ -1646,6 +1646,20 @@ impl CpuManager {
         }
         let snapshot = snapshot_from_id(snapshot, CPU_MANAGER_SNAPSHOT_ID);
 
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+        if let Some(CpuState::Kvm(state)) =
+            vm_migration::state_from_id(snapshot, "0").map_err(|e| Error::VcpuCreate(e.into()))?
+        {
+            self.msr_config_update = Some(
+                arch::x86_64::generate_restored_msr_updates(
+                    self.hypervisor.as_ref(),
+                    &state.msrs,
+                    self.msr_config_update.as_ref(),
+                )
+                .map_err(Error::MsrConfigurationUpdate)?,
+            );
+        }
+
         let num_vcpus = self.boot_vcpus();
         #[cfg(all(feature = "kvm", feature = "sev_snp"))]
         let num_vcpus =
@@ -3717,12 +3731,23 @@ mod tests {
     #[test]
     fn test_restore_preserves_cpu_model() {
         use hypervisor::CpuState;
-        use hypervisor::arch::x86::CpuIdEntry;
+        use hypervisor::arch::x86::msr_index::{MSR_IA32_UCODE_REV, MSR_KERNEL_GS_BASE};
+        use hypervisor::arch::x86::{CpuIdEntry, MsrEntry};
         use hypervisor::kvm::VcpuKvmState;
 
         use crate::CPU_MANAGER_SNAPSHOT_ID;
         use crate::migration::get_vm_snapshot;
 
+        let mut source_msrs = vec![
+            MsrEntry {
+                index: MSR_IA32_UCODE_REV,
+                data: 0,
+            },
+            MsrEntry {
+                index: MSR_KERNEL_GS_BASE,
+                data: 0,
+            },
+        ];
         let (source_cpuid, snapshot) = {
             let source = create_test_cpu_manager(2);
             let mut source = source.lock().unwrap();
@@ -3743,9 +3768,18 @@ mod tests {
 
             source.cpuid = source_cpuid.clone();
             let vcpus = source.create_boot_vcpus(None).unwrap();
-            source
-                .configure_vcpu(&mut vcpus[0].lock().unwrap(), None)
-                .unwrap();
+            {
+                let mut vcpu = vcpus[0].lock().unwrap();
+                source.configure_vcpu(&mut vcpu, None).unwrap();
+                assert_eq!(
+                    vcpu.vcpu.get_msrs(&mut source_msrs).unwrap(),
+                    source_msrs.len()
+                );
+                // Model a different source feature value and non-default runtime state.
+                source_msrs[0].data ^= 1 << 32;
+                source_msrs[1].data = 0x1234_5000;
+                assert_eq!(vcpu.vcpu.set_msrs(&source_msrs).unwrap(), source_msrs.len());
+            }
             (source_cpuid, snapshot_cpu_manager(&mut source).unwrap())
         };
 
@@ -3772,7 +3806,7 @@ mod tests {
                 .copied()
                 .unwrap()
         };
-        for cpu_id in 0..2 {
+        for (cpu_id, gs_base) in [(0, source_msrs[1].data), (1, 0)] {
             let state: VcpuKvmState = resnapshot.snapshots[CPU_MANAGER_SNAPSHOT_ID].snapshots
                 [&cpu_id.to_string()]
                 .to_state::<CpuState>()
@@ -3792,6 +3826,12 @@ mod tests {
                 .ebx
                 >> 24;
             assert_eq!(apic_id, cpu_id);
+            assert!(state.msrs.contains(&source_msrs[0]), "vCPU {cpu_id}");
+            // Restore runtime state on the old CPU; use boot values on the new CPU.
+            assert!(state.msrs.contains(&MsrEntry {
+                index: MSR_KERNEL_GS_BASE,
+                data: gs_base,
+            }));
         }
     }
 

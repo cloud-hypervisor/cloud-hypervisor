@@ -21,7 +21,7 @@ mod mptable;
 use std::arch::x86_64;
 
 use helpers::{deserialize_u32_hex, serialize_u32_hex};
-use hypervisor::arch::x86::{CPUID_FLAG_VALID_INDEX, CpuIdEntry, VcpuMsrConfigUpdate};
+use hypervisor::arch::x86::{CPUID_FLAG_VALID_INDEX, CpuIdEntry, MsrEntry, VcpuMsrConfigUpdate};
 use hypervisor::{CpuVendor, HypervisorCpuError, HypervisorError};
 use linux_loader::loader::bootparam::{boot_params, setup_header};
 use linux_loader::loader::elf::start_info::{
@@ -156,20 +156,21 @@ pub enum Error {
     #[error("The selected CPU profile cannot be utilized because a necessary MSR was not found")]
     CpuProfileMissingMsr,
 
-    /// Error checking if the host's feature MSRs are compatible with the CPU Profile
-    #[error(
-        "The selected CPU profile cannot be utilized because the host's MSR entries are not compatible with the profile"
-    )]
-    CpuProfileMsrIncompatibility,
+    /// The host does not provide the required architectural capabilities MSR.
+    #[error("Host does not provide IA32_ARCH_CAPABILITIES")]
+    ArchCapabilitiesMissing,
 
-    /// Error when trying to apply a CPU profile because the MSR index list could not be obtained
-    #[error("The selected CPU profile could not be utilized: failed to obtain MSR index list")]
-    CpuProfileMsrIndexList(#[source] HypervisorError),
+    /// The required architectural capabilities are incompatible with the host.
+    #[error("Host has incompatible IA32_ARCH_CAPABILITIES")]
+    ArchCapabilitiesIncompatibility,
 
-    /// Error when trying to apply a CPU profile because the feature MSRs could not be obtained
-    /// from the hypervisor.
-    #[error("The selected CPU profile could not be utilized: failed to obtain feature MSRs")]
-    CpuProfileFeatureMsrs(#[source] HypervisorError),
+    /// The MSR index list could not be obtained from the hypervisor.
+    #[error("Failed to obtain MSR index list")]
+    MsrIndexList(#[source] HypervisorError),
+
+    /// The feature MSRs could not be obtained from the hypervisor.
+    #[error("Failed to obtain feature MSRs")]
+    FeatureMsrs(#[source] HypervisorError),
 
     #[error("Custom CPU profiles are not supported by {0:?}")]
     CpuProfileUnsupportedHypervisor(hypervisor::HypervisorType),
@@ -857,11 +858,9 @@ pub fn generate_required_msr_updates(
 
     let host_supported_msrs = hypervisor
         .get_msr_index_list()
-        .map_err(Error::CpuProfileMsrIndexList)?;
+        .map_err(Error::MsrIndexList)?;
 
-    let host_feature_msrs = hypervisor
-        .get_feature_msrs()
-        .map_err(Error::CpuProfileFeatureMsrs)?;
+    let host_feature_msrs = hypervisor.get_feature_msrs().map_err(Error::FeatureMsrs)?;
 
     let required_updates = cpu_profile.required_msr_updates(
         &host_feature_msrs,
@@ -876,10 +875,52 @@ pub fn generate_required_msr_updates(
     // TODO: Consider adding a CPU vendor equality requirement to `check_cpuid_compatibility` even though
     // it is extremely unlikely that CPUs from different vendors will pass the existing checks.
     arch_capabilities_checks::valid_required_arch_capabilities_update(
-        &required_updates,
+        &required_updates.feature_msrs,
         &host_feature_msrs,
+        "CPU Profile",
     )?;
     Ok(Some(required_updates))
+}
+
+/// Recover feature MSR initialization from the saved boot vCPU, preserving the snapshot policy.
+pub fn generate_restored_msr_updates(
+    hypervisor: &dyn hypervisor::Hypervisor,
+    saved_msrs: &[MsrEntry],
+    configured_updates: Option<&VcpuMsrConfigUpdate>,
+) -> super::Result<VcpuMsrConfigUpdate> {
+    let host_feature_msrs = hypervisor.get_feature_msrs().map_err(Error::FeatureMsrs)?;
+    // KVM accepts arbitrary IA32_ARCH_CAPABILITIES values, so validate them here.
+    arch_capabilities_checks::valid_required_arch_capabilities_update(
+        saved_msrs,
+        &host_feature_msrs,
+        "Snapshot",
+    )?;
+    let mut snapshottable_msr_indices = match configured_updates {
+        Some(updates) => updates.snapshottable_msr_indices.clone(),
+        None => hypervisor
+            .get_msr_index_list()
+            .map_err(Error::MsrIndexList)?,
+    };
+
+    let feature_msrs: Vec<MsrEntry> = saved_msrs
+        .iter()
+        .filter(|saved| {
+            host_feature_msrs
+                .iter()
+                .any(|host| host.index == saved.index)
+        })
+        .copied()
+        .collect();
+    for msr in &feature_msrs {
+        if !snapshottable_msr_indices.contains(&msr.index) {
+            snapshottable_msr_indices.push(msr.index);
+        }
+    }
+
+    Ok(VcpuMsrConfigUpdate {
+        feature_msrs,
+        snapshottable_msr_indices,
+    })
 }
 
 /// Apply updates to common CPUID (not vCPU specific) that are necessary regardless of
@@ -1754,9 +1795,80 @@ fn update_cpuid_topology(
 }
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "kvm")]
+    use hypervisor::arch::x86::msr_index::{MSR_IA32_TSC, MSR_IA32_UCODE_REV, MSR_KERNEL_GS_BASE};
     use linux_loader::loader::bootparam::boot_e820_entry;
 
     use super::*;
+
+    #[cfg(feature = "kvm")]
+    #[test]
+    fn test_restored_msr_updates() {
+        use hypervisor::kvm::KvmHypervisor;
+
+        let hv = KvmHypervisor::new().unwrap();
+        let saved_feature = MsrEntry {
+            index: MSR_IA32_UCODE_REV,
+            data: 0,
+        };
+        let saved_msrs = [
+            saved_feature,
+            MsrEntry {
+                index: MSR_KERNEL_GS_BASE,
+                data: 0x1234_5000,
+            },
+        ];
+        let indices = vec![MSR_IA32_TSC, MSR_KERNEL_GS_BASE];
+        let mut expected_indices = indices.clone();
+        expected_indices.push(saved_feature.index);
+        for indices in [indices, expected_indices.clone()] {
+            let configured = VcpuMsrConfigUpdate {
+                feature_msrs: vec![MsrEntry {
+                    data: 1 << 32,
+                    ..saved_feature
+                }],
+                snapshottable_msr_indices: indices,
+            };
+            let updates =
+                generate_restored_msr_updates(hv.as_ref(), &saved_msrs, Some(&configured)).unwrap();
+            assert_eq!(updates.feature_msrs, [saved_feature]);
+            assert_eq!(updates.snapshottable_msr_indices, expected_indices);
+        }
+
+        let updates = generate_restored_msr_updates(hv.as_ref(), &[], None).unwrap();
+        assert!(updates.feature_msrs.is_empty());
+        assert_eq!(
+            updates.snapshottable_msr_indices,
+            hv.get_msr_index_list().unwrap()
+        );
+    }
+
+    #[cfg(feature = "kvm")]
+    #[test]
+    fn test_restored_msr_updates_check_arch_capabilities() {
+        use hypervisor::kvm::KvmHypervisor;
+
+        use crate::Error as ArchError;
+
+        let hv = KvmHypervisor::new().unwrap();
+        let mut saved = hv
+            .get_feature_msrs()
+            .unwrap()
+            .into_iter()
+            .find(|msr| msr.index == 0x10a)
+            .unwrap_or(MsrEntry {
+                index: 0x10a,
+                data: 0,
+            });
+        // Reserved bits must match. Hosts without this MSR must also reject it.
+        saved.data ^= 1 << 31;
+        assert!(matches!(
+            generate_restored_msr_updates(hv.as_ref(), &[saved], None),
+            Err(ArchError::PlatformSpecific(
+                Error::ArchCapabilitiesIncompatibility | Error::ArchCapabilitiesMissing
+            ))
+        ));
+    }
 
     #[test]
     fn test_cpuid_override_existing_entries() {
