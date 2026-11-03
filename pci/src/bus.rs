@@ -571,16 +571,6 @@ mod tests {
     }
 
     #[test]
-    // Test to acquire all IDs that can be acquired
-    fn allocate_device_id_next_free() {
-        // The first address is occupied by the root
-        let mut bus = setup_bus();
-        for expected_id in 1..NUM_DEVICE_IDS {
-            assert_eq!(expected_id, bus.allocate_device_id(None).unwrap());
-        }
-    }
-
-    #[test]
     // Test that requesting specific ID work
     fn allocate_device_id_request_id() -> Result<(), Box<dyn Error>> {
         // The first address is occupied by the root

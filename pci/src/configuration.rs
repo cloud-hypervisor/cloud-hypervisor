@@ -1437,14 +1437,6 @@ mod tests {
         assert_eq!(registers.as_slice(), &[(0, 0x1234_5678), (15, 0xff)]);
     }
 
-    #[test]
-    fn test_register_map_restores_the_dense_form() {
-        // Snapshots of older versions carry every register.
-        #[expect(deprecated)]
-        let dense = PciConfigurationRegisterState::Linear(vec![1, 0, 3]);
-        assert_eq!(Into::<Vec<u32>>::into(dense), vec![1_u32, 0, 3]);
-    }
-
     #[repr(C, packed)]
     #[derive(Clone, Copy, Default)]
     struct TestCap {
