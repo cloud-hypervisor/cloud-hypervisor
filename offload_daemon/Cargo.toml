@@ -6,7 +6,15 @@ rust-version.workspace = true
 version = "0.1.0"
 
 [dependencies]
-clap = { workspace = true, features = ["derive"] }
+clap = { workspace = true, features = [
+  "color",
+  "derive",
+  "error-context",
+  "help",
+  "std",
+  "suggestions",
+  "usage",
+] }
 env_logger = { workspace = true, features = ["auto-color", "humantime"] }
 libc = { workspace = true }
 log = { workspace = true }
