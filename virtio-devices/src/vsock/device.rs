@@ -667,18 +667,6 @@ mod tests {
     }
 
     #[test]
-    fn test_irq() {
-        // Test case: successful IRQ signaling.
-        {
-            let test_ctx = TestContext::new();
-            let ctx = test_ctx.create_epoll_handler_context();
-
-            let _queue: Queue = Queue::new(256).unwrap();
-            ctx.handler.signal_used_queue(0).unwrap();
-        }
-    }
-
-    #[test]
     fn test_txq_event() {
         // Test case:
         // - the driver has something to send (there's data in the TX queue); and

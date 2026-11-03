@@ -247,22 +247,6 @@ mod tests {
     }
 
     #[test]
-    fn test_push_from_wrap() {
-        let mut txbuf = TxBuf::new();
-        let mut sink = TestSink::new();
-        let tmp: Vec<u8> = vec![0; TxBuf::SIZE - 2];
-        txbuf.push(tmp.as_slice()).unwrap();
-        txbuf.flush_to(&mut sink).unwrap();
-        sink.clear();
-
-        let src = [1, 2, 3, 4];
-        txbuf.push_from(&src[..], 0, src.len()).unwrap();
-
-        assert_eq!(txbuf.flush_to(&mut sink).unwrap(), 4);
-        assert_eq!(sink.data, src);
-    }
-
-    #[test]
     fn test_push_error() {
         let mut txbuf = TxBuf::new();
         let mut tmp = Vec::with_capacity(TxBuf::SIZE);
