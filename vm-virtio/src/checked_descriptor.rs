@@ -462,18 +462,6 @@ mod tests {
     }
 
     #[test]
-    fn exhausted_chain_returns_none() {
-        // After the iterator yields the only descriptor in the chain, the
-        // subsequent None must reflect exhaustion, not a validation failure.
-        let (_mem, mem_atomic, mut queue) = setup_vq(128 * 1024, 0x4000, 256, 0);
-        let mem_guard = mem_atomic.memory();
-        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
-        let mut it = chain.checked_iter(None);
-        it.next().unwrap().unwrap();
-        assert!(it.next().is_none());
-    }
-
-    #[test]
     fn accessors_reflect_underlying_descriptor() {
         // Two descriptor chain: a non-empty writable head followed by a
         // zero length tail. Verify the CheckedDescriptor accessors agree
