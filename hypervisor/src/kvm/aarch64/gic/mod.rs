@@ -110,7 +110,7 @@ pub struct KvmGicV3Its {
 pub struct Gicv3ItsState {
     dist: Vec<u32>,
     rdist: Vec<u32>,
-    icc: Vec<u32>,
+    icc: Vec<u64>,
     // special register that enables interrupts and affinity routing
     gicd_ctlr: u32,
     its_ctlr: u64,
