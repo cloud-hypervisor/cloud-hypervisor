@@ -1651,8 +1651,7 @@ impl MemoryManager {
 
         let mut prefault_active = background_fetch_pages && !ranges.is_empty();
         let mut source_failed = false;
-        let mut range_idx = 0;
-        let mut page_idx = 0;
+        let mut prefault_cursor = 0;
         let prefault_start = time::Instant::now();
 
         const EVENT_STOP: u64 = u64::MAX;
@@ -1960,8 +1959,7 @@ impl MemoryManager {
 
             match Self::uffd_prefault(
                 vmm_uffd.fd(),
-                &mut range_idx,
-                &mut page_idx,
+                &mut prefault_cursor,
                 ranges,
                 &mut source,
                 &pages.served,
@@ -1990,40 +1988,31 @@ impl MemoryManager {
 
     fn uffd_prefault(
         uffd_fd: BorrowedFd,
-        range_idx: &mut usize,
-        page_idx: &mut u64,
+        prefault_cursor: &mut u64,
         ranges: &[UffdRange],
         source: &mut Box<dyn UffdMemorySource>,
         served_bitmap: &[AtomicBitmap],
         pages_loading: &Mutex<HashSet<(usize, u64)>>,
     ) -> Result<u64, io::Error> {
-        let mut current_page_idx = *page_idx;
-        let mut current_range_idx = *range_idx;
-
-        'outer: loop {
-            'find_range: loop {
-                if current_page_idx >= ranges[current_range_idx].num_pages() {
-                    if current_range_idx + 1 < ranges.len() {
-                        current_range_idx += 1;
-                        current_page_idx = 0;
-                        continue 'find_range;
-                    }
-
-                    *range_idx = current_range_idx;
-                    *page_idx = current_page_idx;
-                    return Ok(0);
-                }
-                break 'find_range;
+        loop {
+            let mut page_idx = *prefault_cursor;
+            let mut range_idx = 0;
+            while range_idx < ranges.len() && page_idx >= ranges[range_idx].num_pages() {
+                page_idx -= ranges[range_idx].num_pages();
+                range_idx += 1;
+            }
+            if range_idx == ranges.len() {
+                return Ok(0);
             }
 
-            let range = &ranges[current_range_idx];
-            let key = (current_range_idx, current_page_idx);
+            let range = &ranges[range_idx];
+            let key = (range_idx, page_idx);
             let claimed = {
                 let mut loading = pages_loading.lock().unwrap();
 
-                if served_bitmap[current_range_idx].is_bit_set(current_page_idx as usize) {
-                    current_page_idx += 1;
-                    continue 'outer;
+                if served_bitmap[range_idx].is_bit_set(page_idx as usize) {
+                    *prefault_cursor += 1;
+                    continue;
                 }
 
                 loading.insert(key)
@@ -2033,16 +2022,16 @@ impl MemoryManager {
                 // Do not advance the cursor until the page's owner publishes
                 // completion or makes the page available for another attempt.
                 thread::yield_now();
-                continue 'outer;
+                continue;
             }
 
-            let result = source.resolve(uffd_fd, range, current_page_idx);
+            let result = source.resolve(uffd_fd, range, page_idx);
 
             {
                 let mut loading = pages_loading.lock().unwrap();
 
                 if result.is_ok() {
-                    served_bitmap[current_range_idx].set_bit(current_page_idx as usize);
+                    served_bitmap[range_idx].set_bit(page_idx as usize);
                 }
 
                 loading.remove(&key);
@@ -2050,14 +2039,11 @@ impl MemoryManager {
 
             match result {
                 Ok(()) => {
-                    current_page_idx += 1;
-
-                    *range_idx = current_range_idx;
-                    *page_idx = current_page_idx;
+                    *prefault_cursor += 1;
                     return Ok(1);
                 }
                 Err(e) => {
-                    let page_addr = range.page_addr(current_page_idx);
+                    let page_addr = range.page_addr(page_idx);
                     warn!("UFFD prefault: source error at {page_addr:#x}: {e}");
                     return Err(e);
                 }
@@ -4281,14 +4267,12 @@ mod tests {
             fail_next: false,
         });
         let uffd_file = tempfile::tempfile().unwrap();
-        let mut range_idx = 0;
-        let mut page_idx = 0;
+        let mut prefault_cursor = 0;
 
         assert_eq!(
             MemoryManager::uffd_prefault(
                 uffd_file.as_fd(),
-                &mut range_idx,
-                &mut page_idx,
+                &mut prefault_cursor,
                 &ranges,
                 &mut source,
                 &served_bitmap,
@@ -4297,13 +4281,12 @@ mod tests {
             .unwrap(),
             1
         );
-        assert_eq!((range_idx, page_idx), (0, 2));
+        assert_eq!(prefault_cursor, 2);
 
         assert_eq!(
             MemoryManager::uffd_prefault(
                 uffd_file.as_fd(),
-                &mut range_idx,
-                &mut page_idx,
+                &mut prefault_cursor,
                 &ranges,
                 &mut source,
                 &served_bitmap,
@@ -4312,13 +4295,12 @@ mod tests {
             .unwrap(),
             1
         );
-        assert_eq!((range_idx, page_idx), (1, 1));
+        assert_eq!(prefault_cursor, 3);
 
         assert_eq!(
             MemoryManager::uffd_prefault(
                 uffd_file.as_fd(),
-                &mut range_idx,
-                &mut page_idx,
+                &mut prefault_cursor,
                 &ranges,
                 &mut source,
                 &served_bitmap,
@@ -4327,7 +4309,7 @@ mod tests {
             .unwrap(),
             0
         );
-        assert_eq!((range_idx, page_idx), (1, 1));
+        assert_eq!(prefault_cursor, 3);
         assert_eq!(
             *attempts.lock().unwrap(),
             vec![(ranges[0].host_addr, 1), (ranges[1].host_addr, 0)]
@@ -4351,13 +4333,11 @@ mod tests {
             fail_next: true,
         });
         let uffd_file = tempfile::tempfile().unwrap();
-        let mut range_idx = 0;
-        let mut page_idx = 0;
+        let mut prefault_cursor = 0;
 
         let error = MemoryManager::uffd_prefault(
             uffd_file.as_fd(),
-            &mut range_idx,
-            &mut page_idx,
+            &mut prefault_cursor,
             &ranges,
             &mut source,
             &served_bitmap,
@@ -4365,15 +4345,14 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error.to_string(), "test source failure");
-        assert_eq!((range_idx, page_idx), (0, 0));
+        assert_eq!(prefault_cursor, 0);
         assert!(pages_loading.lock().unwrap().is_empty());
         assert!(!served_bitmap[0].is_bit_set(0));
 
         assert_eq!(
             MemoryManager::uffd_prefault(
                 uffd_file.as_fd(),
-                &mut range_idx,
-                &mut page_idx,
+                &mut prefault_cursor,
                 &ranges,
                 &mut source,
                 &served_bitmap,
@@ -4382,7 +4361,7 @@ mod tests {
             .unwrap(),
             1
         );
-        assert_eq!((range_idx, page_idx), (0, 1));
+        assert_eq!(prefault_cursor, 1);
         assert!(pages_loading.lock().unwrap().is_empty());
         assert!(served_bitmap[0].is_bit_set(0));
         assert_eq!(
