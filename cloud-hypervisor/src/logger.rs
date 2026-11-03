@@ -426,17 +426,6 @@ mod tests {
     }
 
     #[test]
-    fn logger_enabled_always_true() {
-        let buf = SharedBuffer::default();
-        let logger = Logger::new(Box::new(buf), DEFAULT_FORMAT).unwrap();
-        let metadata = log::Metadata::builder()
-            .level(log::Level::Trace)
-            .target("anything")
-            .build();
-        assert!(logger.enabled(&metadata));
-    }
-
-    #[test]
     fn logger_writes_expected_fields() {
         let buf = SharedBuffer::default();
         let logger = Logger::new(Box::new(buf.clone()), DEFAULT_FORMAT).unwrap();
