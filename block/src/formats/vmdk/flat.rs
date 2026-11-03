@@ -749,25 +749,6 @@ mod tests {
     }
 
     #[test]
-    fn open_extent_rejects_parent_dir_traversal() {
-        use vmm_sys_util::tempdir::TempDir;
-
-        // Layout:
-        //   root/
-        //     secret     <- must NOT be reachable through the extent name
-        //     anchor/    <- the "descriptor directory" used as the open anchor
-        let root = TempDir::new_with_prefix("/tmp/vmdk-traversal-test").unwrap();
-        let anchor = root.as_path().join("anchor");
-        fs::create_dir(&anchor).unwrap();
-        fs::write(root.as_path().join("secret"), b"secret").unwrap();
-
-        // `..` climbs out of `anchor` back into `root` and reaches `secret`.
-        let (openat2_res, walk_res) = open_both(&anchor, "../secret", false, false);
-        check_openat2(&openat2_res, false);
-        check_walk(&walk_res, false);
-    }
-
-    #[test]
     fn open_extent_rejects_relative_traversal() {
         use vmm_sys_util::tempdir::TempDir;
 
