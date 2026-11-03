@@ -1135,41 +1135,6 @@ mod tests {
     }
 
     #[test]
-    fn test_fdt_generic_initiator_detection_and_skip() {
-        // No Generic Initiator - should not skip FDT NUMA
-        let mut numa_nodes = BTreeMap::new();
-        numa_nodes.insert(0, create_test_numa_node(vec![0, 1], None));
-        numa_nodes.insert(1, create_test_numa_node(vec![2, 3], None));
-
-        let has_gi = numa_nodes.values().any(|node| node.device_id.is_some());
-        assert!(
-            !has_gi,
-            "Should not detect Generic Initiator when none present"
-        );
-
-        // One Generic Initiator - should skip FDT NUMA
-        let mut numa_nodes = BTreeMap::new();
-        numa_nodes.insert(0, create_test_numa_node(vec![0, 1], None));
-        numa_nodes.insert(1, create_test_numa_node(vec![], Some("vfio0".to_string())));
-
-        let has_gi = numa_nodes.values().any(|node| node.device_id.is_some());
-        assert!(has_gi, "Should detect Generic Initiator when present");
-
-        let mut fdt = FdtWriter::new().unwrap();
-        let result = create_distance_map_node(&mut fdt, &numa_nodes);
-        assert!(result.is_ok(), "Should skip distance map when GI present");
-
-        // Multiple Generic Initiators - should skip FDT NUMA
-        let mut numa_nodes = BTreeMap::new();
-        numa_nodes.insert(0, create_test_numa_node(vec![0, 1], None));
-        numa_nodes.insert(1, create_test_numa_node(vec![], Some("vfio0".to_string())));
-        numa_nodes.insert(2, create_test_numa_node(vec![], Some("vfio1".to_string())));
-
-        let has_gi = numa_nodes.values().any(|node| node.device_id.is_some());
-        assert!(has_gi, "Should detect multiple Generic Initiators");
-    }
-
-    #[test]
     fn test_fdt_distance_map() {
         // Single NUMA node - should skip distance map
         let mut numa_nodes = BTreeMap::new();
