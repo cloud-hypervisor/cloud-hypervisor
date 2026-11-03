@@ -1251,11 +1251,38 @@ impl vm::Vm for KvmVm {
     #[cfg(target_arch = "x86_64")]
     fn restore_clock(
         &self,
-        _vcpus: &[&dyn cpu::Vcpu],
+        vcpus: &[&dyn cpu::Vcpu],
         state: &ClockState,
-        _mode: ClockRestoreMode,
+        mode: ClockRestoreMode,
     ) -> vm::Result<()> {
-        self.set_clock(state)
+        self.set_clock(state)?;
+        // A snapshot restore moves kvmclock forward but not the TSC, so an armed TSC
+        // deadline would fire late. Make it due so the guest catches up on resume.
+        if mode == ClockRestoreMode::SnapshotRestore && state.has_realtime() {
+            for vcpu in vcpus {
+                let mut msrs = vec![
+                    MsrEntry {
+                        index: msr_index::MSR_IA32_TSC,
+                        data: 0,
+                    },
+                    MsrEntry {
+                        index: msr_index::MSR_IA32_TSC_DEADLINE,
+                        data: 0,
+                    },
+                ];
+                vcpu.get_msrs(&mut msrs)
+                    .map_err(|e| vm::HypervisorVmError::SetClock(e.into()))?;
+                let (tsc, deadline) = (msrs[0].data, msrs[1].data);
+                if deadline > tsc {
+                    vcpu.set_msrs(&[MsrEntry {
+                        index: msr_index::MSR_IA32_TSC_DEADLINE,
+                        data: tsc,
+                    }])
+                    .map_err(|e| vm::HypervisorVmError::SetClock(e.into()))?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Advance the guest virtual counter to current wall time before the vCPUs
