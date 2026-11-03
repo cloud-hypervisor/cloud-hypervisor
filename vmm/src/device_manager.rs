@@ -28,9 +28,8 @@ use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-#[cfg(not(target_arch = "riscv64"))]
 use std::time::Instant;
-use std::{iter, path, result, sync};
+use std::{iter, path, result, sync, thread};
 
 use acpi_tables::sdt::GenericAddress;
 use acpi_tables::{Aml, aml};
@@ -6775,8 +6774,109 @@ impl BusDevice for DeviceManager {
     }
 }
 
+impl DeviceManager {
+    /// Drop every VFIO passthrough device on its own thread.
+    ///
+    /// Dropping a VFIO device unmaps its BARs and closes the device file, and the
+    /// kernel then resets the device. This blocks for a long time on devices with
+    /// large BARs, and no device depends on another, so the drops run in parallel.
+    ///
+    /// Each device is detached from the device tree, the PCI bus and `bus_devices`,
+    /// and its regions are taken out of `mmio_regions`, so that its thread holds the
+    /// last references. A BAR mapping keeps the device file open, so a copy left in
+    /// `mmio_regions` would delay the reset. The threads are joined before the VFIO
+    /// container is dropped.
+    fn drop_vfio_devices_concurrently(&mut self) {
+        let nodes: Vec<(String, Arc<Mutex<VfioPciDevice>>, Option<PciBdf>)> = {
+            let device_tree = self.device_tree.lock().unwrap();
+            device_tree
+                .iter()
+                .filter_map(|(id, node)| match &node.pci_device_handle {
+                    Some(PciDeviceHandle::Vfio(dev)) => {
+                        Some((id.clone(), Arc::clone(dev), node.pci_bdf))
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        if nodes.is_empty() {
+            return;
+        }
+
+        let start = Instant::now();
+        let count = nodes.len();
+        let mut devices = Vec::with_capacity(count);
+        for (id, dev, bdf) in nodes {
+            self.device_tree.lock().unwrap().remove(&id);
+
+            let bus_device = Arc::clone(&dev) as Arc<dyn BusDeviceSync>;
+            let pci_device = Arc::clone(&dev) as Arc<Mutex<dyn PciDevice>>;
+            if let Some(bdf) = bdf
+                && let Err(e) = self.pci_segments[bdf.segment() as usize]
+                    .pci_bus
+                    .lock()
+                    .unwrap()
+                    .remove_by_device(&pci_device)
+            {
+                warn!("Could not remove VFIO device {id} from the PCI bus: {e:?}");
+            }
+            // The MMIO and IO buses only hold weak references, so they do not keep
+            // the device alive. bus_devices holds the strong one.
+            self.bus_devices.retain(|d| !Arc::ptr_eq(d, &bus_device));
+            drop(bus_device);
+            drop(pci_device);
+
+            let device_regions = dev.lock().unwrap().mmio_regions();
+            let mut regions = Vec::new();
+            self.mmio_regions.lock().unwrap().retain(|r| {
+                if device_regions.iter().any(|d| r.has_matching_slots(d)) {
+                    regions.push(r.clone());
+                    false
+                } else {
+                    true
+                }
+            });
+
+            devices.push((id, dev, regions));
+        }
+
+        let mut handles = Vec::with_capacity(count);
+        for (id, dev, regions) in devices {
+            let refs = Arc::strong_count(&dev);
+            if refs > 1 {
+                warn!("VFIO device {id} still has {refs} references, it may be dropped later");
+            }
+            match thread::Builder::new()
+                .name(format!("vfio-drop-{}", handles.len()))
+                .spawn(move || {
+                    // Drop the DeviceManager's copies first, so the device's own
+                    // drop removes the last BAR mapping.
+                    drop(regions);
+                    drop(dev);
+                }) {
+                Ok(handle) => handles.push(handle),
+                // The closure, and the device with it, was dropped on this thread.
+                Err(e) => warn!("Could not spawn a thread to drop VFIO device {id}: {e}"),
+            }
+        }
+        for handle in handles {
+            if handle.join().is_err() {
+                error!("A VFIO device drop thread panicked");
+            }
+        }
+        info!(
+            "Dropped {count} VFIO devices concurrently in {:?}",
+            start.elapsed()
+        );
+    }
+}
+
 impl Drop for DeviceManager {
     fn drop(&mut self) {
+        // Drop the VFIO devices first, concurrently, while the container they are
+        // attached to is still alive.
+        self.drop_vfio_devices_concurrently();
+
         // Explicitly clear the regions owned by this device to ensure
         // that they are dropped and unmapped before the container is cleared.
         // See eject_device() for the device hot-unplug equivalent.
