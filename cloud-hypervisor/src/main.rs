@@ -681,6 +681,34 @@ fn start_vmm(
     api_socket_path: &Option<String>,
     api_socket_fd: Option<RawFd>,
 ) -> Result<(), Error> {
+    #[cfg(feature = "igvm")]
+    let payload_present = cmd_arguments.contains_id("kernel")
+        || cmd_arguments.contains_id("firmware")
+        || cmd_arguments.contains_id("igvm");
+    #[cfg(not(feature = "igvm"))]
+    let payload_present =
+        cmd_arguments.contains_id("kernel") || cmd_arguments.contains_id("firmware");
+
+    let vm_config = if payload_present {
+        let vm_params = VmParams::from_arg_matches(cmd_arguments);
+        Some(VmConfig::parse(vm_params).map_err(Error::ParsingConfig)?)
+    } else {
+        None
+    };
+    let restore_config = if vm_config.is_none() {
+        cmd_arguments
+            .get_one::<String>("restore")
+            .map(|restore| RestoreConfig::parse(restore))
+            .transpose()
+            .map_err(Error::ParsingRestore)?
+    } else {
+        None
+    };
+
+    if let Err(e) = expand_fdtable() {
+        warn!("Error expanding FD table: {e}");
+    }
+
     let log_level = match cmd_arguments.get_count("v") {
         0 => LevelFilter::Warn,
         1 => LevelFilter::Info,
@@ -875,18 +903,7 @@ fn start_vmm(
     event!("vmm", "started");
 
     let r: Result<(), Error> = (|| {
-        #[cfg(feature = "igvm")]
-        let payload_present = cmd_arguments.contains_id("kernel")
-            || cmd_arguments.contains_id("firmware")
-            || cmd_arguments.contains_id("igvm");
-        #[cfg(not(feature = "igvm"))]
-        let payload_present =
-            cmd_arguments.contains_id("kernel") || cmd_arguments.contains_id("firmware");
-
-        if payload_present {
-            let vm_params = VmParams::from_arg_matches(cmd_arguments);
-            let vm_config = VmConfig::parse(vm_params).map_err(Error::ParsingConfig)?;
-
+        if let Some(vm_config) = vm_config {
             // Create and boot the VM based off the VM config we just built.
             let sender = api_request_sender.clone();
             api::VmCreate
@@ -899,12 +916,12 @@ fn start_vmm(
             api::VmBoot
                 .send(api_evt.try_clone().unwrap(), sender, ())
                 .map_err(Error::VmBoot)?;
-        } else if let Some(restore_params) = cmd_arguments.get_one::<String>("restore") {
+        } else if let Some(restore_config) = restore_config {
             api::VmRestore
                 .send(
                     api_evt.try_clone().unwrap(),
                     api_request_sender,
-                    RestoreConfig::parse(restore_params).map_err(Error::ParsingRestore)?,
+                    restore_config,
                 )
                 .map_err(Error::VmRestore)?;
         }
@@ -1041,10 +1058,6 @@ fn main() {
         }
 
         return;
-    }
-
-    if let Err(e) = expand_fdtable() {
-        warn!("Error expanding FD table: {e}");
     }
 
     let (api_socket_path, api_socket_fd) = match parse_api_socket(&cmd_arguments) {
