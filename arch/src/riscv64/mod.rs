@@ -22,7 +22,7 @@ use thiserror::Error;
 use vm_memory::{Address, GuestAddress, GuestMemoryAtomic, GuestMemoryBackend};
 
 pub use self::fdt::DeviceInfoForFdt;
-use crate::{DeviceType, GuestMemoryMmap, PciSpaceInfo, RegionType};
+use crate::{DeviceType, GuestMemory, PciSpaceInfo, RegionType};
 
 pub const CLOUDHV_IRQCHIP_NUM_MSIS: u16 = 255;
 pub const CLOUDHV_IRQCHIP_NUM_SOURCES: u8 = 96;
@@ -83,7 +83,7 @@ pub struct EntryPoint {
 pub fn configure_vcpu(
     vcpu: &dyn hypervisor::Vcpu,
     id: u32,
-    boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
+    boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemory>)>,
 ) -> super::Result<()> {
     if let Some((kernel_entry_point, _guest_memory)) = boot_setup {
         vcpu.setup_regs(
@@ -161,7 +161,7 @@ fn isa_string_from_host() -> Result<String, Error> {
 
 /// Configures the system and should be called once per vm before starting vcpu threads.
 pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHasher>(
-    guest_mem: &GuestMemoryMmap,
+    guest_mem: &GuestMemory,
     cmdline: &str,
     num_vcpu: u32,
     device_info: &HashMap<(DeviceType, String), T, S>,
@@ -194,10 +194,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
 }
 
 /// Returns the memory address where the initramfs could be loaded.
-pub fn initramfs_load_addr(
-    guest_mem: &GuestMemoryMmap,
-    initramfs_size: usize,
-) -> super::Result<u64> {
+pub fn initramfs_load_addr(guest_mem: &GuestMemory, initramfs_size: usize) -> super::Result<u64> {
     let round_to_pagesize = |size| (size + (super::PAGE_SIZE - 1)) & !(super::PAGE_SIZE - 1);
     match guest_mem
         .last_addr()

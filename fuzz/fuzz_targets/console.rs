@@ -21,7 +21,7 @@ use vm_migration::{Pausable, Snapshot, Snapshottable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
-type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
+type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 macro_rules! align {
     ($n:expr, $align:expr) => {{
@@ -182,7 +182,7 @@ fn run_console_case(bytes: &[u8], cursor_offset: usize, mode: u8) -> Result<(), 
         _ => 0,
     };
     let mut queues = setup_virt_queues(&mut cursor, BASE_VIRT_QUEUE_ADDR, bad_used_ring_mask);
-    let mem = GuestMemoryMmap::from_ranges(&[
+    let mem = GuestMemory::from_ranges(&[
         (GuestAddress(0), MEM_SIZE),
         (GuestAddress(BASE_VIRT_QUEUE_ADDR), QUEUE_REGION_SIZE),
     ])
@@ -307,7 +307,7 @@ fn exercise_queue_event_read_error(
     .map_err(|_| ())?;
 
     let mut queues = setup_virt_queues(cursor, BASE_VIRT_QUEUE_ADDR, 0);
-    let mem = GuestMemoryMmap::from_ranges(&[
+    let mem = GuestMemory::from_ranges(&[
         (GuestAddress(0), MEM_SIZE),
         (GuestAddress(BASE_VIRT_QUEUE_ADDR), QUEUE_REGION_SIZE),
     ])
@@ -373,7 +373,7 @@ fn exercise_activation_failure(
     )
     .map_err(|_| ())?;
     let mem = GuestMemoryAtomic::new(
-        GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).map_err(|_| ())?,
+        GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).map_err(|_| ())?,
     );
 
     let _ = console.activate(virtio_devices::ActivationContext {
@@ -414,7 +414,7 @@ fn exercise_restored_input_queue(
 
     let bad_used_ring_mask = if bad_used_ring { 1 } else { 0 };
     let mut queues = setup_virt_queues(cursor, BASE_VIRT_QUEUE_ADDR, bad_used_ring_mask);
-    let mem = GuestMemoryMmap::from_ranges(&[
+    let mem = GuestMemory::from_ranges(&[
         (GuestAddress(0), MEM_SIZE),
         (GuestAddress(BASE_VIRT_QUEUE_ADDR), QUEUE_REGION_SIZE),
     ])
@@ -628,7 +628,7 @@ fn setup_virt_queues(
 }
 
 fn populate_queue_memory(
-    mem: &GuestMemoryMmap,
+    mem: &GuestMemory,
     queue_index: usize,
     queue: &mut Queue,
     is_input: bool,
@@ -738,13 +738,13 @@ fn populate_queue_memory(
     true
 }
 
-fn write_u16(mem: &GuestMemoryMmap, addr: u64, value: u16) -> bool {
+fn write_u16(mem: &GuestMemory, addr: u64, value: u16) -> bool {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .is_ok()
 }
 
 fn write_desc(
-    mem: &GuestMemoryMmap,
+    mem: &GuestMemory,
     table_addr: u64,
     index: u16,
     addr: u64,

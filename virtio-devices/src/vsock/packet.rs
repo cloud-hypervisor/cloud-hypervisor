@@ -28,7 +28,7 @@ use vm_virtio::AccessPlatform;
 use vm_virtio::checked_descriptor::DescriptorChainExt;
 
 use super::{Result, VsockError, defs};
-use crate::GuestMemoryMmap;
+use crate::GuestMemory;
 
 // The vsock packet header is defined by the C struct:
 //
@@ -114,7 +114,7 @@ fn set_hdr_field<const N: usize>(hdr: &mut [u8], offset: usize, field: [u8; N]) 
 ///   multiple virtq descriptors.
 enum PacketBuffer {
     Guest {
-        mem: GuestMemoryMmap,
+        mem: GuestMemory,
         addr: GuestAddress,
         len: usize,
     },
@@ -122,7 +122,7 @@ enum PacketBuffer {
 }
 
 impl PacketBuffer {
-    fn guest(mem: GuestMemoryMmap, addr: GuestAddress, len: usize) -> Result<Self> {
+    fn guest(mem: GuestMemory, addr: GuestAddress, len: usize) -> Result<Self> {
         // Validate the range before storing it.
         mem.get_slice(addr, len)
             .map_err(|_| VsockError::GuestMemory)?;
@@ -273,7 +273,7 @@ impl VsockPacket {
         access_platform: Option<&dyn AccessPlatform>,
     ) -> Result<Self>
     where
-        M: Clone + Deref<Target = GuestMemoryMmap>,
+        M: Clone + Deref<Target = GuestMemory>,
     {
         let head = desc_chain
             .next_checked(access_platform)
@@ -417,7 +417,7 @@ impl VsockPacket {
         access_platform: Option<&dyn AccessPlatform>,
     ) -> Result<Self>
     where
-        M: Clone + Deref<Target = GuestMemoryMmap>,
+        M: Clone + Deref<Target = GuestMemory>,
     {
         let head = desc_chain
             .next_checked(access_platform)
@@ -692,7 +692,7 @@ mod tests {
 
     use super::super::tests::TestContext;
     use super::*;
-    use crate::GuestMemoryMmap;
+    use crate::GuestMemory;
     use crate::vsock::defs::MAX_PKT_BUF_SIZE;
 
     macro_rules! create_context {
@@ -727,7 +727,7 @@ mod tests {
         };
     }
 
-    fn set_pkt_len(len: u32, guest_desc: &GuestQDesc<'_, GuestMemoryMmap>, mem: &GuestMemoryMmap) {
+    fn set_pkt_len(len: u32, guest_desc: &GuestQDesc<'_, GuestMemory>, mem: &GuestMemory) {
         let hdr_gpa = guest_desc.addr.get();
         mem.write_slice(
             &len.to_le_bytes(),

@@ -16,7 +16,7 @@ use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
-type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
+type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 const QUEUE_DATA_SIZE: usize = 4;
 const CONTROL_SIZE: usize = 30;
@@ -494,7 +494,7 @@ fn bounded_pfn(v: u8) -> u32 {
     u32::from(v) & ((MEM_SIZE as u32 >> 12) - 1)
 }
 
-fn create_guest_memory(shared: bool) -> Option<GuestMemoryMmap> {
+fn create_guest_memory(shared: bool) -> Option<GuestMemory> {
     let mem_region = vmm::memory_manager::MemoryManager::create_ram_region(
         &None,
         0,
@@ -538,7 +538,7 @@ fn create_guest_memory(shared: bool) -> Option<GuestMemoryMmap> {
     )
     .ok()?;
 
-    GuestMemoryMmap::from_arc_regions(vec![mem_region, reporting_tail_region, queue_region]).ok()
+    GuestMemory::from_arc_regions(vec![mem_region, reporting_tail_region, queue_region]).ok()
 }
 
 fn run_failing_interrupt_case(
@@ -775,11 +775,7 @@ fn activate_reporting_available_unacked(queue_data: &[u8]) {
     balloon.reset();
 }
 
-fn populate_queue_memory(
-    mem: &GuestMemoryMmap,
-    queue_layouts: &[QueueLayout],
-    bytes: &[u8],
-) -> bool {
+fn populate_queue_memory(mem: &GuestMemory, queue_layouts: &[QueueLayout], bytes: &[u8]) -> bool {
     if queue_layouts.len() != QUEUE_NUM as usize {
         return false;
     }
@@ -930,7 +926,7 @@ fn populate_queue_memory(
     ) && write_avail_ring(mem, reporting.avail_ring_addr, &[0, 1, 2, 3])
 }
 
-fn write_avail_ring(mem: &GuestMemoryMmap, avail_ring_addr: u64, heads: &[u16]) -> bool {
+fn write_avail_ring(mem: &GuestMemory, avail_ring_addr: u64, heads: &[u16]) -> bool {
     if !write_obj(mem, 0u16, avail_ring_addr)
         || !write_obj(mem, heads.len() as u16, avail_ring_addr + 2)
     {
@@ -947,7 +943,7 @@ fn write_avail_ring(mem: &GuestMemoryMmap, avail_ring_addr: u64, heads: &[u16]) 
 }
 
 fn write_descriptor(
-    mem: &GuestMemoryMmap,
+    mem: &GuestMemory,
     desc_table_addr: u64,
     index: u16,
     addr: u64,
@@ -962,6 +958,6 @@ fn write_descriptor(
         && write_obj(mem, next, offset + 14)
 }
 
-fn write_obj<T: ByteValued>(mem: &GuestMemoryMmap, value: T, addr: u64) -> bool {
+fn write_obj<T: ByteValued>(mem: &GuestMemory, value: T, addr: u64) -> bool {
     mem.write_obj(value, GuestAddress(addr)).is_ok()
 }

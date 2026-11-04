@@ -35,7 +35,7 @@ use thiserror::Error;
 use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryError};
 use vmm_sys_util::eventfd;
 
-use crate::{GuestMemoryMmap, cpu, vm};
+use crate::{GuestMemory, cpu, vm};
 
 type ArchUsize = u64;
 
@@ -72,14 +72,14 @@ pub(crate) trait Debuggable: vm_migration::Pausable {
     fn write_regs(&self, cpu_id: usize, regs: &CoreRegs) -> result::Result<(), DebuggableError>;
     fn read_mem(
         &self,
-        guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+        guest_memory: &GuestMemoryAtomic<GuestMemory>,
         cpu_id: usize,
         vaddr: GuestAddress,
         len: usize,
     ) -> result::Result<Vec<u8>, DebuggableError>;
     fn write_mem(
         &self,
-        guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+        guest_memory: &GuestMemoryAtomic<GuestMemory>,
         cpu_id: usize,
         vaddr: &GuestAddress,
         data: &[u8],

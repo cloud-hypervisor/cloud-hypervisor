@@ -47,7 +47,7 @@ use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::{
     ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
-    GuestMemoryMmap, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice,
+    GuestMemory, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice,
     VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
 };
 
@@ -284,7 +284,7 @@ struct BalloonStatsHandler {
 }
 
 struct BalloonEpollHandler {
-    mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    mem: GuestMemoryAtomic<GuestMemory>,
     queues: Vec<Queue>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     inflate_queue_evt: EventFd,
@@ -307,7 +307,7 @@ impl BalloonEpollHandler {
     }
 
     fn advise_memory_range(
-        memory: &GuestMemoryMmap,
+        memory: &GuestMemory,
         range_base: GuestAddress,
         range_len: usize,
         advice: libc::c_int,
@@ -328,7 +328,7 @@ impl BalloonEpollHandler {
     }
 
     fn release_memory_range(
-        memory: &GuestMemoryMmap,
+        memory: &GuestMemory,
         range_base: GuestAddress,
         range_len: usize,
     ) -> result::Result<(), Error> {
@@ -379,7 +379,7 @@ impl BalloonEpollHandler {
 
     fn release_memory_range_partial_page(
         pbp: &mut Option<PartiallyBalloonedPage>,
-        memory: &GuestMemoryMmap,
+        memory: &GuestMemory,
         range_base: GuestAddress,
     ) -> result::Result<(), Error> {
         let page_size: u64 = get_page_size();
@@ -409,7 +409,7 @@ impl BalloonEpollHandler {
 
     fn process_inflate_addresses(
         &mut self,
-        memory: &GuestMemoryMmap,
+        memory: &GuestMemory,
         addresses: &mut SmallVec<[GuestAddress; VIRTIO_BALLOON_PFNS_PER_BATCH]>,
     ) {
         // The balloon always deals with 4 KiB pages. Use partial page handling
@@ -541,7 +541,7 @@ impl BalloonEpollHandler {
         access_platform: Option<&dyn AccessPlatform>,
     ) -> BalloonStatsResult
     where
-        M: Deref<Target = GuestMemoryMmap>,
+        M: Deref<Target = GuestMemory>,
     {
         let results: SmallVec<[_; 4]> = desc_chain.checked_iter(access_platform).collect();
         let mut data = Vec::new();
@@ -1205,7 +1205,7 @@ mod tests {
         use vm_memory::{FileOffset, GuestAddress, MmapRegion};
         use vmm_sys_util::tempfile::TempFile;
 
-        use crate::GuestRegionMmap;
+        use crate::GuestRegion;
 
         let backing_file = TempFile::new().unwrap();
         backing_file.as_file().write_all(&[0x5a; 4096]).unwrap();
@@ -1223,8 +1223,8 @@ mod tests {
             libc::MAP_PRIVATE,
         )
         .unwrap();
-        let region = GuestRegionMmap::new(mmap, GuestAddress(0)).unwrap();
-        let memory = GuestMemoryMmap::from_regions(vec![region]).unwrap();
+        let region = GuestRegion::new(mmap, GuestAddress(0)).unwrap();
+        let memory = GuestMemory::from_regions(vec![region]).unwrap();
         memory.write_slice(&[0xa5], GuestAddress(0)).unwrap();
         assert_eq!(memory.read_obj::<u8>(GuestAddress(0)).unwrap(), 0xa5);
 

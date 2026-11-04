@@ -31,7 +31,7 @@ use vmm_sys_util::ioctl_io_nr;
 use crate::device::ActivationContext;
 use crate::{
     ActivateError, ActivateResult, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK,
-    DEVICE_FEATURES_OK, GuestMemoryMmap, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon, VirtioDevice,
+    DEVICE_FEATURES_OK, GuestMemory, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon, VirtioDevice,
     VirtioInterrupt, VirtioInterruptType, get_host_address_range,
 };
 
@@ -112,7 +112,7 @@ pub struct VdpaState {
 pub struct Vdpa {
     common: VirtioCommon,
     id: String,
-    vhost: Option<VhostKernVdpa<GuestMemoryAtomic<GuestMemoryMmap>>>,
+    vhost: Option<VhostKernVdpa<GuestMemoryAtomic<GuestMemory>>>,
     iova_range: VhostVdpaIovaRange,
     enabled_queues: BTreeMap<u16, bool>,
     backend_features: u64,
@@ -123,7 +123,7 @@ impl Vdpa {
     pub fn new(
         id: String,
         device_path: &str,
-        mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        mem: GuestMemoryAtomic<GuestMemory>,
         num_queues: u16,
         state: Option<VdpaState>,
     ) -> Result<Self> {
@@ -220,7 +220,7 @@ impl Vdpa {
 
     fn activate_vdpa(
         &mut self,
-        _mem: &GuestMemoryMmap,
+        _mem: &GuestMemory,
         virtio_interrupt: &dyn VirtioInterrupt,
         queues: &[(u16, Queue, EventFd)],
     ) -> Result<()> {
@@ -653,7 +653,7 @@ mod tests {
     use vm_memory::GuestAddress;
 
     use super::*;
-    use crate::{GuestMemoryMmap, VirtioInterruptType};
+    use crate::{GuestMemory, VirtioInterruptType};
 
     struct NoopInterrupt;
 
@@ -688,7 +688,7 @@ mod tests {
         };
         let context = ActivationContext {
             mem: GuestMemoryAtomic::new(
-                GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+                GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
             ),
             interrupt_cb: Arc::new(NoopInterrupt),
             queues: vec![],
@@ -720,7 +720,7 @@ mod tests {
         };
         let context = ActivationContext {
             mem: GuestMemoryAtomic::new(
-                GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+                GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
             ),
             interrupt_cb: Arc::new(NoopInterrupt),
             queues: vec![],

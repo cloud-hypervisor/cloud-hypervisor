@@ -12,7 +12,7 @@ use thiserror::Error;
 use uuid::Uuid;
 use vm_memory::{Address, ByteValued, Bytes, GuestAddress};
 
-use crate::GuestMemoryMmap;
+use crate::GuestMemory;
 use crate::layout::{SMBIOS_MAX_SIZE, SMBIOS_START};
 
 #[derive(Debug, Error)]
@@ -200,7 +200,7 @@ unsafe impl ByteValued for SmbiosChassis {}
 unsafe impl ByteValued for SmbiosEndOfTable {}
 
 fn write_and_incr<T: ByteValued>(
-    mem: &GuestMemoryMmap,
+    mem: &GuestMemory,
     val: T,
     mut curptr: GuestAddress,
 ) -> Result<GuestAddress> {
@@ -211,11 +211,7 @@ fn write_and_incr<T: ByteValued>(
     Ok(curptr)
 }
 
-fn write_string(
-    mem: &GuestMemoryMmap,
-    val: &str,
-    mut curptr: GuestAddress,
-) -> Result<GuestAddress> {
+fn write_string(mem: &GuestMemory, val: &str, mut curptr: GuestAddress) -> Result<GuestAddress> {
     for c in val.as_bytes().iter() {
         curptr = write_and_incr(mem, *c, curptr)?;
     }
@@ -223,11 +219,7 @@ fn write_string(
     Ok(curptr)
 }
 
-fn write_opt_string(
-    mem: &GuestMemoryMmap,
-    s: Option<&str>,
-    cur: GuestAddress,
-) -> Result<GuestAddress> {
+fn write_opt_string(mem: &GuestMemory, s: Option<&str>, cur: GuestAddress) -> Result<GuestAddress> {
     if let Some(v) = s {
         write_string(mem, v, cur)
     } else {
@@ -236,7 +228,7 @@ fn write_opt_string(
 }
 
 fn write_string_terminator(
-    mem: &GuestMemoryMmap,
+    mem: &GuestMemory,
     cur: GuestAddress,
     has_strings: bool,
 ) -> Result<GuestAddress> {
@@ -272,7 +264,7 @@ fn alloc_index(next: &mut u8, present: bool) -> Result<u8> {
 }
 
 fn write_type1_system(
-    mem: &GuestMemoryMmap,
+    mem: &GuestMemory,
     curptr: &mut GuestAddress,
     handle: &mut u16,
     system: Option<&SmbiosSystem>,
@@ -331,7 +323,7 @@ fn write_type1_system(
 }
 
 fn write_type3_chassis(
-    mem: &GuestMemoryMmap,
+    mem: &GuestMemory,
     curptr: &mut GuestAddress,
     handle: &mut u16,
     chassis: &SmbiosChassisConfig,
@@ -366,7 +358,7 @@ fn write_type3_chassis(
     Ok(())
 }
 
-pub(crate) fn setup_smbios(mem: &GuestMemoryMmap, smbios: Option<&SmbiosConfig>) -> Result<u64> {
+pub(crate) fn setup_smbios(mem: &GuestMemory, smbios: Option<&SmbiosConfig>) -> Result<u64> {
     let system = smbios.and_then(|cfg| cfg.system.as_ref());
     let chassis = smbios.and_then(|cfg| cfg.chassis.as_ref());
     let oem_strings: &[String] = smbios.map_or(&[], |cfg| &cfg.oem_strings);
@@ -466,7 +458,7 @@ mod tests {
     use super::*;
 
     /// Collects all strings after a SMBIOS structure, stopping at the double-NUL terminator and returns next addr.
-    fn read_string_set(mem: &GuestMemoryMmap, addr: GuestAddress) -> (Vec<String>, GuestAddress) {
+    fn read_string_set(mem: &GuestMemory, addr: GuestAddress) -> (Vec<String>, GuestAddress) {
         let mut cur = addr;
         let read_byte = |addr: GuestAddress| -> u8 { mem.read_obj(addr).unwrap() };
 
@@ -503,7 +495,7 @@ mod tests {
 
     #[test]
     fn entrypoint_checksum() {
-        let mem = GuestMemoryMmap::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
+        let mem = GuestMemory::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
 
         setup_smbios(&mem, None).unwrap();
 
@@ -533,7 +525,7 @@ mod tests {
 
     #[test]
     fn smbios_chassis_empty_string_set_has_double_null() {
-        let mem = GuestMemoryMmap::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
+        let mem = GuestMemory::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
         let smbios = SmbiosConfig {
             chassis: Some(SmbiosChassisConfig::default()),
             ..Default::default()
@@ -569,7 +561,7 @@ mod tests {
 
     #[test]
     fn smbios_chassis_oem_strings_layout() {
-        let mem = GuestMemoryMmap::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
+        let mem = GuestMemory::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
 
         let smbios = SmbiosConfig {
             chassis: Some(SmbiosChassisConfig {
@@ -616,7 +608,7 @@ mod tests {
 
     #[test]
     fn smbios_strings_terminators_default() {
-        let mem = GuestMemoryMmap::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
+        let mem = GuestMemory::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
 
         setup_smbios(&mem, None).unwrap();
 
@@ -662,7 +654,7 @@ mod tests {
 
     #[test]
     fn smbios_uuid_invalid_rejected() {
-        let mem = GuestMemoryMmap::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
+        let mem = GuestMemory::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
         let smbios = SmbiosConfig {
             system: Some(SmbiosSystem {
                 uuid: Some("not-a-uuid".to_string()),
@@ -677,7 +669,7 @@ mod tests {
 
     #[test]
     fn smbios_uuid_written_le() {
-        let mem = GuestMemoryMmap::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
+        let mem = GuestMemory::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
         let uuid_str = "00112233-4455-6677-8899-aabbccddeeff";
         let smbios = SmbiosConfig {
             system: Some(SmbiosSystem {
@@ -706,8 +698,8 @@ mod tests {
         // The region is deliberately larger than SMBIOS_MAX_SIZE so that the
         // rejection comes from the size check below, not from running out of
         // guest memory.
-        let mem = GuestMemoryMmap::from_ranges(&[(SMBIOS_START, (SMBIOS_MAX_SIZE * 2) as usize)])
-            .unwrap();
+        let mem =
+            GuestMemory::from_ranges(&[(SMBIOS_START, (SMBIOS_MAX_SIZE * 2) as usize)]).unwrap();
 
         // A single OEM string larger than the whole reservation. Reachable
         // via `--platform oem_strings=...`, which places no bound on length.
@@ -722,8 +714,8 @@ mod tests {
 
     #[test]
     fn smbios_write_fails_with_too_small_memory() {
-        let mem = GuestMemoryMmap::from_ranges(&[(SMBIOS_START, size_of::<Smbios30Entrypoint>())])
-            .unwrap();
+        let mem =
+            GuestMemory::from_ranges(&[(SMBIOS_START, size_of::<Smbios30Entrypoint>())]).unwrap();
 
         let err = setup_smbios(&mem, None).unwrap_err();
         assert!(matches!(err, Error::WriteData(_)));
@@ -731,7 +723,7 @@ mod tests {
 
     #[test]
     fn smbios_type0_is_virtual_machine_bit_set() {
-        let mem = GuestMemoryMmap::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
+        let mem = GuestMemory::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
 
         setup_smbios(&mem, None).unwrap();
 

@@ -26,7 +26,7 @@ use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
-type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
+type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 // Guest memory size. Kept small: everything the device touches lives in the
 // first megabyte, and a smaller mapping keeps the executions per second up.
@@ -223,7 +223,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     // Setup the guest memory and lay out a virtio queue the device can
     // actually consume: a descriptor table, an available ring referring to
     // it, and request headers/payloads/status bytes in the data region.
-    let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap();
+    let mem = GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap();
     build_queue_content(&mem, &input);
     let guest_memory = GuestMemoryAtomic::new(mem);
 
@@ -278,7 +278,7 @@ impl VirtioInterrupt for NoopVirtioInterrupt {
 }
 
 /// Write a single descriptor into the descriptor table.
-fn write_descriptor(mem: &GuestMemoryMmap, index: u16, addr: u64, len: u32, flags: u16, next: u16) {
+fn write_descriptor(mem: &GuestMemory, index: u16, addr: u64, len: u32, flags: u16, next: u16) {
     let desc_addr = GuestAddress(DESC_TABLE_ADDR + 16 * u64::from(index));
     let _ = mem.write_obj(addr.to_le(), desc_addr);
     let _ = mem.write_obj(len.to_le(), GuestAddress(desc_addr.0 + 8));
@@ -295,7 +295,7 @@ fn data_is_write_only(request_type: u32) -> bool {
 /// Build the descriptor table, the available ring and the request contents
 /// from the fuzz input. Returns the number of chains published in the
 /// available ring.
-fn build_queue_content(mem: &GuestMemoryMmap, input: &FuzzInput) {
+fn build_queue_content(mem: &GuestMemory, input: &FuzzInput) {
     // Fill the data region with the leftover fuzz bytes, repeated so that
     // request payloads (e.g. DISCARD segments) are never all zeroes.
     if !input.payload.is_empty() {

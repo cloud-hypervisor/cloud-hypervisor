@@ -9,12 +9,10 @@ use std::result;
 use crc_any::CRCu32;
 use thiserror::Error;
 use uuid::Uuid;
-use vm_memory::{
-    ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryBackend, GuestMemoryRegion,
-};
+use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryBackend, GuestMemoryRegion};
 
 use super::layout;
-use crate::GuestMemoryMmap;
+use crate::GuestMemory;
 
 /// Errors while loading UEFI or writing boot tables.
 #[derive(Debug, Error)]
@@ -101,10 +99,7 @@ struct MemoryDescriptor {
 // SAFETY: All fields are integers and the C layout has no implicit padding.
 unsafe impl ByteValued for MemoryDescriptor {}
 
-pub(super) fn create_uefi_stub_tables(
-    guest_mem: &GuestMemoryMmap,
-    rsdp: GuestAddress,
-) -> Result<u32> {
+pub(super) fn create_uefi_stub_tables(guest_mem: &GuestMemory, rsdp: GuestAddress) -> Result<u32> {
     let configuration_table = layout::EFI_TABLES_START.0 + size_of::<SystemTable>() as u64;
     let runtime_properties = configuration_table + 4 * size_of::<ConfigurationTable>() as u64;
     let memory_reserve = runtime_properties + 8;
@@ -207,7 +202,7 @@ pub(super) fn create_uefi_stub_tables(
     Ok(memory_map_size as u32)
 }
 
-pub fn load_uefi<F, M: GuestMemory>(
+pub fn load_uefi<F, M: vm_memory::GuestMemory>(
     guest_mem: &M,
     guest_addr: GuestAddress,
     uefi_image: &mut F,

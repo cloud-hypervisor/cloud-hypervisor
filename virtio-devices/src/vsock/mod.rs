@@ -171,7 +171,7 @@ pub mod tests {
     use super::*;
     use crate::device::{VirtioInterrupt, VirtioInterruptType};
     use crate::epoll_helper::EpollHelperHandler;
-    use crate::{EpollHelper, GuestMemoryMmap};
+    use crate::{EpollHelper, GuestMemory};
 
     pub struct NoopVirtioInterrupt {}
 
@@ -283,7 +283,7 @@ pub mod tests {
 
     pub struct TestContext {
         pub cid: u64,
-        pub mem: GuestMemoryMmap,
+        pub mem: GuestMemory,
         pub device: Vsock<TestBackend>,
     }
 
@@ -294,7 +294,7 @@ pub mod tests {
             const MEM_SIZE: usize = 1024 * 1024 * 128;
             Self {
                 cid: CID as u64,
-                mem: GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap(),
+                mem: GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap(),
                 device: Vsock::new(
                     String::from("vsock"),
                     CID,
@@ -369,9 +369,9 @@ pub mod tests {
 
     pub struct EpollHandlerContext<'a> {
         pub(crate) handler: VsockEpollHandler<TestBackend>,
-        pub guest_rxvq: GuestQ<'a, GuestMemoryMmap>,
-        pub guest_txvq: GuestQ<'a, GuestMemoryMmap>,
-        pub guest_evvq: GuestQ<'a, GuestMemoryMmap>,
+        pub guest_rxvq: GuestQ<'a, GuestMemory>,
+        pub guest_txvq: GuestQ<'a, GuestMemory>,
+        pub guest_evvq: GuestQ<'a, GuestMemory>,
     }
 
     // The event helpers are inline so external callers instantiate the

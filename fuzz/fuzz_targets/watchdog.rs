@@ -19,7 +19,7 @@ use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
 use vm_migration::{Pausable, Snapshottable};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
-type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
+type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 const MEM_SIZE: usize = 2 * 1024 * 1024;
 const QUEUE_SIZE: u16 = 8;
@@ -339,7 +339,7 @@ fn run_watchdog_case(bytes: &[u8], mode: usize) -> Result<(), ()> {
         drop(writer);
     }
 
-    let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).map_err(|_| ())?;
+    let mem = GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).map_err(|_| ())?;
     seed_memory(&mem, &mut cursor)?;
     let queue = setup_virt_queue(&mut cursor, config.invalid_used_ring)?;
     populate_queue_memory(&mem, config.desc_mode, &mut cursor)?;
@@ -461,7 +461,7 @@ fn timer_pipe() -> Result<(std::fs::File, std::fs::File), ()> {
     }))
 }
 
-fn seed_memory(mem: &GuestMemoryMmap, cursor: &mut FuzzCursor) -> Result<(), ()> {
+fn seed_memory(mem: &GuestMemory, cursor: &mut FuzzCursor) -> Result<(), ()> {
     let mut seed = [0u8; 512];
     cursor.fill_slice(&mut seed);
     mem.write_slice(&seed, GuestAddress(DATA_ADDR))
@@ -497,7 +497,7 @@ fn setup_virt_queue(_cursor: &mut FuzzCursor, invalid_used_ring: bool) -> Result
 }
 
 fn populate_queue_memory(
-    mem: &GuestMemoryMmap,
+    mem: &GuestMemory,
     desc_mode: DescriptorMode,
     cursor: &mut FuzzCursor,
 ) -> Result<(), ()> {
@@ -531,13 +531,13 @@ fn populate_queue_memory(
     Ok(())
 }
 
-fn write_u16(mem: &GuestMemoryMmap, addr: u64, value: u16) -> Result<(), ()> {
+fn write_u16(mem: &GuestMemory, addr: u64, value: u16) -> Result<(), ()> {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .map_err(|_| ())
 }
 
 fn write_desc(
-    mem: &GuestMemoryMmap,
+    mem: &GuestMemory,
     index: u16,
     addr: u64,
     len: u32,

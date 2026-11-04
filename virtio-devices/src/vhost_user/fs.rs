@@ -24,8 +24,8 @@ use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::vhost_user::{VhostUserCommon, VhostUserState};
 use crate::{
-    ActivateResult, GuestRegionMmap, MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon,
-    VirtioDevice, VirtioDeviceType, VirtioSharedMemoryList,
+    ActivateResult, GuestRegion, MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon, VirtioDevice,
+    VirtioDeviceType, VirtioSharedMemoryList,
 };
 
 const NUM_QUEUE_OFFSET: u16 = 1;
@@ -309,10 +309,7 @@ impl VirtioDevice for Fs {
         }
     }
 
-    fn add_memory_region(
-        &mut self,
-        region: &Arc<GuestRegionMmap>,
-    ) -> result::Result<(), crate::Error> {
+    fn add_memory_region(&mut self, region: &Arc<GuestRegion>) -> result::Result<(), crate::Error> {
         self.vu_common.add_memory_region(region)
     }
 

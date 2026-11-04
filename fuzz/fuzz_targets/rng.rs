@@ -20,7 +20,7 @@ use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
-type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
+type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 macro_rules! align {
     ($n:expr, $align:expr) => {{
@@ -124,7 +124,7 @@ fn run_rng_case(bytes: &[u8], offset: usize, mode: u8) -> Result<(), ()> {
     let _ = rng.snapshot();
 
     let mut q = setup_virt_queue(&mut cursor);
-    let mem = GuestMemoryMmap::from_ranges(&[
+    let mem = GuestMemory::from_ranges(&[
         (GuestAddress(0), MEM_SIZE),
         (GuestAddress(DESC_TABLE_ADDR), QUEUE_BYTES_SIZE),
     ])
@@ -232,7 +232,7 @@ fn run_bad_activate_case(bytes: &[u8]) {
     ) else {
         return;
     };
-    let Ok(mem) = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x4000)]) else {
+    let Ok(mem) = GuestMemory::from_ranges(&[(GuestAddress(0), 0x4000)]) else {
         return;
     };
     let _ = rng.activate(virtio_devices::ActivationContext {
@@ -320,7 +320,7 @@ fn setup_virt_queue(cursor: &mut FuzzCursor) -> Queue {
 }
 
 fn populate_queue_memory(
-    mem: &GuestMemoryMmap,
+    mem: &GuestMemory,
     q: &mut Queue,
     cursor: &mut FuzzCursor,
     mode: u8,
@@ -378,13 +378,13 @@ fn populate_queue_memory(
     Ok(())
 }
 
-fn write_u16(mem: &GuestMemoryMmap, addr: u64, value: u16) -> Result<(), ()> {
+fn write_u16(mem: &GuestMemory, addr: u64, value: u16) -> Result<(), ()> {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .map_err(|_| ())
 }
 
 fn write_desc(
-    mem: &GuestMemoryMmap,
+    mem: &GuestMemory,
     index: u16,
     addr: u64,
     len: u32,

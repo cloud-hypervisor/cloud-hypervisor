@@ -163,7 +163,7 @@ use crate::vm_config::{
     PciDeviceCommonConfig, PmemConfig, UserDeviceConfig, VdpaConfig, VhostMode, VmConfig,
     VsockConfig,
 };
-use crate::{DEVICE_MANAGER_SNAPSHOT_ID, GuestRegionMmap, PciDeviceInfo, device_node};
+use crate::{DEVICE_MANAGER_SNAPSHOT_ID, GuestRegion, PciDeviceInfo, device_node};
 
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 const MMIO_LEN: u64 = 0x1000;
@@ -4514,7 +4514,7 @@ impl DeviceManager {
                     for region in zone.regions() {
                         // vfio_dma_map is unsound and ought to be marked as unsafe
                         #[allow(unused_unsafe)]
-                        // SAFETY: GuestMemoryMmap guarantees that region points
+                        // SAFETY: GuestMemory guarantees that region points
                         // to len bytes of valid memory starting at as_ptr()
                         // that will only be freed with munmap().
                         unsafe {
@@ -5292,7 +5292,7 @@ impl DeviceManager {
         self.cmdline_additions.as_slice()
     }
 
-    pub fn update_memory(&self, new_region: &Arc<GuestRegionMmap>) -> DeviceManagerResult<()> {
+    pub fn update_memory(&self, new_region: &Arc<GuestRegion>) -> DeviceManagerResult<()> {
         for handle in self.virtio_devices.iter() {
             handle
                 .virtio_device
@@ -5316,7 +5316,7 @@ impl DeviceManager {
         if let Some(vfio_ops) = &self.vfio_ops {
             // vfio_dma_map is unsound and ought to be marked as unsafe
             #[allow(unused_unsafe)]
-            // SAFETY: GuestMemoryMmap guarantees that region points
+            // SAFETY: GuestMemory guarantees that region points
             // to len bytes of valid memory starting at as_ptr()
             // that will only be freed with munmap().
             unsafe {

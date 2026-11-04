@@ -32,7 +32,7 @@ use super::{
 };
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
-use crate::{DmaRemapping, GuestMemoryMmap, VirtioInterrupt, VirtioInterruptType};
+use crate::{DmaRemapping, GuestMemory, VirtioInterrupt, VirtioInterruptType};
 
 /// Queues sizes
 const QUEUE_SIZE: u16 = 256;
@@ -380,7 +380,7 @@ impl Request {
     // is created based on the information provided from the guest driver for
     // virtio-iommu (giving the link device_id <=> domain).
     fn parse(
-        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>,
+        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemory>>,
         mapping: &Arc<IommuMapping>,
         ext_mapping: &BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
         msi_iova_space: (u64, u64),
@@ -889,7 +889,7 @@ fn detach_endpoint_from_domain(
 }
 
 struct IommuEpollHandler {
-    mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    mem: GuestMemoryAtomic<GuestMemory>,
     request_queue: Queue,
     _event_queue: Queue,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
@@ -1497,7 +1497,7 @@ mod tests {
         VirtioIommuReqAttach, VirtioIommuReqDetach, VirtioIommuReqHead, VirtioIommuReqMap,
         VirtioIommuReqTail, VirtioIommuReqUnmap,
     };
-    use crate::{DmaRemapping, GuestMemoryMmap};
+    use crate::{DmaRemapping, GuestMemory};
 
     /// Test stub for VfioDmaMapping.
     struct MockMapping;
@@ -1628,7 +1628,7 @@ mod tests {
         mapping: &Arc<IommuMapping>,
         ext_mapping: &BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
     ) -> (Result<usize, Error>, u8) {
-        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let mem = GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
         let vq = VirtQueue::new(GuestAddress(0x1000), &mem, 2);
         let req_addr = GuestAddress(0x2000);
         let tail_addr = GuestAddress(0x3000);

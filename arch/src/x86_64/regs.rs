@@ -19,7 +19,7 @@ use vm_memory::{Address, Bytes, GuestMemoryBackend, GuestMemoryError};
 use crate::layout::{
     BOOT_GDT_START, BOOT_IDT_START, BOOT_STACK_POINTER, PVH_INFO_START, ZERO_PAGE_START,
 };
-use crate::{EntryPoint, GuestMemoryMmap};
+use crate::{EntryPoint, GuestMemory};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -133,7 +133,7 @@ pub fn setup_regs(vcpu: &dyn hypervisor::Vcpu, entry_point: EntryPoint) -> Resul
 /// * `mem` - The memory that will be passed to the guest.
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
 pub fn setup_sregs(
-    mem: &GuestMemoryMmap,
+    mem: &GuestMemory,
     vcpu: &dyn hypervisor::Vcpu,
     enable_x2_apic_mode: bool,
 ) -> Result<()> {
@@ -144,7 +144,7 @@ pub fn setup_sregs(
 
 const BOOT_GDT_MAX: usize = 4;
 
-fn write_gdt_table(table: &[u64], guest_mem: &GuestMemoryMmap) -> Result<()> {
+fn write_gdt_table(table: &[u64], guest_mem: &GuestMemory) -> Result<()> {
     let boot_gdt_addr = BOOT_GDT_START;
     for (index, entry) in table.iter().enumerate() {
         let addr = guest_mem
@@ -155,7 +155,7 @@ fn write_gdt_table(table: &[u64], guest_mem: &GuestMemoryMmap) -> Result<()> {
     Ok(())
 }
 
-fn write_idt_value(val: u64, guest_mem: &GuestMemoryMmap) -> Result<()> {
+fn write_idt_value(val: u64, guest_mem: &GuestMemory) -> Result<()> {
     let boot_idt_addr = BOOT_IDT_START;
     guest_mem
         .write_obj(val, boot_idt_addr)
@@ -163,7 +163,7 @@ fn write_idt_value(val: u64, guest_mem: &GuestMemoryMmap) -> Result<()> {
 }
 
 pub fn configure_segments_and_sregs(
-    mem: &GuestMemoryMmap,
+    mem: &GuestMemory,
     sregs: &mut SpecialRegisters,
     enable_x2_apic_mode: bool,
 ) -> Result<()> {
@@ -215,11 +215,11 @@ mod tests {
 
     use super::*;
 
-    fn create_guest_mem() -> GuestMemoryMmap {
-        GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap()
+    fn create_guest_mem() -> GuestMemory {
+        GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap()
     }
 
-    fn read_u64(gm: &GuestMemoryMmap, offset: GuestAddress) -> u64 {
+    fn read_u64(gm: &GuestMemory, offset: GuestAddress) -> u64 {
         gm.read_obj(offset).unwrap()
     }
 

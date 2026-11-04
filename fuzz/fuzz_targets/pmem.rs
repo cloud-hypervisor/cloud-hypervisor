@@ -24,7 +24,7 @@ use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
-type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
+type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 const MEM_SIZE: usize = 2 * 1024 * 1024;
 const PMEM_FILE_SIZE: usize = 128 * 1024 * 1024;
@@ -92,7 +92,7 @@ fn run_pmem_case(
 
     exercise_device_api(&mut pmem, cursor, enable_access_platform);
 
-    let mem = match GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
+    let mem = match GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
         Ok(mem) => mem,
         Err(_) => return false,
     };
@@ -191,7 +191,7 @@ fn run_bad_activate_case(cursor: &mut FuzzCursor<'_>) -> bool {
         Ok(pmem) => pmem,
         Err(_) => return false,
     };
-    let mem = match GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
+    let mem = match GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
         Ok(mem) => mem,
         Err(_) => return false,
     };
@@ -332,7 +332,7 @@ fn build_chain_cases(cursor: &mut FuzzCursor<'_>) -> Vec<ChainCase> {
     ]
 }
 
-fn populate_queue(mem: &GuestMemoryMmap, chain_cases: &[ChainCase]) -> bool {
+fn populate_queue(mem: &GuestMemory, chain_cases: &[ChainCase]) -> bool {
     if chain_cases.is_empty() || chain_cases.len() > (QUEUE_SIZE as usize / 2) {
         return false;
     }
@@ -399,7 +399,7 @@ fn populate_queue(mem: &GuestMemoryMmap, chain_cases: &[ChainCase]) -> bool {
     write_u16(mem, AVAIL_RING_ADDR + 2, chain_cases.len() as u16)
 }
 
-fn write_desc(mem: &GuestMemoryMmap, idx: u16, addr: u64, len: u32, flags: u16, next: u16) -> bool {
+fn write_desc(mem: &GuestMemory, idx: u16, addr: u64, len: u32, flags: u16, next: u16) -> bool {
     let desc_addr = DESC_TABLE_ADDR + u64::from(idx) * 16;
     write_u64(mem, desc_addr, addr)
         && write_u32(mem, desc_addr + 8, len)
@@ -407,17 +407,17 @@ fn write_desc(mem: &GuestMemoryMmap, idx: u16, addr: u64, len: u32, flags: u16, 
         && write_u16(mem, desc_addr + 14, next)
 }
 
-fn write_u16(mem: &GuestMemoryMmap, addr: u64, value: u16) -> bool {
+fn write_u16(mem: &GuestMemory, addr: u64, value: u16) -> bool {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .is_ok()
 }
 
-fn write_u32(mem: &GuestMemoryMmap, addr: u64, value: u32) -> bool {
+fn write_u32(mem: &GuestMemory, addr: u64, value: u32) -> bool {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .is_ok()
 }
 
-fn write_u64(mem: &GuestMemoryMmap, addr: u64, value: u64) -> bool {
+fn write_u64(mem: &GuestMemory, addr: u64, value: u64) -> bool {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .is_ok()
 }
