@@ -65,7 +65,7 @@ use devices::iommu::iommufd::Error as IommufdIommuError;
 #[cfg(target_arch = "aarch64")]
 use devices::iommu::iommufd::Smmuv3Iommufd;
 #[cfg(feature = "ivshmem")]
-use devices::ivshmem::{IVSHMEM_DATA_BAR_IDX, IvshmemError, IvshmemOps};
+use devices::ivshmem::{IVSHMEM_DATA_BAR_IDX, IvshmemError};
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
 #[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))]
@@ -122,15 +122,11 @@ use virtio_devices::{
 };
 use vm_allocator::page_size::get_page_size;
 use vm_allocator::{AddressAllocator, GuestRegionError, InterruptAllocError, SystemAllocator};
-#[cfg(feature = "ivshmem")]
-use vm_device::UserspaceMapping;
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptRemapping, LegacyIrqGroupConfig, MsiIrqGroupConfig,
 };
 use vm_device::{Bus, BusDevice, BusDeviceSync, Resource};
-#[cfg(feature = "ivshmem")]
-use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
     Address, GuestAddress, GuestMemoryRegion, GuestUsize, MmapRegion, VolatileMemory, mmap,
@@ -5167,15 +5163,11 @@ impl DeviceManager {
         )?;
         let snapshot = snapshot_from_id(snapshot, id.as_str());
 
-        let ivshmem_ops = Arc::new(Mutex::new(IvshmemHandler {
-            memory_manager: Arc::clone(&self.memory_manager),
-        }));
         let ivshmem_device = Arc::new(Mutex::new(
             devices::IvshmemDevice::new(
                 id.clone(),
                 pci_device_bdf,
                 ivshmem_cfg.size as u64,
-                Arc::clone(&ivshmem_ops) as Arc<Mutex<dyn IvshmemOps>>,
                 snapshot,
             )
             .map_err(DeviceManagerError::IvshmemCreate)?,
@@ -5191,12 +5183,34 @@ impl DeviceManager {
             .find(|bar| bar.idx() == IVSHMEM_DATA_BAR_IDX)
             .unwrap()
             .addr();
-        let (region, mapping) = ivshmem_ops
-            .lock()
-            .unwrap()
-            .map_ram_region(start_addr, ivshmem_cfg.size, Some(ivshmem_cfg.path.clone()))
-            .map_err(DeviceManagerError::IvshmemCreate)?;
-        ivshmem_device.lock().unwrap().set_region(region, mapping);
+        let mapping = MemoryManager::create_ram_region_raw(
+            &Some(ivshmem_cfg.path.clone()),
+            0,
+            ivshmem_cfg.size,
+            false,
+            true,
+            false,
+            None,
+            None,
+            None,
+            false,
+        )
+        .map_err(DeviceManagerError::MemoryManager)?;
+        let region = GuestRegion::from_mmap(
+            mapping,
+            GuestAddress(start_addr),
+            Arc::clone(&self.address_manager.vm),
+            Arc::clone(self.memory_manager.lock().unwrap().memory_slot_allocator()),
+            false,
+            false,
+            false,
+            hypervisor::MemoryVisibility::Shared,
+        )
+        .map_err(DeviceManagerError::RegisterGuestRegion)?;
+        region
+            .register()
+            .map_err(DeviceManagerError::RegisterGuestRegion)?;
+        ivshmem_device.lock().unwrap().set_region(region);
 
         let mut node = device_node!(id, ivshmem_device);
         node.resources = new_resources;
@@ -6180,85 +6194,6 @@ impl DeviceManager {
         );
 
         Some(tracker)
-    }
-}
-
-#[cfg(feature = "ivshmem")]
-struct IvshmemHandler {
-    memory_manager: Arc<Mutex<MemoryManager>>,
-}
-
-#[cfg(feature = "ivshmem")]
-impl IvshmemOps for IvshmemHandler {
-    fn map_ram_region(
-        &mut self,
-        start_addr: u64,
-        size: usize,
-        backing_file: Option<PathBuf>,
-    ) -> Result<(Arc<MmapRegion<AtomicBitmap>>, UserspaceMapping), IvshmemError> {
-        info!("Creating ivshmem mem region at 0x{start_addr:x}");
-
-        let region = MemoryManager::create_ram_region_raw(
-            &backing_file,
-            0,
-            size,
-            false,
-            true,
-            false,
-            None,
-            None,
-            None,
-            false,
-        )
-        .map_err(|e| IvshmemError::CreateUserMemoryRegion(e.into()))?;
-        let region = Arc::new(region);
-        let mapping = self.create_userspace_mapping(start_addr, Arc::clone(&region))?;
-        Ok((region, mapping))
-    }
-
-    fn create_userspace_mapping(
-        &mut self,
-        start_addr: u64,
-        region: Arc<MmapRegion<AtomicBitmap>>,
-    ) -> Result<UserspaceMapping, IvshmemError> {
-        let mem_slot = {
-            let mut manager = self.memory_manager.lock().unwrap();
-            // SAFETY: guaranteed by MmapRegion invariants
-            unsafe {
-                manager.create_userspace_mapping(
-                    start_addr,
-                    region.len(),
-                    region.as_ptr(),
-                    false,
-                    false,
-                    false,
-                    hypervisor::MemoryVisibility::Shared,
-                )
-            }
-        }
-        .map_err(|e| IvshmemError::CreateUserspaceMapping(e.into()))?;
-        Ok(UserspaceMapping {
-            mapping: region,
-            mem_slot,
-            addr: GuestAddress(start_addr),
-            mergeable: false,
-        })
-    }
-
-    fn unmap_ram_region(&mut self, mapping: UserspaceMapping) -> Result<(), IvshmemError> {
-        let mut manager = self.memory_manager.lock().unwrap();
-        // SAFETY: UserspaceMapping is valid due to other code being correct
-        unsafe {
-            manager.remove_userspace_mapping(
-                mapping.addr.raw_value(),
-                mapping.mapping.len(),
-                mapping.mapping.as_ptr(),
-                mapping.mergeable,
-                mapping.mem_slot,
-            )
-        }
-        .map_err(|e| IvshmemError::RemoveUserspaceMapping(e.into()))?;
-        Ok(())
     }
 }
 
