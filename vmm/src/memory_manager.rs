@@ -249,7 +249,7 @@ pub struct MemoryManager {
     boot_guest_memory: GuestMemory,
     guest_memory: GuestMemoryAtomic<GuestMemory>,
     next_memory_slot: Arc<AtomicU32>,
-    memory_slot_free_list: Arc<Mutex<Vec<u32>>>,
+    memory_slot_allocator: Arc<MemorySlotAllocator>,
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
     end_of_ram_area: GuestAddress,
@@ -2255,12 +2255,18 @@ impl MemoryManager {
         let end_of_ram_area = start_of_device_area.unchecked_sub(1);
         let ram_allocator = AddressAllocator::new(GuestAddress(0), start_of_device_area.0).unwrap();
 
+        let next_memory_slot = Arc::new(AtomicU32::new(next_memory_slot));
+        let memory_slot_allocator = Arc::new(MemorySlotAllocator::new(
+            Arc::clone(&next_memory_slot),
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+
         #[allow(unused_mut)]
         let mut memory_manager = MemoryManager {
             boot_guest_memory,
             guest_memory,
-            next_memory_slot: Arc::new(AtomicU32::new(next_memory_slot)),
-            memory_slot_free_list: Arc::new(Mutex::new(Vec::new())),
+            next_memory_slot,
+            memory_slot_allocator,
             start_of_device_area,
             end_of_device_area,
             end_of_ram_area,
@@ -2820,10 +2826,8 @@ impl MemoryManager {
         self.end_of_device_area
     }
 
-    pub fn memory_slot_allocator(&mut self) -> MemorySlotAllocator {
-        let memory_slot_free_list = Arc::clone(&self.memory_slot_free_list);
-        let next_memory_slot = Arc::clone(&self.next_memory_slot);
-        MemorySlotAllocator::new(next_memory_slot, memory_slot_free_list)
+    pub fn memory_slot_allocator(&self) -> &Arc<MemorySlotAllocator> {
+        &self.memory_slot_allocator
     }
 
     pub fn allocate_memory_slot(&mut self) -> u32 {

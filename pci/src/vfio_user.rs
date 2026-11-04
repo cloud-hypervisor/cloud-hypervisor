@@ -37,7 +37,7 @@ pub struct VfioUserPciDevice {
     vm: Arc<dyn hypervisor::Vm>,
     client: Arc<Mutex<Client>>,
     common: VfioCommon,
-    memory_slot_allocator: MemorySlotAllocator,
+    memory_slot_allocator: Arc<MemorySlotAllocator>,
     bdf: PciBdf,
 }
 
@@ -89,7 +89,7 @@ impl VfioUserPciDevice {
         msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
         bdf: PciBdf,
-        memory_slot_allocator: MemorySlotAllocator,
+        memory_slot_allocator: Arc<MemorySlotAllocator>,
         snapshot: Option<&Snapshot>,
     ) -> Result<Self, VfioUserPciDeviceError> {
         let resettable = client.lock().unwrap().resettable();

@@ -2192,7 +2192,7 @@ pub struct VfioPciDevice {
     // Required for peer-to-peer DMA between VFIO devices.
     p2p_dma: bool,
     p2p_dma_mapped: bool,
-    memory_slot_allocator: MemorySlotAllocator,
+    memory_slot_allocator: Arc<MemorySlotAllocator>,
     // Guest memory layout, used to enumerate the IOVA ranges to track when
     // programming VFIO DMA logging.
     memory: GuestMemoryAtomic<GuestMemory>,
@@ -2213,7 +2213,7 @@ impl VfioPciDevice {
         iommu_attached: bool,
         p2p_dma: bool,
         bdf: PciBdf,
-        memory_slot_allocator: MemorySlotAllocator,
+        memory_slot_allocator: Arc<MemorySlotAllocator>,
         memory: GuestMemoryAtomic<GuestMemory>,
         snapshot: Option<&Snapshot>,
         x_nv_gpudirect_clique: Option<u8>,
