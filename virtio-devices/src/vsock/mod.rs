@@ -369,9 +369,9 @@ pub mod tests {
 
     pub struct EpollHandlerContext<'a> {
         pub(crate) handler: VsockEpollHandler<TestBackend>,
-        pub guest_rxvq: GuestQ<'a>,
-        pub guest_txvq: GuestQ<'a>,
-        pub guest_evvq: GuestQ<'a>,
+        pub guest_rxvq: GuestQ<'a, GuestMemoryMmap>,
+        pub guest_txvq: GuestQ<'a, GuestMemoryMmap>,
+        pub guest_evvq: GuestQ<'a, GuestMemoryMmap>,
     }
 
     // The event helpers are inline so external callers instantiate the
