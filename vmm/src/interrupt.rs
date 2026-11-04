@@ -507,6 +507,8 @@ mod tests {
                     0x1000_0000,
                     #[cfg(target_arch = "x86_64")]
                     &[GsiApic::new(5, 19)],
+                    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+                    arch::IRQ_BASE,
                 )
                 .unwrap(),
             ))

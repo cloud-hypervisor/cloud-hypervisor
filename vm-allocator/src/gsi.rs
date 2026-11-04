@@ -58,16 +58,7 @@ pub enum InterruptAllocError {
 /// Maximum number of IRQ routes supported by KVM.
 ///
 /// See <https://elixir.bootlin.com/linux/v7.0.1/source/include/linux/kvm_host.h#L2193>.
-const KVM_MAX_IRQ_ROUTES: u32 = {
-    #[cfg(feature = "kvm")]
-    {
-        4096
-    }
-    #[cfg(not(feature = "kvm"))]
-    {
-        0
-    }
-};
+const KVM_MAX_IRQ_ROUTES: u32 = 4096;
 
 /// Maximum number of IRQ routes supported by MSHV.
 ///
@@ -78,7 +69,6 @@ const MSHV_MAX_GUEST_IRQS: u32 = 4096;
 ///
 /// This affects the number of interrupts that can be allocated. This number
 /// alone doesn't mean that the backend necessarily accepts all the IRQs.
-#[allow(clippy::absurd_extreme_comparisons)]
 const MAX_GUEST_IRQS: u32 = {
     // cmp::max is not const compatible
     if KVM_MAX_IRQ_ROUTES > MSHV_MAX_GUEST_IRQS {
@@ -249,13 +239,14 @@ impl GsiAllocator {
     }
 
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
-    /// New GSI allocator.
-    // On aarch 64 and riscv x86, the IRQs and GSIs use independent interrupt
+    /// Creates a new GSI allocator with independent IRQ and GSI namespaces,
+    /// both starting at `irq_base`.
+    // On aarch64 and riscv64, the IRQs and GSIs use independent interrupt
     // number namespaces.
-    pub fn new() -> Self {
+    pub fn new(irq_base: u32) -> Self {
         GsiAllocator {
-            irqs: InterruptAllocator::new(MAX_GUEST_IRQS - arch::IRQ_BASE, arch::IRQ_BASE),
-            gsis: InterruptAllocator::new(MAX_GUEST_IRQS - arch::IRQ_BASE, arch::IRQ_BASE),
+            irqs: InterruptAllocator::new(MAX_GUEST_IRQS - irq_base, irq_base),
+            gsis: InterruptAllocator::new(MAX_GUEST_IRQS - irq_base, irq_base),
         }
     }
 
@@ -288,13 +279,6 @@ impl GsiAllocator {
     /// Allocate an IRQ
     pub fn allocate_irq(&mut self) -> Result<u32> {
         self.irqs.alloc()
-    }
-}
-
-#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
-impl Default for GsiAllocator {
-    fn default() -> Self {
-        GsiAllocator::new()
     }
 }
 
@@ -465,41 +449,45 @@ mod tests {
     mod gsi_allocator {
         use super::*;
 
-        fn single_apic_allocator() -> GsiAllocator {
-            GsiAllocator::new()
+        const IRQ_BASE: u32 = 32;
+
+        fn allocator() -> GsiAllocator {
+            GsiAllocator::new(IRQ_BASE)
         }
 
         #[test]
-        fn test_allocator_uses_arch_irq_base() {
-            let mut allocator = single_apic_allocator();
+        fn test_allocator_uses_provided_irq_base() {
+            for irq_base in [0, 32, 64, MAX_GUEST_IRQS - 2] {
+                let mut allocator = GsiAllocator::new(irq_base);
 
-            assert_eq!(allocator.irqs.range(), ::arch::IRQ_BASE..MAX_GUEST_IRQS);
-            assert_eq!(allocator.gsis.range(), ::arch::IRQ_BASE..MAX_GUEST_IRQS);
-            assert_eq!(allocator.allocate_irq(), Ok(::arch::IRQ_BASE));
-            assert_eq!(allocator.allocate_irq(), Ok(::arch::IRQ_BASE + 1));
-            assert_eq!(allocator.allocate_gsi(), Ok(::arch::IRQ_BASE));
-            assert_eq!(allocator.allocate_gsi(), Ok(::arch::IRQ_BASE + 1));
+                assert_eq!(allocator.irqs.range(), irq_base..MAX_GUEST_IRQS);
+                assert_eq!(allocator.gsis.range(), irq_base..MAX_GUEST_IRQS);
+                assert_eq!(allocator.allocate_irq(), Ok(irq_base));
+                assert_eq!(allocator.allocate_irq(), Ok(irq_base + 1));
+                assert_eq!(allocator.allocate_gsi(), Ok(irq_base));
+                assert_eq!(allocator.allocate_gsi(), Ok(irq_base + 1));
+            }
         }
 
         #[test]
         fn test_allocator_keeps_irq_and_gsi_namespaces_independent() {
-            let mut allocator = single_apic_allocator();
+            let mut allocator = allocator();
 
-            assert_eq!(allocator.allocate_irq(), Ok(::arch::IRQ_BASE));
-            assert_eq!(allocator.allocate_gsi(), Ok(::arch::IRQ_BASE));
+            assert_eq!(allocator.allocate_irq(), Ok(IRQ_BASE));
+            assert_eq!(allocator.allocate_gsi(), Ok(IRQ_BASE));
         }
 
         #[test]
         fn test_allocator_can_free_and_reuse_gsis() {
-            let mut allocator = single_apic_allocator();
+            let mut allocator = allocator();
 
             assert_eq!(
-                allocator.free_gsi(::arch::IRQ_BASE),
-                Err(InterruptAllocError::AlreadyFree(::arch::IRQ_BASE))
+                allocator.free_gsi(IRQ_BASE),
+                Err(InterruptAllocError::AlreadyFree(IRQ_BASE))
             );
 
             let gsi = allocator.allocate_gsi().unwrap();
-            assert_eq!(gsi, ::arch::IRQ_BASE);
+            assert_eq!(gsi, IRQ_BASE);
 
             allocator.free_gsi(gsi).unwrap();
             assert_eq!(allocator.allocate_gsi(), Ok(gsi));

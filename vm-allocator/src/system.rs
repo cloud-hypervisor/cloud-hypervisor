@@ -29,7 +29,9 @@ use crate::page_size::get_page_size;
 ///           GuestAddress(0x1000),
 ///           0x10000,
 ///           GuestAddress(0x10000000), 0x10000000,
-///           #[cfg(target_arch = "x86_64")] &[GsiApic::new(5, 19)]).unwrap();
+///           #[cfg(target_arch = "x86_64")] &[GsiApic::new(5, 19)],
+///           #[cfg(target_arch = "aarch64")] 32,
+///           #[cfg(target_arch = "riscv64")] 0).unwrap();
 ///   #[cfg(target_arch = "x86_64")]
 ///   assert_eq!(allocator.allocate_irq(), Ok(5));
 ///   #[cfg(target_arch = "aarch64")]
@@ -60,12 +62,14 @@ impl SystemAllocator {
     /// * `platform_mmio_base` - The starting address of platform MMIO memory.
     /// * `platform_mmio_size` - The size of platform MMIO memory.
     /// * `apics` - (X86) slice of APIC's.
+    /// * `irq_base` - (AArch64, RISC-V) The first allocatable IRQ and GSI.
     pub fn new(
         io_base: GuestAddress,
         io_size: GuestUsize,
         platform_mmio_base: GuestAddress,
         platform_mmio_size: GuestUsize,
         #[cfg(target_arch = "x86_64")] apics: &[GsiApic],
+        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))] irq_base: u32,
     ) -> Option<Self> {
         Some(SystemAllocator {
             io_address_space: AddressAllocator::new(io_base, io_size)?,
@@ -76,7 +80,7 @@ impl SystemAllocator {
             #[cfg(target_arch = "x86_64")]
             gsi_allocator: GsiAllocator::new(apics),
             #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
-            gsi_allocator: GsiAllocator::new(),
+            gsi_allocator: GsiAllocator::new(irq_base),
         })
     }
 
@@ -156,6 +160,8 @@ mod tests {
             0x1000,
             #[cfg(target_arch = "x86_64")]
             &[GsiApic::new(5, 19)],
+            #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+            32,
         )
         .unwrap();
 

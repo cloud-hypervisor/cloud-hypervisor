@@ -2226,6 +2226,8 @@ impl MemoryManager {
                     X86_64_IRQ_BASE,
                     ioapic::NUM_IOAPIC_PINS as u32 - X86_64_IRQ_BASE,
                 )],
+                #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+                arch::IRQ_BASE,
             )
             .ok_or(Error::CreateSystemAllocator)?,
         ));
