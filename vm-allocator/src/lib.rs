@@ -11,12 +11,14 @@
 //! Manages system resources that can be allocated to VMs and their devices.
 
 mod address;
+mod aligned_mapping;
 mod gsi;
 /// page size related utility functions
 pub mod page_size;
 mod system;
 
 pub use crate::address::AddressAllocator;
+pub use crate::aligned_mapping::MmapRegion;
 #[cfg(target_arch = "x86_64")]
 pub use crate::gsi::GsiApic;
 pub use crate::gsi::{GsiAllocator, InterruptAllocError};
