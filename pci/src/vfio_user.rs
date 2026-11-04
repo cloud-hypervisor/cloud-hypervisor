@@ -195,7 +195,7 @@ impl VfioUserPciDevice {
                     let mapping = Arc::new(Mutex::new(mapping));
 
                     let user_memory_region = UserMemoryRegion {
-                        start: mmio_region.start.0 + s.offset,
+                        offset: s.offset,
                         mapping,
                         p2p_mapped: false,
                         // A vfio-user device exports no dma-buf.
@@ -418,12 +418,12 @@ impl PciDevice for VfioUserPciDevice {
                 .iter()
                 .map(|user_memory_region| {
                     let new_address = new_base
-                        .checked_add(user_memory_region.start - old_base)
+                        .checked_add(user_memory_region.offset)
                         .ok_or_else(|| io::Error::other("BAR address overflows"))?;
                     new_address
                         .checked_add(user_memory_region.size() as u64)
                         .ok_or_else(|| io::Error::other("BAR range overflows"))?;
-                    Ok((user_memory_region.start, new_address))
+                    Ok((user_memory_region.start(), new_address))
                 })
                 .collect::<io::Result<Vec<_>>>()?;
             for (i, &(_, new_address)) in new_addresses.iter().enumerate() {
