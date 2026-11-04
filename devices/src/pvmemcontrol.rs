@@ -22,10 +22,11 @@ use vm_device::{BusDeviceSync, Resource};
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-    GuestMemoryBackend, GuestMemoryError, GuestMemoryMmap, GuestMemoryRegion, Le32, Le64,
-    VolatileMemory,
+    GuestMemoryBackend, GuestMemoryError, GuestMemoryRegion, Le32, Le64, VolatileMemory,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
+
+type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 const PVMEMCONTROL_VENDOR_ID: u16 = 0x1ae0;
 const PVMEMCONTROL_DEVICE_ID: u16 = 0x0087;
@@ -354,7 +355,7 @@ impl PvmemcontrolDevice {
 
 impl PvmemcontrolDevice {
     fn register_percpu_buf(
-        guest_memory: &GuestMemoryAtomic<GuestMemoryMmap<AtomicBitmap>>,
+        guest_memory: &GuestMemoryAtomic<GuestMemory>,
         mut state: PercpuInitState,
         PvmemcontrolTransportRegister { buf_phys_addr }: PvmemcontrolTransportRegister,
     ) -> Self {
@@ -415,7 +416,7 @@ impl PvmemcontrolDevice {
 
     fn run_command(
         &mut self,
-        guest_memory: &GuestMemoryAtomic<GuestMemoryMmap<AtomicBitmap>>,
+        guest_memory: &GuestMemoryAtomic<GuestMemory>,
         command: PvmemcontrolTransportCommand,
     ) {
         let state = mem::replace(&mut self.state, PvmemcontrolState::Broken);
@@ -485,7 +486,7 @@ impl PvmemcontrolDevice {
 }
 
 pub struct PvmemcontrolBusDevice {
-    mem: GuestMemoryAtomic<GuestMemoryMmap<AtomicBitmap>>,
+    mem: GuestMemoryAtomic<GuestMemory>,
     dev: RwLock<PvmemcontrolDevice>,
 }
 
@@ -803,7 +804,7 @@ impl PvmemcontrolDevice {
     pub fn make_device(
         id: String,
         bdf: PciBdf,
-        mem: GuestMemoryAtomic<GuestMemoryMmap<AtomicBitmap>>,
+        mem: GuestMemoryAtomic<GuestMemory>,
     ) -> (PvmemcontrolPciDevice, PvmemcontrolBusDevice) {
         let dev = RwLock::new(PvmemcontrolDevice::error());
         let mut configuration = PciConfiguration::new(
@@ -1006,7 +1007,7 @@ mod tests {
         file.write_all_at(&vec![0xaa; REGION_SIZE], REGION_SIZE as u64)
             .unwrap();
 
-        let mem = GuestMemoryMmap::from_ranges_with_files([(
+        let mem = GuestMemory::from_ranges_with_files([(
             GuestAddress(0),
             REGION_SIZE,
             Some(FileOffset::new(file.try_clone().unwrap(), 0)),

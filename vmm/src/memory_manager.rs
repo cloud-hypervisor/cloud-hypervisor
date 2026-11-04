@@ -1919,12 +1919,11 @@ impl MemoryManager {
         let mut list = Vec::new();
 
         for (zone_id, memory_zone) in self.memory_zones.iter() {
-            let mut regions: Vec<(Arc<vm_memory::GuestRegionMmap<AtomicBitmap>>, bool)> =
-                memory_zone
-                    .regions()
-                    .iter()
-                    .map(|r| (Arc::clone(r), false))
-                    .collect();
+            let mut regions: Vec<(Arc<GuestRegion>, bool)> = memory_zone
+                .regions()
+                .iter()
+                .map(|r| (Arc::clone(r), false))
+                .collect();
 
             if let Some(virtio_mem_zone) = memory_zone.virtio_mem_zone() {
                 regions.push((Arc::clone(virtio_mem_zone.region()), true));
