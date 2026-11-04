@@ -32,7 +32,7 @@ use vu_common_ctrl::VhostUserHandle;
 use crate::seccomp_filters::Thread;
 use crate::{
     ActivateError, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
-    GuestMemoryMmap, GuestRegionMmap, VIRTIO_F_IN_ORDER, VIRTIO_F_NOTIFICATION_DATA,
+    GuestMemory, GuestRegion, VIRTIO_F_IN_ORDER, VIRTIO_F_NOTIFICATION_DATA,
     VIRTIO_F_ORDER_PLATFORM, VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_RING_INDIRECT_DESC,
     VIRTIO_F_VERSION_1, VirtioCommon, VirtioInterrupt,
 };
@@ -254,7 +254,7 @@ pub struct Inflight {
 
 pub struct VhostUserEpollHandler<S: VhostUserFrontendReqHandler> {
     pub vu: Arc<Mutex<VhostUserHandle>>,
-    pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    pub mem: GuestMemoryAtomic<GuestMemory>,
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
     pub queues: Vec<(u16, Queue, EventFd)>,
@@ -464,7 +464,7 @@ impl<C> VhostUserState<C> {
 pub struct VhostUserCommon {
     pub virtio_common: VirtioCommon,
     pub vu: Option<Arc<Mutex<VhostUserHandle>>>,
-    pub guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
+    pub guest_memory: Option<GuestMemoryAtomic<GuestMemory>>,
     pub acked_protocol_features: u64,
     pub socket_path: String,
     pub vu_num_queues: u16,
@@ -482,7 +482,7 @@ impl VhostUserCommon {
     #[expect(clippy::too_many_arguments)]
     pub fn activate<T: VhostUserFrontendReqHandler>(
         &mut self,
-        mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        mem: GuestMemoryAtomic<GuestMemory>,
         queues: &[(u16, Queue, EventFd)],
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         acked_features: u64,
@@ -645,7 +645,7 @@ impl VhostUserCommon {
         self.vu = None;
     }
 
-    fn add_memory_region_internal(&self, region: &Arc<GuestRegionMmap>) -> Result<()> {
+    fn add_memory_region_internal(&self, region: &Arc<GuestRegion>) -> Result<()> {
         if let Some(vu) = &self.vu {
             if self.acked_protocol_features & VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits()
                 != 0
@@ -664,7 +664,7 @@ impl VhostUserCommon {
 
     pub fn add_memory_region(
         &mut self,
-        region: &Arc<GuestRegionMmap>,
+        region: &Arc<GuestRegion>,
     ) -> result::Result<(), crate::Error> {
         if self.disconnected.load(Ordering::Relaxed) {
             warn!(
@@ -1060,7 +1060,7 @@ mod tests {
             .open(temp_dir.as_path().join("memory"))
             .unwrap();
         file.set_len(0x1000).unwrap();
-        let mem = GuestMemoryMmap::from_ranges_with_files(&[(
+        let mem = GuestMemory::from_ranges_with_files(&[(
             GuestAddress(0),
             0x1000,
             Some(FileOffset::new(file, 0)),
@@ -1207,7 +1207,7 @@ mod tests {
 
         // Sending this region would fail, as it has no backing file.
         let region = MmapRegion::new(0x1000).unwrap();
-        let region = Arc::new(GuestRegionMmap::new(region, GuestAddress(0)).unwrap());
+        let region = Arc::new(GuestRegion::new(region, GuestAddress(0)).unwrap());
         common.add_memory_region(&region).unwrap();
     }
 }

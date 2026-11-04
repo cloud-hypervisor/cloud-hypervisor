@@ -31,7 +31,7 @@ use super::{
 };
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
-use crate::{GuestMemoryMmap, VirtioInterrupt, VirtioInterruptType};
+use crate::{GuestMemory, VirtioInterrupt, VirtioInterruptType};
 
 const QUEUE_SIZE: u16 = 256;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];
@@ -46,7 +46,7 @@ enum Error {
 }
 
 struct RngEpollHandler {
-    mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    mem: GuestMemoryAtomic<GuestMemory>,
     queue: Queue,
     random_file: File,
     interrupt_cb: Arc<dyn VirtioInterrupt>,

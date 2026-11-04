@@ -22,7 +22,7 @@ use thiserror::Error;
 use vm_memory::{Address, GuestAddress, GuestMemoryAtomic, GuestMemoryBackend};
 
 pub use self::fdt::DeviceInfoForFdt;
-use crate::{DeviceType, GuestMemoryMmap, NumaNodes, PciSpaceInfo, RegionType, smbios};
+use crate::{DeviceType, GuestMemory, NumaNodes, PciSpaceInfo, RegionType, smbios};
 
 pub const _NSIG: i32 = 65;
 
@@ -73,7 +73,7 @@ pub struct EntryPoint {
 pub fn configure_vcpu(
     vcpu: &dyn hypervisor::Vcpu,
     id: u32,
-    boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
+    boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemory>)>,
     nested: bool,
 ) -> super::Result<()> {
     if let Some((kernel_entry_point, _guest_memory)) = boot_setup {
@@ -128,7 +128,7 @@ pub fn arch_memory_regions() -> Vec<(GuestAddress, usize, RegionType)> {
 /// Configures the system and should be called once per vm before starting vcpu threads.
 #[expect(clippy::too_many_arguments)]
 pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
-    guest_mem: &GuestMemoryMmap,
+    guest_mem: &GuestMemory,
     cmdline: &str,
     vcpu_mpidr: &[u64],
     vcpu_topology: Option<(u16, u16, u16, u16)>,
@@ -176,10 +176,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
 }
 
 /// Returns the memory address where the initramfs could be loaded.
-pub fn initramfs_load_addr(
-    guest_mem: &GuestMemoryMmap,
-    initramfs_size: usize,
-) -> super::Result<u64> {
+pub fn initramfs_load_addr(guest_mem: &GuestMemory, initramfs_size: usize) -> super::Result<u64> {
     let round_to_pagesize = |size| (size + (super::PAGE_SIZE - 1)) & !(super::PAGE_SIZE - 1);
     match guest_mem
         .last_addr()

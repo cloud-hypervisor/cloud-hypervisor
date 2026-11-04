@@ -38,7 +38,7 @@ use zerocopy::IntoBytes;
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::sync_utils::Gate;
 use crate::util::flatten_error_chain_to_string;
-use crate::{GuestMemoryMmap, VmMigrationConfig};
+use crate::{GuestMemory, VmMigrationConfig};
 
 /// Hard upper bound for migration worker connections on both the sender and
 /// receiver side.
@@ -333,7 +333,7 @@ impl ReceiveAdditionalConnections {
     /// accept thread and its memory workers are signaled and joined.
     pub(crate) fn new(
         listener: ReceiveListener,
-        guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
+        guest_memory: GuestMemoryAtomic<GuestMemory>,
         fault_tx: Sender<SocketStream>,
         seccomp_action: &SeccompAction,
     ) -> Result<Self, MigratableError> {
@@ -390,7 +390,7 @@ impl ReceiveAdditionalConnections {
     fn accept_connections(
         mut listener: ReceiveListener,
         kill_evt: &EventFd,
-        guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+        guest_memory: &GuestMemoryAtomic<GuestMemory>,
         fault_tx: &Sender<SocketStream>,
         seccomp_filter: &BpfProgram,
     ) -> Result<(), MigratableError> {
@@ -428,7 +428,7 @@ impl ReceiveAdditionalConnections {
     fn accept_connections_loop(
         listener: &mut ReceiveListener,
         kill_evt: &EventFd,
-        guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+        guest_memory: &GuestMemoryAtomic<GuestMemory>,
         fault_tx: &Sender<SocketStream>,
         threads: &mut Vec<JoinHandle<Result<(), MigratableError>>>,
         seccomp_filter: &BpfProgram,
@@ -521,7 +521,7 @@ impl ReceiveAdditionalConnections {
         mut socket: SocketStream,
         index: usize,
         kill_evt: &EventFd,
-        guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
+        guest_memory: GuestMemoryAtomic<GuestMemory>,
         seccomp_filter: &BpfProgram,
     ) -> Result<JoinHandle<Result<(), MigratableError>>, MigratableError> {
         let kill_evt = kill_evt
@@ -579,7 +579,7 @@ impl ReceiveAdditionalConnections {
     fn worker_receive_memory(
         mut socket: &mut SocketStream,
         kill_evt: &EventFd,
-        guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+        guest_memory: &GuestMemoryAtomic<GuestMemory>,
     ) -> Result<(), MigratableError> {
         loop {
             // We only check whether we should abort when waiting for a new request. If the
@@ -686,7 +686,7 @@ enum SendMemoryThreadNotify {
 
 /// This struct keeps track of additional threads we use to send VM memory.
 pub(crate) struct SendAdditionalConnections {
-    guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
+    guest_memory: GuestMemoryAtomic<GuestMemory>,
     threads: Vec<JoinHandle<Result<(), MigratableError>>>,
     /// Sender to all workers. The receiver is shared by all workers.
     message_tx: SyncSender<SendMemoryThreadMessage>,
@@ -720,7 +720,7 @@ impl SendAdditionalConnections {
         destination: &str,
         connections: NonZeroU32,
         tls_dir: Option<&Path>,
-        guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+        guest_memory: &GuestMemoryAtomic<GuestMemory>,
         seccomp_filter: &BpfProgram,
         cancel_migration: &Arc<AtomicBool>,
     ) -> Result<Self, MigratableError> {
@@ -795,7 +795,7 @@ impl SendAdditionalConnections {
     /// The lifecycle loop a TCP worker thread executes.
     fn worker_send_memory(
         socket: &mut SocketStream,
-        guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+        guest_memory: &GuestMemoryAtomic<GuestMemory>,
         message_rx: &Mutex<Receiver<SendMemoryThreadMessage>>,
         worker_error: &AtomicBool,
         notify_tx: &Sender<SendMemoryThreadNotify>,
@@ -1388,7 +1388,7 @@ impl TransmissionBuffer {
 ///
 /// In case the migration is cancelled, this shortcuts the transfer.
 pub(crate) fn send_memory_ranges(
-    guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+    guest_memory: &GuestMemoryAtomic<GuestMemory>,
     range_table: &MemoryRangeTable,
     socket: &mut SocketStream,
     cancel_migration: &AtomicBool,
@@ -1443,7 +1443,7 @@ pub(crate) fn send_memory_ranges(
 
 /// Receive memory contents for the given range table into guest memory.
 pub(crate) fn receive_memory_ranges(
-    guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+    guest_memory: &GuestMemoryAtomic<GuestMemory>,
     req: &Request,
     socket: &mut SocketStream,
 ) -> Result<(), MigratableError> {

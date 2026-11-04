@@ -22,7 +22,7 @@ use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
-type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
+type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 macro_rules! align {
     ($n:expr, $align:expr) => {{
@@ -293,7 +293,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     // with exactly the same shape as the 'request_queue'.
     let event_queue = setup_virt_queue();
 
-    let mem = GuestMemoryMmap::from_ranges(&[
+    let mem = GuestMemory::from_ranges(&[
         (GuestAddress(0), MEM_SIZE),
         (GuestAddress(DESC_TABLE_ADDR), QUEUE_BYTES_SIZE),
     ])
@@ -968,7 +968,7 @@ fn append_u64(vec: &mut Vec<u8>, value: u64) {
     vec.extend_from_slice(&value.to_le_bytes());
 }
 
-fn write_request_queue(mem: &GuestMemoryMmap, chains: &[ChainSpec]) -> Result<(), ()> {
+fn write_request_queue(mem: &GuestMemory, chains: &[ChainSpec]) -> Result<(), ()> {
     let mut next_desc: u16 = 0;
     let mut next_payload_addr = PAYLOAD_ADDR_START;
     let mut avail_count: u16 = 0;
@@ -1072,7 +1072,7 @@ fn allocate_payload(next_payload_addr: &mut u64, len: u32) -> Option<u64> {
     Some(start)
 }
 
-fn write_desc(mem: &GuestMemoryMmap, desc_index: u16, desc: VirtqDesc) -> Result<(), ()> {
+fn write_desc(mem: &GuestMemory, desc_index: u16, desc: VirtqDesc) -> Result<(), ()> {
     let mut raw = [0u8; 16];
     raw[..8].copy_from_slice(&desc.addr.to_le_bytes());
     raw[8..12].copy_from_slice(&desc.len.to_le_bytes());
@@ -1085,7 +1085,7 @@ fn write_desc(mem: &GuestMemoryMmap, desc_index: u16, desc: VirtqDesc) -> Result
     .map_err(|_| ())
 }
 
-fn write_u16(mem: &GuestMemoryMmap, addr: u64, value: u16) -> Result<(), ()> {
+fn write_u16(mem: &GuestMemory, addr: u64, value: u16) -> Result<(), ()> {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .map_err(|_| ())
 }

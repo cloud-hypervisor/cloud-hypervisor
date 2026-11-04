@@ -33,7 +33,7 @@ use crate::seccomp_filters::Thread;
 use crate::vhost_user::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
 use crate::vhost_user::{DEFAULT_VIRTIO_FEATURES, Error, Result, VhostUserCommon, VhostUserState};
 use crate::{
-    ActivateError, ActivateResult, GuestRegionMmap, NetCtrlEpollHandler, VIRTIO_F_ACCESS_PLATFORM,
+    ActivateError, ActivateResult, GuestRegion, NetCtrlEpollHandler, VIRTIO_F_ACCESS_PLATFORM,
     VirtioCommon, VirtioDevice, VirtioDeviceType,
 };
 
@@ -482,10 +482,7 @@ impl VirtioDevice for Net {
         self.vu_common.shutdown();
     }
 
-    fn add_memory_region(
-        &mut self,
-        region: &Arc<GuestRegionMmap>,
-    ) -> result::Result<(), crate::Error> {
+    fn add_memory_region(&mut self, region: &Arc<GuestRegion>) -> result::Result<(), crate::Error> {
         self.vu_common.add_memory_region(region)
     }
 }

@@ -61,8 +61,8 @@ pub use self::vdpa::{Vdpa, VdpaDmaMapping};
 pub use self::vsock::Vsock;
 pub use self::watchdog::Watchdog;
 
-type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
-type GuestRegionMmap = vm_memory::GuestRegionMmap<AtomicBitmap>;
+type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
+type GuestRegion = vm_memory::GuestRegionMmap<AtomicBitmap>;
 type MmapRegion = vm_memory::MmapRegion<AtomicBitmap>;
 
 const DEVICE_INIT: u32 = 0x00;

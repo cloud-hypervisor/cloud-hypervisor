@@ -34,7 +34,7 @@ use super::{
 };
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
-use crate::{GuestMemoryMmap, VirtioInterrupt};
+use crate::{GuestMemory, VirtioInterrupt};
 
 const QUEUE_SIZE: u16 = 256;
 const NUM_QUEUES: u16 = 2;
@@ -85,7 +85,7 @@ impl Default for VirtioConsoleConfig {
 unsafe impl ByteValued for VirtioConsoleConfig {}
 
 struct ConsoleEpollHandler {
-    mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    mem: GuestMemoryAtomic<GuestMemory>,
     input_queue: Queue,
     output_queue: Queue,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
@@ -150,7 +150,7 @@ impl Endpoint {
 impl ConsoleEpollHandler {
     #[expect(clippy::too_many_arguments)]
     fn new(
-        mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        mem: GuestMemoryAtomic<GuestMemory>,
         input_queue: Queue,
         output_queue: Queue,
         interrupt_cb: Arc<dyn VirtioInterrupt>,

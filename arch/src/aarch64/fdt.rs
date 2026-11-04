@@ -24,7 +24,7 @@ use thiserror::Error;
 use vm_fdt::{FdtWriter, FdtWriterResult};
 use vm_memory::{Address, Bytes, GuestMemoryBackend, GuestMemoryError, GuestMemoryRegion};
 
-use super::super::{DeviceType, GuestMemoryMmap, InitramfsConfig};
+use super::super::{DeviceType, GuestMemory, InitramfsConfig};
 use super::cache::{CacheTopologyInfo, read_cache_topology};
 use super::layout::{
     GIC_V2M_COMPATIBLE, GICV2M_SPI_BASE, GICV2M_SPI_NUM, IRQ_BASE, MEM_32BIT_DEVICES_SIZE,
@@ -96,7 +96,7 @@ type Result<T> = result::Result<T, Error>;
 /// Creates the flattened device tree for this aarch64 VM.
 #[expect(clippy::too_many_arguments)]
 pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
-    guest_mem: &GuestMemoryMmap,
+    guest_mem: &GuestMemory,
     cmdline: &str,
     vcpu_mpidr: &[u64],
     vcpu_topology: Option<(u16, u16, u16, u16)>,
@@ -151,7 +151,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
     Ok(fdt_final)
 }
 
-pub fn write_fdt_to_memory(fdt_final: &[u8], guest_mem: &GuestMemoryMmap) -> Result<()> {
+pub fn write_fdt_to_memory(fdt_final: &[u8], guest_mem: &GuestMemory) -> Result<()> {
     if fdt_final.len() as u64 > super::layout::FDT_MAX_SIZE {
         return Err(Error::FdtTooLarge(
             fdt_final.len(),
@@ -367,7 +367,7 @@ fn create_cpu_nodes(
 
 fn create_memory_node(
     fdt: &mut FdtWriter,
-    guest_mem: &GuestMemoryMmap,
+    guest_mem: &GuestMemory,
     numa_nodes: &NumaNodes,
 ) -> FdtWriterResult<()> {
     // See https://github.com/torvalds/linux/blob/58ae0b51506802713aa0e9956d1853ba4c722c98/Documentation/devicetree/bindings/numa.txt
@@ -1092,7 +1092,7 @@ mod tests {
     #[test]
     fn test_write_fdt_to_memory_size() {
         let max = usize::try_from(layout::FDT_MAX_SIZE).unwrap();
-        let mem = GuestMemoryMmap::from_ranges(&[(layout::RAM_START, 2 * max)]).unwrap();
+        let mem = GuestMemory::from_ranges(&[(layout::RAM_START, 2 * max)]).unwrap();
 
         write_fdt_to_memory(&vec![0; max], &mem).unwrap();
         assert!(matches!(

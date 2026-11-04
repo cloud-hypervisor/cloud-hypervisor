@@ -29,7 +29,7 @@ use crate::epoll_helper::EpollHelperError;
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::{
-    ActivateError, ActivateResult, Error, GuestMemoryMmap, GuestRegionMmap, MmapRegion,
+    ActivateError, ActivateResult, Error, GuestMemory, GuestRegion, MmapRegion,
     VIRTIO_F_RING_INDIRECT_DESC,
 };
 
@@ -66,7 +66,7 @@ pub struct VirtioSharedMemoryList {
 }
 
 pub struct ActivationContext {
-    pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    pub mem: GuestMemoryAtomic<GuestMemory>,
     pub interrupt_cb: Arc<dyn VirtioInterrupt>,
     pub queues: Vec<(u16, Queue, EventFd)>,
     pub device_status: Arc<AtomicU8>,
@@ -153,7 +153,7 @@ pub trait VirtioDevice: Send {
     /// after a shutdown() can lead to unpredictable results.
     fn shutdown(&mut self) {}
 
-    fn add_memory_region(&mut self, _region: &Arc<GuestRegionMmap>) -> result::Result<(), Error> {
+    fn add_memory_region(&mut self, _region: &Arc<GuestRegion>) -> result::Result<(), Error> {
         Ok(())
     }
 

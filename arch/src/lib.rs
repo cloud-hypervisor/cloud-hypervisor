@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_memory::bitmap::AtomicBitmap;
 
-type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
-type GuestRegionMmap = vm_memory::GuestRegionMmap<AtomicBitmap>;
+type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
+type GuestRegion = vm_memory::GuestRegionMmap<AtomicBitmap>;
 
 /// Type for returning error code.
 #[derive(Debug, Error)]
@@ -169,8 +169,8 @@ fn pagesize() -> usize {
 
 #[derive(Clone, Default)]
 pub struct NumaNode {
-    pub memory_regions: Vec<Arc<GuestRegionMmap>>,
-    pub hotplug_regions: Vec<Arc<GuestRegionMmap>>,
+    pub memory_regions: Vec<Arc<GuestRegion>>,
+    pub hotplug_regions: Vec<Arc<GuestRegion>>,
     pub cpus: Vec<u32>,
     pub pci_segments: Vec<u16>,
     pub distances: BTreeMap<u32, u8>,

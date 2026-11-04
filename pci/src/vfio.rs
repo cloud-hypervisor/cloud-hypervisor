@@ -51,7 +51,7 @@ use vm_memory::{
     GuestMemoryRegion, GuestUsize,
 };
 
-type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
+type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -2198,7 +2198,7 @@ pub struct VfioPciDevice {
     memory_slot_allocator: MemorySlotAllocator,
     // Guest memory layout, used to enumerate the IOVA ranges to track when
     // programming VFIO DMA logging.
-    memory: GuestMemoryAtomic<GuestMemoryMmap>,
+    memory: GuestMemoryAtomic<GuestMemory>,
     bdf: PciBdf,
     device_path: PathBuf,
 }
@@ -2217,7 +2217,7 @@ impl VfioPciDevice {
         p2p_dma: bool,
         bdf: PciBdf,
         memory_slot_allocator: MemorySlotAllocator,
-        memory: GuestMemoryAtomic<GuestMemoryMmap>,
+        memory: GuestMemoryAtomic<GuestMemory>,
         snapshot: Option<&Snapshot>,
         x_nv_gpudirect_clique: Option<u8>,
         x_exclude_mmap_bars: Vec<u8>,

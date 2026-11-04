@@ -53,7 +53,7 @@ use super::{
 };
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
-use crate::{GuestMemoryMmap, VirtioInterrupt};
+use crate::{GuestMemory, VirtioInterrupt};
 
 const SECTOR_SHIFT: u8 = 9;
 pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
@@ -166,7 +166,7 @@ impl Drop for ActiveRequestGuard {
 struct BlockEpollHandler {
     queue_index: u16,
     queue: Queue,
-    mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    mem: GuestMemoryAtomic<GuestMemory>,
     disk_image: Box<dyn AsyncIo>,
     disk_nsectors: Arc<AtomicU64>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
@@ -1480,14 +1480,14 @@ mod tests {
         assert_eq!(&block.serial[..], serial.as_bytes());
     }
 
-    fn make_handler(queue: Queue, mem: &GuestMemoryMmap, acked_features: u64) -> BlockEpollHandler {
+    fn make_handler(queue: Queue, mem: &GuestMemory, acked_features: u64) -> BlockEpollHandler {
         let evt = || EventFd::new(EFD_NONBLOCK).unwrap();
         make_handler_with_io(queue, mem, acked_features, Box::new(Noop(evt())))
     }
 
     fn make_handler_with_io(
         queue: Queue,
-        mem: &GuestMemoryMmap,
+        mem: &GuestMemory,
         acked_features: u64,
         disk_image: Box<dyn AsyncIo>,
     ) -> BlockEpollHandler {
@@ -1523,7 +1523,7 @@ mod tests {
     /// data descriptor and a 1 byte status descriptor. Returns the status
     /// byte and the 3 bytes after it, which are poisoned with 0xff before.
     fn process_one_request(request_type: u32, acked_features: u64) -> [u8; 4] {
-        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let mem = GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
         let vq = GuestQ::new(GuestAddress(0x1000), &mem, 4);
         mem.write_obj(request_type, GuestAddress(REQ_HDR_ADDR))
             .unwrap();
@@ -1570,7 +1570,7 @@ mod tests {
         // driver only enabled queue 1.
         let dir = TempDir::new_with_prefix("/dev/shm/ch-sparse-queue").unwrap();
         let mut block = make_block_with_serial(dir.as_path(), None, 2);
-        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let mem = GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
         let vq = GuestQ::new(GuestAddress(0x1000), &mem, 4);
         mem.write_obj(VIRTIO_BLK_T_GET_ID, GuestAddress(REQ_HDR_ADDR))
             .unwrap();
@@ -1602,7 +1602,7 @@ mod tests {
 
     #[test]
     fn parse_failure_reclaims_head() {
-        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let mem = GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
         let vq = GuestQ::new(GuestAddress(0x1000), &mem, 4);
         vq.dtable[0].set(0x2000, 16, 0, 0);
         vq.avail.ring[0].set(0);
@@ -1650,7 +1650,7 @@ mod tests {
 
     #[test]
     fn writethrough_write_fails_when_fsync_fails() {
-        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let mem = GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
         let vq = GuestQ::new(GuestAddress(0x1000), &mem, 4);
         mem.write_obj(VIRTIO_BLK_T_OUT, GuestAddress(REQ_HDR_ADDR))
             .unwrap();
@@ -1727,7 +1727,7 @@ mod tests {
     }
 
     fn completion_status(request_type: u32, result: i32) -> (u8, u32) {
-        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let mem = GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
         let vq = GuestQ::new(GuestAddress(0x1000), &mem, 4);
         mem.write_obj(request_type, GuestAddress(REQ_HDR_ADDR))
             .unwrap();

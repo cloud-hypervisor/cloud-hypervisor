@@ -25,8 +25,8 @@ use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
 use vm_migration::{Pausable, Snapshottable};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
-type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
-type GuestRegionMmap = vm_memory::GuestRegionMmap<AtomicBitmap>;
+type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
+type GuestRegion = vm_memory::GuestRegionMmap<AtomicBitmap>;
 
 macro_rules! align {
     ($n:expr, $align:expr) => {{
@@ -329,9 +329,8 @@ fn run_device_scenario(stream: &mut FuzzCursor, kind: ScenarioKind) -> Result<()
 
     let mut queue = setup_virt_queue(stream).ok_or(())?;
 
-    let mut mem =
-        GuestMemoryMmap::from_ranges(&[(GuestAddress(DESC_TABLE_ADDR), QUEUE_REGION_SIZE)])
-            .map_err(|_| ())?;
+    let mut mem = GuestMemory::from_ranges(&[(GuestAddress(DESC_TABLE_ADDR), QUEUE_REGION_SIZE)])
+        .map_err(|_| ())?;
     mem = mem.insert_region(virtio_mem_region).map_err(|_| ())?;
 
     let chains = build_chains(kind, stream);
@@ -410,7 +409,7 @@ fn run_device_scenario(stream: &mut FuzzCursor, kind: ScenarioKind) -> Result<()
     Ok(())
 }
 
-fn create_region(size: usize, numa_id: Option<u32>) -> Option<Arc<GuestRegionMmap>> {
+fn create_region(size: usize, numa_id: Option<u32>) -> Option<Arc<GuestRegion>> {
     create_region_with_options(size, GuestAddress(0), numa_id, false)
 }
 
@@ -419,14 +418,14 @@ fn create_region_with_options(
     start_addr: GuestAddress,
     numa_id: Option<u32>,
     shared: bool,
-) -> Option<Arc<GuestRegionMmap>> {
+) -> Option<Arc<GuestRegion>> {
     vmm::memory_manager::MemoryManager::create_ram_region(
         &None, 0, start_addr, size, false, false, shared, None, numa_id, None, false,
     )
     .ok()
 }
 
-fn create_mem_device(initial_size: u64, with_numa: bool) -> Option<(Mem, Arc<GuestRegionMmap>)> {
+fn create_mem_device(initial_size: u64, with_numa: bool) -> Option<(Mem, Arc<GuestRegion>)> {
     create_mem_device_with_options(initial_size, with_numa, false)
 }
 
@@ -434,7 +433,7 @@ fn create_mem_device_with_options(
     initial_size: u64,
     with_numa: bool,
     shared: bool,
-) -> Option<(Mem, Arc<GuestRegionMmap>)> {
+) -> Option<(Mem, Arc<GuestRegion>)> {
     let numa_id = if with_numa { Some(0) } else { None };
 
     let region = create_region_with_options(MEM_SIZE, GuestAddress(0), numa_id, shared)?;
@@ -551,7 +550,7 @@ fn build_chains(kind: ScenarioKind, stream: &mut FuzzCursor) -> Vec<ChainSpec> {
     }
 }
 
-fn populate_queue_memory(mem: &GuestMemoryMmap, queue: &mut Queue, chains: &[ChainSpec]) -> bool {
+fn populate_queue_memory(mem: &GuestMemory, queue: &mut Queue, chains: &[ChainSpec]) -> bool {
     if chains.len() * 2 > QUEUE_SIZE as usize {
         return false;
     }
@@ -652,19 +651,12 @@ fn populate_queue_memory(mem: &GuestMemoryMmap, queue: &mut Queue, chains: &[Cha
     true
 }
 
-fn write_u16(mem: &GuestMemoryMmap, addr: u64, value: u16) -> bool {
+fn write_u16(mem: &GuestMemory, addr: u64, value: u16) -> bool {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .is_ok()
 }
 
-fn write_desc(
-    mem: &GuestMemoryMmap,
-    index: u16,
-    addr: u64,
-    len: u32,
-    flags: u16,
-    next: u16,
-) -> bool {
+fn write_desc(mem: &GuestMemory, index: u16, addr: u64, len: u32, flags: u16, next: u16) -> bool {
     let desc_addr = DESC_TABLE_ADDR + u64::from(index) * 16;
     let mut raw = [0u8; 16];
     raw[..8].copy_from_slice(&addr.to_le_bytes());

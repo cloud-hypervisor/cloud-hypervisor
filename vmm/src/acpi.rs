@@ -30,7 +30,7 @@ use crate::cpu::CpuManager;
 use crate::device_manager::DeviceManager;
 use crate::memory_manager::MemoryManager;
 use crate::pci_segment::PciSegment;
-use crate::{GuestMemoryMmap, GuestRegionMmap};
+use crate::{GuestMemory, GuestRegion};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -232,11 +232,7 @@ bitflags! {
 }
 
 impl MemoryAffinity {
-    fn from_region(
-        region: &GuestRegionMmap,
-        proximity_domain: u32,
-        flags: MemAffinityFlags,
-    ) -> Self {
+    fn from_region(region: &GuestRegion, proximity_domain: u32, flags: MemAffinityFlags) -> Self {
         Self::from_range(
             region.start_addr().raw_value(),
             region.len(),
@@ -1401,7 +1397,7 @@ pub(crate) fn create_acpi_tables_for_fw_cfg(
 }
 
 pub(crate) fn create_acpi_tables(
-    guest_mem: &GuestMemoryMmap,
+    guest_mem: &GuestMemory,
     device_manager: &DeviceManager,
     cpu_manager: &CpuManager,
     memory_manager: &MemoryManager,

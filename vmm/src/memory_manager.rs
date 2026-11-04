@@ -64,7 +64,7 @@ use crate::uffd::{
     self, FileUffdMemorySource, SocketUffdMemorySource, Uffd, UffdMemorySource, UffdRange,
 };
 use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
-use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID, prefault, userfaultfd};
+use crate::{GuestMemory, GuestRegion, MEMORY_MANAGER_SNAPSHOT_ID, prefault, userfaultfd};
 
 struct UffdHandler {
     stop_event: EventFd,
@@ -107,7 +107,7 @@ struct HotPlugState {
 }
 
 pub struct VirtioMemZone {
-    region: Arc<GuestRegionMmap>,
+    region: Arc<GuestRegion>,
     virtio_device: Option<Arc<Mutex<virtio_devices::Mem>>>,
     hotplugged_size: u64,
     hugepages: bool,
@@ -115,7 +115,7 @@ pub struct VirtioMemZone {
 }
 
 impl VirtioMemZone {
-    pub fn region(&self) -> &Arc<GuestRegionMmap> {
+    pub fn region(&self) -> &Arc<GuestRegion> {
         &self.region
     }
     pub fn set_virtio_device(&mut self, virtio_device: Arc<Mutex<virtio_devices::Mem>>) {
@@ -139,7 +139,7 @@ impl VirtioMemZone {
 }
 
 pub struct MemoryZone {
-    regions: Vec<Arc<GuestRegionMmap>>,
+    regions: Vec<Arc<GuestRegion>>,
     virtio_mem_zone: Option<VirtioMemZone>,
     shared: bool,
     hugepages: bool,
@@ -159,7 +159,7 @@ impl MemoryZone {
         }
     }
 
-    pub fn regions(&self) -> &Vec<Arc<GuestRegionMmap>> {
+    pub fn regions(&self) -> &Vec<Arc<GuestRegion>> {
         &self.regions
     }
     pub fn virtio_mem_zone(&self) -> &Option<VirtioMemZone> {
@@ -246,8 +246,8 @@ struct CowSource {
 }
 
 pub struct MemoryManager {
-    boot_guest_memory: GuestMemoryMmap,
-    guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
+    boot_guest_memory: GuestMemory,
+    guest_memory: GuestMemoryAtomic<GuestMemory>,
     next_memory_slot: Arc<AtomicU32>,
     memory_slot_free_list: Arc<Mutex<Vec<u32>>>,
     start_of_device_area: GuestAddress,
@@ -286,7 +286,7 @@ pub struct MemoryManager {
 
     pub acpi_address: Option<GuestAddress>,
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
-    uefi_flash: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
+    uefi_flash: Option<GuestMemoryAtomic<GuestMemory>>,
 }
 
 #[derive(Error, Debug)]
@@ -684,7 +684,7 @@ impl MemoryManager {
         ram_regions: &[(GuestAddress, usize)],
         zones: &[MemoryZoneConfig],
         thp: bool,
-    ) -> Result<(Vec<Arc<GuestRegionMmap>>, MemoryZones), Error> {
+    ) -> Result<(Vec<Arc<GuestRegion>>, MemoryZones), Error> {
         let mut zone_iter = zones.iter();
         let mut mem_regions = Vec::new();
         let mut zone = zone_iter.next().ok_or(Error::MissingMemoryZones)?;
@@ -862,7 +862,7 @@ impl MemoryManager {
         zones_config: &[MemoryZoneConfig],
         mut existing_memory_files: HashMap<u32, File>,
         thp: bool,
-    ) -> Result<(Vec<Arc<GuestRegionMmap>>, MemoryZones), Error> {
+    ) -> Result<(Vec<Arc<GuestRegion>>, MemoryZones), Error> {
         let mut memory_regions = Vec::new();
         let mut memory_zones = HashMap::new();
 
@@ -1935,7 +1935,7 @@ impl MemoryManager {
 
         for (zone_id, regions, zone_mergeable) in list {
             for (region, virtio_mem) in regions {
-                // SAFETY: guaranteed by GuestRegionMmap invariants
+                // SAFETY: guaranteed by GuestRegion invariants
                 let slot = unsafe {
                     self.create_userspace_mapping(
                         region.start_addr().raw_value(),
@@ -2001,14 +2001,14 @@ impl MemoryManager {
         // The UEFI binary requires a flash device at address 0.
         // 4 MiB memory is mapped to simulate the flash.
         let uefi_mem_slot = self.allocate_memory_slot();
-        let uefi_region = GuestRegionMmap::new(
+        let uefi_region = GuestRegion::new(
             MmapRegion::new(layout::UEFI_SIZE as usize).unwrap(),
             layout::UEFI_START,
         )
         .unwrap();
         const _: () = assert!(size_of::<usize>() == size_of::<u64>());
 
-        // SAFETY: guaranteed by GuestRegionMmap
+        // SAFETY: guaranteed by GuestRegion
         unsafe {
             self.vm
                 .create_user_memory_region(
@@ -2023,7 +2023,7 @@ impl MemoryManager {
                 .map_err(Error::CreateUefiFlash)?;
         }
         let uefi_flash =
-            GuestMemoryAtomic::new(GuestMemoryMmap::from_regions(vec![uefi_region]).unwrap());
+            GuestMemoryAtomic::new(GuestMemory::from_regions(vec![uefi_region]).unwrap());
 
         self.uefi_flash = Some(uefi_flash);
 
@@ -2075,7 +2075,7 @@ impl MemoryManager {
                 config.thp,
             )?;
             let guest_memory =
-                GuestMemoryMmap::from_arc_regions(regions).map_err(Error::GuestRegionCollection)?;
+                GuestMemory::from_arc_regions(regions).map_err(Error::GuestRegionCollection)?;
             let boot_guest_memory = guest_memory.clone();
             (
                 GuestAddress(data.start_of_device_area),
@@ -2112,8 +2112,8 @@ impl MemoryManager {
             let (mem_regions, mut memory_zones) =
                 Self::create_memory_regions_from_zones(&ram_regions, &zones, config.thp)?;
 
-            let mut guest_memory = GuestMemoryMmap::from_arc_regions(mem_regions)
-                .map_err(Error::GuestRegionCollection)?;
+            let mut guest_memory =
+                GuestMemory::from_arc_regions(mem_regions).map_err(Error::GuestRegionCollection)?;
 
             let boot_guest_memory = guest_memory.clone();
 
@@ -2573,7 +2573,7 @@ impl MemoryManager {
         host_numa_node: Option<u32>,
         existing_memory_file: Option<File>,
         thp: bool,
-    ) -> Result<Arc<GuestRegionMmap>, Error> {
+    ) -> Result<Arc<GuestRegion>, Error> {
         let r = Self::create_ram_region_raw(
             backing_file,
             file_offset,
@@ -2587,7 +2587,7 @@ impl MemoryManager {
             thp,
         )?;
 
-        Ok(Arc::new(GuestRegionMmap::new(r, start_addr).ok_or(
+        Ok(Arc::new(GuestRegion::new(r, start_addr).ok_or(
             Error::GuestMemory(MmapError::InvalidGuestAddress(start_addr)),
         )?))
     }
@@ -2621,8 +2621,8 @@ impl MemoryManager {
         }
     }
 
-    // Update the GuestMemoryMmap with the new range
-    fn add_region(&mut self, region: Arc<GuestRegionMmap>) -> Result<(), Error> {
+    // Update the GuestMemory with the new range
+    fn add_region(&mut self, region: Arc<GuestRegion>) -> Result<(), Error> {
         let guest_memory = self
             .guest_memory
             .memory()
@@ -2671,7 +2671,7 @@ impl MemoryManager {
         &mut self,
         start_addr: GuestAddress,
         size: usize,
-    ) -> Result<Arc<GuestRegionMmap>, Error> {
+    ) -> Result<Arc<GuestRegion>, Error> {
         // Allocate memory for the region
         let region = MemoryManager::create_ram_region(
             &None,
@@ -2727,7 +2727,7 @@ impl MemoryManager {
         Ok(region)
     }
 
-    fn hotplug_ram_region(&mut self, size: usize) -> Result<Arc<GuestRegionMmap>, Error> {
+    fn hotplug_ram_region(&mut self, size: usize) -> Result<Arc<GuestRegion>, Error> {
         info!("Hotplugging new RAM: {size}");
 
         // Check that there is a free slot
@@ -2797,11 +2797,11 @@ impl MemoryManager {
         Ok(region)
     }
 
-    pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemoryMmap> {
+    pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemory> {
         self.guest_memory.clone()
     }
 
-    pub fn boot_guest_memory(&self) -> GuestMemoryMmap {
+    pub fn boot_guest_memory(&self) -> GuestMemory {
         self.boot_guest_memory.clone()
     }
 
@@ -3010,7 +3010,7 @@ impl MemoryManager {
     /// guest memory, the new region is returned to the caller. The virtio-mem
     /// use case never adds a new region as the whole hotpluggable memory has
     /// already been allocated at boot time.
-    pub fn resize(&mut self, desired_ram: u64) -> Result<Option<Arc<GuestRegionMmap>>, Error> {
+    pub fn resize(&mut self, desired_ram: u64) -> Result<Option<Arc<GuestRegion>>, Error> {
         if self.user_provided_zones {
             error!(
                 "Not allowed to resize guest memory when backed with user \
@@ -3019,7 +3019,7 @@ impl MemoryManager {
             return Err(Error::InvalidResizeWithMemoryZones);
         }
 
-        let mut region: Option<Arc<GuestRegionMmap>> = None;
+        let mut region: Option<Arc<GuestRegion>> = None;
         match self.hotplug_method {
             HotplugMethod::VirtioMem => {
                 if desired_ram < self.boot_ram {
@@ -3217,7 +3217,7 @@ impl MemoryManager {
     }
 
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
-    pub fn uefi_flash(&self) -> GuestMemoryAtomic<GuestMemoryMmap> {
+    pub fn uefi_flash(&self) -> GuestMemoryAtomic<GuestMemory> {
         self.uefi_flash.as_ref().unwrap().clone()
     }
 
@@ -3880,7 +3880,7 @@ impl Migratable for MemoryManager {
 
 // Streams guest memory `[gpa, gpa + length)` into `file` at `file_offset`.
 fn write_guest_range(
-    guest_memory: &GuestMemoryMmap,
+    guest_memory: &GuestMemory,
     file: &mut File,
     file_offset: u64,
     gpa: u64,
@@ -3905,7 +3905,7 @@ fn write_guest_range(
 // Writes the guest pages that no longer read from the restore source over
 // the clone of that source in `file`.
 fn write_private_pages(
-    guest_memory: &GuestMemoryMmap,
+    guest_memory: &GuestMemory,
     source: &CowSource,
     file: &mut File,
 ) -> result::Result<(), MigratableError> {
@@ -3938,10 +3938,7 @@ fn write_private_pages(
 // single plain private-anonymous guest region — the MAP_FIXED overlay
 // preconditions. File-backed regions are rejected: their stale mapping
 // metadata would misdirect a later snapshot or fd consumer.
-fn is_restore_cow_compatible(
-    guest_memory: &GuestMemoryMmap,
-    saved_regions: &MemoryRangeTable,
-) -> bool {
+fn is_restore_cow_compatible(guest_memory: &GuestMemory, saved_regions: &MemoryRangeTable) -> bool {
     let page_size = get_page_size();
     let mut file_offset: u64 = 0;
     for range in saved_regions.ranges() {
@@ -3974,7 +3971,7 @@ fn is_restore_cow_compatible(
 // region's reserve policy and the THP policy. Ranges must have passed
 // `is_restore_cow_compatible`.
 fn do_mmap_cow_saved_regions(
-    guest_memory: &GuestMemoryMmap,
+    guest_memory: &GuestMemory,
     memory_file: &File,
     saved_regions: &MemoryRangeTable,
     thp: bool,
@@ -4253,7 +4250,7 @@ mod tests {
     #[test]
     fn cow_restore_maps_data_and_reads_holes_as_zero() {
         let page = get_page_size();
-        let gm = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), (2 * page) as usize)]).unwrap();
+        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), (2 * page) as usize)]).unwrap();
 
         let mut file = tempfile::tempfile().unwrap();
         file.write_all(&vec![0xabu8; page as usize]).unwrap();
@@ -4285,7 +4282,7 @@ mod tests {
     #[test]
     fn cow_snapshot_writes_private_pages_over_the_source() {
         let page = get_page_size();
-        let gm = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), (16 * page) as usize)]).unwrap();
+        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), (16 * page) as usize)]).unwrap();
         let mut file = tempfile::tempfile().unwrap();
         for i in 0..16u8 {
             file.write_all(&vec![i + 1; page as usize]).unwrap();
@@ -4323,7 +4320,7 @@ mod tests {
     #[test]
     fn cow_restore_rejects_unaligned_or_out_of_region_ranges() {
         let page = get_page_size();
-        let gm = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), page as usize)]).unwrap();
+        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), page as usize)]).unwrap();
 
         let mut unaligned = MemoryRangeTable::default();
         unaligned.push(MemoryRange {
@@ -4352,10 +4349,9 @@ mod tests {
             libc::MAP_SHARED,
         )
         .unwrap();
-        let gm = GuestMemoryMmap::from_regions(vec![
-            GuestRegionMmap::new(region, GuestAddress(0)).unwrap(),
-        ])
-        .unwrap();
+        let gm =
+            GuestMemory::from_regions(vec![GuestRegion::new(region, GuestAddress(0)).unwrap()])
+                .unwrap();
 
         let mut table = MemoryRangeTable::default();
         table.push(MemoryRange {
@@ -4379,10 +4375,9 @@ mod tests {
                 libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | extra_flags,
             )
             .unwrap();
-            let gm = GuestMemoryMmap::from_regions(vec![
-                GuestRegionMmap::new(region, GuestAddress(0)).unwrap(),
-            ])
-            .unwrap();
+            let gm =
+                GuestMemory::from_regions(vec![GuestRegion::new(region, GuestAddress(0)).unwrap()])
+                    .unwrap();
 
             let mut table = MemoryRangeTable::default();
             table.push(MemoryRange {

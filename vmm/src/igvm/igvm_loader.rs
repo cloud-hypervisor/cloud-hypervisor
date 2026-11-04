@@ -47,7 +47,7 @@ use zerocopy::IntoBytes;
 use zerocopy::{FromBytes, FromZeros};
 
 #[cfg(feature = "sev_snp")]
-use crate::GuestMemoryMmap;
+use crate::GuestMemory;
 use crate::cpu;
 use crate::cpu::CpuManager;
 use crate::igvm::loader::Loader;
@@ -177,9 +177,7 @@ fn igvm_memmap_from_ram_range(ram_range: (u64, u64)) -> IGVM_VHS_MEMORY_MAP_ENTR
 }
 
 #[cfg(feature = "sev_snp")]
-fn generate_memory_map(
-    guest_mem: &GuestMemoryMmap,
-) -> Result<Vec<IGVM_VHS_MEMORY_MAP_ENTRY>, Error> {
+fn generate_memory_map(guest_mem: &GuestMemory) -> Result<Vec<IGVM_VHS_MEMORY_MAP_ENTRY>, Error> {
     let mut memory_map = Vec::new();
 
     // Get usable physical memory ranges

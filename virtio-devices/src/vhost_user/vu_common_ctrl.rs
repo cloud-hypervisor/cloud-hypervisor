@@ -38,7 +38,7 @@ use vmm_sys_util::timerfd::TimerFd;
 use super::{Error, Result, VhostUserState};
 use crate::vhost_user::Inflight;
 use crate::{
-    GuestMemoryMmap, GuestRegionMmap, MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_IN_ORDER,
+    GuestMemory, GuestRegion, MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_IN_ORDER,
     VirtioInterrupt, VirtioInterruptType, get_host_address_range,
 };
 
@@ -73,7 +73,7 @@ pub struct VhostUserHandle {
 }
 
 impl VhostUserHandle {
-    pub fn update_mem_table(&mut self, mem: &GuestMemoryMmap) -> Result<()> {
+    pub fn update_mem_table(&mut self, mem: &GuestMemory) -> Result<()> {
         let mut regions: Vec<VhostUserMemoryRegionInfo> = Vec::new();
         for region in mem.iter() {
             let (mmap_handle, mmap_offset) = match region.file_offset() {
@@ -103,7 +103,7 @@ impl VhostUserHandle {
         Ok(())
     }
 
-    pub fn add_memory_region(&mut self, region: &Arc<GuestRegionMmap>) -> Result<()> {
+    pub fn add_memory_region(&mut self, region: &Arc<GuestRegion>) -> Result<()> {
         let (mmap_handle, mmap_offset) = match region.file_offset() {
             Some(file_offset) => (file_offset.file().as_raw_fd(), file_offset.start()),
             None => return Err(Error::MissingRegionFd),
@@ -163,7 +163,7 @@ impl VhostUserHandle {
     #[expect(clippy::too_many_arguments)]
     pub fn setup_vhost_user<S: VhostUserFrontendReqHandler>(
         &mut self,
-        mem: &GuestMemoryMmap,
+        mem: &GuestMemory,
         queues: &[(u16, Queue, EventFd)],
         virtio_interrupt: &dyn VirtioInterrupt,
         acked_features: u64,
@@ -371,7 +371,7 @@ impl VhostUserHandle {
     #[expect(clippy::too_many_arguments)]
     pub fn reinitialize_vhost_user<S: VhostUserFrontendReqHandler>(
         &mut self,
-        mem: &GuestMemoryMmap,
+        mem: &GuestMemory,
         queues: &[(u16, Queue, EventFd)],
         virtio_interrupt: &dyn VirtioInterrupt,
         acked_features: u64,
@@ -672,7 +672,7 @@ impl VhostUserHandle {
     /// enable them if they haven't been stopped.
     pub fn resume<S: VhostUserFrontendReqHandler>(
         &mut self,
-        mem: &GuestMemoryMmap,
+        mem: &GuestMemory,
         queues: &[(u16, Queue, EventFd)],
         virtio_interrupt: &dyn VirtioInterrupt,
         acked_features: u64,

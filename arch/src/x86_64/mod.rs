@@ -37,7 +37,7 @@ use vm_memory::{
 use crate::smbios::SmbiosConfig;
 use crate::x86_64::cpu_profile::CpuProfile;
 use crate::x86_64::cpu_profile::cpuid_adjustments::MissingCpuidEntriesError;
-use crate::{GuestMemoryMmap, InitramfsConfig, RegionType, smbios};
+use crate::{GuestMemory, InitramfsConfig, RegionType, smbios};
 
 // While modern architectures support more than 255 CPUs via x2APIC,
 // legacy devices such as mptable support at most 254 CPUs.
@@ -1074,7 +1074,7 @@ fn required_common_cpuid_updates(
 pub fn configure_vcpu(
     vcpu: &dyn hypervisor::Vcpu,
     id: u32,
-    boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
+    boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemory>)>,
     cpuid: Vec<CpuIdEntry>,
     kvm_hyperv: bool,
     cpu_vendor: CpuVendor,
@@ -1228,7 +1228,7 @@ pub fn arch_memory_regions() -> Vec<(GuestAddress, usize, RegionType)> {
 /// * `num_cpus` - Number of virtual CPUs the guest will have.
 #[expect(clippy::too_many_arguments)]
 pub fn configure_system(
-    guest_mem: &GuestMemoryMmap,
+    guest_mem: &GuestMemory,
     cmdline_addr: GuestAddress,
     cmdline_size: usize,
     initramfs: &Option<InitramfsConfig>,
@@ -1274,7 +1274,7 @@ type RamRange = (u64, u64);
 
 /// Returns usable physical memory ranges for the guest
 /// These should be used to create e820_RAM memory maps
-pub fn generate_ram_ranges(guest_mem: &GuestMemoryMmap) -> super::Result<Vec<RamRange>> {
+pub fn generate_ram_ranges(guest_mem: &GuestMemory) -> super::Result<Vec<RamRange>> {
     // Merge continuous memory regions into one region.
     // Note: memory regions from "GuestMemoryBackend" are sorted and non-zero sized.
     let ram_regions = {
@@ -1354,9 +1354,7 @@ pub fn generate_ram_ranges(guest_mem: &GuestMemoryMmap) -> super::Result<Vec<Ram
 
 /// Generate the E820 entries shared by direct boot and fw_cfg.
 /// Each entry is (base, size, type).
-pub fn generate_e820_memory_map(
-    guest_mem: &GuestMemoryMmap,
-) -> super::Result<Vec<(u64, u64, u32)>> {
+pub fn generate_e820_memory_map(guest_mem: &GuestMemory) -> super::Result<Vec<(u64, u64, u32)>> {
     let mut entries = vec![(0, layout::EBDA_START.0, E820_RAM)];
     entries.extend(
         generate_ram_ranges(guest_mem)?
@@ -1376,7 +1374,7 @@ pub fn generate_e820_memory_map(
 }
 
 fn configure_pvh(
-    guest_mem: &GuestMemoryMmap,
+    guest_mem: &GuestMemory,
     cmdline_addr: GuestAddress,
     initramfs: &Option<InitramfsConfig>,
     rsdp_addr: Option<GuestAddress>,
@@ -1462,7 +1460,7 @@ fn configure_pvh(
 }
 
 fn configure_32bit_entry(
-    guest_mem: &GuestMemoryMmap,
+    guest_mem: &GuestMemory,
     cmdline_addr: GuestAddress,
     cmdline_size: usize,
     initramfs: &Option<InitramfsConfig>,
@@ -1538,10 +1536,7 @@ fn add_memmap_entry(memmap: &mut Vec<hvm_memmap_table_entry>, addr: u64, size: u
 }
 
 /// Returns the memory address where the initramfs could be loaded.
-pub fn initramfs_load_addr(
-    guest_mem: &GuestMemoryMmap,
-    initramfs_size: usize,
-) -> super::Result<u64> {
+pub fn initramfs_load_addr(guest_mem: &GuestMemory, initramfs_size: usize) -> super::Result<u64> {
     let first_region = guest_mem
         .find_region(GuestAddress::new(0))
         .ok_or(super::Error::InitramfsAddress)?;
@@ -1864,7 +1859,7 @@ mod tests {
     #[test]
     fn test_system_configuration() {
         let no_vcpus = 4;
-        let gm = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
         let config_err = configure_system(
             &gm,
             GuestAddress(0),
@@ -1885,7 +1880,7 @@ mod tests {
             .filter(|r| r.2 == RegionType::Ram && r.0 < layout::RAM_64BIT_START)
             .map(|r| (r.0, r.1))
             .collect();
-        let gm = GuestMemoryMmap::from_ranges(&ram_regions).unwrap();
+        let gm = GuestMemory::from_ranges(&ram_regions).unwrap();
 
         configure_system(
             &gm,
@@ -1913,7 +1908,7 @@ mod tests {
                 }
             })
             .collect();
-        let gm = GuestMemoryMmap::from_ranges(&ram_regions).unwrap();
+        let gm = GuestMemory::from_ranges(&ram_regions).unwrap();
         configure_system(
             &gm,
             GuestAddress(0),
@@ -1943,7 +1938,7 @@ mod tests {
 
     #[test]
     fn test_generate_e820_memory_map() {
-        let gm = GuestMemoryMmap::from_ranges(&[
+        let gm = GuestMemory::from_ranges(&[
             (GuestAddress(0), 2 << 20),
             (layout::RAM_64BIT_START, 2 << 20),
             (layout::RAM_64BIT_START.unchecked_add(4 << 20), 2 << 20),
