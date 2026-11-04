@@ -24,7 +24,7 @@ use virtio_bindings::virtio_blk::{
 use virtio_queue::DescriptorChain;
 use vm_memory::bitmap::Bitmap;
 use vm_memory::{
-    Address as _, Bytes as _, GuestAddress, GuestMemoryBackend as _, GuestMemoryError,
+    Address as _, Bytes as _, GuestAddress, GuestMemoryBackend, GuestMemoryError,
     GuestMemoryLoadGuard,
 };
 use vm_virtio::AccessPlatform;
@@ -81,8 +81,8 @@ pub struct Request {
 }
 
 impl Request {
-    pub fn parse<B: Bitmap + 'static>(
-        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<vm_memory::GuestMemoryMmap<B>>>,
+    pub fn parse<M: GuestMemoryBackend>(
+        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<M>>,
         access_platform: Option<&dyn AccessPlatform>,
     ) -> Result<Request, Error> {
         let hdr_desc = desc_chain
@@ -176,11 +176,11 @@ impl Request {
         Ok(req)
     }
 
-    pub fn execute<T: FileExt + FileSync, B: Bitmap + 'static>(
+    pub fn execute<T: FileExt + FileSync, M: GuestMemoryBackend>(
         &self,
         disk: &mut T,
         disk_nsectors: u64,
-        mem: &vm_memory::GuestMemoryMmap<B>,
+        mem: &M,
         serial: &[u8],
     ) -> Result<u32, ExecuteError> {
         self.check_data_bounds(disk_nsectors)?;
@@ -233,9 +233,9 @@ impl Request {
         Ok(len)
     }
 
-    pub fn execute_async<B: Bitmap + Send + Sync + 'static>(
+    pub fn execute_async<M: GuestMemoryBackend + Send + Sync + 'static>(
         &mut self,
-        mem: Arc<vm_memory::GuestMemoryMmap<B>>,
+        mem: Arc<M>,
         disk_nsectors: u64,
         disk_image: &mut dyn AsyncIo,
         serial: &[u8],
@@ -423,9 +423,9 @@ impl Request {
     }
 
     // Builds a read or write operation for IO to or from `mem`.
-    fn build_data_operation<B: Bitmap + Send + Sync + 'static>(
+    fn build_data_operation<M: GuestMemoryBackend + Send + Sync + 'static>(
         &self,
-        mem: Arc<vm_memory::GuestMemoryMmap<B>>,
+        mem: Arc<M>,
         offset: libc::off_t,
         alignment: Option<u64>,
         user_data: u64,
@@ -444,14 +444,14 @@ impl Request {
         }
 
         if let Some(alignment) = alignment
-            && !self.guest_memory_is_aligned(&mem, alignment)?
+            && !self.guest_memory_is_aligned(mem.as_ref(), alignment)?
         {
             // The guest-memory buffers are unaligned, so use an aligned bounce buffer.
             let mut buffer = OwnedIoBuffer::new(self.data_len(), alignment as usize)
                 .map_err(ExecuteError::TemporaryBufferAllocation)?;
 
             if self.request_type == RequestType::Out {
-                self.copy_guest_to_buffer(&mem, buffer.as_mut_slice())?;
+                self.copy_guest_to_buffer(mem.as_ref(), buffer.as_mut_slice())?;
             }
 
             return Ok(match self.request_type {
@@ -471,9 +471,9 @@ impl Request {
     }
 
     // Checks whether `self.data_descriptors` are aligned to `alignment`.
-    fn guest_memory_is_aligned<B: Bitmap + 'static>(
+    fn guest_memory_is_aligned<M: GuestMemoryBackend>(
         &self,
-        mem: &vm_memory::GuestMemoryMmap<B>,
+        mem: &M,
         alignment: u64,
     ) -> Result<bool, ExecuteError> {
         if alignment <= 1 {
@@ -513,11 +513,7 @@ impl Request {
     }
 
     // Marks the first `len` bytes of the read destinations dirty.
-    fn mark_read_dirty<B: Bitmap + 'static>(
-        &self,
-        mem: &vm_memory::GuestMemoryMmap<B>,
-        len: usize,
-    ) -> Result<(), Error> {
+    fn mark_read_dirty<M: GuestMemoryBackend>(&self, mem: &M, len: usize) -> Result<(), Error> {
         let mut remaining = len;
         for (data_addr, data_len) in &self.data_descriptors {
             if *data_len == 0 {
@@ -537,9 +533,9 @@ impl Request {
     }
 
     // Copies guest descriptor contents into a contiguous host buffer.
-    fn copy_guest_to_buffer<B: Bitmap + 'static>(
+    fn copy_guest_to_buffer<M: GuestMemoryBackend>(
         &self,
-        mem: &vm_memory::GuestMemoryMmap<B>,
+        mem: &M,
         buffer: &mut [u8],
     ) -> Result<(), ExecuteError> {
         let mut offset = 0usize;
@@ -553,9 +549,9 @@ impl Request {
     }
 
     // Copies a host completion buffer back into guest descriptors.
-    fn copy_buffer_to_guest<B: Bitmap + 'static>(
+    fn copy_buffer_to_guest<M: GuestMemoryBackend>(
         &self,
-        mem: &vm_memory::GuestMemoryMmap<B>,
+        mem: &M,
         buffer: &[u8],
     ) -> Result<(), Error> {
         let mut buffer_offset = 0usize;
@@ -571,9 +567,9 @@ impl Request {
         Ok(())
     }
 
-    pub fn complete_async<B: Bitmap + 'static>(
+    pub fn complete_async<M: GuestMemoryBackend>(
         &mut self,
-        mem: &vm_memory::GuestMemoryMmap<B>,
+        mem: &M,
         completion: &mut AsyncIoCompletion,
     ) -> Result<(), Error> {
         if self.request_type == RequestType::In && completion.result > 0 {
@@ -825,7 +821,9 @@ mod tests {
 
         // The backend filled the first buffer and one page of the second
         let mut completion = AsyncIoCompletion::from_operation(op, 0x2000);
-        request.complete_async(&mem, &mut completion).unwrap();
+        request
+            .complete_async(mem.as_ref(), &mut completion)
+            .unwrap();
 
         let bitmap = region.bitmap();
         assert!(bitmap.dirty_at(0x1000));

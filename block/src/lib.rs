@@ -40,7 +40,6 @@ use serde::{Deserialize, Serialize};
 pub use sparse::{BLKDISCARD, BLKZEROOUT};
 use thiserror::Error;
 use virtio_bindings::virtio_blk::*;
-use vm_memory::bitmap::Bitmap;
 use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryBackend, GuestMemoryError};
 use vmm_sys_util::fallocate::{FallocateMode, fallocate};
 use vmm_sys_util::{aio, ioctl_io_nr, ioctl_ior_nr};
@@ -171,8 +170,8 @@ impl ExecuteError {
     }
 }
 
-pub fn request_type<B: Bitmap + 'static>(
-    mem: &vm_memory::GuestMemoryMmap<B>,
+pub fn request_type<M: GuestMemoryBackend>(
+    mem: &M,
     desc_addr: GuestAddress,
 ) -> result::Result<RequestType, Error> {
     let type_ = mem.read_obj(desc_addr).map_err(Error::GuestMemory)?;
@@ -187,10 +186,7 @@ pub fn request_type<B: Bitmap + 'static>(
     }
 }
 
-fn sector<B: Bitmap + 'static>(
-    mem: &vm_memory::GuestMemoryMmap<B>,
-    desc_addr: GuestAddress,
-) -> result::Result<u64, Error> {
+fn sector<M: GuestMemoryBackend>(mem: &M, desc_addr: GuestAddress) -> result::Result<u64, Error> {
     const SECTOR_OFFSET: usize = 8;
     let addr = match mem.checked_offset(desc_addr, SECTOR_OFFSET) {
         Some(v) => v,
