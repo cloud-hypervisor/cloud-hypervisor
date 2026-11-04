@@ -16,8 +16,7 @@ use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
 use virtio_devices::{Pmem, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
-use vm_allocator::GuestMemory;
-use vm_device::UserspaceMapping;
+use vm_allocator::{GuestMemory, GuestRegion};
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, MmapRegion};
 use vm_migration::{Pausable, Snapshottable};
@@ -482,7 +481,7 @@ impl AccessPlatform for FuzzAccessPlatform {
     }
 }
 
-fn create_backing_file_and_mapping() -> io::Result<(File, GuestAddress, UserspaceMapping)> {
+fn create_backing_file_and_mapping() -> io::Result<(File, GuestAddress, GuestRegion)> {
     let shm = memfd_create_with_size(&ffi::CString::new("fuzz").unwrap(), 0, PMEM_FILE_SIZE)?;
     let file: File = unsafe { File::from_raw_fd(shm) };
 
@@ -496,12 +495,9 @@ fn create_backing_file_and_mapping() -> io::Result<(File, GuestAddress, Userspac
     )
     .map_err(|e| io::Error::other(format!("failed building mmap region: {e}")))?;
     let guest_addr = GuestAddress(0);
-    let dummy_user_mapping = UserspaceMapping {
-        mem_slot: 0,
-        addr: guest_addr,
-        mapping: Arc::new(dummy_mmap_region),
-        mergeable: false,
-    };
+    let dummy_user_mapping = vm_memory::GuestRegionMmap::new(dummy_mmap_region, guest_addr)
+        .unwrap()
+        .into();
 
     Ok((file, guest_addr, dummy_user_mapping))
 }
