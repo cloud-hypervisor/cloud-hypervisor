@@ -15,10 +15,7 @@ use std::{fmt, result};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use vm_memory::bitmap::AtomicBitmap;
-
-type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
-type GuestRegion = vm_memory::GuestRegionMmap<AtomicBitmap>;
+use vm_allocator::{GuestMemory, GuestRegion};
 
 /// Type for returning error code.
 #[derive(Debug, Error)]

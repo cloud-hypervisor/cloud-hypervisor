@@ -38,7 +38,7 @@ use serde::{Deserialize, Serialize};
 use signal_hook::iterator::{Handle, Signals};
 use thiserror::Error;
 use tracer::trace_scoped;
-use vm_memory::bitmap::AtomicBitmap;
+use vm_allocator::{GuestMemory, GuestRegion};
 use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::protocol::*;
 use vm_migration::{
@@ -111,9 +111,6 @@ mod uffd;
 mod userfaultfd;
 pub mod vm;
 pub mod vm_config;
-
-type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
-type GuestRegion = vm_memory::GuestRegionMmap<AtomicBitmap>;
 
 /// Errors associated with VMM management
 #[derive(Debug, Error)]

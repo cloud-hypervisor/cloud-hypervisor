@@ -22,11 +22,9 @@ use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
 use virtio_devices::{Block, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
-use vm_memory::bitmap::AtomicBitmap;
+use vm_allocator::GuestMemory;
 use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
-
-type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 // Guest memory size. Kept small: everything the device touches lives in the
 // first megabyte, and a smaller mapping keeps the executions per second up.

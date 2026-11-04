@@ -21,15 +21,13 @@ use virtio_devices::{
     VirtioInterrupt, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
 };
 use virtio_queue::{Queue, QueueT};
-use vm_memory::bitmap::AtomicBitmap;
+use vm_allocator::GuestMemory;
 use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
 use vm_migration::{Migratable, Pausable, Snapshottable};
 use vm_virtio::AccessPlatform;
 use vmm::EpollContext;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 use vmm_sys_util::timerfd::TimerFd;
-
-type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 macro_rules! align {
     ($n:expr, $align:expr) => {{

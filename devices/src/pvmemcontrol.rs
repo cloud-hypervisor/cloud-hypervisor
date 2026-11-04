@@ -17,16 +17,13 @@ use pci::{
 };
 use thiserror::Error;
 use vm_allocator::page_size::get_page_size;
-use vm_allocator::{AddressAllocator, SystemAllocator};
+use vm_allocator::{AddressAllocator, GuestMemory, SystemAllocator};
 use vm_device::{BusDeviceSync, Resource};
-use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
     GuestMemoryBackend, GuestMemoryError, GuestMemoryRegion, Le32, Le64, VolatileMemory,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
-
-type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 const PVMEMCONTROL_VENDOR_ID: u16 = 0x1ae0;
 const PVMEMCONTROL_DEVICE_ID: u16 = 0x0087;

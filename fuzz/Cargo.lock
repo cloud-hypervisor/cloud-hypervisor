@@ -61,6 +61,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "uuid",
+ "vm-allocator",
  "vm-fdt",
  "vm-memory",
 ]

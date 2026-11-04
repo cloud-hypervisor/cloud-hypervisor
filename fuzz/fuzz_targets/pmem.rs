@@ -16,15 +16,13 @@ use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
 use virtio_devices::{Pmem, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
+use vm_allocator::GuestMemory;
 use vm_device::UserspaceMapping;
-use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, MmapRegion};
 use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
-
-type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 const MEM_SIZE: usize = 2 * 1024 * 1024;
 const PMEM_FILE_SIZE: usize = 128 * 1024 * 1024;

@@ -14,12 +14,10 @@ use seccompiler::SeccompAction;
 use virtio_devices::watchdog::WatchdogState;
 use virtio_devices::{VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
-use vm_memory::bitmap::AtomicBitmap;
+use vm_allocator::GuestMemory;
 use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
 use vm_migration::{Pausable, Snapshottable};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
-
-type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 const MEM_SIZE: usize = 2 * 1024 * 1024;
 const QUEUE_SIZE: u16 = 8;
