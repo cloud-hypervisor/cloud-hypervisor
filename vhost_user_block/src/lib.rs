@@ -358,6 +358,7 @@ impl VhostUserBackendMut for VhostUserBlkBackend {
             | VhostUserProtocolFeatures::MQ
             | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
             | VhostUserProtocolFeatures::DEVICE_STATE
+            | VhostUserProtocolFeatures::PAGEFAULT
     }
 
     fn set_event_idx(&mut self, enabled: bool) {
