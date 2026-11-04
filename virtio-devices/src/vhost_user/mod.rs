@@ -1207,7 +1207,11 @@ mod tests {
 
         // Sending this region would fail, as it has no backing file.
         let region = MmapRegion::new(0x1000).unwrap();
-        let region = Arc::new(GuestRegion::new(region, GuestAddress(0)).unwrap());
+        let region = Arc::new(
+            vm_memory::GuestRegionMmap::new(region, GuestAddress(0))
+                .unwrap()
+                .into(),
+        );
         common.add_memory_region(&region).unwrap();
     }
 }

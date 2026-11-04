@@ -1204,8 +1204,6 @@ mod tests {
         use vm_memory::{FileOffset, GuestAddress, MmapRegion};
         use vmm_sys_util::tempfile::TempFile;
 
-        use crate::GuestRegion;
-
         let backing_file = TempFile::new().unwrap();
         backing_file.as_file().write_all(&[0x5a; 4096]).unwrap();
         let original = fs::read(backing_file.as_path()).unwrap();
@@ -1222,7 +1220,9 @@ mod tests {
             libc::MAP_PRIVATE,
         )
         .unwrap();
-        let region = GuestRegion::new(mmap, GuestAddress(0)).unwrap();
+        let region = vm_memory::GuestRegionMmap::new(mmap, GuestAddress(0))
+            .unwrap()
+            .into();
         let memory = GuestMemory::from_regions(vec![region]).unwrap();
         memory.write_slice(&[0xa5], GuestAddress(0)).unwrap();
         assert_eq!(memory.read_obj::<u8>(GuestAddress(0)).unwrap(), 0xa5);
