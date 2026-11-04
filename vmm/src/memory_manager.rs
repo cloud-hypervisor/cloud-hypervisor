@@ -276,7 +276,7 @@ pub struct MemoryManager {
     ram_allocator: AddressAllocator,
     dynamic: bool,
 
-    // Keep track of calls to create_userspace_mapping() for guest RAM.
+    // Keep slot and range metadata for guest RAM snapshots.
     // This is useful for getting the dirty pages as we need to know the
     // slots that the mapping is created in.
     guest_ram_mappings: Vec<GuestRamMapping>,
@@ -324,10 +324,6 @@ pub enum Error {
     /// The requested hotplug memory addition is not a valid size
     #[error("The requested hotplug memory addition is not a valid size")]
     InvalidSize,
-
-    /// Failed to create the user memory region.
-    #[error("Failed to create the user memory region")]
-    CreateUserMemoryRegion(#[source] hypervisor::HypervisorVmError),
 
     /// Failed to register a guest region.
     #[error("Failed to register a guest region")]
@@ -2841,98 +2837,10 @@ impl MemoryManager {
         &self.memory_slot_allocator
     }
 
-    pub fn allocate_memory_slot(&mut self) -> u32 {
-        self.memory_slot_allocator().next_memory_slot()
-    }
-
-    /// # Safety
-    ///
-    /// `userspace_addr` and `memory_size` must be and remain valid
-    /// until `remove_userspace_mapping` is called.
-    #[expect(clippy::too_many_arguments)]
-    pub unsafe fn create_userspace_mapping(
-        &mut self,
-        guest_phys_addr: u64,
-        memory_size: usize,
-        userspace_addr: *mut u8,
-        mergeable: bool,
-        readonly: bool,
-        log_dirty: bool,
-        visibility: hypervisor::MemoryVisibility,
-    ) -> Result<u32, Error> {
-        let slot = self.allocate_memory_slot();
-
-        info!(
-            "Creating userspace mapping: {guest_phys_addr:x} -> {userspace_addr_:x} {memory_size:x}, slot {slot}",
-            userspace_addr_ = userspace_addr as u64
-        );
-
-        // SAFETY: caller promises parameters are correct.
-        unsafe {
-            self.vm
-                .create_user_memory_region(
-                    slot,
-                    guest_phys_addr,
-                    memory_size,
-                    userspace_addr,
-                    readonly,
-                    log_dirty,
-                    visibility,
-                )
-                .map_err(Error::CreateUserMemoryRegion)?;
-        }
-
-        // SAFETY: the address and size are valid since the
-        // mmap succeeded.
-        let ret = unsafe {
-            libc::madvise(
-                userspace_addr.cast(),
-                memory_size as libc::size_t,
-                libc::MADV_DONTDUMP,
-            )
-        };
-        if ret != 0 {
-            let e = io::Error::last_os_error();
-            warn!("Failed to mark mapping as MADV_DONTDUMP: {e}");
-        }
-
-        // Mark the pages as mergeable if explicitly asked for.
-        if mergeable {
-            // SAFETY: the address and size are valid since the
-            // mmap succeeded.
-            let ret = unsafe {
-                libc::madvise(
-                    userspace_addr.cast(),
-                    memory_size as libc::size_t,
-                    libc::MADV_MERGEABLE,
-                )
-            };
-            if ret != 0 {
-                let err = io::Error::last_os_error();
-                // Safe to unwrap because the error is constructed with
-                // last_os_error(), which ensures the output will be Some().
-                let errno = err.raw_os_error().unwrap();
-                if errno == libc::EINVAL {
-                    warn!("kernel not configured with CONFIG_KSM");
-                } else {
-                    warn!("madvise error: {err}");
-                }
-                warn!("failed to mark pages as mergeable");
-            }
-        }
-
-        info!(
-            "Created userspace mapping: {guest_phys_addr:x} -> {userspace_addr_:x} {memory_size:x}",
-            userspace_addr_ = userspace_addr as u64
-        );
-
-        Ok(slot)
-    }
-
     /// # Safety
     ///
     /// `userspace_addr` and `memory_size` must have previously been passed
-    /// to `create_userspace_mapping`.
+    /// to the matching hypervisor registration.
     ///
     /// # Errors
     ///
