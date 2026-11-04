@@ -8465,6 +8465,133 @@ mod common_parallel {
         handle_child_output(r, &dest_output);
     }
 
+    // Postcopy live migration with a vhost-user-blk disk. The guest fills a
+    // buffer before the migration and writes it to the disk with O_DIRECT,
+    // one page at a time, across the migration, so the backend is the first
+    // to touch the pages written once the destination runs.
+    fn _test_live_migration_tcp_postcopy_vhost_user_blk() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let blk_img = guest.tmp_dir.as_path().join("blk.img");
+        let blk_img = blk_img.to_str().unwrap();
+        assert!(exec_host_command_status(&format!("truncate -s 32M {blk_img}")).success());
+        // An absolute image path replaces the workloads directory.
+        let (mut src_blk_child, vubd_socket_path) =
+            prepare_vubd(&guest.tmp_dir, blk_img, 1, false, false);
+        let blk_params = format!("vhost_user=true,socket={vubd_socket_path}");
+
+        let src_api_socket = temp_api_path(&guest.tmp_dir);
+        let mut src_child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=2"])
+            .args(["--memory", "size=512M,shared=on"])
+            .default_kernel_cmdline()
+            .default_disks()
+            .args(["--disk", blk_params.as_str()])
+            .default_net()
+            .args(["--api-socket", &src_api_socket])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let dest_event_path = temp_event_monitor_path(&guest.tmp_dir);
+        let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
+        dest_api_socket.push_str(".dest");
+        let mut dest_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &dest_api_socket])
+            .args([
+                "--event-monitor",
+                format!("path={dest_event_path}").as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            guest.wait_vm_boot().unwrap();
+            guest
+                .ssh_command(
+                    "sudo python3 -c 'import mmap, os, time; \
+                     m = mmap.mmap(-1, 32 << 20); \
+                     m[:] = b\"\".join(i.to_bytes(4, \"little\") * 1024 for i in range(8192)); \
+                     open(\"/tmp/filled\", \"w\").close(); \
+                     fd = os.open(\"/dev/vdc\", os.O_WRONLY | os.O_DIRECT); \
+                     v = memoryview(m)\n\
+                     for i in range(8192): os.pwrite(fd, v[i << 12:(i + 1) << 12], i << 12); time.sleep(0.002)' \
+                     > /dev/null 2>&1 & \
+                     until [ -e /tmp/filled ]; do sleep 1; done",
+                )
+                .unwrap();
+
+            thread::scope(|s| {
+                // The source's backend exits and removes the socket once the
+                // source disconnects from it during the migration.
+                let dest_blk_child = s.spawn(|| {
+                    assert!(wait_until(Duration::from_secs(60), || matches!(
+                        src_blk_child.try_wait(),
+                        Ok(Some(_))
+                    )));
+                    prepare_vubd(&guest.tmp_dir, blk_img, 1, false, false).0
+                });
+                assert!(
+                    start_live_migration_tcp_with_flags(
+                        &src_api_socket,
+                        &dest_api_socket,
+                        &dest_event_path,
+                        NonZeroU32::new(1).unwrap(),
+                        &SendMigrationOptions {
+                            postcopy: true,
+                            ..Default::default()
+                        },
+                    ),
+                    "Postcopy live migration command failed."
+                );
+                dest_blk_child.join().unwrap()
+            })
+        }));
+        let Ok(mut dest_blk_child) = r else {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Error occurred during postcopy live-migration",
+            );
+        };
+
+        let src_exited_ok = wait_until(Duration::from_secs(60), || {
+            matches!(src_child.try_wait(), Ok(Some(_)))
+        }) && src_child.try_wait().unwrap().is_some_and(|s| s.success());
+        if !src_exited_ok {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Source VM (postcopy) was not terminated successfully.",
+            );
+        }
+
+        let r = panic::catch_unwind(|| {
+            assert!(wait_until(Duration::from_secs(60), || {
+                let data = fs::read(blk_img).unwrap();
+                for (i, page) in data.chunks(4096).enumerate() {
+                    if page != (i as u32).to_le_bytes().repeat(1024) {
+                        return false;
+                    }
+                }
+                true
+            }));
+        });
+
+        let _ = dest_child.kill();
+        let dest_output = dest_child.wait_with_output().unwrap();
+        let _ = src_child.kill();
+        let _ = src_child.wait();
+        let _ = dest_blk_child.kill();
+        let _ = dest_blk_child.wait();
+        let _ = src_blk_child.kill();
+        let _ = src_blk_child.wait();
+        handle_child_output(r, &dest_output);
+    }
+
     fn _test_live_migration_tcp_timeout(timeout_strategy: TimeoutStrategy) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -8997,6 +9124,12 @@ mod common_parallel {
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_tcp_postcopy() {
         _test_live_migration_tcp_postcopy();
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_live_migration_tcp_postcopy_vhost_user_blk() {
+        _test_live_migration_tcp_postcopy_vhost_user_blk();
     }
 
     #[test]
