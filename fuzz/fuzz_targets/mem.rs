@@ -416,10 +416,13 @@ fn create_region_with_options(
     numa_id: Option<u32>,
     shared: bool,
 ) -> Option<Arc<GuestRegion>> {
-    vmm::memory_manager::MemoryManager::create_ram_region(
-        &None, 0, start_addr, size, false, false, shared, None, numa_id, None, false,
+    let mapping = vmm::memory_manager::MemoryManager::create_ram_region_raw(
+        &None, 0, size, false, false, shared, None, numa_id, None, false,
     )
-    .ok()
+    .ok()?;
+    Some(Arc::new(
+        vm_memory::GuestRegionMmap::new(mapping, start_addr)?.into(),
+    ))
 }
 
 fn create_mem_device(initial_size: u64, with_numa: bool) -> Option<(Mem, Arc<GuestRegion>)> {
