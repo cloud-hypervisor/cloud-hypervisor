@@ -4579,8 +4579,8 @@ impl DeviceManager {
             && device_cfg.pci_common.iommu != IommuType::Virtio;
 
         let (memory_slot_allocator, guest_memory) = {
-            let mut mm = memory_manager.lock().unwrap();
-            (mm.memory_slot_allocator(), mm.guest_memory())
+            let mm = memory_manager.lock().unwrap();
+            (Arc::clone(mm.memory_slot_allocator()), mm.guest_memory())
         };
 
         let extended_caps = pasid_cap
@@ -4820,7 +4820,7 @@ impl DeviceManager {
                 as Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
             legacy_interrupt_group,
             pci_device_bdf,
-            memory_manager.lock().unwrap().memory_slot_allocator(),
+            Arc::clone(memory_manager.lock().unwrap().memory_slot_allocator()),
             vm_migration::snapshot_from_id(snapshot, vfio_user_name.as_str()),
         )
         .map_err(DeviceManagerError::VfioUserCreate)?;
