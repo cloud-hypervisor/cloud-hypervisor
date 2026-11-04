@@ -23,7 +23,7 @@ net_util = { path = "../net_util" }
 option_parser = { path = "../option_parser" }
 thiserror = { workspace = true }
 vhost = { workspace = true, features = ["vhost-user-backend"] }
-vhost-user-backend = { workspace = true }
+vhost-user-backend = { workspace = true, features = ["postcopy"] }
 virtio-bindings = { workspace = true }
 vm-memory = { workspace = true, features = ["backend-atomic", "backend-mmap"] }
 vmm-sys-util = { workspace = true }
