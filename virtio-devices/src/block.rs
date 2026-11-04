@@ -489,7 +489,7 @@ impl BlockEpollHandler {
             let _active_request = ActiveRequestGuard::new(&self.active_request_count);
 
             request
-                .complete_async(&mem, &mut completion)
+                .complete_async(&*mem, &mut completion)
                 .map_err(Error::RequestCompleting)?;
 
             // Generate a virtio-block error if the fsync fails and writethrough requested

@@ -7,10 +7,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use smallvec::SmallVec;
-use vm_memory::bitmap::Bitmap;
-use vm_memory::{
-    Address, Bytes, GuestAddress, GuestMemoryBackend, GuestMemoryError, GuestMemoryMmap,
-};
+use vm_memory::{Address, Bytes, GuestAddress, GuestMemoryBackend, GuestMemoryError};
 
 trait GuestMemoryTargetOwner: Send + Sync {
     fn iovec_for_range(
@@ -22,9 +19,9 @@ trait GuestMemoryTargetOwner: Send + Sync {
     fn read_guest_slice(&self, buf: &mut [u8], addr: GuestAddress) -> Result<(), GuestMemoryError>;
 }
 
-impl<B> GuestMemoryTargetOwner for GuestMemoryMmap<B>
+impl<M> GuestMemoryTargetOwner for M
 where
-    B: Bitmap + Send + Sync + 'static,
+    M: GuestMemoryBackend + Send + Sync + 'static,
 {
     fn iovec_for_range(
         &self,
@@ -70,12 +67,9 @@ impl GuestMemoryTarget {
     ///
     /// The memory Arc is retained for the life of `Self`, making this
     /// appropriate for asynchronous I/O operations on the specified ranges.
-    pub fn new<B>(
-        mem: Arc<GuestMemoryMmap<B>>,
-        ranges: &[(GuestAddress, u32)],
-    ) -> Result<Self, GuestMemoryError>
+    pub fn new<M>(mem: Arc<M>, ranges: &[(GuestAddress, u32)]) -> Result<Self, GuestMemoryError>
     where
-        B: Bitmap + Send + Sync + 'static,
+        M: GuestMemoryBackend + Send + Sync + 'static,
     {
         let retained_ranges: SmallVec<[(GuestAddress, usize); 1]> = ranges
             .iter()
