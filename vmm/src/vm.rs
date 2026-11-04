@@ -3325,8 +3325,11 @@ mod tests {
 
     #[test]
     pub(crate) fn test_vm() {
+        use std::sync::atomic::AtomicU32;
+
         use hypervisor::VmExit;
-        use vm_memory::{Address, GuestMemoryBackend, GuestMemoryRegion};
+        use vm_allocator::{GuestRegion, MemorySlotAllocator};
+        use vm_memory::GuestMemoryBackend;
         // This example based on https://lwn.net/Articles/658511/
         let code = [
             0xba, 0xf8, 0x03, /* mov $0x3f8, %dx */
@@ -3340,30 +3343,33 @@ mod tests {
 
         let mem_size = 0x1000;
         let load_addr = GuestAddress(0x1000);
-        let mem = GuestMemory::from_ranges(&[(load_addr, mem_size)]).unwrap();
 
         let hv = hypervisor::new().unwrap();
         let vm = hv
             .create_vm(HypervisorVmConfig::default())
             .expect("new VM creation failed");
 
-        for (index, region) in mem.iter().enumerate() {
-            // SAFETY: inputs are valid
-            unsafe {
-                vm.create_user_memory_region(
-                    index as u32,
-                    region.start_addr().raw_value(),
-                    region.len().try_into().unwrap(),
-                    region.as_ptr(),
-                    false,
-                    false,
-                    hypervisor::MemoryVisibility::Shared,
-                )
-                .expect("Cannot configure guest memory");
-            }
-        }
+        let slot_allocator = Arc::new(MemorySlotAllocator::new(
+            Arc::new(AtomicU32::new(0)),
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let region = GuestRegion::from_mmap(
+            vm_memory::MmapRegion::new(mem_size).unwrap(),
+            load_addr,
+            Arc::clone(&vm),
+            slot_allocator,
+            false,
+            false,
+            false,
+            hypervisor::MemoryVisibility::Shared,
+        )
+        .unwrap();
+        let mem = GuestMemory::from_regions(vec![region]).unwrap();
         mem.write_slice(&code, load_addr)
             .expect("Writing code to memory failed");
+        for region in mem.iter() {
+            region.register().expect("Cannot configure guest memory");
+        }
 
         let mut vcpu = vm
             .create_vcpu(0, None, Default::default())
