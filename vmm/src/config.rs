@@ -454,8 +454,8 @@ pub enum ValidationError {
     /// vfio_fds entry does not match any DeviceConfig.id in the snapshot
     #[error("VFIO device id '{0}' in 'vfio_fds' does not match any device in the snapshot")]
     RestoreUnknownVfioId(String),
-    /// A device saved with an FD has no replacement FD for the restore
-    #[error("VFIO device '{0}' was FD backed and needs a new fd in 'vfio_fds'")]
+    /// A VFIO device has no replacement FD for the restore
+    #[error("VFIO device '{0}' needs a replacement fd in 'vfio_fds'")]
     RestoreMissingVfioFd(String),
     /// Prefault requires the eager-copy restore mode
     #[error("'prefault' requires 'memory_restore_mode=copy'")]
@@ -3159,8 +3159,8 @@ impl RestoreConfig {
         \n`net_fds` is a list of net ids with new file descriptors. \
         Only net devices backed by FDs directly are needed as input.\
         \n`vfio_fds` is a list of VFIO device ids each paired with a new cdev file descriptor, \
-        e.g. vfio_fds=[vfio0@5,vfio1@6]. Use this to restore a VFIO device onto a different \
-        sysfs path or host. Requires `iommufd_fd`.\
+        e.g. vfio_fds=[vfio0@5,vfio1@6]. Required for every VFIO device.\
+        Requires `iommufd_fd` and platform `iommufd=on`.\
         \n`iommufd_fd` is a new iommufd file descriptor for the restored VM. \
         The one saved in the snapshot does not survive serialization.\
         \n `resume` controls whether the VM will be directly resumed after restore \
@@ -3361,16 +3361,15 @@ impl RestoreConfig {
             }
         }
 
-        // A device saved with an FD cannot reuse it, the snapshot carries no
-        // live descriptor. Each one needs a replacement in vfio_fds.
+        // Saved paths may identify a different device on a different host and saved
+        // FDs cannot be reused.
         let substituted: HashSet<&str> = vfio_fds.iter().map(|v| v.id.as_str()).collect();
         for d in vm_config.devices.iter().flatten() {
-            if (d.fd.is_some() || d.path.is_none())
-                && !d
-                    .pci_common
-                    .id
-                    .as_deref()
-                    .is_some_and(|id| substituted.contains(id))
+            if !d
+                .pci_common
+                .id
+                .as_deref()
+                .is_some_and(|id| substituted.contains(id))
             {
                 return Err(ValidationError::RestoreMissingVfioFd(
                     d.pci_common.id.clone().unwrap_or_default(),
@@ -6652,14 +6651,43 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             Err(ValidationError::IdentifierNotUnique("vfio0".to_string()))
         );
 
-        // A device saved with an FD must get a replacement FD.
-        snapshot_vm_config.devices.as_mut().unwrap()[0].path = None;
-        snapshot_vm_config.devices.as_mut().unwrap()[0].fd = Default::default();
         let no_substitution = RestoreConfig {
             vfio_fds: None,
             iommufd_fd: Default::default(),
             ..valid_config.clone()
         };
+        assert_eq!(
+            no_substitution.validate(&snapshot_vm_config),
+            Err(ValidationError::RestoreMissingVfioFd("vfio0".to_string()))
+        );
+
+        // Replacing only some of the path-backed devices is insufficient.
+        let mut second_device = snapshot_vm_config.devices.as_ref().unwrap()[0].clone();
+        second_device.pci_common.id = Some("vfio1".to_string());
+        second_device.path = Some(PathBuf::from("/sys/bus/pci/devices/0000:02:00.0"));
+        snapshot_vm_config
+            .devices
+            .as_mut()
+            .unwrap()
+            .push(second_device);
+        assert_eq!(
+            valid_config.validate(&snapshot_vm_config),
+            Err(ValidationError::RestoreMissingVfioFd("vfio1".to_string()))
+        );
+        let mut complete_substitution = valid_config.clone();
+        complete_substitution
+            .vfio_fds
+            .as_mut()
+            .unwrap()
+            .push(RestoredVfioConfig {
+                id: "vfio1".to_string(),
+                fd: fd.clone(),
+            });
+        complete_substitution.validate(&snapshot_vm_config).unwrap();
+        snapshot_vm_config.devices.as_mut().unwrap().pop();
+
+        snapshot_vm_config.devices.as_mut().unwrap()[0].path = None;
+        snapshot_vm_config.devices.as_mut().unwrap()[0].fd = Default::default();
         assert_eq!(
             no_substitution.validate(&snapshot_vm_config),
             Err(ValidationError::RestoreMissingVfioFd("vfio0".to_string()))

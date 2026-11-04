@@ -294,9 +294,11 @@ dst $ ch-remote --api-socket=/tmp/api receive-migration \
 ```
 
 The id in each `vfio_fds` entry must match the `id` of the corresponding
-device in the source VM configuration. The same substitution is available on
-snapshot restore through the `vfio_fds` and `iommufd_fd` parameters of the
-restore request, for restoring onto a different VF or host.
+device in the source VM configuration. Snapshot restore requires a
+replacement FD for every VFIO device, including devices
+saved with a sysfs path and restores on the same host. For snapshot restore,
+supply `vfio_fds` and `iommufd_fd` in the restore request. The saved VM
+configuration must have `iommufd=on`.
 
 ### Failure Recovery
 
