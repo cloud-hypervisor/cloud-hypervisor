@@ -2521,6 +2521,7 @@ dependencies = [
 name = "vm-allocator"
 version = "0.1.0"
 dependencies = [
+ "hypervisor",
  "libc",
  "log",
  "thiserror",
