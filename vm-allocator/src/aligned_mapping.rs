@@ -11,7 +11,8 @@ use std::os::fd::{AsRawFd as _, BorrowedFd};
 
 use libc::size_t;
 use log::warn;
-use vm_allocator::page_size::get_page_size;
+
+use crate::page_size::get_page_size;
 
 const ONE_GIB: usize = 1024 * 1024 * 1024;
 
@@ -171,7 +172,7 @@ fn allocate_aligned_mapping(
 /// cause SIGSEGV or SIGBUS.  Non-atomic access will generally cause data
 /// races and thus Undefined Behavior.
 #[derive(Debug)]
-pub(crate) struct MmapRegion {
+pub struct MmapRegion {
     addr: *mut u8,
     len: size_t,
 }
@@ -190,8 +191,9 @@ unsafe impl Send for MmapRegion {}
 unsafe impl Sync for MmapRegion {}
 
 impl MmapRegion {
+    /// Return the host address of the mapping.
     #[inline]
-    pub(crate) fn addr(&self) -> *mut u8 {
+    pub fn addr(&self) -> *mut u8 {
         self.addr
     }
 
@@ -199,12 +201,13 @@ impl MmapRegion {
     /// This function promises that the return value fits in [`libc::size_t`]
     /// and in [`isize`] and `unsafe` code can rely on this.
     #[inline]
-    pub(crate) fn len(&self) -> usize {
+    #[expect(clippy::len_without_is_empty)]
+    pub fn len(&self) -> usize {
         self.len
     }
 
     /// Create an [`MmapRegion`] using `mmap` of a file descriptor.
-    pub(crate) fn mmap(
+    pub fn mmap(
         len: u64,
         prot: c_int,
         fd: BorrowedFd,
