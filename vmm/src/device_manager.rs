@@ -6743,6 +6743,12 @@ impl Drop for DeviceManager {
             handle.virtio_device.lock().unwrap().shutdown();
         }
 
+        // Release the DMA handler's guest memory references.
+        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        if let Some(tracker) = &self.sev_snp_shared_page_tracker {
+            tracker.clear_dma_mapping_handler();
+        }
+
         if let Some(termios) = *self.original_termios_opt.lock().unwrap() {
             // SAFETY: FFI call
             let _ = unsafe { tcsetattr(stdout().lock().as_raw_fd(), TCSANOW, &termios) };
