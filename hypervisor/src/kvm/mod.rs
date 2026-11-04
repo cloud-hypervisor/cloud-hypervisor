@@ -18,6 +18,8 @@ use std::mem::offset_of;
 use std::num;
 use std::os::fd::{FromRawFd, OwnedFd};
 use std::os::unix::io::AsRawFd;
+#[cfg(feature = "sev_snp")]
+use std::process;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use std::sync::Mutex;
 #[cfg(feature = "sev_snp")]
@@ -1070,6 +1072,27 @@ impl vm::Vm for KvmVm {
                 .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))?;
         }
 
+        #[cfg(feature = "sev_snp")]
+        if visibility == vm::MemoryVisibility::Private
+            && self.memory_slots.is_some()
+            && let Err(e) = self.fd.set_memory_attributes(kvm_memory_attributes {
+                address: region.guest_phys_addr,
+                size: region.memory_size,
+                attributes: KVM_MEMORY_ATTRIBUTE_PRIVATE as u64,
+                flags: 0,
+            })
+        {
+            let removed = kvm_userspace_memory_region2 {
+                memory_size: 0,
+                ..region
+            };
+            // SAFETY: the region was installed above and its backing is still alive.
+            if let Err(rollback) = unsafe { self.set_user_memory_region(removed) } {
+                error!("Failed to roll back memory slot {slot}: {rollback}");
+                process::exit(1);
+            }
+            return Err(vm::HypervisorVmError::CreateUserMemory(e.into()));
+        }
         if let Some(fd) = guest_memfd {
             self.memory_slots.as_ref().unwrap().write().unwrap().insert(
                 slot,
@@ -1097,17 +1120,6 @@ impl vm::Vm for KvmVm {
             );
         }
 
-        #[cfg(feature = "sev_snp")]
-        if visibility == vm::MemoryVisibility::Private && self.memory_slots.is_some() {
-            self.fd
-                .set_memory_attributes(kvm_memory_attributes {
-                    address: region.guest_phys_addr,
-                    size: region.memory_size,
-                    attributes: KVM_MEMORY_ATTRIBUTE_PRIVATE as u64,
-                    flags: 0,
-                })
-                .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))?;
-        }
         Ok(())
     }
 
