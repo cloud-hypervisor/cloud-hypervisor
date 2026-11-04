@@ -4031,6 +4031,7 @@ impl DeviceManager {
         }
 
         self.add_vfio_device(device_cfg, snapshot)
+            .inspect_err(|_| self.cleanup_vfio_ops())
     }
 
     fn create_vfio_ops(&self) -> DeviceManagerResult<Arc<dyn VfioOps>> {
