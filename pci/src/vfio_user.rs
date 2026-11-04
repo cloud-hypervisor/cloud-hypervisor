@@ -213,12 +213,10 @@ impl VfioUserPciDevice {
                     mapping
                         .register()
                         .map_err(VfioUserPciDeviceError::MapRegionGuest)?;
-                    let slot = mapping.slot().unwrap();
                     let mapping = Arc::new(Mutex::new(mapping));
 
                     let user_memory_region = UserMemoryRegion {
-                        slot,
-                        start: mmio_region.start.0 + s.offset,
+                        offset: s.offset,
                         mapping,
                         p2p_mapped: false,
                         // A vfio-user device exports no dma-buf.
@@ -434,21 +432,20 @@ impl PciDevice for VfioUserPciDevice {
             if region.index as usize != bar_idx {
                 continue;
             }
-            let old_base = region.start.raw_value();
             let addresses = region
                 .user_memory_regions
                 .iter()
                 .map(|entry| {
                     let address = new_base
-                        .checked_add(entry.start - old_base)
+                        .checked_add(entry.offset)
                         .ok_or_else(|| io::Error::other("BAR address overflows"))?;
                     address
                         .checked_add(entry.size() as u64)
                         .ok_or_else(|| io::Error::other("BAR range overflows"))?;
-                    Ok(address)
+                    Ok((entry.start(), address))
                 })
                 .collect::<io::Result<Vec<_>>>()?;
-            for (i, address) in addresses.into_iter().enumerate() {
+            for (i, &(_, address)) in addresses.iter().enumerate() {
                 let entry = &region.user_memory_regions[i];
                 let result = entry
                     .mapping
@@ -456,10 +453,14 @@ impl PciDevice for VfioUserPciDevice {
                     .unwrap()
                     .move_guest_address(GuestAddress(address));
                 if let Err(e) = result {
-                    for entry in &region.user_memory_regions[..=i] {
+                    for (entry, &(old_address, _)) in region.user_memory_regions[..=i]
+                        .iter()
+                        .zip(&addresses[..=i])
+                        .rev()
+                    {
                         let mut mapping = entry.mapping.lock().unwrap();
                         let rollback = mapping
-                            .move_guest_address(GuestAddress(entry.start))
+                            .move_guest_address(GuestAddress(old_address))
                             .and_then(|()| {
                                 if mapping.is_registered() {
                                     Ok(())
@@ -474,10 +475,6 @@ impl PciDevice for VfioUserPciDevice {
                     }
                     return Err(io::Error::other(e));
                 }
-            }
-            for entry in &mut region.user_memory_regions {
-                entry.start = entry.mapping.lock().unwrap().start_addr().raw_value();
-                entry.slot = entry.mapping.lock().unwrap().slot().unwrap();
             }
             region.start = GuestAddress(new_base);
         }

@@ -325,8 +325,7 @@ impl Interrupt {
 
 #[derive(Clone)]
 pub(crate) struct UserMemoryRegion {
-    pub slot: u32,
-    pub start: u64,
+    pub offset: u64,
     pub mapping: Arc<Mutex<GuestRegion>>,
     pub p2p_mapped: bool,
     #[cfg(feature = "kvm")]
@@ -334,6 +333,10 @@ pub(crate) struct UserMemoryRegion {
 }
 
 impl UserMemoryRegion {
+    pub(crate) fn start(&self) -> u64 {
+        self.mapping.lock().unwrap().start_addr().raw_value()
+    }
+
     pub(crate) fn size(&self) -> usize {
         self.mapping.lock().unwrap().size()
     }
@@ -345,7 +348,7 @@ impl UserMemoryRegion {
     fn unmap_p2p(&mut self, vfio_ops: &Arc<dyn VfioOps>) -> io::Result<()> {
         if self.p2p_mapped {
             vfio_ops
-                .vfio_dma_unmap(self.start, self.size())
+                .vfio_dma_unmap(self.start(), self.size())
                 .map_err(io::Error::other)?;
             self.p2p_mapped = false;
         }
@@ -362,7 +365,7 @@ impl UserMemoryRegion {
         region_index: u32,
         offset: u64,
     ) -> Result<(), VfioPciError> {
-        let iova = self.start;
+        let iova = self.start();
         let length = self.size();
 
         #[cfg(feature = "kvm")]
@@ -403,7 +406,7 @@ impl UserMemoryRegion {
         // SAFETY: AlignedMapping invariants guarantee that self.host_address()
         // points to self.size() bytes of valid memory that will only
         // be unmapped with munmap().
-        unsafe { vfio_ops.vfio_dma_map(self.start, self.size(), self.host_address()) }
+        unsafe { vfio_ops.vfio_dma_map(self.start(), self.size(), self.host_address()) }
             .map_err(|e| VfioPciError::DmaMap(e, device_path.to_path_buf(), bdf))?;
         self.p2p_mapped = true;
         Ok(())
@@ -425,13 +428,15 @@ impl MmioRegion {
         self.length >= get_page_size()
     }
 
-    /// Returns true if this region has the exact same memory slots as the other region.
-    pub fn has_matching_slots(&self, other: &MmioRegion) -> bool {
+    /// Whether both BAR descriptions refer to the same backing regions.
+    pub fn has_matching_mappings(&self, other: &MmioRegion) -> bool {
         self.user_memory_regions.len() == other.user_memory_regions.len()
-            && self
-                .user_memory_regions
-                .iter()
-                .all(|u| other.user_memory_regions.iter().any(|o| o.slot == u.slot))
+            && self.user_memory_regions.iter().all(|u| {
+                other
+                    .user_memory_regions
+                    .iter()
+                    .any(|o| Arc::ptr_eq(&o.mapping, &u.mapping))
+            })
     }
 }
 
@@ -452,10 +457,16 @@ unsafe impl MmioRegionRange for Vec<MmioRegion> {
             return false;
         };
         for region in self.iter() {
-            let Some(region_end) = region.start.raw_value().checked_add(region.length) else {
+            let start = region
+                .user_memory_regions
+                .first()
+                .map_or(region.start.raw_value(), |entry| {
+                    entry.start() - entry.offset
+                });
+            let Some(region_end) = start.checked_add(region.length) else {
                 return false;
             };
-            if guest_addr >= region.start.raw_value() && guest_addr_end <= region_end {
+            if guest_addr >= start && guest_addr_end <= region_end {
                 return true;
             }
         }
@@ -467,7 +478,7 @@ unsafe impl MmioRegionRange for Vec<MmioRegion> {
         for region in self.iter() {
             for user_region in region.user_memory_regions.iter() {
                 let mapping = user_region.mapping.lock().unwrap();
-                let start: u64 = user_region.start;
+                let start = mapping.start_addr().raw_value();
                 let len = mapping.len();
                 // See if the guest address is inside the region.
                 let Some(offset_from_start) = guest_addr.checked_sub(start) else {
@@ -2520,9 +2531,9 @@ impl VfioPciDevice {
                     mapping
                         .register()
                         .map_err(VfioPciError::CreateUserMemoryRegion)?;
+
                     let mut user_memory_region = UserMemoryRegion {
-                        slot: mapping.slot().unwrap(),
-                        start: region.start.0 + area.offset,
+                        offset: area.offset,
                         mapping: Arc::new(Mutex::new(mapping)),
                         p2p_mapped: false,
                         #[cfg(feature = "kvm")]
@@ -2580,7 +2591,7 @@ impl VfioPciDevice {
                 let Some(dma_buf) = &user_memory_region.dma_buf else {
                     continue;
                 };
-                let iova = user_memory_region.start;
+                let iova = user_memory_region.start();
                 let length = user_memory_region.size() as u64;
 
                 let res = if memory_space_enabled {
@@ -2768,12 +2779,12 @@ impl PciDevice for VfioPciDevice {
                 .iter()
                 .map(|entry| {
                     let address = new_base
-                        .checked_add(entry.start - old_base)
+                        .checked_add(entry.offset)
                         .ok_or_else(|| io::Error::other("BAR address overflows"))?;
                     address
                         .checked_add(entry.size() as u64)
                         .ok_or_else(|| io::Error::other("BAR range overflows"))?;
-                    Ok((entry.start, address, entry.p2p_mapped))
+                    Ok((entry.start(), address, entry.p2p_mapped))
                 })
                 .collect::<io::Result<Vec<_>>>()?;
             for (i, &(old_address, address, map_p2p)) in moves.iter().enumerate() {
@@ -2786,8 +2797,6 @@ impl PciDevice for VfioPciDevice {
                         .unwrap()
                         .move_guest_address(GuestAddress(address))
                         .map_err(io::Error::other)?;
-                    entry.start = address;
-                    entry.slot = entry.mapping.lock().unwrap().slot().unwrap();
                     if map_p2p {
                         entry
                             .map_for_p2p(
@@ -2808,7 +2817,7 @@ impl PciDevice for VfioPciDevice {
                         .zip(&moves[..=i])
                         .rev()
                     {
-                        if entry.start == old_address
+                        if entry.start() == old_address
                             && entry.p2p_mapped == was_mapped
                             && entry.mapping.lock().unwrap().is_registered()
                         {
@@ -3100,16 +3109,14 @@ mod tests {
             index: 0,
             user_memory_regions: vec![
                 UserMemoryRegion {
-                    slot: 0,
-                    start: page_size,
+                    offset: 0,
                     mapping: mapping_a,
                     p2p_mapped: false,
                     #[cfg(feature = "kvm")]
                     dma_buf: None,
                 },
                 UserMemoryRegion {
-                    slot: 1,
-                    start: 3 * page_size,
+                    offset: 2 * page_size,
                     mapping: mapping_b,
                     p2p_mapped: false,
                     #[cfg(feature = "kvm")]
