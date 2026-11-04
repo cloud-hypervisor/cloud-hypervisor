@@ -1018,10 +1018,11 @@ impl vm::Vm for KvmVm {
 
         // Create a per-region guest_memfd when supported.
         // Each region gets its own fd sized exactly to memory_size
-        let guest_memfd = if let Some(slots) = self
+        let guest_memfd = if self
             .memory_slots
             .as_ref()
             .filter(|_| visibility == vm::MemoryVisibility::Private)
+            .is_some()
         {
             if log_dirty_pages {
                 return Err(vm::HypervisorVmError::CreateUserMemory(anyhow!(
@@ -1040,19 +1041,9 @@ impl vm::Vm for KvmVm {
                         .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))?,
                 )
             };
-            let raw_fd = fd.as_raw_fd() as u32;
-            slots.write().unwrap().insert(
-                slot,
-                KvmMemorySlot {
-                    guest_memfd: fd,
-                    guest_phys_addr,
-                    memory_size: memory_size as u64,
-                    userspace_addr: userspace_addr as usize as u64,
-                },
-            );
-            raw_fd
+            Some(fd)
         } else {
-            0
+            None
         };
 
         let region = kvm_userspace_memory_region2 {
@@ -1061,19 +1052,36 @@ impl vm::Vm for KvmVm {
             guest_phys_addr,
             memory_size: memory_size as u64,
             userspace_addr: userspace_addr as usize as u64,
-            guest_memfd,
+            guest_memfd: guest_memfd.as_ref().map_or(0, |fd| fd.as_raw_fd() as u32),
             // Each guest_memfd is per-region and sized to memory_size,
             // so the region's data always starts at offset 0.
             guest_memfd_offset: 0,
             ..Default::default()
         };
-        if log_dirty_pages {
-            if (region.flags & KVM_MEM_READONLY) != 0 {
-                return Err(vm::HypervisorVmError::CreateUserMemory(anyhow!(
-                    "Error creating regions with both 'dirty-pages-log' and 'read-only'."
-                )));
-            }
+        if log_dirty_pages && (region.flags & KVM_MEM_READONLY) != 0 {
+            return Err(vm::HypervisorVmError::CreateUserMemory(anyhow!(
+                "Error creating regions with both 'dirty-pages-log' and 'read-only'."
+            )));
+        }
 
+        // SAFETY: Safe because caller promised this is safe.
+        unsafe {
+            self.set_user_memory_region(region)
+                .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))?;
+        }
+
+        if let Some(fd) = guest_memfd {
+            self.memory_slots.as_ref().unwrap().write().unwrap().insert(
+                slot,
+                KvmMemorySlot {
+                    guest_memfd: fd,
+                    guest_phys_addr,
+                    memory_size: memory_size as u64,
+                    userspace_addr: userspace_addr as usize as u64,
+                },
+            );
+        }
+        if log_dirty_pages {
             // Keep track of the regions that need dirty pages log
             self.dirty_log_slots.write().unwrap().insert(
                 region.slot,
@@ -1087,12 +1095,6 @@ impl vm::Vm for KvmVm {
                     guest_memfd: region.guest_memfd,
                 },
             );
-        }
-
-        // SAFETY: Safe because caller promised this is safe.
-        unsafe {
-            self.set_user_memory_region(region)
-                .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))?;
         }
 
         #[cfg(feature = "sev_snp")]
@@ -1134,9 +1136,6 @@ impl vm::Vm for KvmVm {
             ..Default::default()
         };
 
-        // Remove the corresponding entry from "self.dirty_log_slots" if needed
-        self.dirty_log_slots.write().unwrap().remove(&region.slot);
-
         // Setting the size to 0 means "remove"
         region.memory_size = 0;
         // SAFETY: Safe because caller promised this is safe.
@@ -1144,6 +1143,9 @@ impl vm::Vm for KvmVm {
             self.set_user_memory_region(region)
                 .map_err(|e| vm::HypervisorVmError::RemoveUserMemory(e.into()))?;
         }
+
+        // Remove the corresponding entry from "self.dirty_log_slots" if needed
+        self.dirty_log_slots.write().unwrap().remove(&region.slot);
 
         // Close the per-region guest_memfd if one was created for this slot
         if let Some(slots) = &self.memory_slots {
