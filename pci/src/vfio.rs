@@ -325,7 +325,7 @@ impl Interrupt {
 
 #[derive(Clone)]
 pub(crate) struct UserMemoryRegion {
-    pub start: u64,
+    pub offset: u64,
     pub mapping: Arc<Mutex<GuestRegion>>,
     pub p2p_mapped: bool,
     #[cfg(feature = "kvm")]
@@ -339,8 +339,11 @@ impl UserMemoryRegion {
             .unwrap()
             .move_guest_address(GuestAddress(new_address))
             .map_err(io::Error::other)?;
-        self.start = new_address;
         Ok(())
+    }
+
+    pub(crate) fn start(&self) -> u64 {
+        self.mapping.lock().unwrap().start_addr().raw_value()
     }
 
     pub(crate) fn size(&self) -> usize {
@@ -361,7 +364,7 @@ impl UserMemoryRegion {
         region_index: u32,
         offset: u64,
     ) -> Result<(), VfioPciError> {
-        let iova = self.start;
+        let iova = self.start();
         let length = self.size();
 
         #[cfg(feature = "kvm")]
@@ -402,7 +405,7 @@ impl UserMemoryRegion {
         // SAFETY: AlignedMapping invariants guarantee that self.host_address()
         // points to self.size() bytes of valid memory that will only
         // be unmapped with munmap().
-        unsafe { vfio_ops.vfio_dma_map(self.start, self.size(), self.host_address()) }
+        unsafe { vfio_ops.vfio_dma_map(self.start(), self.size(), self.host_address()) }
             .map_err(|e| VfioPciError::DmaMap(e, device_path.to_path_buf(), bdf))?;
         self.p2p_mapped = true;
         Ok(())
@@ -411,7 +414,7 @@ impl UserMemoryRegion {
     fn unmap_p2p(&mut self, vfio_ops: &dyn VfioOps) -> io::Result<()> {
         if self.p2p_mapped {
             vfio_ops
-                .vfio_dma_unmap(self.start, self.size())
+                .vfio_dma_unmap(self.start(), self.size())
                 .map_err(io::Error::other)?;
             self.p2p_mapped = false;
         }
@@ -463,10 +466,16 @@ unsafe impl MmioRegionRange for Vec<MmioRegion> {
             return false;
         };
         for region in self.iter() {
-            let Some(region_end) = region.start.raw_value().checked_add(region.length) else {
+            let start = region
+                .user_memory_regions
+                .first()
+                .map_or(region.start.raw_value(), |entry| {
+                    entry.start() - entry.offset
+                });
+            let Some(region_end) = start.checked_add(region.length) else {
                 return false;
             };
-            if guest_addr >= region.start.raw_value() && guest_addr_end <= region_end {
+            if guest_addr >= start && guest_addr_end <= region_end {
                 return true;
             }
         }
@@ -478,7 +487,7 @@ unsafe impl MmioRegionRange for Vec<MmioRegion> {
         for region in self.iter() {
             for user_region in region.user_memory_regions.iter() {
                 let mapping = user_region.mapping.lock().unwrap();
-                let start: u64 = user_region.start;
+                let start = mapping.start_addr().raw_value();
                 let len = mapping.len();
                 // See if the guest address is inside the region.
                 let Some(offset_from_start) = guest_addr.checked_sub(start) else {
@@ -2531,7 +2540,7 @@ impl VfioPciDevice {
                         .register()
                         .map_err(VfioPciError::CreateUserMemoryRegion)?;
                     let mut user_memory_region = UserMemoryRegion {
-                        start: region.start.0 + area.offset,
+                        offset: area.offset,
                         mapping: Arc::new(Mutex::new(mapping)),
                         p2p_mapped: false,
                         #[cfg(feature = "kvm")]
@@ -2589,7 +2598,7 @@ impl VfioPciDevice {
                 let Some(dma_buf) = &user_memory_region.dma_buf else {
                     continue;
                 };
-                let iova = user_memory_region.start;
+                let iova = user_memory_region.start();
                 let length = user_memory_region.size() as u64;
 
                 let res = if memory_space_enabled {
@@ -2778,13 +2787,13 @@ impl PciDevice for VfioPciDevice {
                 .iter()
                 .map(|user_memory_region| {
                     let new_address = new_base
-                        .checked_add(user_memory_region.start - old_base)
+                        .checked_add(user_memory_region.offset)
                         .ok_or_else(|| io::Error::other("BAR address overflows"))?;
                     new_address
                         .checked_add(user_memory_region.size() as u64)
                         .ok_or_else(|| io::Error::other("BAR range overflows"))?;
                     Ok((
-                        user_memory_region.start,
+                        user_memory_region.start(),
                         new_address,
                         user_memory_region.p2p_mapped,
                     ))
@@ -2816,7 +2825,7 @@ impl PciDevice for VfioPciDevice {
                         .zip(&moves[..=i])
                         .rev()
                     {
-                        if user_memory_region.start == old_address
+                        if user_memory_region.start() == old_address
                             && user_memory_region.p2p_mapped == was_mapped
                             && user_memory_region.mapping.lock().unwrap().is_registered()
                         {
@@ -3086,7 +3095,6 @@ mod tests {
             assert_eq!(entry.size(), size);
             assert_eq!(entry.mapping.lock().unwrap().slot(), slot);
             assert!(!entry.mapping.lock().unwrap().is_registered());
-            assert_eq!(entry.start, address);
         }
     }
 
@@ -3131,7 +3139,7 @@ mod tests {
             .unwrap();
             mapping.register().unwrap();
             regions.push(UserMemoryRegion {
-                start: address,
+                offset: 0,
                 mapping: Arc::new(Mutex::new(mapping)),
                 p2p_mapped: false,
                 dma_buf: None,
@@ -3147,12 +3155,12 @@ mod tests {
             .collect::<Vec<_>>();
 
         regions[0].move_region(4 * page_size).unwrap();
-        assert_eq!(regions[0].start, 4 * page_size);
+        assert_eq!(regions[0].start(), 4 * page_size);
         assert!(regions[0].mapping.lock().unwrap().is_registered());
 
         // KVM rejects the second mapping at the first mapping's new address.
         regions[1].move_region(4 * page_size).unwrap_err();
-        assert_eq!(regions[1].start, 2 * page_size);
+        assert_eq!(regions[1].start(), 2 * page_size);
         assert!(!regions[1].mapping.lock().unwrap().is_registered());
 
         // A failed replacement reserves the slot for explicit restoration.
@@ -3160,7 +3168,7 @@ mod tests {
         regions[1].mapping.lock().unwrap().register().unwrap();
         regions[0].move_region(page_size).unwrap();
         for (i, entry) in regions.iter().enumerate() {
-            assert_eq!(entry.start, (i as u64 + 1) * page_size);
+            assert_eq!(entry.start(), (i as u64 + 1) * page_size);
             assert_eq!(entry.host_address(), host_addresses[i]);
             let mapping = entry.mapping.lock().unwrap();
             assert_eq!(mapping.slot(), Some(slots[i]));
@@ -3206,14 +3214,14 @@ mod tests {
             index: 0,
             user_memory_regions: vec![
                 UserMemoryRegion {
-                    start: page_size,
+                    offset: 0,
                     mapping: mapping_a,
                     p2p_mapped: false,
                     #[cfg(feature = "kvm")]
                     dma_buf: None,
                 },
                 UserMemoryRegion {
-                    start: 3 * page_size,
+                    offset: 2 * page_size,
                     mapping: mapping_b,
                     p2p_mapped: false,
                     #[cfg(feature = "kvm")]
@@ -3240,6 +3248,52 @@ mod tests {
         regions
             .find_user_address(guest_addr, page_size)
             .unwrap_err();
+    }
+
+    #[test]
+    fn dma_lookup_through_cloned_bar_tracks_relocation() {
+        let page_size = get_page_size();
+        let mut regions = sparse_mmio_regions();
+        let lookup_regions = regions.clone();
+        let host_addresses = [
+            lookup_regions
+                .find_user_address(page_size, page_size)
+                .unwrap(),
+            lookup_regions
+                .find_user_address(3 * page_size, page_size)
+                .unwrap(),
+        ];
+
+        for new_base in [10 * page_size, page_size] {
+            let old_base = regions[0].start.raw_value();
+            for entry in &mut regions[0].user_memory_regions {
+                entry.move_region(new_base + entry.offset).unwrap();
+            }
+            regions[0].start = GuestAddress(new_base);
+
+            // Only the shared mappings change in the cloned lookup records.
+            assert_eq!(lookup_regions[0].start, GuestAddress(page_size));
+            assert!(!lookup_regions.check_range(old_base, page_size));
+            assert!(lookup_regions.check_range(new_base, 4 * page_size));
+            for (i, offset) in [0, 2 * page_size].into_iter().enumerate() {
+                lookup_regions
+                    .find_user_address(old_base + offset, page_size)
+                    .unwrap_err();
+                assert_eq!(
+                    lookup_regions
+                        .find_user_address(new_base + offset, page_size)
+                        .unwrap(),
+                    host_addresses[i],
+                );
+            }
+            // Relocation must preserve the unmapped gap between sparse areas.
+            lookup_regions
+                .find_user_address(new_base + page_size, page_size)
+                .unwrap_err();
+            lookup_regions
+                .find_user_address(new_base + page_size / 2, page_size)
+                .unwrap_err();
+        }
     }
 
     // Trait default behavior and state enum round trip.
