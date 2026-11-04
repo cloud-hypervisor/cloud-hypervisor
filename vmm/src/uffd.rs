@@ -326,15 +326,25 @@ impl UffdRange {
     }
 }
 
+pub(crate) struct UffdHole {
+    pub host_addr: u64,
+    pub length: u64,
+}
+
 /// A userfaultfd and the ranges registered in it, at the addresses they are
 /// mapped at in the process owning it.
 pub(crate) struct Uffd {
     fd: OwnedFd,
     ranges: Box<[UffdRange]>,
+    holes: Box<[UffdHole]>,
 }
 
 impl Uffd {
-    pub(crate) fn new(fd: OwnedFd, ranges: Box<[UffdRange]>) -> Result<Self, Error> {
+    pub(crate) fn new(
+        fd: OwnedFd,
+        ranges: Box<[UffdRange]>,
+        holes: Box<[UffdHole]>,
+    ) -> Result<Self, Error> {
         // SAFETY: `F_GETFL` takes no argument.
         let flags = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETFL) };
         if flags < 0 {
@@ -344,7 +354,7 @@ impl Uffd {
         if unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
             return Err(Error::last_os_error());
         }
-        Ok(Self { fd, ranges })
+        Ok(Self { fd, ranges, holes })
     }
 
     pub(crate) fn fd(&self) -> BorrowedFd<'_> {
@@ -353,6 +363,16 @@ impl Uffd {
 
     pub(crate) fn ranges(&self) -> &[UffdRange] {
         &self.ranges
+    }
+
+    pub(crate) fn holes(&self) -> &[UffdHole] {
+        &self.holes
+    }
+
+    pub(crate) fn locate_hole(&self, addr: u64) -> Option<&UffdHole> {
+        self.holes
+            .iter()
+            .find(|hole| addr >= hole.host_addr && addr < hole.host_addr + hole.length)
     }
 
     /// Returns the `(range_idx, page_idx)` containing `addr`.

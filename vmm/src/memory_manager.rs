@@ -62,7 +62,7 @@ use crate::migration::url_to_path;
 use crate::pagemap::PageMap;
 use crate::sparse::{clone_file_range, next_data_extent, write_region_sparse};
 use crate::uffd::{
-    self, FileUffdMemorySource, SocketUffdMemorySource, Uffd, UffdMemorySource, UffdRange,
+    self, FileUffdMemorySource, SocketUffdMemorySource, Uffd, UffdHole, UffdMemorySource, UffdRange,
 };
 use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
 use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID, prefault, userfaultfd};
@@ -101,6 +101,13 @@ impl PostcopyHandler for UffdRegistry {
     // defensive approach and design against this by creating a copy of the
     // memory ranges for each backends (with an updated host_addr that reflects
     // the backend VMA).
+    //
+    // Ideally, we would unregister any memory that's not within a range, as to
+    // have the kernel handle these pages. These pages should be 0s (eg. the
+    // guest plugged a virtio-mem block). However, we can't unregister them
+    // directly, as we have no guarantees that the vhost-user backends actually
+    // have registered the region with userfaultfd. So, instead, keep track of
+    // the holes, and when a fault happen on them, we can then unregister them.
     fn register_uffd_regions(
         &self,
         id: &str,
@@ -127,7 +134,32 @@ impl PostcopyHandler for UffdRegistry {
             });
         }
 
-        let entry = (id.to_string(), Uffd::new(fd, ranges.into())?);
+        let mut holes = Vec::new();
+        for region in regions {
+            let end = region.backend_addr + region.memory_size;
+            let mut start = region.backend_addr;
+            for range in &ranges {
+                let in_region = range.host_addr >= region.backend_addr && range.host_addr < end;
+                if !in_region {
+                    continue;
+                }
+                if range.host_addr > start {
+                    holes.push(UffdHole {
+                        host_addr: start,
+                        length: range.host_addr - start,
+                    });
+                }
+                start = range.host_addr + range.length;
+            }
+            if start < end {
+                holes.push(UffdHole {
+                    host_addr: start,
+                    length: end - start,
+                });
+            }
+        }
+
+        let entry = (id.to_string(), Uffd::new(fd, ranges.into(), holes.into())?);
         self.added_uffds.lock().unwrap().push(entry);
         self.added_uffd_evt.write(1)
     }
@@ -1335,7 +1367,7 @@ impl MemoryManager {
         }
 
         Ok(Some(
-            Uffd::new(uffd_fd, handler_ranges.into()).map_err(UffdError::Create)?,
+            Uffd::new(uffd_fd, handler_ranges.into(), Box::new([])).map_err(UffdError::Create)?,
         ))
     }
 
@@ -1679,11 +1711,18 @@ impl MemoryManager {
                 let fault_addr = msg.pf_address;
                 let minor_fault = msg.pf_flags & userfaultfd::UFFD_PAGEFAULT_FLAG_MINOR != 0;
 
-                let (range_idx, page_idx) = fault_uffd.locate(fault_addr).ok_or_else(|| {
-                    io::Error::other(format!(
-                        "UFFD handler: fault at {fault_addr:#x} does not belong to any registered range",
-                    ))
-                })?;
+                let (range_idx, page_idx) = match fault_uffd.locate(fault_addr) {
+                    Some(located) => located,
+                    None => {
+                        if let Some(hole) = fault_uffd.locate_hole(fault_addr) {
+                            uffd::unregister(fault_uffd.fd(), hole.host_addr, hole.length)?;
+                            continue;
+                        }
+                        return Err(io::Error::other(format!(
+                            "UFFD handler: fault at {fault_addr:#x} does not belong to any registered range",
+                        )));
+                    }
+                };
                 let range = &fault_uffd.ranges()[range_idx];
 
                 if source_failed {
@@ -1838,6 +1877,9 @@ impl MemoryManager {
                     for (_, uffd) in &uffds {
                         for range in uffd.ranges() {
                             uffd::wake(uffd.fd(), range.host_addr, range.length)?;
+                        }
+                        for hole in uffd.holes() {
+                            uffd::unregister(uffd.fd(), hole.host_addr, hole.length)?;
                         }
                     }
                     uffd_registry.done.write(1)?;
