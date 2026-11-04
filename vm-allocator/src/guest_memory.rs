@@ -5,14 +5,15 @@
 
 use std::borrow::Borrow;
 use std::ops::Deref;
+use std::os::fd::AsFd;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{fmt, io, process};
 
 use log::{error, info, warn};
 use thiserror::Error;
-use vm_memory::bitmap::{AtomicBitmap, BS};
-use vm_memory::mmap::FromRangesError;
+use vm_memory::bitmap::{AtomicBitmap, BS, NewBitmap};
+use vm_memory::mmap::{FromRangesError, MmapRegionBuilder, MmapRegionError};
 use vm_memory::{
     Address, FileOffset, GuestAddress, GuestMemoryBackend, GuestMemoryError, GuestMemoryRegion,
     GuestMemoryRegionBytes, GuestRegionCollection, GuestRegionCollectionError, GuestRegionMmap,
@@ -20,6 +21,7 @@ use vm_memory::{
 };
 
 use crate::MemorySlotAllocator;
+use crate::aligned_mapping::AlignedMapping;
 
 /// Errors registering guest memory with the hypervisor.
 #[derive(Error, Debug)]
@@ -42,11 +44,19 @@ pub enum Error {
     /// Private memory cannot be recreated without preserving its guest_memfd.
     #[error("Cannot move a private memory region")]
     MovePrivateRegion,
+    /// The aligned file mapping could not be allocated.
+    #[error("Failed to map the backing file")]
+    FileMapping(#[source] io::Error),
+    /// The raw mapping could not be wrapped.
+    #[error("Failed to create the mmap region")]
+    MmapRegion(#[source] MmapRegionError),
 }
 
 /// A region of guest memory backed by an mmap allocation.
 pub struct GuestRegion {
     region: GuestRegionMmap<AtomicBitmap>,
+    // Keep the mapping alive until the memory region is dropped.
+    aligned_mapping: Option<AlignedMapping>,
     vm: Option<Arc<dyn hypervisor::Vm>>,
     slot_allocator: Option<Arc<MemorySlotAllocator>>,
     slot: Option<u32>,
@@ -85,6 +95,7 @@ impl GuestRegion {
         let slot = slot_allocator.next_memory_slot();
         Ok(Self {
             region,
+            aligned_mapping: None,
             vm: Some(vm),
             slot_allocator: Some(slot_allocator),
             slot: Some(slot),
@@ -94,6 +105,54 @@ impl GuestRegion {
             log_dirty_pages,
             visibility,
         })
+    }
+
+    /// Create a shared file mapping with the requested host address alignment.
+    /// The returned region owns the allocation but is not registered yet.
+    pub fn from_file(
+        file_offset: FileOffset,
+        size: usize,
+        alignment: usize,
+        guest_addr: GuestAddress,
+        prot: i32,
+        vm: Arc<dyn hypervisor::Vm>,
+        slot_allocator: Arc<MemorySlotAllocator>,
+    ) -> Result<Self, Error> {
+        guest_addr
+            .checked_add(size as u64)
+            .ok_or(Error::InvalidGuestAddress(guest_addr.raw_value()))?;
+        let backing = AlignedMapping::mmap(
+            size as u64,
+            alignment,
+            prot,
+            file_offset.file().as_fd(),
+            file_offset.start(),
+            0,
+        )
+        .map_err(Error::FileMapping)?;
+        // SAFETY: backing owns the allocation and is retained until this region
+        // is dropped. The non-owning mmap Arc cannot escape GuestRegion.
+        let mapping = unsafe {
+            MmapRegionBuilder::new_with_bitmap(size, AtomicBitmap::with_len(size))
+                .with_raw_mmap_pointer(backing.addr())
+                .with_file_offset(file_offset)
+                .with_mmap_prot(prot)
+                .with_mmap_flags(libc::MAP_SHARED)
+                .build()
+        }
+        .map_err(Error::MmapRegion)?;
+        let mut region = Self::from_mmap(
+            mapping,
+            guest_addr,
+            vm,
+            slot_allocator,
+            false,
+            false,
+            false,
+            hypervisor::MemoryVisibility::Shared,
+        )?;
+        region.aligned_mapping = Some(backing);
+        Ok(region)
     }
 
     /// Register the region with the hypervisor.
@@ -279,6 +338,7 @@ impl From<GuestRegionMmap<AtomicBitmap>> for GuestRegion {
     fn from(region: GuestRegionMmap<AtomicBitmap>) -> Self {
         Self {
             region,
+            aligned_mapping: None,
             vm: None,
             slot_allocator: None,
             slot: None,
