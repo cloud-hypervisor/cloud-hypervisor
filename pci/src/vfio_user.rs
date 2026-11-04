@@ -15,7 +15,9 @@ use thiserror::Error;
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::VfioIrq;
 use vfio_user::{Client, Error as VfioUserError};
-use vm_allocator::{AddressAllocator, GuestRegion, MemorySlotAllocator, SystemAllocator};
+use vm_allocator::{
+    AddressAllocator, GuestRegion, MemorySlotAllocator, MmapRegion, SystemAllocator,
+};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig};
 use vm_device::{BusDevice, Resource};
@@ -23,7 +25,6 @@ use vm_memory::{Address, GuestAddress, GuestAddressSpace, GuestMemoryBackend, Gu
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::mmap::MmapRegion;
 use crate::vfio::{
     UserMemoryRegion, VFIO_COMMON_ID, Vfio, VfioCommon, VfioCommonConfig, VfioError,
 };

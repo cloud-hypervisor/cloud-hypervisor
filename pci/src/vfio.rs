@@ -39,7 +39,9 @@ use vm_allocator::page_size::{
     align_page_size_down, align_page_size_up, get_page_size, is_4k_aligned, is_4k_multiple,
     is_page_size_aligned,
 };
-use vm_allocator::{AddressAllocator, GuestMemory, MemorySlotAllocator, SystemAllocator};
+use vm_allocator::{
+    AddressAllocator, GuestMemory, MemorySlotAllocator, MmapRegion, SystemAllocator,
+};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
@@ -58,7 +60,6 @@ use crate::configuration::{
     PCI_EXP_FLAGS_VERS_SHIFT, PCI_EXP_LNKCTL, PCI_EXP_LNKCTL2, PCI_EXP_TYPE_RC_END,
     PCI_EXT_CAP_ALIGN, PCI_EXT_CAP_NEXT_MASK, PCI_EXT_CAP_NEXT_SHIFT, PCIE_CONFIG_SPACE_SIZE,
 };
-use crate::mmap::MmapRegion;
 use crate::msi::{Error as MsiError, MSI_CONFIG_ID, MsiConfigState};
 use crate::msix::{Error as MsixError, MaybeMutInterruptSourceGroup, MsixConfigState};
 use crate::{
