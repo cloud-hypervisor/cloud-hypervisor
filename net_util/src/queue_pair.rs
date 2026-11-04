@@ -36,9 +36,9 @@ type Iovecs = SmallVec<[libc::iovec; CHAIN_INLINE_DESCS]>;
 
 /// Resolves guest ranges to host iovecs for readv()/writev(). The pointers
 /// stay valid as long as `mem` is mapped.
-fn guest_ranges_to_iovecs<B: Bitmap + 'static>(
+fn guest_ranges_to_iovecs<M: GuestMemoryBackend>(
     guest_ranges: &[(GuestAddress, usize)],
-    mem: &vm_memory::GuestMemoryMmap<B>,
+    mem: &M,
 ) -> Result<Iovecs, NetQueuePairError> {
     guest_ranges
         .iter()
@@ -90,9 +90,9 @@ impl TxVirtio {
                     && u32::from(header[1]) == VIRTIO_NET_HDR_GSO_NONE))
     }
 
-    pub fn process_desc_chain<B: Bitmap + 'static>(
+    pub fn process_desc_chain<M: GuestMemoryBackend>(
         &mut self,
-        mem: &vm_memory::GuestMemoryMmap<B>,
+        mem: &M,
         tap: &Tap,
         queue: &mut Queue,
         rate_limiter: &mut Option<RateLimiter>,
@@ -272,9 +272,9 @@ impl RxVirtio {
         }
     }
 
-    pub fn process_desc_chain<B: Bitmap + 'static>(
+    pub fn process_desc_chain<M: GuestMemoryBackend>(
         &mut self,
-        mem: &vm_memory::GuestMemoryMmap<B>,
+        mem: &M,
         tap: &Tap,
         queue: &mut Queue,
         rate_limiter: &mut Option<RateLimiter>,
@@ -523,9 +523,9 @@ pub struct NetQueuePair {
 }
 
 impl NetQueuePair {
-    pub fn process_tx<B: Bitmap + 'static>(
+    pub fn process_tx<M: GuestMemoryBackend>(
         &mut self,
-        mem: &vm_memory::GuestMemoryMmap<B>,
+        mem: &M,
         queue: &mut Queue,
     ) -> Result<bool, NetQueuePairError> {
         let tx_tap_retry = self.tx.process_desc_chain(
@@ -573,9 +573,9 @@ impl NetQueuePair {
             .map_err(NetQueuePairError::QueueNeedsNotification)
     }
 
-    pub fn process_rx<B: Bitmap + 'static>(
+    pub fn process_rx<M: GuestMemoryBackend>(
         &mut self,
-        mem: &vm_memory::GuestMemoryMmap<B>,
+        mem: &M,
         queue: &mut Queue,
     ) -> Result<bool, NetQueuePairError> {
         self.rx_desc_avail = !self.rx.process_desc_chain(

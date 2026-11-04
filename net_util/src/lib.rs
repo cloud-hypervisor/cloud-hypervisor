@@ -26,8 +26,10 @@ use virtio_bindings::virtio_net::{
     VIRTIO_NET_F_GUEST_UFO, virtio_net_hdr_v1,
 };
 use vm_memory::ByteValued;
+#[cfg(test)]
 use vm_memory::bitmap::AtomicBitmap;
 
+#[cfg(test)]
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 pub use ctrl_queue::{CtrlQueue, Error as CtrlQueueError};

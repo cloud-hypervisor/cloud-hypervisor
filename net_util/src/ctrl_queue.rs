@@ -18,11 +18,11 @@ use virtio_bindings::virtio_net::{
     VIRTIO_NET_OK,
 };
 use virtio_queue::{Queue, QueueT};
-use vm_memory::{ByteValued, Bytes, GuestMemoryError};
+use vm_memory::{ByteValued, Bytes, GuestMemoryBackend, GuestMemoryError};
 use vm_virtio::{AccessPlatform, Translatable};
 
 use super::virtio_features_to_tap_offload;
-use crate::{GuestMemoryMmap, Tap, associate_taps};
+use crate::{Tap, associate_taps};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -105,9 +105,9 @@ impl CtrlQueue {
         }
     }
 
-    pub fn process(
+    pub fn process<M: GuestMemoryBackend>(
         &mut self,
-        mem: &GuestMemoryMmap,
+        mem: &M,
         queue: &mut Queue,
         access_platform: Option<&dyn AccessPlatform>,
     ) -> Result<()> {

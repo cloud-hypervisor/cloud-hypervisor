@@ -281,7 +281,7 @@ impl NetEpollHandler {
     fn process_tx(&mut self) -> result::Result<(), DeviceError> {
         let res = self
             .net
-            .process_tx(&self.mem.memory(), &mut self.queue_pair.1)
+            .process_tx(&*self.mem.memory(), &mut self.queue_pair.1)
             .map_err(DeviceError::NetQueuePair)?;
 
         if res {
@@ -310,7 +310,7 @@ impl NetEpollHandler {
     fn handle_rx_tap_event(&mut self) -> result::Result<(), DeviceError> {
         let res = self
             .net
-            .process_rx(&self.mem.memory(), &mut self.queue_pair.0)
+            .process_rx(&*self.mem.memory(), &mut self.queue_pair.0)
             .map_err(DeviceError::NetQueuePair)?;
 
         if res {
