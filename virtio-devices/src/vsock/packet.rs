@@ -727,7 +727,7 @@ mod tests {
         };
     }
 
-    fn set_pkt_len(len: u32, guest_desc: &GuestQDesc, mem: &GuestMemoryMmap) {
+    fn set_pkt_len(len: u32, guest_desc: &GuestQDesc<'_, GuestMemoryMmap>, mem: &GuestMemoryMmap) {
         let hdr_gpa = guest_desc.addr.get();
         mem.write_slice(
             &len.to_le_bytes(),
