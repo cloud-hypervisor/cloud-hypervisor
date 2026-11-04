@@ -122,11 +122,13 @@ use virtio_devices::{
 };
 use vm_allocator::page_size::get_page_size;
 use vm_allocator::{AddressAllocator, GuestRegionError, InterruptAllocError, SystemAllocator};
+#[cfg(feature = "ivshmem")]
+use vm_device::UserspaceMapping;
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptRemapping, LegacyIrqGroupConfig, MsiIrqGroupConfig,
 };
-use vm_device::{Bus, BusDevice, BusDeviceSync, Resource, UserspaceMapping};
+use vm_device::{Bus, BusDevice, BusDeviceSync, Resource};
 #[cfg(feature = "ivshmem")]
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::guest_memory::FileOffset;
@@ -3562,32 +3564,20 @@ impl DeviceManager {
                 },
         )
         .map_err(DeviceManagerError::NewMmapRegion)?;
-        let host_addr = mmap_region.as_ptr();
-
-        // SAFETY: host_addr points to region_size bytes of mmap-allocated memory.
-        let mem_slot = unsafe {
-            let region_size = region_size.try_into().unwrap();
-            self.memory_manager
-                .lock()
-                .unwrap()
-                .create_userspace_mapping(
-                    region_base,
-                    region_size,
-                    host_addr,
-                    false,
-                    false,
-                    false,
-                    hypervisor::MemoryVisibility::Shared,
-                )
-                .map_err(DeviceManagerError::MemoryManager)
-        }?;
-
-        let mapping = UserspaceMapping {
-            mem_slot,
-            addr: GuestAddress(region_base),
-            mapping: Arc::new(mmap_region),
-            mergeable: false,
-        };
+        let mapping = GuestRegion::from_mmap(
+            mmap_region,
+            GuestAddress(region_base),
+            Arc::clone(&self.address_manager.vm),
+            Arc::clone(self.memory_manager.lock().unwrap().memory_slot_allocator()),
+            false,
+            false,
+            false,
+            hypervisor::MemoryVisibility::Shared,
+        )
+        .map_err(DeviceManagerError::RegisterGuestRegion)?;
+        mapping
+            .register()
+            .map_err(DeviceManagerError::RegisterGuestRegion)?;
 
         let virtio_pmem_device = Arc::new(Mutex::new(
             virtio_devices::Pmem::new(
