@@ -12,15 +12,15 @@ use acpi_tables::{Aml, AmlSink, aml};
 use log::{debug, error, info};
 #[cfg(not(target_arch = "riscv64"))]
 use thiserror::Error;
+#[cfg(not(target_arch = "riscv64"))]
+use vm_allocator::GuestRegion;
 use vm_device::BusDevice;
 use vm_device::interrupt::InterruptSourceGroup;
+use vm_memory::GuestAddress;
 #[cfg(not(target_arch = "riscv64"))]
 use vm_memory::VolatileMemory;
 #[cfg(not(target_arch = "riscv64"))]
-use vm_memory::bitmap::AtomicBitmap;
-#[cfg(not(target_arch = "riscv64"))]
 use vm_memory::volatile_memory::Error as VolatileMemoryError;
-use vm_memory::{GuestAddress, MmapRegion};
 use vmm_sys_util::eventfd::EventFd;
 
 use super::AcpiNotificationFlags;
@@ -255,7 +255,7 @@ impl Aml for AcpiGedDevice {
 #[cfg(not(target_arch = "riscv64"))]
 pub struct VmGenIdDevice {
     address: GuestAddress,
-    region: Arc<MmapRegion<AtomicBitmap>>,
+    region: Arc<GuestRegion>,
 }
 
 #[cfg(not(target_arch = "riscv64"))]
@@ -272,7 +272,7 @@ pub enum VmGenIdError {
 impl VmGenIdDevice {
     pub fn new(
         address: GuestAddress,
-        region: Arc<MmapRegion<AtomicBitmap>>,
+        region: Arc<GuestRegion>,
     ) -> Result<VmGenIdDevice, VmGenIdError> {
         let device = VmGenIdDevice { address, region };
         device.regenerate()?;
@@ -362,7 +362,14 @@ mod tests {
     #[test]
     fn test_vmgenid_regenerate() {
         let page_size = get_page_size() as usize;
-        let region: Arc<MmapRegion<AtomicBitmap>> = Arc::new(MmapRegion::new(page_size).unwrap());
+        let region = Arc::new(
+            vm_memory::GuestRegionMmap::new(
+                vm_memory::MmapRegion::new(page_size).unwrap(),
+                GuestAddress(0xa_0028),
+            )
+            .unwrap()
+            .into(),
+        );
         let device = VmGenIdDevice::new(GuestAddress(0xa_0028), Arc::clone(&region)).unwrap();
 
         let mut first = [0u8; VMGENID_SIZE];
