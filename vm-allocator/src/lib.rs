@@ -10,6 +10,8 @@
 
 //! Manages system resources that can be allocated to VMs and their devices.
 
+use vm_memory::bitmap::AtomicBitmap;
+
 mod address;
 mod gsi;
 /// page size related utility functions
@@ -23,3 +25,9 @@ pub use crate::gsi::{GsiAllocator, InterruptAllocError};
 pub use crate::system::SystemAllocator;
 mod memory_slot;
 pub use memory_slot::MemorySlotAllocator;
+
+/// Guest memory using an atomic dirty bitmap.
+pub type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
+
+/// A memory-mapped guest region using an atomic dirty bitmap.
+pub type GuestRegion = vm_memory::GuestRegionMmap<AtomicBitmap>;
