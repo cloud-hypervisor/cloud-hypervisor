@@ -20,10 +20,7 @@ use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig};
 use vm_device::{BusDevice, Resource};
 use vm_memory::bitmap::AtomicBitmap;
-use vm_memory::{
-    Address, GuestAddress, GuestAddressSpace, GuestMemoryBackend, GuestMemoryRegion,
-    GuestRegionMmap,
-};
+use vm_memory::{Address, GuestAddress, GuestAddressSpace, GuestMemoryBackend, GuestMemoryRegion};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -35,6 +32,8 @@ use crate::{
     BarReprogrammingParams, PciBarConfiguration, PciBdf, PciDevice, PciDeviceError, PciSubclass,
     VfioPciError,
 };
+
+type GuestRegion = vm_memory::GuestRegionMmap<AtomicBitmap>;
 
 pub struct VfioUserPciDevice {
     id: String,
@@ -266,10 +265,7 @@ impl VfioUserPciDevice {
         }
     }
 
-    pub fn dma_map(
-        &mut self,
-        region: &GuestRegionMmap<AtomicBitmap>,
-    ) -> Result<(), VfioUserPciDeviceError> {
+    pub fn dma_map(&mut self, region: &GuestRegion) -> Result<(), VfioUserPciDeviceError> {
         let (fd, offset) = match region.file_offset() {
             Some(_file_offset) => (_file_offset.file().as_raw_fd(), _file_offset.start()),
             None => return Ok(()),
@@ -282,10 +278,7 @@ impl VfioUserPciDevice {
             .map_err(VfioUserPciDeviceError::DmaMap)
     }
 
-    pub fn dma_unmap(
-        &mut self,
-        region: &GuestRegionMmap<AtomicBitmap>,
-    ) -> Result<(), VfioUserPciDeviceError> {
+    pub fn dma_unmap(&mut self, region: &GuestRegion) -> Result<(), VfioUserPciDeviceError> {
         self.client
             .lock()
             .unwrap()

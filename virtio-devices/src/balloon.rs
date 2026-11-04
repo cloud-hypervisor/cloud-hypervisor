@@ -1135,12 +1135,11 @@ impl Migratable for Balloon {}
 
 #[cfg(test)]
 mod tests {
-    use vm_memory::bitmap::AtomicBitmap;
     use vm_virtio::queue::testing::VirtQueue;
 
     use super::*;
 
-    type TestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
+    type TestMemory = GuestMemory;
 
     struct NoopInterrupt;
 

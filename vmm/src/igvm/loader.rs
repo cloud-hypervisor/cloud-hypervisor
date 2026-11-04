@@ -5,19 +5,19 @@
 use log::debug;
 use range_map_vec::{Entry, RangeMap};
 use thiserror::Error;
-use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{
-    Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend, GuestMemoryMmap,
+    Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend,
     GuestMemoryRegion,
 };
 
+use crate::GuestMemory;
 use crate::igvm::{BootPageAcceptance, HV_PAGE_SIZE, StartupMemoryType};
 
 /// Structure to hold the guest memory info/layout to check
 /// the if the memory is accepted within the layout.
 /// Adds up the total bytes written to the guest memory
 pub(super) struct Loader {
-    memory: GuestMemoryAtomic<GuestMemoryMmap<AtomicBitmap>>,
+    memory: GuestMemoryAtomic<GuestMemory>,
     accepted_ranges: RangeMap<u64, BootPageAcceptance>,
     bytes_written: u64,
 }
@@ -42,7 +42,7 @@ pub enum Error {
 }
 
 impl Loader {
-    pub(super) fn new(memory: GuestMemoryAtomic<GuestMemoryMmap<AtomicBitmap>>) -> Loader {
+    pub(super) fn new(memory: GuestMemoryAtomic<GuestMemory>) -> Loader {
         Loader {
             memory,
             accepted_ranges: RangeMap::new(),

@@ -12,15 +12,13 @@ use thiserror::Error as ThisError;
 use vm_device::BusDevice;
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_memory::bitmap::AtomicBitmap;
-use vm_memory::{
-    Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError, GuestMemoryMmap,
-};
+use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 
 use crate::iommu::{Error as IommuError, HwInfo, Invalidation, PhysicalIommu, TableEntry};
 use crate::{read_le_u32, read_le_u64, write_le_u32, write_le_u64};
 
-type GuestMemoryMmapAtomic = GuestMemoryAtomic<GuestMemoryMmap<AtomicBitmap>>;
+type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 // All constants below are based on the reference specification that
 // can be found at https://developer.arm.com/documentation/ihi0070/latest/
@@ -424,7 +422,7 @@ pub struct Smmuv3 {
     stream_ids: BTreeSet<u32>,
     restored: bool,
 
-    mem: GuestMemoryMmapAtomic,
+    mem: GuestMemoryAtomic<GuestMemory>,
     interrupts: Smmuv3Interrupts,
     backend: Arc<dyn PhysicalIommu>,
 }
@@ -432,7 +430,7 @@ pub struct Smmuv3 {
 impl Smmuv3 {
     pub fn new(
         id: String,
-        mem: GuestMemoryMmapAtomic,
+        mem: GuestMemoryAtomic<GuestMemory>,
         interrupts: Smmuv3Interrupts,
         backend: Arc<dyn PhysicalIommu>,
         state: Option<Smmuv3State>,
@@ -1080,7 +1078,7 @@ mod tests {
 
     fn test_smmuv3() -> Smmuv3 {
         let mem = GuestMemoryAtomic::new(
-            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x1_0000)]).unwrap(),
+            GuestMemory::from_ranges(&[(GuestAddress(0), 0x1_0000)]).unwrap(),
         );
         let group = || Arc::new(NoopInterrupts) as Arc<dyn InterruptSourceGroup>;
 
@@ -1185,7 +1183,7 @@ mod tests {
 
     fn smmuv3_with_host_info(backend: &Arc<HostInfoBackend>) -> Smmuv3 {
         let mem = GuestMemoryAtomic::new(
-            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x1_0000)]).unwrap(),
+            GuestMemory::from_ranges(&[(GuestAddress(0), 0x1_0000)]).unwrap(),
         );
         let group = || Arc::new(NoopInterrupts) as Arc<dyn InterruptSourceGroup>;
 
@@ -1210,7 +1208,7 @@ mod tests {
 
     fn smmuv3_with_command(failing: &Arc<AtomicBool>, word0: u64) -> Smmuv3 {
         let mem = GuestMemoryAtomic::new(
-            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x1_0000)]).unwrap(),
+            GuestMemory::from_ranges(&[(GuestAddress(0), 0x1_0000)]).unwrap(),
         );
         mem.memory()
             .write_obj::<u64>(word0, GuestAddress(TEST_CMDQ_BASE))
