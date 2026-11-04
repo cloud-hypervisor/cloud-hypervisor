@@ -24,8 +24,6 @@ use anyhow::{Context, anyhow};
 use arch::{RegionType, layout};
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
-#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
-use hypervisor::HypervisorVmError;
 use log::{debug, error, info, trace, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -452,7 +450,7 @@ pub enum Error {
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     /// Failed to create UEFI flash
     #[error("Failed to create UEFI flash")]
-    CreateUefiFlash(#[source] HypervisorVmError),
+    CreateUefiFlash(#[source] GuestRegionError),
 
     /// Using a directory as a backing file for memory is not supported
     #[error("Using a directory as a backing file for memory is not supported")]
@@ -2005,29 +2003,18 @@ impl MemoryManager {
     pub fn add_uefi_flash(&mut self) -> Result<(), Error> {
         // The UEFI binary requires a flash device at address 0.
         // 4 MiB memory is mapped to simulate the flash.
-        let uefi_mem_slot = self.allocate_memory_slot();
-        let uefi_region: GuestRegion = vm_memory::GuestRegionMmap::new(
+        let uefi_region = GuestRegion::from_mmap(
             MmapRegion::new(layout::UEFI_SIZE as usize).unwrap(),
             layout::UEFI_START,
+            Arc::clone(&self.vm),
+            Arc::clone(self.memory_slot_allocator()),
+            false,
+            false,
+            false,
+            hypervisor::MemoryVisibility::Private,
         )
-        .unwrap()
-        .into();
-        const _: () = assert!(size_of::<usize>() == size_of::<u64>());
-
-        // SAFETY: guaranteed by GuestRegion
-        unsafe {
-            self.vm
-                .create_user_memory_region(
-                    uefi_mem_slot,
-                    uefi_region.start_addr().raw_value(),
-                    uefi_region.len() as usize,
-                    uefi_region.as_ptr(),
-                    false,
-                    false,
-                    hypervisor::MemoryVisibility::Private,
-                )
-                .map_err(Error::CreateUefiFlash)?;
-        }
+        .map_err(Error::CreateUefiFlash)?;
+        uefi_region.register().map_err(Error::CreateUefiFlash)?;
         let uefi_flash =
             GuestMemoryAtomic::new(GuestMemory::from_regions(vec![uefi_region]).unwrap());
 
