@@ -2000,11 +2000,12 @@ impl MemoryManager {
         // The UEFI binary requires a flash device at address 0.
         // 4 MiB memory is mapped to simulate the flash.
         let uefi_mem_slot = self.allocate_memory_slot();
-        let uefi_region = GuestRegion::new(
+        let uefi_region: GuestRegion = vm_memory::GuestRegionMmap::new(
             MmapRegion::new(layout::UEFI_SIZE as usize).unwrap(),
             layout::UEFI_START,
         )
-        .unwrap();
+        .unwrap()
+        .into();
         const _: () = assert!(size_of::<usize>() == size_of::<u64>());
 
         // SAFETY: guaranteed by GuestRegion
@@ -2592,9 +2593,10 @@ impl MemoryManager {
             thp,
         )?;
 
-        Ok(Arc::new(GuestRegion::new(r, start_addr).ok_or(
-            Error::GuestMemory(MmapError::InvalidGuestAddress(start_addr)),
-        )?))
+        let region = vm_memory::GuestRegionMmap::new(r, start_addr).ok_or(Error::GuestMemory(
+            MmapError::InvalidGuestAddress(start_addr),
+        ))?;
+        Ok(Arc::new(region.into()))
     }
 
     // Duplicate of `memory_zone_get_align_size` that does not require a `zone`
@@ -4352,9 +4354,12 @@ mod tests {
             libc::MAP_SHARED,
         )
         .unwrap();
-        let gm =
-            GuestMemory::from_regions(vec![GuestRegion::new(region, GuestAddress(0)).unwrap()])
-                .unwrap();
+        let gm = GuestMemory::from_regions(vec![
+            vm_memory::GuestRegionMmap::new(region, GuestAddress(0))
+                .unwrap()
+                .into(),
+        ])
+        .unwrap();
 
         let mut table = MemoryRangeTable::default();
         table.push(MemoryRange {
@@ -4378,9 +4383,12 @@ mod tests {
                 libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | extra_flags,
             )
             .unwrap();
-            let gm =
-                GuestMemory::from_regions(vec![GuestRegion::new(region, GuestAddress(0)).unwrap()])
-                    .unwrap();
+            let gm = GuestMemory::from_regions(vec![
+                vm_memory::GuestRegionMmap::new(region, GuestAddress(0))
+                    .unwrap()
+                    .into(),
+            ])
+            .unwrap();
 
             let mut table = MemoryRangeTable::default();
             table.push(MemoryRange {
