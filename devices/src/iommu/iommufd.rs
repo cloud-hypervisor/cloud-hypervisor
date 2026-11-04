@@ -23,8 +23,8 @@ use iommufd_ioctls::{
 use log::{error, warn};
 use pci::{PasidCap, PciBdf};
 use thiserror::Error;
+use vm_allocator::GuestMemory;
 use vm_memory::GuestMemoryAtomic;
-use vm_memory::bitmap::AtomicBitmap;
 use vmm_sys_util::epoll::{ControlOperation, Epoll, EpollEvent, EventSet};
 use vmm_sys_util::eventfd::{EFD_NONBLOCK, EventFd};
 
@@ -32,8 +32,6 @@ use crate::iommu::{
     Error as IommuError, HwInfo, Invalidation, PhysicalIommu, Smmuv3AcpiInfo, TableEntry,
 };
 use crate::smmuv3::{Error as Smmuv3Error, EventRecord, IDR0_COHACC, Smmuv3, Smmuv3Interrupts};
-
-type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 const VEVENTQ_DEPTH: u32 = 64;
 

@@ -9,16 +9,14 @@ use std::sync::{Arc, Barrier};
 use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error as ThisError;
+use vm_allocator::GuestMemory;
 use vm_device::BusDevice;
 use vm_device::interrupt::InterruptSourceGroup;
-use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 
 use crate::iommu::{Error as IommuError, HwInfo, Invalidation, PhysicalIommu, TableEntry};
 use crate::{read_le_u32, read_le_u64, write_le_u32, write_le_u64};
-
-type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 // All constants below are based on the reference specification that
 // can be found at https://developer.arm.com/documentation/ihi0070/latest/

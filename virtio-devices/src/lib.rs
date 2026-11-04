@@ -37,6 +37,7 @@ pub mod vhost_user;
 pub mod vsock;
 pub mod watchdog;
 
+use vm_allocator::{GuestMemory, GuestRegion};
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{GuestAddress, GuestMemoryBackend};
 use vm_virtio::VirtioDeviceType;
@@ -61,8 +62,6 @@ pub use self::vdpa::{Vdpa, VdpaDmaMapping};
 pub use self::vsock::Vsock;
 pub use self::watchdog::Watchdog;
 
-type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
-type GuestRegion = vm_memory::GuestRegionMmap<AtomicBitmap>;
 type MmapRegion = vm_memory::MmapRegion<AtomicBitmap>;
 
 const DEVICE_INIT: u32 = 0x00;

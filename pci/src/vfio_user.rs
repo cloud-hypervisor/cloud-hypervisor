@@ -15,11 +15,10 @@ use thiserror::Error;
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::VfioIrq;
 use vfio_user::{Client, Error as VfioUserError};
-use vm_allocator::{AddressAllocator, MemorySlotAllocator, SystemAllocator};
+use vm_allocator::{AddressAllocator, GuestRegion, MemorySlotAllocator, SystemAllocator};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig};
 use vm_device::{BusDevice, Resource};
-use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{Address, GuestAddress, GuestAddressSpace, GuestMemoryBackend, GuestMemoryRegion};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -32,8 +31,6 @@ use crate::{
     BarReprogrammingParams, PciBarConfiguration, PciBdf, PciDevice, PciDeviceError, PciSubclass,
     VfioPciError,
 };
-
-type GuestRegion = vm_memory::GuestRegionMmap<AtomicBitmap>;
 
 pub struct VfioUserPciDevice {
     id: String,

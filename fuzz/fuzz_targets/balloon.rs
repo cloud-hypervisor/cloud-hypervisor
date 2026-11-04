@@ -10,13 +10,11 @@ use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
 use virtio_devices::{VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
-use vm_memory::bitmap::AtomicBitmap;
+use vm_allocator::GuestMemory;
 use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryAtomic};
 use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
-
-type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 const QUEUE_DATA_SIZE: usize = 4;
 const CONTROL_SIZE: usize = 30;

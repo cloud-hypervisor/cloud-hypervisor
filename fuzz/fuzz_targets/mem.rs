@@ -19,14 +19,11 @@ use virtio_devices::{
     VirtioMemMappingSource,
 };
 use virtio_queue::{Queue, QueueT};
+use vm_allocator::{GuestMemory, GuestRegion};
 use vm_device::dma_mapping::ExternalDmaMapping;
-use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
 use vm_migration::{Pausable, Snapshottable};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
-
-type GuestMemory = vm_memory::GuestMemoryMmap<AtomicBitmap>;
-type GuestRegion = vm_memory::GuestRegionMmap<AtomicBitmap>;
 
 macro_rules! align {
     ($n:expr, $align:expr) => {{

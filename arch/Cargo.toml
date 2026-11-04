@@ -20,6 +20,7 @@ serde = { workspace = true, features = ["derive", "rc", "std"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
+vm-allocator = { path = "../vm-allocator" }
 vm-memory = { workspace = true, features = [
   "backend-atomic",
   "backend-bitmap",
