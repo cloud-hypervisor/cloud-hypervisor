@@ -2520,7 +2520,6 @@ dependencies = [
 name = "vm-allocator"
 version = "0.1.0"
 dependencies = [
- "arch",
  "libc",
  "log",
  "thiserror",
