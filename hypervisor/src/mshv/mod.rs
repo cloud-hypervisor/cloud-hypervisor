@@ -1978,6 +1978,9 @@ impl vm::Vm for MshvVm {
             userspace_addr: (userspace_addr as usize).try_into().unwrap(),
             ..Default::default()
         };
+        self.fd
+            .map_user_memory(user_memory_region)
+            .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))?;
         // No matter read only or not we keep track the slots.
         // For readonly hypervisor can enable the dirty bits,
         // but a VM exit happens before setting the dirty bits
@@ -1989,9 +1992,6 @@ impl vm::Vm for MshvVm {
             },
         );
 
-        self.fd
-            .map_user_memory(user_memory_region)
-            .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))?;
         Ok(())
     }
 
@@ -2021,15 +2021,15 @@ impl vm::Vm for MshvVm {
             userspace_addr: (userspace_addr as usize).try_into().unwrap(),
             ..Default::default()
         };
+        self.fd
+            .unmap_user_memory(user_memory_region)
+            .map_err(|e| vm::HypervisorVmError::RemoveUserMemory(e.into()))?;
         // Remove the corresponding entry from "self.dirty_log_slots" if needed
         self.dirty_log_slots
             .write()
             .unwrap()
             .remove(&user_memory_region.guest_pfn);
 
-        self.fd
-            .unmap_user_memory(user_memory_region)
-            .map_err(|e| vm::HypervisorVmError::RemoveUserMemory(e.into()))?;
         Ok(())
     }
 
