@@ -19,7 +19,7 @@ use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
-use vm_device::UserspaceMapping;
+use vm_allocator::GuestRegion;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
     GuestMemoryError, GuestMemoryLoadGuard,
@@ -269,7 +269,7 @@ pub struct Pmem {
     id: String,
     disk: Option<File>,
     config: VirtioPmemConfig,
-    mapping: UserspaceMapping,
+    _mapping: GuestRegion,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
 }
@@ -287,7 +287,7 @@ impl Pmem {
         id: String,
         disk: File,
         addr: GuestAddress,
-        mapping: UserspaceMapping,
+        mapping: GuestRegion,
         access_platform_enabled: bool,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
@@ -304,7 +304,7 @@ impl Pmem {
         } else {
             let config = VirtioPmemConfig {
                 start: addr.raw_value().to_le(),
-                size: (mapping.mapping.size() as u64).to_le(),
+                size: (mapping.size() as u64).to_le(),
             };
 
             let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
@@ -329,7 +329,7 @@ impl Pmem {
             id,
             disk: Some(disk),
             config,
-            mapping,
+            _mapping: mapping,
             seccomp_action,
             exit_evt,
         })
@@ -420,10 +420,6 @@ impl VirtioDevice for Pmem {
     fn reset(&mut self) {
         self.common.reset();
         event!("virtio-device", "reset", "id", &self.id);
-    }
-
-    fn userspace_mappings(&self) -> Vec<UserspaceMapping> {
-        vec![self.mapping.clone()]
     }
 
     fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
