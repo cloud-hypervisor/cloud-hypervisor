@@ -418,20 +418,17 @@ mod tests {
 
     use super::*;
     use crate::formats::vhdx::bat::PAYLOAD_BLOCK_FULLY_PRESENT;
-    use crate::formats::vhdx::test_util::{create_dynamic_vhdx, open_vhdx};
+    use crate::formats::vhdx::test_util::{create_dynamic_vhdx, edit_header, open_vhdx};
 
     const VHDX_HEADER_1_OFFSET: u64 = 0x10000;
     const VHDX_HEADER_2_OFFSET: u64 = 0x20000;
     const VHDX_HEADER_SIZE: usize = 4096;
     const VHDX_LOG_GUID_OFFSET: usize = 48;
-    const VHDX_HEADER_CHECKSUM_OFFSET: usize = 4;
 
     /// A VHDX image with an active log must be rejected until replay is
     /// supported; opening it would silently use a stale BAT.
     #[test]
     fn active_log_is_rejected() {
-        use crc_any::CRC;
-
         let tf = create_dynamic_vhdx(16, None);
 
         let file = fs::OpenOptions::new()
@@ -441,15 +438,9 @@ mod tests {
             .unwrap();
         // VHDX header 1 and 2 live at fixed 64 KiB offsets.
         for base in [VHDX_HEADER_1_OFFSET, VHDX_HEADER_2_OFFSET] {
-            let mut header = [0u8; VHDX_HEADER_SIZE];
-            file.read_exact_at(&mut header, base).unwrap();
-            header[VHDX_LOG_GUID_OFFSET..VHDX_LOG_GUID_OFFSET + 16].copy_from_slice(&[0x5a; 16]);
-            header[VHDX_HEADER_CHECKSUM_OFFSET..VHDX_HEADER_CHECKSUM_OFFSET + 4].fill(0);
-            let mut crc = CRC::crc32c();
-            crc.digest(&header);
-            header[VHDX_HEADER_CHECKSUM_OFFSET..VHDX_HEADER_CHECKSUM_OFFSET + 4]
-                .copy_from_slice(&(crc.get_crc() as u32).to_le_bytes());
-            file.write_all_at(&header, base).unwrap();
+            edit_header(&file, base, VHDX_HEADER_SIZE, |header| {
+                header[VHDX_LOG_GUID_OFFSET..VHDX_LOG_GUID_OFFSET + 16].fill(0x5a);
+            });
         }
         file.sync_all().unwrap();
 

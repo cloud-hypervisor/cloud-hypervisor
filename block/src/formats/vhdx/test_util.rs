@@ -5,6 +5,7 @@
 //! Shared test helpers for VHDX image tests.
 
 use std::fs::OpenOptions;
+use std::os::unix::fs::FileExt;
 use std::path::Path;
 
 use vmm_sys_util::tempfile::TempFile;
@@ -34,4 +35,22 @@ pub(super) fn open_vhdx(path: &Path) -> Result<Vhdx> {
         .open(path)
         .unwrap();
     Vhdx::new(file, false)
+}
+
+/// Edit a header or region table and recalculate its CRC32C checksum.
+/// Flushing the resulting write is left to the caller.
+pub(super) fn edit_header(
+    file: &impl FileExt,
+    offset: u64,
+    length: usize,
+    edit: impl FnOnce(&mut [u8]),
+) {
+    let mut bytes = vec![0; length];
+    file.read_exact_at(&mut bytes, offset).unwrap();
+    edit(&mut bytes);
+    bytes[4..8].fill(0);
+    let mut crc = crc_any::CRC::crc32c();
+    crc.digest(&bytes);
+    bytes[4..8].copy_from_slice(&(crc.get_crc() as u32).to_le_bytes());
+    file.write_all_at(&bytes, offset).unwrap();
 }
