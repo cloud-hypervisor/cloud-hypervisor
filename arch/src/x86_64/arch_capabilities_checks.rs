@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use hypervisor::arch::x86::{MsrEntry, VcpuMsrConfigUpdate};
+use hypervisor::arch::x86::MsrEntry;
 use log::{debug, error};
 
 use crate::x86_64::Error;
@@ -11,11 +11,11 @@ use crate::x86_64::Error;
 /// The register address of the IA32_ARCH_CAPABILITIES MSR
 const IA32_ARCH_CAPABILITIES: u32 = 0x10a;
 
-/// Check that the MSR updates required by the CPU profile are compatible with the
-/// host's feature MSRs.
+/// Check that the required architectural capabilities are compatible with the host.
 pub(crate) fn valid_required_arch_capabilities_update(
-    required_updates: &VcpuMsrConfigUpdate,
+    required_msrs: &[MsrEntry],
     host_feature_msrs: &[MsrEntry],
+    source: &str,
 ) -> Result<(), Error> {
     let find_arch_capabilities = |msrs: &[MsrEntry]| {
         msrs.iter()
@@ -23,26 +23,24 @@ pub(crate) fn valid_required_arch_capabilities_update(
             .map(|entry| entry.data)
     };
 
-    let Some(required_arch_capabilities_msr) =
-        find_arch_capabilities(&required_updates.feature_msrs)
-    else {
+    let Some(required_arch_capabilities_msr) = find_arch_capabilities(required_msrs) else {
         return Ok(());
     };
 
     let Some(host_arch_capabilities) = find_arch_capabilities(host_feature_msrs) else {
-        error!("Unable to find MSR IA32_ARCH_CAPABILITIES, but it is required by the CPU profile");
-        return Err(Error::CpuProfileMissingMsr);
+        error!("Unable to find MSR IA32_ARCH_CAPABILITIES, but it is required by {source}");
+        return Err(Error::ArchCapabilitiesMissing);
     };
 
     if arch_capabilities_compatible(
         required_arch_capabilities_msr,
         host_arch_capabilities,
-        "CPU Profile",
+        source,
         "Host",
     ) {
         Ok(())
     } else {
-        Err(Error::CpuProfileMsrIncompatibility)
+        Err(Error::ArchCapabilitiesIncompatibility)
     }
 }
 

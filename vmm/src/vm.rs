@@ -109,8 +109,8 @@ use crate::vm_config::{
     NumaConfig, PayloadConfig, PmemConfig, UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
 };
 use crate::{
-    CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, GuestMemoryMmap,
-    MEMORY_MANAGER_SNAPSHOT_ID, MemoryZoneUpdateError, PciDeviceInfo, acpi, cpu,
+    DEVICE_MANAGER_SNAPSHOT_ID, GuestMemoryMmap, MEMORY_MANAGER_SNAPSHOT_ID, MemoryZoneUpdateError,
+    PciDeviceInfo, acpi, cpu,
 };
 
 /// Errors associated with VM management
@@ -893,7 +893,7 @@ impl Vm {
         cpu_manager
             .lock()
             .unwrap()
-            .create_boot_vcpus(snapshot_from_id(snapshot, CPU_MANAGER_SNAPSHOT_ID))
+            .create_boot_vcpus(snapshot)
             .map_err(Error::CpuManager)?;
 
         // KVM-specific initialization
@@ -936,7 +936,7 @@ impl Vm {
         cpu_manager
             .lock()
             .unwrap()
-            .create_boot_vcpus(snapshot_from_id(snapshot, CPU_MANAGER_SNAPSHOT_ID))
+            .create_boot_vcpus(snapshot)
             .map_err(Error::CpuManager)?;
 
         // Extract guest policy from IGVM if available, otherwise use default.
