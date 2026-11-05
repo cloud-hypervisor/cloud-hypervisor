@@ -46,10 +46,10 @@ mod device;
 
 use std::result;
 use std::sync::Arc;
-#[cfg(target_arch = "x86_64")]
-use std::time::SystemTime;
 #[cfg(all(target_arch = "x86_64", feature = "kvm"))]
 use std::time::UNIX_EPOCH;
+#[cfg(target_arch = "x86_64")]
+use std::time::{Duration, SystemTime};
 
 use anyhow::anyhow;
 use concat_idents::concat_idents;
@@ -164,6 +164,22 @@ pub enum CpuState {
     Mshv(mshv::VcpuMshvState),
 }
 
+#[cfg(all(target_arch = "x86_64", feature = "kvm"))]
+impl CpuState {
+    /// Returns the TSC saved in this vCPU state.
+    pub fn tsc(&self) -> Option<u64> {
+        match self {
+            CpuState::Kvm(state) => state
+                .msrs
+                .iter()
+                .find(|msr| msr.index == arch::x86::msr_index::MSR_IA32_TSC)
+                .map(|msr| msr.data),
+            #[cfg(feature = "mshv")]
+            CpuState::Mshv(_) => None,
+        }
+    }
+}
+
 #[cfg(target_arch = "aarch64")]
 impl CpuState {
     pub fn pre_finalize_regs(&self) -> &[arch::aarch64::ExtendedReg] {
@@ -225,10 +241,39 @@ impl ClockData {
 }
 
 /// Guest clock state preserved across pause/resume and snapshot/restore
-/// (`ClockData` on x86, `TimerState` on aarch64+kvm.
+/// (`ClockData` on x86, `TimerState` on aarch64+kvm). On x86, `guest_tsc` is the
+/// boot vCPU TSC saved with the vCPU state; it is filled on restore, not serialized.
 /// The platform where it has not guest clock, `Option<ClockState>` will be None.
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[cfg(target_arch = "x86_64")]
-pub type ClockState = ClockData;
+pub struct ClockState {
+    #[serde(flatten)]
+    pub data: ClockData,
+    #[serde(skip)]
+    pub guest_tsc: Option<u64>,
+}
+#[cfg(target_arch = "x86_64")]
+impl ClockState {
+    /// Returns the clock as a capture taken `by` later would read it.
+    #[must_use]
+    pub fn advanced(mut self, by: Duration) -> Self {
+        match &mut self.data {
+            #[cfg(feature = "kvm")]
+            ClockData::Kvm(s) => {
+                let ns = by.as_nanos() as u64;
+                s.clock = s.clock.wrapping_add(ns);
+                if s.flags & kvm_bindings::KVM_CLOCK_REALTIME != 0 {
+                    s.realtime = s.realtime.wrapping_add(ns);
+                }
+            }
+            #[allow(unreachable_patterns)]
+            _ => {
+                let _ = by;
+            }
+        }
+        self
+    }
+}
 #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
 pub type ClockState = TimerState;
 #[cfg(not(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm"))))]

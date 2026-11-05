@@ -25,7 +25,7 @@ use std::sync::OnceLock;
 #[cfg(target_arch = "x86_64")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{fs, io, result};
 
@@ -168,7 +168,7 @@ const KVM_REG_ARM_TIMER_CNT: u64 = KVM_REG_ARM64
     | ((3_u64 << KVM_REG_ARM64_SYSREG_CRM_SHIFT) & KVM_REG_ARM64_SYSREG_CRM_MASK as u64)
     | (2_u64 & KVM_REG_ARM64_SYSREG_OP2_MASK as u64);
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 const NANOS_PER_SECOND: u128 = 1_000_000_000;
 
 #[cfg(target_arch = "aarch64")]
@@ -628,6 +628,42 @@ impl KvmVm {
                 })
             }
         }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn advance_tsc(vcpus: &[&dyn cpu::Vcpu], saved_tsc: u64, saved_ns: u64) -> vm::Result<()> {
+        let Some(vcpu) = vcpus.first() else {
+            return Ok(());
+        };
+        let set_clock_err = |e: cpu::HypervisorCpuError| vm::HypervisorVmError::SetClock(e.into());
+        let (Some(khz), Some(offset)) = (
+            vcpu.tsc_khz().map_err(set_clock_err)?,
+            vcpu.tsc_offset().map_err(set_clock_err)?,
+        ) else {
+            return Ok(());
+        };
+        let mut msrs = vec![MsrEntry {
+            index: msr_index::MSR_IA32_TSC,
+            data: 0,
+        }];
+        vcpu.get_msrs(&mut msrs).map_err(set_clock_err)?;
+        let now_ns = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| vm::HypervisorVmError::SetClock(e.into()))?
+            .as_nanos() as u64;
+        let elapsed_ns = u128::from(now_ns.saturating_sub(saved_ns));
+        let elapsed_ticks = (elapsed_ns * u128::from(khz) * 1000 / NANOS_PER_SECOND) as u64;
+        let Some(delta) = saved_tsc
+            .saturating_add(elapsed_ticks)
+            .checked_sub(msrs[0].data)
+        else {
+            return Ok(());
+        };
+        let offset = offset.wrapping_add(delta);
+        for vcpu in vcpus {
+            vcpu.set_tsc_offset(offset).map_err(set_clock_err)?;
+        }
+        Ok(())
     }
 }
 
@@ -1224,7 +1260,10 @@ impl vm::Vm for KvmVm {
     /// Capture kvmclock (filling realtime) for snapshot/migration.
     #[cfg(target_arch = "x86_64")]
     fn snapshot_clock(&self, _boot_vcpu: &dyn cpu::Vcpu) -> vm::Result<Option<ClockState>> {
-        Ok(Some(self.get_clock()?.with_realtime_filled()))
+        Ok(Some(ClockState {
+            data: self.get_clock()?.with_realtime_filled(),
+            guest_tsc: None,
+        }))
     }
 
     /// Capture the guest virtual counter and host wall clock for
@@ -1247,7 +1286,7 @@ impl vm::Vm for KvmVm {
         }))
     }
 
-    /// Restore kvmclock before the vCPUs resume.
+    /// Restore kvmclock, and the TSC on a snapshot restore, before the vCPUs resume.
     #[cfg(target_arch = "x86_64")]
     fn restore_clock(
         &self,
@@ -1255,10 +1294,20 @@ impl vm::Vm for KvmVm {
         state: &ClockState,
         mode: ClockRestoreMode,
     ) -> vm::Result<()> {
-        self.set_clock(state)?;
-        // A snapshot restore moves kvmclock forward but not the TSC, so an armed TSC
-        // deadline would fire late. Make it due so the guest catches up on resume.
-        if mode == ClockRestoreMode::SnapshotRestore && state.has_realtime() {
+        let catch_up = mode == ClockRestoreMode::SnapshotRestore && state.data.has_realtime();
+        // set kvmclock last, after the advance writes the TSC offsets it is computed from
+        let advanced = match state.guest_tsc {
+            Some(saved_tsc) if catch_up => {
+                let saved_ns = kvm_clock_data::from(state.data).realtime;
+                Self::advance_tsc(vcpus, saved_tsc, saved_ns)?;
+                true
+            }
+            _ => false,
+        };
+        self.set_clock(&state.data)?;
+        if catch_up {
+            // an armed TSC deadline keeps the delay KVM computed before the clocks moved
+            // a write recomputes it; without the advance the TSC stays behind, so make it due
             for vcpu in vcpus {
                 let mut msrs = vec![
                     MsrEntry {
@@ -1273,10 +1322,15 @@ impl vm::Vm for KvmVm {
                 vcpu.get_msrs(&mut msrs)
                     .map_err(|e| vm::HypervisorVmError::SetClock(e.into()))?;
                 let (tsc, deadline) = (msrs[0].data, msrs[1].data);
-                if deadline > tsc {
+                let rearm = if advanced {
+                    (deadline != 0).then_some(deadline)
+                } else {
+                    (deadline > tsc).then_some(tsc)
+                };
+                if let Some(data) = rearm {
                     vcpu.set_msrs(&[MsrEntry {
                         index: msr_index::MSR_IA32_TSC_DEADLINE,
-                        data: tsc,
+                        data,
                     }])
                     .map_err(|e| vm::HypervisorVmError::SetClock(e.into()))?;
                 }
@@ -3728,6 +3782,164 @@ mod tests {
         assert_eq!(vcpu.tsc_offset().unwrap(), Some(target));
         vcpu.set_tsc_offset(offset).unwrap();
         assert_eq!(vcpu.tsc_offset().unwrap(), Some(offset));
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_clock_state_serializes_as_clock_data() {
+        use super::*;
+
+        let data = ClockData::from(kvm_clock_data {
+            clock: 7,
+            ..Default::default()
+        });
+        let state = ClockState {
+            data,
+            guest_tsc: Some(9),
+        };
+        assert_eq!(
+            serde_json::to_string(&state).unwrap(),
+            serde_json::to_string(&data).unwrap()
+        );
+        let state: ClockState =
+            serde_json::from_str(&serde_json::to_string(&data).unwrap()).unwrap();
+        assert_eq!(state.guest_tsc, None);
+        assert_eq!(kvm_clock_data::from(state.data).clock, 7);
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_clock_state_advanced_moves_clock_and_realtime() {
+        use std::time::Duration;
+
+        use super::*;
+
+        let state = |flags| ClockState {
+            data: ClockData::from(kvm_clock_data {
+                clock: 7,
+                realtime: 100,
+                flags,
+                ..Default::default()
+            }),
+            guest_tsc: None,
+        };
+        let moved = kvm_clock_data::from(
+            state(kvm_bindings::KVM_CLOCK_REALTIME)
+                .advanced(Duration::from_nanos(5))
+                .data,
+        );
+        assert_eq!((moved.clock, moved.realtime), (12, 105));
+        let moved = kvm_clock_data::from(state(0).advanced(Duration::from_nanos(5)).data);
+        assert_eq!((moved.clock, moved.realtime), (12, 100));
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_restore_clock_advances_tsc() {
+        use super::*;
+
+        let hypervisor = KvmHypervisor::new().unwrap();
+        let vm = hypervisor.create_vm(HypervisorVmConfig::default()).unwrap();
+        let vcpus = [
+            vm.create_vcpu(0, None, Default::default()).unwrap(),
+            vm.create_vcpu(1, None, Default::default()).unwrap(),
+        ];
+        let refs: Vec<&dyn cpu::Vcpu> = vcpus.iter().map(|v| v.as_ref()).collect();
+        let hz = u64::from(vcpus[0].tsc_khz().unwrap().unwrap()) * 1000;
+        let read_tsc = |vcpu: &dyn cpu::Vcpu| {
+            let mut msrs = vec![MsrEntry {
+                index: msr_index::MSR_IA32_TSC,
+                data: 0,
+            }];
+            vcpu.get_msrs(&mut msrs).unwrap();
+            msrs[0].data
+        };
+
+        let state = vm.snapshot_clock(refs[0]).unwrap().unwrap();
+        let saved_tsc = read_tsc(refs[0]);
+        let mut data = kvm_clock_data::from(state.data);
+        data.realtime -= 10_000_000_000;
+        let saved = ClockState {
+            data: data.into(),
+            guest_tsc: Some(saved_tsc),
+        };
+
+        let offset = vcpus[0].tsc_offset().unwrap();
+        vm.restore_clock(&refs, &saved, ClockRestoreMode::SameHostResume)
+            .unwrap();
+        assert_eq!(vcpus[0].tsc_offset().unwrap(), offset);
+
+        vm.restore_clock(&refs, &saved, ClockRestoreMode::SnapshotRestore)
+            .unwrap();
+        let advanced = read_tsc(refs[0]) - saved_tsc;
+        assert!(
+            (10 * hz..11 * hz).contains(&advanced),
+            "advanced {advanced} ticks at {hz} Hz"
+        );
+        assert_eq!(
+            vcpus[0].tsc_offset().unwrap(),
+            vcpus[1].tsc_offset().unwrap()
+        );
+
+        vm.restore_clock(&refs, &saved, ClockRestoreMode::SnapshotRestore)
+            .unwrap();
+        let again = read_tsc(refs[0]) - saved_tsc;
+        assert!(again - advanced < hz, "second restore moved {again} ticks");
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_restore_clock_rearms_tsc_deadline() {
+        use super::*;
+
+        let hypervisor = KvmHypervisor::new().unwrap();
+        let vm = hypervisor.create_vm(HypervisorVmConfig::default()).unwrap();
+        vm.create_irq_chip().unwrap();
+        let vcpu = vm.create_vcpu(0, None, Default::default()).unwrap();
+        let mut cpuid = hypervisor.get_supported_cpuid().unwrap();
+        for entry in cpuid.iter_mut().filter(|e| e.function == 1) {
+            entry.ecx |= 1 << 24;
+        }
+        vcpu.set_cpuid2(&cpuid).unwrap();
+        let mut lapic = vcpu.get_lapic().unwrap();
+        lapic.set_klapic_reg(0x320, (2 << 17) | 0xec);
+        vcpu.set_lapic(&lapic).unwrap();
+        let refs = [vcpu.as_ref()];
+        let hz = u64::from(vcpu.tsc_khz().unwrap().unwrap()) * 1000;
+        let read_msr = |index| {
+            let mut msrs = vec![MsrEntry { index, data: 0 }];
+            vcpu.get_msrs(&mut msrs).unwrap();
+            msrs[0].data
+        };
+        let arm = |data| {
+            vcpu.set_msrs(&[MsrEntry {
+                index: msr_index::MSR_IA32_TSC_DEADLINE,
+                data,
+            }])
+            .unwrap();
+        };
+
+        let state = vm.snapshot_clock(refs[0]).unwrap().unwrap();
+        let saved_tsc = read_msr(msr_index::MSR_IA32_TSC);
+        let mut data = kvm_clock_data::from(state.data);
+        data.realtime -= 10_000_000_000;
+        let mut saved = ClockState {
+            data: data.into(),
+            guest_tsc: Some(saved_tsc),
+        };
+
+        let deadline = saved_tsc + 100 * hz;
+        arm(deadline);
+        vm.restore_clock(&refs, &saved, ClockRestoreMode::SnapshotRestore)
+            .unwrap();
+        assert_eq!(read_msr(msr_index::MSR_IA32_TSC_DEADLINE), deadline);
+
+        saved.guest_tsc = None;
+        let deadline = read_msr(msr_index::MSR_IA32_TSC) + 100 * hz;
+        arm(deadline);
+        vm.restore_clock(&refs, &saved, ClockRestoreMode::SnapshotRestore)
+            .unwrap();
+        assert!(read_msr(msr_index::MSR_IA32_TSC_DEADLINE) < deadline);
     }
 
     #[test]

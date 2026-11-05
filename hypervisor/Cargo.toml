@@ -60,6 +60,7 @@ bitfield-struct = { workspace = true, optional = true }
 [dev-dependencies]
 cfg-if = { workspace = true }
 env_logger = { workspace = true }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

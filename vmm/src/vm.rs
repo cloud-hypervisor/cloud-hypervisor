@@ -22,6 +22,8 @@ use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
 #[cfg(not(target_arch = "riscv64"))]
 use std::time::Instant;
+#[cfg(target_arch = "x86_64")]
+use std::time::SystemTime;
 use std::{any, cmp, result, str, thread};
 
 use anyhow::{Context, anyhow};
@@ -75,6 +77,8 @@ use tracer::trace_scoped;
 use vm_device::Bus;
 use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::protocol::{MemoryRangeTable, Request, Response};
+#[cfg(all(target_arch = "x86_64", feature = "kvm"))]
+use vm_migration::state_from_id;
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, snapshot_from_id,
 };
@@ -488,6 +492,22 @@ fn is_restore_cow_supported(config: &VmConfig) -> bool {
 struct SavedClock {
     mode: hypervisor::ClockRestoreMode,
     state: hypervisor::ClockState,
+    // the boot vCPU TSC matched `state` at this wall time
+    #[cfg(target_arch = "x86_64")]
+    tsc_at: SystemTime,
+}
+
+impl SavedClock {
+    // The TSC keeps running while the VM stays paused, so the stored clock
+    // moves with it to stay paired with the vCPU state captured now.
+    fn for_snapshot(&self) -> hypervisor::ClockState {
+        #[cfg(target_arch = "x86_64")]
+        return self
+            .state
+            .advanced(self.tsc_at.elapsed().unwrap_or_default());
+        #[cfg(not(target_arch = "x86_64"))]
+        self.state
+    }
 }
 
 pub struct Vm {
@@ -648,9 +668,21 @@ impl Vm {
             let vm_snapshot = get_vm_snapshot(snapshot).map_err(Error::Restore)?;
             // Restored or migrated in: the guest clock must catch up to wall time
             // on resume (the counter was reset to the saved value).
+            #[cfg(all(target_arch = "x86_64", feature = "kvm"))]
+            let guest_tsc = state_from_id::<hypervisor::CpuState>(
+                snapshot_from_id(Some(snapshot), CPU_MANAGER_SNAPSHOT_ID),
+                "0",
+            )
+            .map_err(Error::Restore)?
+            .and_then(|state| state.tsc());
             vm_snapshot.clock.map(|state| SavedClock {
                 mode: hypervisor::ClockRestoreMode::SnapshotRestore,
+                #[cfg(all(target_arch = "x86_64", feature = "kvm"))]
+                state: hypervisor::ClockState { guest_tsc, ..state },
+                #[cfg(not(all(target_arch = "x86_64", feature = "kvm")))]
                 state,
+                #[cfg(target_arch = "x86_64")]
+                tsc_at: SystemTime::now(),
             })
         } else {
             None
@@ -2849,6 +2881,8 @@ impl Vm {
             .map(|state| SavedClock {
                 mode: hypervisor::ClockRestoreMode::SameHostResume,
                 state,
+                #[cfg(target_arch = "x86_64")]
+                tsc_at: SystemTime::now(),
             }))
     }
 
@@ -2973,7 +3007,7 @@ impl Snapshottable for Vm {
         let common_cpuid = self.cpu_manager.lock().unwrap().common_cpuid();
 
         let vm_snapshot_state = VmSnapshot {
-            clock: self.saved_clock.map(|saved| saved.state),
+            clock: self.saved_clock.as_ref().map(SavedClock::for_snapshot),
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             common_cpuid,
         };
