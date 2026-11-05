@@ -855,7 +855,7 @@ impl vm::Vm for KvmVm {
             xsave_size,
             #[cfg(target_arch = "x86_64")]
             has_xcrs: self.check_extension(Cap::Xcrs),
-            #[cfg(any(target_arch = "x86_64", feature = "sev_snp"))]
+            #[cfg(target_arch = "x86_64")]
             vm_fd: Arc::clone(&self.fd),
             #[cfg(feature = "sev_snp")]
             memory_slots: self.memory_slots.clone(),
@@ -1710,7 +1710,7 @@ pub struct KvmVcpu {
     xsave_size: i32,
     #[cfg(target_arch = "x86_64")]
     has_xcrs: bool,
-    #[cfg(any(target_arch = "x86_64", feature = "sev_snp"))]
+    #[cfg(target_arch = "x86_64")]
     vm_fd: Arc<VmFd>,
     #[cfg(feature = "sev_snp")]
     memory_slots: Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
