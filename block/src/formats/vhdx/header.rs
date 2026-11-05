@@ -454,16 +454,13 @@ fn calculate_checksum(buffer: &mut [u8], csum_offset: usize) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::FileExt;
-
-    use vmm_sys_util::tempfile::TempFile;
     use zerocopy::{FromBytes, IntoBytes};
 
     use super::{
         BAT_GUID, HEADER_SIGN, Header, MDR_GUID, REGION_TABLE_1_START, RegionInfo,
         RegionTableHeader, VhdxHeaderError, ranges_overlap,
     };
-    use crate::aligned_file::AlignedFile;
+    use crate::formats::vhdx::test_util::{region_entry, region_file};
 
     #[test]
     fn test_header_bytes_round_trip() {
@@ -531,17 +528,6 @@ mod tests {
         }
     }
 
-    /// Builds the 32-byte on-disk region table entry for `guid` describing
-    /// the region `[file_offset, file_offset + length)`.
-    fn region_entry(guid: [u8; 16], file_offset: u64, length: u32) -> [u8; 32] {
-        let mut e = [0u8; 32];
-        e[0..16].copy_from_slice(&guid);
-        e[16..24].copy_from_slice(&file_offset.to_le_bytes());
-        e[24..28].copy_from_slice(&length.to_le_bytes());
-        // `required` (e[28..32]) left zero.
-        e
-    }
-
     #[test]
     fn test_region_info_rejects_overlapping_regions() {
         // BAT region [1 MiB, 3 MiB) and metadata region [2 MiB, 4 MiB) overlap
@@ -551,18 +537,13 @@ mod tests {
         let region_start = REGION_TABLE_1_START;
         let entries_at = region_start + size_of::<RegionTableHeader>() as u64;
 
-        let temp = TempFile::new().unwrap();
-        let f = temp.into_file();
-        f.set_len(entries_at + 64 * 1024).unwrap();
-        f.write_all_at(&region_entry(BAT_GUID, MIB, (2 * MIB) as u32), entries_at)
-            .unwrap();
-        f.write_all_at(
-            &region_entry(MDR_GUID, 2 * MIB, (2 * MIB) as u32),
-            entries_at + 32,
-        )
-        .unwrap();
-
-        let af = AlignedFile::new(f, false);
+        let af = region_file(
+            entries_at + 64 * 1024,
+            &[
+                region_entry(BAT_GUID, MIB, (2 * MIB) as u32),
+                region_entry(MDR_GUID, 2 * MIB, (2 * MIB) as u32),
+            ],
+        );
         let res = RegionInfo::new(&af, region_start, 2);
         assert!(
             matches!(res, Err(VhdxHeaderError::RegionOverlap)),
@@ -578,13 +559,10 @@ mod tests {
         let region_start = REGION_TABLE_1_START;
         let entries_at = region_start + size_of::<RegionTableHeader>() as u64;
 
-        let temp = TempFile::new().unwrap();
-        let f = temp.into_file();
-        f.set_len(entries_at + 64 * 1024).unwrap();
-        f.write_all_at(&region_entry(BAT_GUID, u64::MAX, 0x1000), entries_at)
-            .unwrap();
-
-        let af = AlignedFile::new(f, false);
+        let af = region_file(
+            entries_at + 64 * 1024,
+            &[region_entry(BAT_GUID, u64::MAX, 0x1000)],
+        );
         let res = RegionInfo::new(&af, region_start, 1);
         assert!(
             matches!(res, Err(VhdxHeaderError::RegionEntryOverflow(..))),
