@@ -623,9 +623,6 @@ pub(crate) fn load_igvm(
                             vcpu_locked
                                 .setup_sev_snp_regs(loaded_info.vmsa, nested)
                                 .map_err(Error::SetVmsa)?;
-                            vcpu_locked
-                                .set_sev_control_register(0)
-                                .map_err(Error::SetVmsa)?;
                         }
                     }
                 }

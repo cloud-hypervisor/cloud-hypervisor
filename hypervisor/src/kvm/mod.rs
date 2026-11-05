@@ -3428,11 +3428,6 @@ impl cpu::Vcpu for KvmVcpu {
     }
 
     #[cfg(feature = "sev_snp")]
-    fn set_sev_control_register(&self, _vmsa_pfn: u64) -> cpu::Result<()> {
-        Ok(())
-    }
-
-    #[cfg(feature = "sev_snp")]
     fn setup_sev_snp_regs(&self, vmsa: SevVmsa, nested: bool) -> cpu::Result<()> {
         let mut sregs = self
             .fd
