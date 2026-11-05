@@ -108,23 +108,16 @@ impl AsyncIo for VhdxSync {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
     use std::sync::{Arc, Mutex};
 
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
     use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoOperation, OwnedIoBuffer};
-    use crate::formats::vhdx::dynamic::Vhdx;
-    use crate::formats::vhdx::test_util::create_dynamic_vhdx;
+    use crate::formats::vhdx::test_util::{create_dynamic_vhdx, open_vhdx};
 
     fn make_vhdx_sync(tf: &TempFile) -> (VhdxSync, u64) {
-        let file = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(tf.as_path())
-            .unwrap();
-        let vhdx = Vhdx::new(file, false).unwrap();
+        let vhdx = open_vhdx(tf.as_path()).unwrap();
         let size = vhdx.virtual_disk_size();
         let sync = VhdxSync::new(Arc::new(Mutex::new(vhdx)), size);
         (sync, size)
@@ -132,7 +125,7 @@ mod tests {
 
     /// Builds a `VhdxSync` from a fresh 1 MiB dynamic VHDX.
     fn setup() -> (VhdxSync, u64) {
-        let tf = create_dynamic_vhdx(1);
+        let tf = create_dynamic_vhdx(1, None);
         make_vhdx_sync(&tf)
     }
 
