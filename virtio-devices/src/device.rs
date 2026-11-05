@@ -483,6 +483,9 @@ impl Pausable for VirtioCommon {
             pause_evt
                 .write(1)
                 .map_err(|e| MigratableError::Pause(e.into()))?;
+            if let Some(workers) = &self.workers {
+                workers.unpark();
+            }
 
             // Wait for all threads to acknowledge the pause before going
             // any further. This is exclusively performed when pause_evt

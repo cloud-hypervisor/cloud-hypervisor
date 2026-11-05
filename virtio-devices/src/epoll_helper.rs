@@ -99,6 +99,23 @@ impl EpollHelper {
         Ok(helper)
     }
 
+    // events are level-triggered, so the ones seen here stay ready for the loop
+    #[cfg(not(fuzzing))]
+    fn pause_pending(&self) -> bool {
+        let mut events = [epoll::Event::new(epoll::Events::empty(), 0); 100];
+        loop {
+            match epoll::wait(self.epoll_file.as_raw_fd(), 0, &mut events) {
+                Ok(n) => {
+                    return events[..n]
+                        .iter()
+                        .any(|e| e.data as u16 == EPOLL_HELPER_EVENT_PAUSE);
+                }
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(_) => return false,
+            }
+        }
+    }
+
     pub fn add_event(&mut self, fd: RawFd, id: u16) -> result::Result<(), EpollHelperError> {
         self.add_event_custom(fd, id, epoll::Events::EPOLLIN)
     }
@@ -172,8 +189,9 @@ impl EpollHelper {
         // Before jumping into the epoll loop, check if the device is expected
         // to be in a paused state. This is helpful for the restore code path
         // as the device thread should not start processing anything before the
-        // device has been resumed.
-        while paused.load(Ordering::SeqCst) {
+        // device has been resumed. A pause requested before this thread ran
+        // after a resume leaves the wait, so the loop acknowledges it.
+        while paused.load(Ordering::SeqCst) && !self.pause_pending() {
             thread::park();
         }
 
@@ -331,5 +349,60 @@ impl EpollHelper {
 impl AsRawFd for EpollHelper {
     fn as_raw_fd(&self) -> RawFd {
         self.epoll_file.as_raw_fd()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, mpsc};
+    use std::time::Duration;
+
+    use super::*;
+
+    struct NoopHandler;
+
+    impl EpollHelperHandler for NoopHandler {
+        fn handle_event(
+            &mut self,
+            _helper: &mut EpollHelper,
+            _event: &epoll::Event,
+        ) -> Result<(), EpollHelperError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    #[cfg(not(fuzzing))]
+    fn pause_reaches_a_worker_that_has_not_run_since_resume() {
+        let kill_evt = EventFd::new(libc::EFD_NONBLOCK).unwrap();
+        let pause_evt = EventFd::new(libc::EFD_NONBLOCK).unwrap();
+        let mut helper = EpollHelper::new(&kill_evt, &pause_evt).unwrap();
+        let paused = Arc::new(AtomicBool::new(true));
+        let paused_sync = Arc::new(Barrier::new(2));
+        let worker = {
+            let paused = Arc::clone(&paused);
+            let paused_sync = Arc::clone(&paused_sync);
+            thread::spawn(move || helper.run(&paused, &paused_sync, &mut NoopHandler))
+        };
+        thread::sleep(Duration::from_millis(50));
+
+        pause_evt.write(1).unwrap();
+        worker.thread().unpark();
+        let (acked, ack) = mpsc::channel();
+        let waiter = {
+            let paused_sync = Arc::clone(&paused_sync);
+            thread::spawn(move || {
+                paused_sync.wait();
+                acked.send(()).unwrap();
+            })
+        };
+        ack.recv_timeout(Duration::from_secs(5))
+            .expect("the worker did not acknowledge the pause");
+        waiter.join().unwrap();
+
+        paused.store(false, Ordering::SeqCst);
+        kill_evt.write(1).unwrap();
+        worker.thread().unpark();
+        worker.join().unwrap().unwrap();
     }
 }
