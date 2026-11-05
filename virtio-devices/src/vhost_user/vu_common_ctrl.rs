@@ -13,8 +13,8 @@ use std::{ffi, fs, io};
 use log::{error, info};
 use vhost::vhost_kern::vhost_binding::VHOST_VRING_F_LOG;
 use vhost::vhost_user::message::{
-    VhostTransferStateDirection, VhostTransferStatePhase, VhostUserHeaderFlag, VhostUserInflight,
-    VhostUserProtocolFeatures, VhostUserVirtioFeatures,
+    FrontendReq, VhostTransferStateDirection, VhostTransferStatePhase, VhostUserHeaderFlag,
+    VhostUserInflight, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
 };
 use vhost::vhost_user::{
     Error as VhostUserError, Frontend, FrontendReqHandler, VhostUserFrontend,
@@ -35,7 +35,7 @@ use vmm_sys_util::epoll::{ControlOperation, Epoll, EpollEvent, EventSet};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::timerfd::TimerFd;
 
-use super::{Error, Result, VhostUserState};
+use super::{Error, PostcopyHandler, PostcopyRegion, Result, VhostUserState};
 use crate::vhost_user::Inflight;
 use crate::{
     GuestMemoryMmap, GuestRegionMmap, MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_IN_ORDER,
@@ -58,7 +58,12 @@ struct VringInfo {
     used_guest_addr: u64,
 }
 
-#[derive(Clone)]
+struct PostcopyContext {
+    uffd: OwnedFd,
+    id: String,
+    handler: Arc<dyn PostcopyHandler>,
+}
+
 pub struct VhostUserHandle {
     vu: Frontend,
     backend_features: u64,
@@ -70,6 +75,7 @@ pub struct VhostUserHandle {
     vrings_info: Option<Vec<VringInfo>>,
     queue_indexes: Vec<u16>,
     vring_bases: Option<Vec<u64>>,
+    postcopy_ctx: Option<PostcopyContext>,
 }
 
 impl VhostUserHandle {
@@ -96,11 +102,48 @@ impl VhostUserHandle {
             regions.push(vhost_user_net_reg);
         }
 
+        if let Some(postcopy_ctx) = &self.postcopy_ctx {
+            let uffd = postcopy_ctx
+                .uffd
+                .try_clone()
+                .map_err(Error::PostcopyRegister)?;
+
+            // The backend doesn't access the regions before the ack, by
+            // which time its faults are served.
+            let bases = self
+                .vu
+                .set_mem_table(&regions)
+                .map_err(Error::VhostUserSetMemTable)?
+                .ok_or(Error::PostcopyMemTableBasesMissing)?;
+            let postcopy_regions = regions
+                .iter()
+                .zip(bases)
+                .map(|(region, backend_addr)| PostcopyRegion {
+                    host_addr: region.userspace_addr,
+                    memory_size: region.memory_size,
+                    backend_addr,
+                })
+                .collect::<Vec<_>>();
+            postcopy_ctx
+                .handler
+                .register_uffd_regions(&postcopy_ctx.id, uffd, &postcopy_regions)
+                .map_err(Error::PostcopyRegister)?;
+            self.vu
+                .postcopy_ack_mem_regions(FrontendReq::SET_MEM_TABLE)
+                .map_err(Error::VhostUserSetMemTable)?;
+
+            return Ok(());
+        }
+
         self.vu
             .set_mem_table(regions.as_slice())
             .map_err(Error::VhostUserSetMemTable)?;
 
         Ok(())
+    }
+
+    pub fn postcopy_handler(&self) -> Option<&Arc<dyn PostcopyHandler>> {
+        self.postcopy_ctx.as_ref().map(|p| &p.handler)
     }
 
     pub fn add_memory_region(&mut self, region: &Arc<GuestRegionMmap>) -> Result<()> {
@@ -124,10 +167,40 @@ impl VhostUserHandle {
         Ok(())
     }
 
+    pub fn start_postcopy(
+        &mut self,
+        id: String,
+        postcopy_handler: Arc<dyn PostcopyHandler>,
+    ) -> Result<()> {
+        let uffd = self
+            .vu
+            .postcopy_advise()
+            .map_err(Error::VhostUserPostcopyAdvise)?;
+        self.vu
+            .postcopy_listen()
+            .map_err(Error::VhostUserPostcopyListen)?;
+        self.postcopy_ctx = Some(PostcopyContext {
+            uffd: uffd.into(),
+            id,
+            handler: postcopy_handler,
+        });
+        Ok(())
+    }
+
+    pub fn stop_postcopy(&mut self) -> Result<()> {
+        if self.postcopy_ctx.take().is_some() {
+            self.vu
+                .postcopy_end()
+                .map_err(Error::VhostUserPostcopyEnd)?;
+        }
+        Ok(())
+    }
+
     pub fn negotiate_features_vhost_user(
         &mut self,
         avail_features: u64,
         avail_protocol_features: VhostUserProtocolFeatures,
+        postcopy: bool,
     ) -> Result<(u64, u64)> {
         let acked_features = avail_features & self.backend_features;
 
@@ -137,14 +210,29 @@ impl VhostUserHandle {
                     .vu
                     .get_protocol_features()
                     .map_err(Error::VhostUserGetProtocolFeatures)?;
+                if postcopy
+                    && !backend_protocol_features.contains(VhostUserProtocolFeatures::PAGEFAULT)
+                {
+                    return Err(Error::VhostUserPageFaultUnsupported);
+                }
 
                 let acked_protocol_features = avail_protocol_features & backend_protocol_features;
+                let mut enabled_protocol_features = acked_protocol_features;
+
+                // Postcopy is not a feature we want to persist to state, since
+                // it's enabled only if we're in postcopy, which we can't know
+                // beforehand, so don't add it to the acked bitflag.
+                if postcopy {
+                    enabled_protocol_features |= VhostUserProtocolFeatures::PAGEFAULT;
+                }
 
                 self.vu
-                    .set_protocol_features(acked_protocol_features)
+                    .set_protocol_features(enabled_protocol_features)
                     .map_err(Error::VhostUserSetProtocolFeatures)?;
 
                 acked_protocol_features
+            } else if postcopy {
+                return Err(Error::VhostUserPageFaultUnsupported);
             } else {
                 VhostUserProtocolFeatures::empty()
             };
@@ -339,6 +427,7 @@ impl VhostUserHandle {
         &mut self,
         acked_features: u64,
         acked_protocol_features: u64,
+        postcopy: bool,
     ) -> Result<()> {
         if acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
             let backend_protocol_features = self
@@ -349,9 +438,19 @@ impl VhostUserHandle {
             if unsupported != 0 {
                 return Err(Error::UnsupportedProtocolFeatures(unsupported));
             }
+            if postcopy && !backend_protocol_features.contains(VhostUserProtocolFeatures::PAGEFAULT)
+            {
+                return Err(Error::VhostUserPageFaultUnsupported);
+            }
 
-            let acked_protocol_features =
+            let mut acked_protocol_features =
                 VhostUserProtocolFeatures::from_bits_truncate(acked_protocol_features);
+            // Postcopy is not a feature we want to persist to state, since
+            // it's enabled only if we're in postcopy, which we can't know
+            // beforehand, so don't add it to the acked bitflag.
+            if postcopy {
+                acked_protocol_features |= VhostUserProtocolFeatures::PAGEFAULT;
+            }
             self.vu
                 .set_protocol_features(acked_protocol_features)
                 .map_err(Error::VhostUserSetProtocolFeatures)?;
@@ -361,6 +460,8 @@ impl VhostUserHandle {
             }
         } else if acked_protocol_features != 0 {
             return Err(Error::InconsistentProtocolFeatures(acked_protocol_features));
+        } else if postcopy {
+            return Err(Error::VhostUserPageFaultUnsupported);
         }
 
         self.update_supported_protocol_features(acked_protocol_features);
@@ -379,7 +480,7 @@ impl VhostUserHandle {
         backend_req_handler: &Option<FrontendReqHandler<S>>,
         inflight: Option<&mut Inflight>,
     ) -> Result<()> {
-        self.set_protocol_features_vhost_user(acked_features, acked_protocol_features)?;
+        self.set_protocol_features_vhost_user(acked_features, acked_protocol_features, false)?;
 
         // With in-order processing, used_idx is a contiguous completion boundary.
         // Replay descriptors after it when inflight tracking is not available to
@@ -445,6 +546,7 @@ impl VhostUserHandle {
                 vrings_info: None,
                 queue_indexes: Vec::new(),
                 vring_bases: None,
+                postcopy_ctx: None,
             };
             vhost_user
                 .vu
@@ -504,6 +606,7 @@ impl VhostUserHandle {
                         vrings_info: None,
                         queue_indexes: Vec::new(),
                         vring_bases: None,
+                        postcopy_ctx: None,
                     })
                     .map_err(Error::VhostUserConnect);
 

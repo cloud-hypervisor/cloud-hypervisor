@@ -131,10 +131,10 @@ Current constraints for `memory_restore_mode=ondemand`:
 - `prefault=on` is not supported
 - the snapshot memory ranges must be page-aligned
 - the process must be able to create a `userfaultfd` object
+- every vhost-user backend must support the `PAGEFAULT` protocol feature
 - VFIO devices are not supported
 - vDPA devices are not supported
 - vfio-user devices are not supported
-- vhost-user devices are not supported
 
 Cloud Hypervisor first tries to open `/dev/userfaultfd`, which is governed by
 file permissions, and falls back to the `userfaultfd(2)` syscall, which is

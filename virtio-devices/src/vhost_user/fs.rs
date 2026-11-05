@@ -22,7 +22,7 @@ use super::vu_common_ctrl::VhostUserHandle;
 use super::{DEFAULT_VIRTIO_FEATURES, Error, Result};
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
-use crate::vhost_user::{VhostUserCommon, VhostUserState};
+use crate::vhost_user::{PostcopyHandler, VhostUserCommon, VhostUserState};
 use crate::{
     ActivateResult, GuestRegionMmap, MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon,
     VirtioDevice, VirtioDeviceType, VirtioSharedMemoryList,
@@ -83,6 +83,7 @@ impl Fs {
         exit_evt: EventFd,
         access_platform_enabled: bool,
         state: Option<State>,
+        postcopy_handler: Option<Arc<dyn PostcopyHandler>>,
     ) -> Result<Fs> {
         // Calculate the actual number of queues needed.
         let num_queues = req_num_queues
@@ -109,6 +110,7 @@ impl Fs {
             vu.set_protocol_features_vhost_user(
                 state.acked_features,
                 state.acked_protocol_features,
+                postcopy_handler.is_some(),
             )?;
 
             vu.restore_state(&state)?;
@@ -133,8 +135,11 @@ impl Fs {
                 | VhostUserProtocolFeatures::LOG_SHMFD
                 | VhostUserProtocolFeatures::DEVICE_STATE;
 
-            let (acked_features, acked_protocol_features) =
-                vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
+            let (acked_features, acked_protocol_features) = vu.negotiate_features_vhost_user(
+                avail_features,
+                avail_protocol_features,
+                postcopy_handler.is_some(),
+            )?;
 
             let backend_num_queues =
                 if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
@@ -182,6 +187,10 @@ impl Fs {
                 None,
             )
         };
+
+        if let Some(postcopy_handler) = postcopy_handler {
+            vu.start_postcopy(id.clone(), postcopy_handler)?;
+        }
 
         Ok(Fs {
             vu_common: VhostUserCommon {
