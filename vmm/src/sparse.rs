@@ -9,10 +9,13 @@
 //! the destination, with a dense fallback when the source filesystem does
 //! not support sparse-seek.
 
+use std::ffi::CString;
 use std::fs::File;
 use std::io;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::FileExt;
+use std::path::Path;
 
 /// Find the next populated (data) extent in `[cursor, end)` of `fd`,
 /// driven by `lseek(SEEK_DATA)` / `lseek(SEEK_HOLE)`. Returns
@@ -162,6 +165,28 @@ pub fn clone_file_range(src: &File, dst: &File, len: u64) -> io::Result<()> {
     // SAFETY: both fds are valid for the borrows and `range` outlives the
     // call; FICLONERANGE only reads them.
     let ret = unsafe { libc::ioctl(dst.as_raw_fd(), libc::FICLONERANGE as _, &range) };
+    if ret < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// Makes `dst` a new hard link to the open file `src`. Fails if `dst`
+/// exists or is on another filesystem.
+pub fn link_file(src: &File, dst: &Path) -> io::Result<()> {
+    let src_path = CString::new(format!("/proc/self/fd/{}", src.as_raw_fd()))?;
+    let dst_path = CString::new(dst.as_os_str().as_bytes())?;
+    // SAFETY: both paths are valid NUL-terminated strings that outlive the
+    // call, and linkat does not keep them.
+    let ret = unsafe {
+        libc::linkat(
+            libc::AT_FDCWD,
+            src_path.as_ptr(),
+            libc::AT_FDCWD,
+            dst_path.as_ptr(),
+            libc::AT_SYMLINK_FOLLOW,
+        )
+    };
     if ret < 0 {
         return Err(io::Error::last_os_error());
     }
