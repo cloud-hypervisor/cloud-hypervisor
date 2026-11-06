@@ -272,20 +272,17 @@ where
                         // On a successful data read, we fill in the packet with the RW op, and
                         // length of the read data.
                         pkt.set_op(uapi::VSOCK_OP_RW).set_len(read_cnt as u32);
+                        // A full buffer means the stream likely has more, so stay due for RX.
+                        if read_cnt == buf_capacity && self.peer_avail_credit() > read_cnt {
+                            self.pending_rx.insert(PendingRx::Rw);
+                        }
                     }
                     self.rx_cnt += Wrapping(pkt.len());
                     self.last_fwd_cnt_to_peer = self.fwd_cnt;
                     return Ok(());
                 }
-                Err(err) if err.kind() == ErrorKind::WouldBlock => {
-                    // This shouldn't actually happen (receiving EWOULDBLOCK after EPOLLIN), but
-                    // apparently it does, so we need to handle it gracefully.
-                    warn!(
-                        "vsock: unexpected EWOULDBLOCK while reading from backing stream: \
-                         lp={}, pp={}, err={:?}",
-                        self.local_port, self.peer_port, err
-                    );
-                }
+                // A batched read ends here once the stream is drained.
+                Err(err) if err.kind() == ErrorKind::WouldBlock => {}
                 Err(err) => {
                     // We are not expecting any other errors when reading from the underlying
                     // stream. If any show up, we'll immediately kill this connection.
@@ -447,6 +444,13 @@ where
                     pkt.hdr()
                 );
             }
+        }
+
+        if pkt.op() == uapi::VSOCK_OP_SHUTDOWN
+            && matches!(self.state, ConnState::PeerClosed(true, _))
+            && !self.host_hung_up
+        {
+            self.pending_rx.remove(PendingRx::Rw);
         }
 
         Ok(())
@@ -1110,6 +1114,83 @@ mod tests {
         ctx.notify_epollin();
         ctx.recv();
         assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RST);
+    }
+
+    #[test]
+    fn test_peer_recv_shutdown_drops_stale_rx() {
+        let mut ctx = CsmTestContext::new_established();
+        let cap = ctx.pkt.buf_capacity().unwrap();
+        let mut stream = TestStream::new_with_read_buf(&vec![7u8; cap]);
+        stream.write_state = StreamState::WouldBlock;
+        ctx.set_stream(stream);
+        ctx.notify_epollin();
+        ctx.recv();
+        assert!(ctx.conn.has_pending_rx());
+
+        ctx.init_data_pkt(&[1, 2, 3, 4]);
+        ctx.send();
+        ctx.init_pkt(uapi::VSOCK_OP_SHUTDOWN, 0)
+            .set_flags(uapi::VSOCK_FLAGS_SHUTDOWN_RCV | uapi::VSOCK_FLAGS_SHUTDOWN_SEND);
+        ctx.send();
+        assert_eq!(ctx.conn.state, ConnState::PeerClosed(true, true));
+        match ctx.conn.recv_pkt(&mut ctx.pkt) {
+            Err(VsockError::NoData) => (),
+            other => panic!("{other:?}"),
+        }
+
+        ctx.conn.stream.write_state = StreamState::Ready;
+        ctx.notify_epollout();
+        assert_eq!(ctx.conn.stream.write_buf.as_slice(), &[1, 2, 3, 4]);
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RST);
+    }
+
+    #[test]
+    fn test_peer_recv_shutdown_keeps_host_hangup() {
+        let mut ctx = CsmTestContext::new_established();
+        ctx.set_stream(TestStream::new());
+        ctx.notify_epollin_hup();
+        ctx.init_pkt(uapi::VSOCK_OP_SHUTDOWN, 0)
+            .set_flags(uapi::VSOCK_FLAGS_SHUTDOWN_RCV);
+        ctx.send();
+        assert_eq!(ctx.conn.state, ConnState::PeerClosed(true, false));
+        assert!(ctx.conn.has_pending_rx());
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RST);
+    }
+
+    #[test]
+    fn test_rx_data_full_buffer_stays_pending() {
+        let mut ctx = CsmTestContext::new_established();
+        let cap = ctx.pkt.buf_capacity().unwrap();
+        let data: Vec<u8> = (0..cap * 2 + 7).map(|i| i as u8).collect();
+        ctx.set_stream(TestStream::new_with_read_buf(&data));
+        ctx.notify_epollin();
+
+        for chunk in data.chunks(cap) {
+            ctx.recv();
+            assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RW);
+            assert_eq!(ctx.pkt_data().as_slice(), chunk);
+        }
+        assert!(!ctx.conn.has_pending_rx());
+
+        ctx.set_stream(TestStream::new_with_read_buf(&data[..cap]));
+        ctx.notify_epollin();
+        ctx.recv();
+        assert!(ctx.conn.has_pending_rx());
+        match ctx.conn.recv_pkt(&mut ctx.pkt) {
+            Err(VsockError::NoData) => (),
+            other => panic!("{other:?}"),
+        }
+        assert!(!ctx.conn.has_pending_rx());
+        assert_eq!(ctx.conn.state, ConnState::Established);
+
+        ctx.set_stream(TestStream::new_with_read_buf(&data));
+        ctx.set_peer_credit(cap as u32);
+        ctx.notify_epollin();
+        ctx.recv();
+        assert_eq!(ctx.pkt.len() as usize, cap);
+        assert!(!ctx.conn.has_pending_rx());
     }
 
     #[test]

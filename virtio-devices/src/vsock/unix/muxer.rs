@@ -149,11 +149,13 @@ impl VsockChannel for VsockMuxer {
         // queue is empty, that doesn't necessarily mean we don't have any pending RX, since
         // the queue might be out-of-sync. If that's the case, we'll attempt to sync it first,
         // and then try to pop something out again.
-        if self.rxq.is_empty() && !self.rxq.is_synced() {
-            self.rxq = MuxerRxQ::from_conn_map(&self.conn_map);
-        }
-
-        while let Some(rx) = self.rxq.peek() {
+        loop {
+            if self.rxq.is_empty() && !self.rxq.is_synced() {
+                self.rxq = MuxerRxQ::from_conn_map(&self.conn_map, self.rxq.next_start());
+            }
+            let Some(rx) = self.rxq.peek() else {
+                return Err(VsockError::NoData);
+            };
             let res = match rx {
                 // We need to build an RST packet, going from `local_port` to `peer_port`.
                 MuxerRx::RstPkt {
@@ -178,13 +180,15 @@ impl VsockChannel for VsockMuxer {
                 // to say.
                 MuxerRx::ConnRx(key) => {
                     let mut conn_res = Err(VsockError::NoData);
-                    let mut do_pop = true;
+                    let mut requeue = false;
                     self.apply_conn_mutation(key, |conn| {
                         conn_res = conn.recv_pkt(pkt);
-                        do_pop = !conn.has_pending_rx();
+                        requeue = conn.has_pending_rx();
                     });
-                    if do_pop {
-                        self.rxq.pop().unwrap();
+                    self.rxq.pop().unwrap();
+                    // A connection that stays due goes to the back, so a batch serves all of them.
+                    if requeue {
+                        self.rxq.push(MuxerRx::ConnRx(key));
                     }
                     conn_res
                 }
@@ -205,8 +209,6 @@ impl VsockChannel for VsockMuxer {
                 return Ok(());
             }
         }
-
-        Err(VsockError::NoData)
     }
 
     /// Deliver a guest-generated packet to its destination in the vsock backend.
@@ -303,9 +305,9 @@ impl VsockEpollListener for VsockMuxer {
     fn notify(&mut self, _: epoll::Events) {
         debug!("vsock: muxer received kick");
 
-        let mut epoll_events = vec![epoll::Event::new(epoll::Events::empty(), 0); 32];
+        let mut epoll_events = [epoll::Event::new(epoll::Events::empty(), 0); 32];
         'epoll: loop {
-            match epoll::wait(self.epoll_file.as_raw_fd(), 0, epoll_events.as_mut_slice()) {
+            match epoll::wait(self.epoll_file.as_raw_fd(), 0, &mut epoll_events) {
                 Ok(ev_cnt) => {
                     for evt in epoll_events.iter().take(ev_cnt) {
                         self.handle_event(
@@ -1277,6 +1279,94 @@ mod tests {
         assert_eq!(ctx.pkt.src_port(), local_port);
         assert_eq!(ctx.pkt.dst_port(), peer_port);
         assert_eq!(ctx.pkt_data().as_slice(), data);
+    }
+
+    #[test]
+    fn test_rx_batch_rotates_connections() {
+        let mut ctx = MuxerTestContext::new("rx_batch_rotates");
+        let cap = ctx.pkt.buf_capacity().unwrap();
+        let (mut first, _) = ctx.local_connect(1025);
+        let (mut second, _) = ctx.local_connect(1026);
+        first.write_all(&vec![1u8; cap * 2]).unwrap();
+        second.write_all(&vec![2u8; cap * 2]).unwrap();
+        ctx.notify_muxer();
+
+        for (port, byte) in [(1025, 1u8), (1026, 2u8), (1025, 1u8), (1026, 2u8)] {
+            ctx.recv();
+            assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RW);
+            assert_eq!(ctx.pkt.dst_port(), port);
+            assert_eq!(ctx.pkt_data(), vec![byte; cap]);
+        }
+        assert!(ctx.muxer.recv_pkt(&mut ctx.pkt).is_err());
+    }
+
+    #[test]
+    fn test_rxq_rebuild_rotates_past_served_connections() {
+        let size = defs::MUXER_RXQ_SIZE;
+        let mut conn_map = HashMap::new();
+        for port in 0..=size as u32 {
+            let (stream, _peer) = UnixStream::pair().unwrap();
+            let conn = MuxerConnection::new_peer_init(
+                stream,
+                uapi::VSOCK_HOST_CID,
+                PEER_CID.into(),
+                port,
+                port,
+                PEER_BUF_ALLOC,
+            );
+            assert!(conn.has_pending_rx());
+            let key = ConnMapKey {
+                local_port: port,
+                peer_port: port,
+            };
+            conn_map.insert(key, conn);
+        }
+
+        let keys = |mut rxq: MuxerRxQ| {
+            let mut keys = Vec::new();
+            while let Some(rx) = rxq.pop() {
+                if let MuxerRx::ConnRx(key) = rx {
+                    keys.push(key);
+                }
+            }
+            keys
+        };
+        let first = MuxerRxQ::from_conn_map(&conn_map, 0);
+        assert_eq!(first.len(), size);
+        assert!(!first.is_synced());
+        let next = first.next_start();
+        let served = keys(first);
+        let skipped = conn_map
+            .keys()
+            .find(|k| !served.contains(k))
+            .copied()
+            .unwrap();
+
+        let second = MuxerRxQ::from_conn_map(&conn_map, next);
+        assert!(keys(second).contains(&skipped));
+    }
+
+    #[test]
+    fn test_rxq_rebuilds_after_draining_stale_entries() {
+        let mut ctx = MuxerTestContext::new("rxq_stale_rebuild");
+        let local_port = 1026;
+        let peer_port = 1025;
+        let _listener = ctx.create_local_listener(local_port);
+        ctx.init_pkt(local_port, peer_port, uapi::VSOCK_OP_REQUEST);
+        ctx.send();
+        assert!(ctx.muxer.rxq.pop().is_some());
+
+        for port in 0..=defs::MUXER_RXQ_SIZE as u32 {
+            ctx.muxer.rxq.push(MuxerRx::ConnRx(ConnMapKey {
+                local_port: 5000 + port,
+                peer_port: 5000 + port,
+            }));
+        }
+        assert!(!ctx.muxer.rxq.is_synced());
+
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RESPONSE);
+        assert_eq!(ctx.pkt.dst_port(), peer_port);
     }
 
     #[test]

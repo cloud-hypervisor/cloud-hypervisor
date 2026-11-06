@@ -362,6 +362,7 @@ pub mod tests {
                     interrupt_cb,
                     backend: Arc::new(RwLock::new(TestBackend::new())),
                     access_platform: None,
+                    backend_parked: false,
                 },
             }
         }

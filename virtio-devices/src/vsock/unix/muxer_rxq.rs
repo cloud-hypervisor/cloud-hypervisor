@@ -28,6 +28,8 @@ pub(super) struct MuxerRxQ {
     q: VecDeque<MuxerRx>,
     /// The RX queue sync status.
     synced: bool,
+    /// Where in the connection pool the next rebuild starts.
+    next_start: usize,
 }
 
 impl MuxerRxQ {
@@ -38,6 +40,7 @@ impl MuxerRxQ {
         Self {
             q: VecDeque::with_capacity(Self::SIZE),
             synced: true,
+            next_start: 0,
         }
     }
 
@@ -45,21 +48,36 @@ impl MuxerRxQ {
     /// Note: the resulting queue may still be desynchronized, if there are too many connections
     ///       that have pending RX data. In that case, the muxer will first drain this queue, and
     ///       then try again to build a synchronized one.
-    pub(super) fn from_conn_map(conn_map: &HashMap<ConnMapKey, MuxerConnection>) -> Self {
+    pub(super) fn from_conn_map(
+        conn_map: &HashMap<ConnMapKey, MuxerConnection>,
+        start: usize,
+    ) -> Self {
         let mut q = VecDeque::new();
         let mut synced = true;
+        let len = conn_map.len();
+        let start = if len == 0 { 0 } else { start % len };
+        let mut visited = 0;
 
-        for (key, conn) in conn_map.iter() {
-            if !conn.has_pending_rx() {
-                continue;
+        for (key, conn) in conn_map.iter().cycle().skip(start).take(len) {
+            if conn.has_pending_rx() {
+                if q.len() >= Self::SIZE {
+                    synced = false;
+                    break;
+                }
+                q.push_back(MuxerRx::ConnRx(*key));
             }
-            if q.len() >= Self::SIZE {
-                synced = false;
-                break;
-            }
-            q.push_back(MuxerRx::ConnRx(*key));
+            visited += 1;
         }
-        Self { q, synced }
+        Self {
+            q,
+            synced,
+            next_start: start + visited,
+        }
+    }
+
+    /// Where the next rebuild starts, so a pool with more pending connections than slots rotates.
+    pub(super) fn next_start(&self) -> usize {
+        self.next_start
     }
 
     /// Push a new RX item to the queue.

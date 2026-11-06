@@ -99,6 +99,7 @@ pub(crate) struct VsockEpollHandler<B: VsockBackend> {
     pub interrupt_cb: Arc<dyn VirtioInterrupt>,
     pub backend: Arc<RwLock<B>>,
     pub access_platform: Option<Arc<dyn AccessPlatform>>,
+    pub backend_parked: bool,
 }
 
 impl<B> VsockEpollHandler<B>
@@ -119,8 +120,8 @@ where
     }
 
     /// Walk the driver-provided RX queue buffers and attempt to fill them up with any data that we
-    /// have pending.
-    fn process_rx(&mut self) -> result::Result<bool, Error> {
+    /// have pending. Returns whether a buffer was used, and whether data is left without a buffer.
+    fn process_rx(&mut self) -> result::Result<(bool, bool), Error> {
         debug!("vsock: epoll_handler::process_rx()");
 
         let mut used_descs = false;
@@ -146,7 +147,7 @@ where
                         // We are using a consuming iterator over the virtio buffers, so, if we can't
                         // fill in this buffer, we'll need to undo the last iterator step.
                         self.queues[0].go_to_previous_position();
-                        break;
+                        return Ok((used_descs, false));
                     }
                 }
                 Err(e) => {
@@ -161,7 +162,35 @@ where
             used_descs = true;
         }
 
-        Ok(used_descs)
+        Ok((used_descs, self.backend.read().unwrap().has_pending_rx()))
+    }
+
+    /// Fill RX buffers and stop polling the backend while it has data but no RX buffer is left.
+    fn rx_and_park(&mut self, helper: &mut EpollHelper) -> result::Result<(), EpollHelperError> {
+        if !self.backend_parked && !self.backend.read().unwrap().has_pending_rx() {
+            return Ok(());
+        }
+        let (used, starved) = self.process_rx().map_err(|e| {
+            EpollHelperError::HandleEvent(anyhow!("Failed to process RX queue: {e:?}"))
+        })?;
+        if used {
+            self.signal_used_queue(0).map_err(|e| {
+                EpollHelperError::HandleEvent(anyhow!("Failed to signal used RX queue: {e:?}"))
+            })?;
+        }
+        if starved != self.backend_parked {
+            let evset = if starved {
+                epoll::Events::empty()
+            } else {
+                epoll::Events::EPOLLIN
+            };
+            let fd = self.backend.read().unwrap().get_polled_fd();
+            match helper.mod_event_custom(fd, BACKEND_EVENT, evset) {
+                Ok(()) => self.backend_parked = starved,
+                Err(e) => warn!("vsock: failed to update backend polling: {e:?}"),
+            }
+        }
+        Ok(())
     }
 
     /// Walk the driver-provided TX queue buffers, package them up as vsock packets, and send them to
@@ -223,7 +252,7 @@ where
 {
     fn handle_event(
         &mut self,
-        _helper: &mut EpollHelper,
+        helper: &mut EpollHelper,
         event: &epoll::Event,
     ) -> result::Result<(), EpollHelperError> {
         let evset = match epoll::Events::from_bits(event.events) {
@@ -242,24 +271,19 @@ where
                 self.queue_evts[0].read().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!("Failed to get RX queue event: {e:?}"))
                 })?;
-                if self.backend.read().unwrap().has_pending_rx() {
-                    let needs_notification = self.process_rx().map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!("Failed to process RX queue: {e:?}"))
-                    })?;
-                    if needs_notification {
-                        self.signal_used_queue(0).map_err(|e| {
-                            EpollHelperError::HandleEvent(anyhow!(
-                                "Failed to signal used RX queue: {e:?}"
-                            ))
-                        })?;
-                    }
+                if self.backend_parked {
+                    self.backend.write().unwrap().notify(epoll::Events::EPOLLIN);
                 }
+                self.rx_and_park(helper)?;
             }
             TX_QUEUE_EVENT => {
                 debug!("vsock: TX queue event");
                 self.queue_evts[1].read().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!("Failed to get TX queue event: {e:?}"))
                 })?;
+                if self.backend_parked {
+                    self.backend.write().unwrap().notify(epoll::Events::EPOLLIN);
+                }
 
                 let needs_notification = self.process_tx().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!("Failed to process TX queue: {e:?}"))
@@ -275,18 +299,7 @@ where
                 // The backend may have queued up responses to the packets we sent during TX queue
                 // processing. If that happened, we need to fetch those responses and place them
                 // into RX buffers.
-                if self.backend.read().unwrap().has_pending_rx() {
-                    let needs_notification = self.process_rx().map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!("Failed to process RX queue: {e:?}"))
-                    })?;
-                    if needs_notification {
-                        self.signal_used_queue(0).map_err(|e| {
-                            EpollHelperError::HandleEvent(anyhow!(
-                                "Failed to signal used RX queue: {e:?}"
-                            ))
-                        })?;
-                    }
-                }
+                self.rx_and_park(helper)?;
             }
             EVT_QUEUE_EVENT => {
                 debug!("vsock: EVT queue event");
@@ -312,18 +325,7 @@ where
                         ))
                     })?;
                 }
-                if self.backend.read().unwrap().has_pending_rx() {
-                    let needs_notification = self.process_rx().map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!("Failed to process RX queue: {e:?}"))
-                    })?;
-                    if needs_notification {
-                        self.signal_used_queue(0).map_err(|e| {
-                            EpollHelperError::HandleEvent(anyhow!(
-                                "Failed to signal used RX queue: {e:?}"
-                            ))
-                        })?;
-                    }
-                }
+                self.rx_and_park(helper)?;
             }
             _ => {
                 return Err(EpollHelperError::HandleEvent(anyhow!(
@@ -484,6 +486,7 @@ where
             interrupt_cb: Arc::clone(&interrupt_cb),
             backend: Arc::clone(&self.backend),
             access_platform: self.common.access_platform(),
+            backend_parked: false,
         };
 
         let paused = Arc::clone(&self.common.paused);
@@ -895,6 +898,42 @@ mod tests {
             // The RX queue should've been left untouched.
             assert_eq!(ctx.guest_rxvq.used.idx.get(), 0);
         }
+    }
+
+    #[test]
+    fn test_backend_parked_without_rx_buffers() {
+        let test_ctx = TestContext::new();
+        let mut ctx = test_ctx.create_epoll_handler_context();
+        let mut helper = EpollHelper::new(&ctx.handler.kill_evt, &ctx.handler.pause_evt).unwrap();
+        let fd = ctx.handler.backend.read().unwrap().get_polled_fd();
+        helper.add_event(fd, BACKEND_EVENT).unwrap();
+
+        ctx.handler.backend.write().unwrap().set_pending_rx(true);
+        let event = epoll::Event::new(epoll::Events::EPOLLIN, BACKEND_EVENT as u64);
+        ctx.handler.handle_event(&mut helper, &event).unwrap();
+        assert_eq!(ctx.guest_rxvq.used.idx.get(), 1);
+        assert!(ctx.handler.backend_parked);
+
+        ctx.handler.backend.write().unwrap().evset = None;
+        ctx.handler.queue_evts[1].write(1).unwrap();
+        let event = epoll::Event::new(epoll::Events::EPOLLIN, TX_QUEUE_EVENT as u64);
+        ctx.handler.handle_event(&mut helper, &event).unwrap();
+        assert_eq!(
+            ctx.handler.backend.read().unwrap().evset,
+            Some(epoll::Events::EPOLLIN)
+        );
+        assert!(ctx.handler.backend_parked);
+
+        ctx.handler.backend.write().unwrap().evset = None;
+        ctx.handler.backend.write().unwrap().set_pending_rx(false);
+        ctx.handler.queue_evts[0].write(1).unwrap();
+        let event = epoll::Event::new(epoll::Events::EPOLLIN, RX_QUEUE_EVENT as u64);
+        ctx.handler.handle_event(&mut helper, &event).unwrap();
+        assert_eq!(
+            ctx.handler.backend.read().unwrap().evset,
+            Some(epoll::Events::EPOLLIN)
+        );
+        assert!(!ctx.handler.backend_parked);
     }
 
     #[test]
