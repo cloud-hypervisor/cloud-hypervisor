@@ -4,7 +4,6 @@
 //
 
 use std::any::Any;
-use std::os::fd::AsFd;
 use std::os::unix::prelude::AsRawFd;
 use std::sync::{Arc, Barrier, Mutex};
 use std::{io, result};
@@ -15,9 +14,7 @@ use thiserror::Error;
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::VfioIrq;
 use vfio_user::{Client, Error as VfioUserError};
-use vm_allocator::{
-    AddressAllocator, AlignedMapping, GuestRegion, MemorySlotAllocator, SystemAllocator,
-};
+use vm_allocator::{AddressAllocator, GuestRegion, MemorySlotAllocator, SystemAllocator};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig};
 use vm_device::{BusDevice, Resource};
@@ -191,25 +188,28 @@ impl VfioUserPciDevice {
                         });
                     }
 
+                    let offset = file_offset.start().checked_add(s.offset).ok_or_else(|| {
+                        VfioUserPciDeviceError::Other(io::Error::other("File offset overflows"))
+                    })?;
                     let size = usize::try_from(s.size)
                         .map_err(|e| VfioUserPciDeviceError::Other(io::Error::other(e)))?;
-                    let mapping = match AlignedMapping::mmap(
-                        s.size,
+                    let mapping = GuestRegion::from_file(
+                        vm_memory::FileOffset::new(
+                            file_offset
+                                .file()
+                                .try_clone()
+                                .map_err(VfioUserPciDeviceError::Other)?,
+                            offset,
+                        ),
+                        size,
                         find_alignment(size),
+                        GuestAddress(mmio_region.start.0 + s.offset),
                         prot,
-                        file_offset.file().as_fd(),
-                        file_offset.start(),
-                        s.offset,
-                    ) {
-                        Ok(mapping) => Arc::new(mapping),
-                        Err(e) => {
-                            error!(
-                                "Could not mmap sparse area (offset = 0x{:x}, size = 0x{:x}): {}",
-                                s.offset, s.size, e
-                            );
-                            return Err(VfioUserPciDeviceError::Other(e));
-                        }
-                    };
+                        Arc::clone(&self.vm),
+                        Arc::clone(&self.memory_slot_allocator),
+                    )
+                    .map_err(|e| VfioUserPciDeviceError::Other(io::Error::other(e)))?;
+                    let mapping = Arc::new(Mutex::new(mapping));
 
                     let user_memory_region = UserMemoryRegion {
                         slot: self.memory_slot_allocator.next_memory_slot(),
@@ -226,8 +226,8 @@ impl VfioUserPciDevice {
                         self.vm.create_user_memory_region(
                             user_memory_region.slot,
                             user_memory_region.start,
-                            user_memory_region.mapping.len(),
-                            user_memory_region.mapping.addr(),
+                            user_memory_region.size(),
+                            user_memory_region.host_address(),
                             false,
                             false,
                             hypervisor::MemoryVisibility::Shared,
@@ -252,8 +252,8 @@ impl VfioUserPciDevice {
                     self.vm.remove_user_memory_region(
                         user_memory_region.slot,
                         user_memory_region.start,
-                        user_memory_region.mapping.len(),
-                        user_memory_region.mapping.addr(),
+                        user_memory_region.size(),
+                        user_memory_region.host_address(),
                         false,
                     )
                 } {
@@ -470,8 +470,8 @@ impl PciDevice for VfioUserPciDevice {
                         self.vm.remove_user_memory_region(
                             user_memory_region.slot,
                             user_memory_region.start,
-                            user_memory_region.mapping.len(),
-                            user_memory_region.mapping.addr(),
+                            user_memory_region.size(),
+                            user_memory_region.host_address(),
                             false,
                         )
                     }
@@ -490,8 +490,8 @@ impl PciDevice for VfioUserPciDevice {
                         self.vm.create_user_memory_region(
                             user_memory_region.slot,
                             user_memory_region.start,
-                            user_memory_region.mapping.len(),
-                            user_memory_region.mapping.addr(),
+                            user_memory_region.size(),
+                            user_memory_region.host_address(),
                             false,
                             false,
                             hypervisor::MemoryVisibility::Shared,
