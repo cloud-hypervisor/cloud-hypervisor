@@ -172,7 +172,11 @@ pub(super) fn set_dist_regs(gic: &DeviceFd, state: &[u32]) -> Result<()> {
         let end = compute_reg_len(gic, dreg, base)?;
 
         while base < end {
-            dist_attr_set(gic, base, state[idx])?;
+            let value = match dreg.base {
+                GICD_ICENABLER | GICD_ICACTIVER => !state[idx],
+                _ => state[idx],
+            };
+            dist_attr_set(gic, base, value)?;
             idx += 1;
             base += REG_SIZE as u32;
         }
