@@ -508,11 +508,10 @@ impl VhostUserCommon {
                 None
             };
 
-        if self.vu.is_none() {
+        let Some(vu) = self.vu.as_ref() else {
             error!("Missing vhost-user handle for socket {}", self.socket_path);
             return Err(ActivateError::BadActivate);
-        }
-        let vu = self.vu.as_ref().unwrap();
+        };
         let queues = queues
             .iter()
             .map(|(i, q, e)| (*i, vm_virtio::clone_queue(q), e.try_clone().unwrap()))
