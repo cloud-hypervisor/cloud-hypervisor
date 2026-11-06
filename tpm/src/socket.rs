@@ -124,12 +124,11 @@ impl SocketDev {
     }
 
     pub fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-        if self.stream.is_none() {
+        let Some(mut socket) = self.stream.as_ref() else {
             return Err(Error::ReadFromSocket(anyhow!(
                 "Stream for tpm socket was not initialized"
             )));
-        }
-        let mut socket = self.stream.as_ref().unwrap();
+        };
         let size: usize = socket.read(buf).map_err(|e| {
             Error::ReadFromSocket(anyhow!("Failed to read from socket. Error Code {e:?}"))
         })?;
@@ -143,11 +142,11 @@ impl SocketDev {
     /// return the full response in one shot. This helper loops until the
     /// expected number of bytes have been collected (or an error is hit).
     pub fn read_exact(&mut self, buf: &mut [u8], expected: usize) -> Result<usize> {
-        if self.stream.is_none() {
+        let Some(mut socket) = self.stream.as_ref() else {
             return Err(Error::ReadFromSocket(anyhow!(
                 "Stream for tpm socket was not initialized"
             )));
-        }
+        };
         if expected > buf.len() {
             return Err(Error::ReadFromSocket(anyhow!(
                 "Buffer too small: have {} bytes, need {}",
@@ -155,7 +154,6 @@ impl SocketDev {
                 expected
             )));
         }
-        let mut socket = self.stream.as_ref().unwrap();
         let mut total = 0usize;
         while total < expected {
             match socket.read(&mut buf[total..expected]) {
