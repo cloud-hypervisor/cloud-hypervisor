@@ -493,13 +493,17 @@ impl Pausable for VirtioCommon {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
+    use std::os::fd::AsRawFd;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Mutex, mpsc};
+    use std::time::Duration;
 
     use virtio_queue::QueueT;
     use vmm_sys_util::eventfd::EFD_NONBLOCK;
 
     use super::*;
+    use crate::epoll_helper::EPOLL_HELPER_EVENT_PAUSE;
+    use crate::{EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperHandler};
 
     #[derive(Default)]
     struct RecordingInterrupt {
@@ -536,6 +540,155 @@ mod tests {
             _: &dyn hypervisor::Vm,
         ) -> io::Result<()> {
             Ok(())
+        }
+    }
+
+    struct QueueEventHandler {
+        queue_evt: EventFd,
+        entered: mpsc::Sender<()>,
+        ready: mpsc::Receiver<()>,
+        processed: mpsc::Sender<u64>,
+    }
+
+    impl QueueEventHandler {
+        fn run(
+            &mut self,
+            kill_evt: &EventFd,
+            pause_evt: &EventFd,
+            pause_common: &PauseCommon,
+        ) -> Result<(), EpollHelperError> {
+            self.entered.send(()).unwrap();
+            self.ready.recv().unwrap();
+            let mut helper = EpollHelper::new(kill_evt, pause_evt)?;
+            helper.add_event(self.queue_evt.as_raw_fd(), EPOLL_HELPER_EVENT_LAST + 1)?;
+            helper.run(pause_common, self)
+        }
+    }
+
+    impl EpollHelperHandler for QueueEventHandler {
+        fn handle_event(
+            &mut self,
+            _: &mut EpollHelper,
+            _: &epoll::Event,
+        ) -> Result<(), EpollHelperError> {
+            self.processed.send(self.queue_evt.read().unwrap()).unwrap();
+            Ok(())
+        }
+    }
+
+    struct PauseTestDevice {
+        exit_evt: EventFd,
+        status: Arc<AtomicU8>,
+        entering: mpsc::Receiver<()>,
+        requests: mpsc::Receiver<u64>,
+        releases: Vec<mpsc::Sender<()>>,
+        queue_evts: Vec<EventFd>,
+        common: VirtioCommon,
+    }
+
+    impl PauseTestDevice {
+        const TIMEOUT: Duration = Duration::from_secs(5);
+
+        fn new() -> Self {
+            let exit_evt = EventFd::new(EFD_NONBLOCK).unwrap();
+            let status = Arc::new(AtomicU8::new(0));
+            let mut common = VirtioCommon {
+                device_type: VirtioDeviceType::Block as u32,
+                pause_common: Arc::new(PauseCommon::new(true)),
+                ..Default::default()
+            };
+            common.activate(&[], Arc::new(NoopInterrupt)).unwrap();
+            let (entered, entering) = mpsc::channel();
+            let (processed, requests) = mpsc::channel();
+            let mut releases = Vec::new();
+            let mut queue_evts = Vec::new();
+
+            for index in 0..2 {
+                let queue_evt = EventFd::new(EFD_NONBLOCK).unwrap();
+                queue_evts.push(queue_evt.try_clone().unwrap());
+                let (release, ready) = mpsc::channel();
+                releases.push(release);
+                let mut handler = QueueEventHandler {
+                    queue_evt,
+                    entered: entered.clone(),
+                    ready,
+                    processed: processed.clone(),
+                };
+                let (kill_evt, pause_evt) = common.dup_eventfds().unwrap();
+                common
+                    .spawn_worker(
+                        &format!("pause_test_{index}"),
+                        &SeccompAction::Allow,
+                        Thread::VirtioBlock,
+                        &exit_evt,
+                        Arc::clone(&status),
+                        Arc::new(NoopInterrupt),
+                        move |pause_common| handler.run(&kill_evt, &pause_evt, pause_common),
+                    )
+                    .unwrap();
+            }
+
+            Self {
+                exit_evt,
+                status,
+                entering,
+                requests,
+                releases,
+                queue_evts,
+                common,
+            }
+        }
+
+        fn pause_during_startup(mut self) -> Self {
+            self.common.resume().unwrap();
+            for _ in &self.queue_evts {
+                self.entering
+                    .recv_timeout(Self::TIMEOUT)
+                    .expect("Thread did not enter handler startup");
+            }
+            let pause_common = Arc::clone(&self.common.pause_common);
+            let pause_monitor =
+                EpollHelper::new(&self.exit_evt, self.common.pause_evt.as_ref().unwrap()).unwrap();
+            let (paused, completed) = mpsc::channel();
+            let pausing = thread::spawn(move || {
+                self.common.pause().unwrap();
+                paused.send(self.common).unwrap();
+            });
+            let mut events = [epoll::Event::new(epoll::Events::empty(), 0)];
+            assert_eq!(
+                epoll::wait(
+                    pause_monitor.as_raw_fd(),
+                    Self::TIMEOUT.as_millis() as i32,
+                    &mut events,
+                )
+                .unwrap(),
+                1
+            );
+            let event_id = events[0].data;
+            assert_eq!(event_id, u64::from(EPOLL_HELPER_EVENT_PAUSE));
+            assert!(pause_common.pause_requested());
+            for release in self.releases.drain(..) {
+                release.send(()).unwrap();
+            }
+            self.common = completed
+                .recv_timeout(Self::TIMEOUT)
+                .expect("Late threads did not acknowledge pause");
+            pausing.join().unwrap();
+            self
+        }
+
+        fn resume_and_pause(mut self) -> Self {
+            let (paused, completed) = mpsc::channel();
+            let pausing = thread::spawn(move || {
+                self.common.resume().unwrap();
+                self.common.pause().unwrap();
+                paused.send(self.common).unwrap();
+            });
+            self.common = completed
+                .recv_timeout(Self::TIMEOUT)
+                .expect("Pause after immediate resume did not complete");
+            pausing.join().unwrap();
+            self
         }
     }
 
@@ -694,5 +847,33 @@ mod tests {
 
         assert!(!common.pause_common.pause_requested());
         assert!(common.pause_evt.is_none());
+    }
+
+    #[test]
+    fn pause_handles_late_threads_and_immediate_resume() {
+        let mut device = PauseTestDevice::new();
+
+        // Late threads must acknowledge pause before processing queued work.
+        device = device.pause_during_startup();
+        for (index, queue_evt) in device.queue_evts.iter().enumerate() {
+            queue_evt.write(index as u64 + 1).unwrap();
+        }
+        assert!(matches!(
+            device.requests.recv_timeout(Duration::from_millis(20)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+
+        // A brief resume must not prevent the following pause from completing.
+        device = device.resume_and_pause();
+        device.common.resume().unwrap();
+        let timeout = PauseTestDevice::TIMEOUT;
+        let mut values = vec![
+            device.requests.recv_timeout(timeout).unwrap(),
+            device.requests.recv_timeout(timeout).unwrap(),
+        ];
+        values.sort_unstable();
+        assert_eq!(values, vec![1, 2]);
+        device.common.reset();
+        assert_eq!(device.status.load(Ordering::SeqCst), 0);
     }
 }
