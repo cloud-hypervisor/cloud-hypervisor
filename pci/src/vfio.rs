@@ -81,8 +81,6 @@ pub enum VfioPciError {
     #[cfg(feature = "kvm")]
     #[error("Failed to map the dma-buf of device {1:?} at {2}")]
     DmaMapFile(#[source] iommufd_ioctls::IommufdError, PathBuf, PciBdf),
-    #[error("Failed to DMA unmap: {0} for device {1} (guest BDF: {2})")]
-    DmaUnmap(#[source] vfio_ioctls::VfioError, PathBuf, PciBdf),
     #[error("Failed to enable INTx")]
     EnableIntx(#[source] VfioError),
     #[error("Failed to enable MSI")]
@@ -318,6 +316,7 @@ pub(crate) struct UserMemoryRegion {
     pub slot: u32,
     pub start: u64,
     pub mapping: Arc<MmapRegion>,
+    pub p2p_mapped: bool,
     #[cfg(feature = "kvm")]
     pub dma_buf: Option<Arc<OwnedFd>>,
 }
@@ -395,6 +394,7 @@ impl UserMemoryRegion {
                 .map_err(|e| VfioPciError::DmaMapFile(e, device_path.to_path_buf(), bdf))?;
 
             self.dma_buf = Some(Arc::new(OwnedFd::from(dma_buf)));
+            self.p2p_mapped = true;
 
             return Ok(());
         }
@@ -409,7 +409,19 @@ impl UserMemoryRegion {
         // points to self.mapping.len() bytes of valid memory that will only
         // be unmapped with munmap().
         unsafe { vfio_ops.vfio_dma_map(self.start, self.mapping.len(), self.mapping.addr()) }
-            .map_err(|e| VfioPciError::DmaMap(e, device_path.to_path_buf(), bdf))
+            .map_err(|e| VfioPciError::DmaMap(e, device_path.to_path_buf(), bdf))?;
+        self.p2p_mapped = true;
+        Ok(())
+    }
+
+    fn unmap_p2p(&mut self, vfio_ops: &dyn VfioOps) -> io::Result<()> {
+        if self.p2p_mapped {
+            vfio_ops
+                .vfio_dma_unmap(self.start, self.mapping.len())
+                .map_err(io::Error::other)?;
+            self.p2p_mapped = false;
+        }
+        Ok(())
     }
 }
 
@@ -2225,7 +2237,6 @@ pub struct VfioPciDevice {
     // Whether to map VFIO device MMIO BARs into the host IOMMU address space.
     // Required for peer-to-peer DMA between VFIO devices.
     p2p_dma: bool,
-    p2p_dma_mapped: bool,
     memory_slot_allocator: Arc<MemorySlotAllocator>,
     // Guest memory layout, used to enumerate the IOVA ranges to track when
     // programming VFIO DMA logging.
@@ -2279,7 +2290,6 @@ impl VfioPciDevice {
             common,
             iommu_attached,
             p2p_dma,
-            p2p_dma_mapped: false,
             memory_slot_allocator,
             memory,
             bdf,
@@ -2523,6 +2533,7 @@ impl VfioPciDevice {
                         slot: self.memory_slot_allocator.next_memory_slot(),
                         start: region.start.0 + area.offset,
                         mapping: Arc::new(mapping),
+                        p2p_mapped: false,
                         #[cfg(feature = "kvm")]
                         dma_buf: None,
                     };
@@ -2560,8 +2571,6 @@ impl VfioPciDevice {
             }
         }
 
-        self.p2p_dma_mapped = self.p2p_dma;
-
         Ok(())
     }
 
@@ -2592,8 +2601,8 @@ impl VfioPciDevice {
             ("unmap", "Unmapped")
         };
 
-        for mmio_region in self.common.mmio_regions.iter() {
-            for user_memory_region in mmio_region.user_memory_regions.iter() {
+        for mmio_region in self.common.mmio_regions.iter_mut() {
+            for user_memory_region in mmio_region.user_memory_regions.iter_mut() {
                 let Some(dma_buf) = &user_memory_region.dma_buf else {
                     continue;
                 };
@@ -2609,11 +2618,14 @@ impl VfioPciDevice {
                 };
 
                 match res {
-                    Ok(()) => debug!(
-                        "{success_action} region {} of device {} at 0x{iova:x} \
+                    Ok(()) => {
+                        user_memory_region.p2p_mapped = memory_space_enabled;
+                        debug!(
+                            "{success_action} region {} of device {} at 0x{iova:x} \
                          through its dma-buf",
-                        mmio_region.index, self.bdf
-                    ),
+                            mmio_region.index, self.bdf
+                        );
+                    }
                     Err(e) => error!(
                         "Could not {failed_action} region {} of device {} at 0x{iova:x}: {e}",
                         mmio_region.index, self.bdf
@@ -2621,28 +2633,17 @@ impl VfioPciDevice {
                 }
             }
         }
-
-        self.p2p_dma_mapped = memory_space_enabled;
     }
 
     pub fn unmap_mmio_regions(&mut self) {
         for region in self.common.mmio_regions.iter_mut() {
-            for user_memory_region in region.user_memory_regions.drain(..) {
+            for mut user_memory_region in region.user_memory_regions.drain(..) {
                 let len = user_memory_region.mapping.len();
                 let host_addr = user_memory_region.mapping.addr();
-                // Unmap MMIO region from the host IOMMU address space via VfioOps
-                // Only needed if p2p_dma is enabled.
-                if self.p2p_dma_mapped
-                    && let Err(e) = self
-                        .vfio_ops
-                        .vfio_dma_unmap(user_memory_region.start, len)
-                        .map_err(|e| VfioPciError::DmaUnmap(e, self.device_path.clone(), self.bdf))
-                {
-                    error!(
-                        "Could not unmap MMIO region from the host IOMMU address space: \
-                            iova 0x{:x}, size 0x{:x}: {}, ",
-                        user_memory_region.start, len, e
-                    );
+                if let Err(e) = user_memory_region.unmap_p2p(self.vfio_ops.as_ref()) {
+                    // The backing memory must remain alive while mapped for DMA.
+                    error!("FATAL: Failed to remove P2P mapping: {e}");
+                    std::process::exit(1);
                 }
 
                 // Remove region
@@ -2665,8 +2666,6 @@ impl VfioPciDevice {
                     .free_memory_slot(user_memory_region.slot);
             }
         }
-
-        self.p2p_dma_mapped = false;
     }
 
     pub fn mmio_regions(&self) -> Vec<MmioRegion> {
@@ -2811,7 +2810,6 @@ impl PciDevice for VfioPciDevice {
             if region.index as usize == bar_idx {
                 let region_index = region.index;
                 let old_base = region.start.raw_value();
-                let map_p2p = self.p2p_dma_mapped && region.is_p2p_mappable();
                 let new_addresses = region
                     .user_memory_regions
                     .iter()
@@ -2832,22 +2830,8 @@ impl PciDevice for VfioPciDevice {
                 {
                     let len = user_memory_region.mapping.len();
                     let offset = user_memory_region.start - old_base;
-                    // Unmap the old MMIO region from the host IOMMU address space via VfioOps
-                    // Only needed if p2p_dma is enabled.
-                    if map_p2p
-                        && let Err(e) = self
-                            .vfio_ops
-                            .vfio_dma_unmap(user_memory_region.start, len)
-                            .map_err(|e| {
-                                VfioPciError::DmaUnmap(e, self.device_path.clone(), self.bdf)
-                            })
-                    {
-                        error!(
-                            "Could not unmap MMIO region from the host IOMMU address space: \
-iova 0x{:x}, size 0x{:x}: {}, ",
-                            user_memory_region.start, len, e
-                        );
-                    }
+                    let map_p2p = user_memory_region.p2p_mapped;
+                    user_memory_region.unmap_p2p(self.vfio_ops.as_ref())?;
                     user_memory_region.move_region(self.vm.as_ref(), new_address)?;
 
                     // Map the moved MMIO region into the host IOMMU address space via VfioOps
@@ -3103,6 +3087,7 @@ mod tests {
                     slot: 0,
                     start: page_size,
                     mapping: mapping_a,
+                    p2p_mapped: false,
                     #[cfg(feature = "kvm")]
                     dma_buf: None,
                 },
@@ -3110,6 +3095,7 @@ mod tests {
                     slot: 1,
                     start: 3 * page_size,
                     mapping: mapping_b,
+                    p2p_mapped: false,
                     #[cfg(feature = "kvm")]
                     dma_buf: None,
                 },
