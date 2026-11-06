@@ -40,7 +40,7 @@ use vm_allocator::page_size::{
     is_page_size_aligned,
 };
 use vm_allocator::{
-    AddressAllocator, GuestMemory, MemorySlotAllocator, MmapRegion, SystemAllocator,
+    AddressAllocator, AlignedMapping, GuestMemory, MemorySlotAllocator, SystemAllocator,
 };
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
@@ -316,7 +316,7 @@ impl Interrupt {
 pub(crate) struct UserMemoryRegion {
     pub slot: u32,
     pub start: u64,
-    pub mapping: Arc<MmapRegion>,
+    pub mapping: Arc<AlignedMapping>,
     pub p2p_mapped: bool,
     #[cfg(feature = "kvm")]
     pub dma_buf: Option<Arc<OwnedFd>>,
@@ -331,7 +331,7 @@ impl UserMemoryRegion {
         let len = self.mapping.len();
         let host_addr = self.mapping.addr();
         // Remove old region
-        // SAFETY: MmapRegion invariants guarantee that
+        // SAFETY: AlignedMapping invariants guarantee that
         // host_addr points to len bytes of
         // valid memory that will only be unmapped with munmap().
         unsafe { vm.remove_user_memory_region(self.slot, self.start, len, host_addr, false) }
@@ -340,7 +340,7 @@ impl UserMemoryRegion {
         self.start = new_address;
 
         // Insert new region
-        // SAFETY: MmapRegion invariants guarantee that
+        // SAFETY: AlignedMapping invariants guarantee that
         // host_addr points to len bytes of
         // valid memory that will only be unmapped with munmap().
         unsafe {
@@ -406,7 +406,7 @@ impl UserMemoryRegion {
              available"
         );
 
-        // SAFETY: MmapRegion invariants guarantee that self.mapping.addr()
+        // SAFETY: AlignedMapping invariants guarantee that self.mapping.addr()
         // points to self.mapping.len() bytes of valid memory that will only
         // be unmapped with munmap().
         unsafe { vfio_ops.vfio_dma_map(self.start, self.mapping.len(), self.mapping.addr()) }
@@ -482,7 +482,7 @@ unsafe impl MmioRegionRange for Vec<MmioRegion> {
     fn find_user_address(&self, guest_addr: u64, size: u64) -> Result<*mut u8, io::Error> {
         for region in self.iter() {
             for user_region in region.user_memory_regions.iter() {
-                let mapping: &MmapRegion = &user_region.mapping;
+                let mapping: &AlignedMapping = &user_region.mapping;
                 let start: u64 = user_region.start;
                 let len: u64 = mapping.len().try_into().unwrap();
                 // See if the guest address is inside the region.
@@ -497,7 +497,7 @@ unsafe impl MmioRegionRange for Vec<MmioRegion> {
                 if size > len - offset_from_start {
                     continue;
                 }
-                // SAFETY: MmapRegion guarantees that mapping.addr points to at least
+                // SAFETY: AlignedMapping guarantees that mapping.addr points to at least
                 // mapping.len() bytes of valid memory. The checks above ensure that
                 // offset_from_start + size stays within that mapping. Also, since
                 // mapping.len() fit in usize, offset_from_start must as well, so the
@@ -2511,7 +2511,7 @@ impl VfioPciDevice {
                     } else {
                         area.size
                     };
-                    let mapping = match MmapRegion::mmap(
+                    let mapping = match AlignedMapping::mmap(
                         mmap_len,
                         prot,
                         fd,
@@ -2538,7 +2538,7 @@ impl VfioPciDevice {
                         #[cfg(feature = "kvm")]
                         dma_buf: None,
                     };
-                    // SAFETY: MmapRegion invariants guarantee that
+                    // SAFETY: AlignedMapping invariants guarantee that
                     // user_memory_region.mapping.addr() points to
                     // user_memory_region.mapping.len() bytes of
                     // valid memory that will only be unmapped with munmap().
@@ -2650,7 +2650,7 @@ impl VfioPciDevice {
                 // Remove region
                 // SAFETY: only valid entries are added to the user_memory_regions field
                 // of the entries of self.common.mmio_regions.
-                // Also, host_addr..host_addr + len is valid by the MmapRegion invariants.
+                // Also, host_addr..host_addr + len is valid by the AlignedMapping invariants.
                 if let Err(e) = unsafe {
                     self.vm.remove_user_memory_region(
                         user_memory_region.slot,
@@ -3058,7 +3058,7 @@ mod tests {
         file.as_file().set_len(2 * page_size).unwrap();
 
         let mapping_a = Arc::new(
-            MmapRegion::mmap(
+            AlignedMapping::mmap(
                 page_size,
                 libc::PROT_READ | libc::PROT_WRITE,
                 file.as_file().as_fd(),
@@ -3068,7 +3068,7 @@ mod tests {
             .unwrap(),
         );
         let mapping_b = Arc::new(
-            MmapRegion::mmap(
+            AlignedMapping::mmap(
                 page_size,
                 libc::PROT_READ | libc::PROT_WRITE,
                 file.as_file().as_fd(),

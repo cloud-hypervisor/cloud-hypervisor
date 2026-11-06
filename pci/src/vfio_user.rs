@@ -16,7 +16,7 @@ use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::VfioIrq;
 use vfio_user::{Client, Error as VfioUserError};
 use vm_allocator::{
-    AddressAllocator, GuestRegion, MemorySlotAllocator, MmapRegion, SystemAllocator,
+    AddressAllocator, AlignedMapping, GuestRegion, MemorySlotAllocator, SystemAllocator,
 };
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig};
@@ -176,7 +176,7 @@ impl VfioUserPciDevice {
                         });
                     }
 
-                    let mapping = match MmapRegion::mmap(
+                    let mapping = match AlignedMapping::mmap(
                         s.size,
                         prot,
                         file_offset.file().as_fd(),
@@ -203,7 +203,7 @@ impl VfioUserPciDevice {
                         dma_buf: None,
                     };
 
-                    // SAFETY: validity of len and host_addr guaranteed by hypervisor::mmap::MmapRegion
+                    // SAFETY: validity of len and host_addr guaranteed by hypervisor::mmap::AlignedMapping
                     unsafe {
                         self.vm.create_user_memory_region(
                             user_memory_region.slot,
@@ -229,7 +229,7 @@ impl VfioUserPciDevice {
         for mmio_region in self.common.mmio_regions.iter_mut() {
             for user_memory_region in mmio_region.user_memory_regions.drain(..) {
                 // Remove region
-                // SAFETY: guaranteed by hypervisor::mmap::MmapRegion invariants
+                // SAFETY: guaranteed by hypervisor::mmap::AlignedMapping invariants
                 if let Err(e) = unsafe {
                     self.vm.remove_user_memory_region(
                         user_memory_region.slot,
