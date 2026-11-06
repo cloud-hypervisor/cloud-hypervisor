@@ -172,12 +172,12 @@ fn allocate_aligned_mapping(
 /// cause SIGSEGV or SIGBUS.  Non-atomic access will generally cause data
 /// races and thus Undefined Behavior.
 #[derive(Debug)]
-pub struct MmapRegion {
+pub struct AlignedMapping {
     addr: *mut u8,
     len: size_t,
 }
 
-impl Drop for MmapRegion {
+impl Drop for AlignedMapping {
     fn drop(&mut self) {
         // SAFETY: guaranteed by type validity invariant
         unsafe {
@@ -186,11 +186,11 @@ impl Drop for MmapRegion {
     }
 }
 // SAFETY: the caller is responsible for avoiding data races
-unsafe impl Send for MmapRegion {}
+unsafe impl Send for AlignedMapping {}
 // SAFETY: the caller is responsible for avoiding data races
-unsafe impl Sync for MmapRegion {}
+unsafe impl Sync for AlignedMapping {}
 
-impl MmapRegion {
+impl AlignedMapping {
     /// Return the host address of the mapping.
     #[inline]
     pub fn addr(&self) -> *mut u8 {
@@ -206,7 +206,7 @@ impl MmapRegion {
         self.len
     }
 
-    /// Create an [`MmapRegion`] using `mmap` of a file descriptor.
+    /// Create an [`AlignedMapping`] using `mmap` of a file descriptor.
     pub fn mmap(
         len: u64,
         prot: c_int,
