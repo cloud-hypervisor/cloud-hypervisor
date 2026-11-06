@@ -26,7 +26,7 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottabl
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::vfio::{
-    UserMemoryRegion, VFIO_COMMON_ID, Vfio, VfioCommon, VfioCommonConfig, VfioError,
+    UserMemoryRegion, VFIO_COMMON_ID, Vfio, VfioCommon, VfioCommonConfig, VfioError, find_alignment,
 };
 use crate::{
     BarReprogrammingParams, PciBarConfiguration, PciBdf, PciDevice, PciDeviceError, PciSubclass,
@@ -176,8 +176,11 @@ impl VfioUserPciDevice {
                         });
                     }
 
+                    let size = usize::try_from(s.size)
+                        .map_err(|e| VfioUserPciDeviceError::Other(io::Error::other(e)))?;
                     let mapping = match AlignedMapping::mmap(
                         s.size,
+                        find_alignment(size),
                         prot,
                         file_offset.file().as_fd(),
                         file_offset.start(),

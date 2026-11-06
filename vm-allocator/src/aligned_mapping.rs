@@ -14,8 +14,6 @@ use log::warn;
 
 use crate::page_size::get_page_size;
 
-const ONE_GIB: usize = 1024 * 1024 * 1024;
-
 /// # SAFETY
 ///
 /// Callers must guarantee that the range can be passed to munmap().
@@ -30,15 +28,6 @@ unsafe fn munmap(addr: *mut c_void, len: size_t) {
             len,
             Error::last_os_error()
         );
-    }
-}
-
-fn find_alignment(len: size_t) -> usize {
-    let page_size = get_page_size() as usize;
-    if len >= ONE_GIB {
-        ONE_GIB
-    } else {
-        len.next_power_of_two().max(page_size)
     }
 }
 
@@ -104,11 +93,17 @@ unsafe fn trim_mapping(base: *mut c_void, reserve: size_t, aligned: *mut c_void,
 
 fn allocate_aligned_mapping(
     len: size_t,
+    alignment: usize,
     prot: c_int,
     fd: BorrowedFd,
     offset: libc::off_t,
 ) -> io::Result<*mut c_void> {
-    let alignment = find_alignment(len);
+    if !alignment.is_power_of_two() || alignment < get_page_size() as usize {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "Alignment must be a power of two and at least the page size",
+        ));
+    }
 
     if alignment == get_page_size() as usize {
         // SAFETY: FFI call with correct parameters.
@@ -209,6 +204,7 @@ impl AlignedMapping {
     /// Create an [`AlignedMapping`] using `mmap` of a file descriptor.
     pub fn mmap(
         len: u64,
+        alignment: usize,
         prot: c_int,
         fd: BorrowedFd,
         offset1: u64,
@@ -236,7 +232,7 @@ in both isize and libc::size_t";
             "bad protection"
         );
 
-        let addr = allocate_aligned_mapping(len, prot, fd, offset)?;
+        let addr = allocate_aligned_mapping(len, alignment, prot, fd, offset)?;
 
         Ok(Self {
             addr: addr.cast(),
@@ -249,8 +245,11 @@ in both isize and libc::size_t";
 mod tests {
     use super::*;
 
-    fn tail_trim_range_from_len(base_addr: usize, len: size_t) -> (usize, size_t) {
-        let alignment = find_alignment(len);
+    fn tail_trim_range_from_len(
+        base_addr: usize,
+        len: size_t,
+        alignment: usize,
+    ) -> (usize, size_t) {
         let reserve = len.checked_add(alignment).unwrap();
         let aligned_addr = base_addr.next_multiple_of(alignment);
 
@@ -258,34 +257,13 @@ mod tests {
     }
 
     #[test]
-    fn find_alignment_scales_with_length() {
-        let page_size = get_page_size() as usize;
-
-        // Sub-page and page-sized mappings only need page alignment.
-        assert_eq!(find_alignment(1), page_size);
-        assert_eq!(find_alignment(page_size), page_size);
-
-        // Larger mappings round up to the next power of two.
-        assert_eq!(
-            find_alignment(page_size + 1),
-            (page_size + 1).next_power_of_two()
-        );
-        assert!(find_alignment(page_size + 1) > page_size);
-
-        // The alignment is capped at 1 GiB.
-        assert_eq!(find_alignment(ONE_GIB), ONE_GIB);
-        assert_eq!(find_alignment(ONE_GIB + 1), ONE_GIB);
-        assert_eq!(find_alignment(2 * ONE_GIB), ONE_GIB);
-    }
-
-    #[test]
     fn tail_trim_range_rounds_non_page_sized_len_up() {
         let page_size = get_page_size() as usize;
         let base_addr = 0x1000_0000;
         let len = page_size * 3 + 1;
-        let alignment = find_alignment(len);
+        let alignment = page_size * 4;
 
-        let (tail_addr, tail_len) = tail_trim_range_from_len(base_addr, len);
+        let (tail_addr, tail_len) = tail_trim_range_from_len(base_addr, len, alignment);
 
         // The tail starts at the first page boundary past the mapping ...
         assert_eq!(tail_addr, base_addr + page_size * 4);
@@ -299,9 +277,9 @@ mod tests {
         let page_size = get_page_size() as usize;
         let base_addr = 0x1000_0000;
         let len = page_size * 3;
-        let alignment = find_alignment(len);
+        let alignment = page_size * 4;
 
-        let (tail_addr, tail_len) = tail_trim_range_from_len(base_addr, len);
+        let (tail_addr, tail_len) = tail_trim_range_from_len(base_addr, len, alignment);
 
         // A page-aligned end needs no rounding.
         assert_eq!(tail_addr, base_addr + len);
@@ -313,9 +291,9 @@ mod tests {
         let page_size = get_page_size() as usize;
         let base_addr = 0x1000_0000;
         let len = page_size * 512 + 1;
-        let alignment = find_alignment(len);
+        let alignment = page_size * 1024;
 
-        let (tail_addr, tail_len) = tail_trim_range_from_len(base_addr, len);
+        let (tail_addr, tail_len) = tail_trim_range_from_len(base_addr, len, alignment);
 
         assert_eq!(tail_addr, base_addr + page_size * 513);
         assert_eq!(tail_addr % page_size, 0);
