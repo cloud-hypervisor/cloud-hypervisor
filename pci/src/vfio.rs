@@ -73,6 +73,17 @@ use crate::{
 pub(crate) const VFIO_COMMON_ID: &str = "vfio_common";
 pub(crate) const VFIO_MIGRATION_ID: &str = "vfio_migration";
 
+const ONE_GIB: usize = 1024 * 1024 * 1024;
+
+pub(crate) fn find_alignment(len: usize) -> usize {
+    let page_size = get_page_size() as usize;
+    if len >= ONE_GIB {
+        ONE_GIB
+    } else {
+        len.next_power_of_two().max(page_size)
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum VfioPciError {
     #[error("Failed to create user memory region")]
@@ -2467,8 +2478,10 @@ impl VfioPciDevice {
                     } else {
                         area.size
                     };
+                    let size = usize::try_from(mmap_len).map_err(|_| VfioPciError::MmapArea)?;
                     let mapping = match AlignedMapping::mmap(
                         mmap_len,
+                        find_alignment(size),
                         prot,
                         fd,
                         mmap_offset,
@@ -3057,6 +3070,27 @@ mod tests {
     use super::*;
     use crate::PasidCap;
 
+    #[test]
+    fn find_alignment_scales_with_length() {
+        let page_size = get_page_size() as usize;
+
+        // Sub-page and page-sized mappings only need page alignment.
+        assert_eq!(find_alignment(1), page_size);
+        assert_eq!(find_alignment(page_size), page_size);
+
+        // Larger mappings round up to the next power of two.
+        assert_eq!(
+            find_alignment(page_size + 1),
+            (page_size + 1).next_power_of_two()
+        );
+        assert!(find_alignment(page_size + 1) > page_size);
+
+        // The alignment is capped at 1 GiB.
+        assert_eq!(find_alignment(ONE_GIB), ONE_GIB);
+        assert_eq!(find_alignment(ONE_GIB + 1), ONE_GIB);
+        assert_eq!(find_alignment(2 * ONE_GIB), ONE_GIB);
+    }
+
     fn sparse_mmio_regions() -> Vec<MmioRegion> {
         let page_size = get_page_size();
         let file =
@@ -3066,6 +3100,7 @@ mod tests {
         let mapping_a = Arc::new(
             AlignedMapping::mmap(
                 page_size,
+                find_alignment(page_size as usize),
                 libc::PROT_READ | libc::PROT_WRITE,
                 file.as_file().as_fd(),
                 0,
@@ -3076,6 +3111,7 @@ mod tests {
         let mapping_b = Arc::new(
             AlignedMapping::mmap(
                 page_size,
+                find_alignment(page_size as usize),
                 libc::PROT_READ | libc::PROT_WRITE,
                 file.as_file().as_fd(),
                 page_size,
