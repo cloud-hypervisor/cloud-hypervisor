@@ -11,6 +11,8 @@ use thiserror::Error;
 mod connection;
 mod txbuf;
 
+#[cfg(test)]
+pub(super) use connection::SeqPacketStream;
 pub(super) use connection::VsockConnection;
 
 pub(super) mod defs {

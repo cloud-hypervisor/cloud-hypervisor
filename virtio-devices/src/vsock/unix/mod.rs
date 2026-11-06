@@ -20,6 +20,9 @@ pub use Error as VsockUnixError;
 pub use muxer::VsockMuxer as VsockUnixBackend;
 use thiserror::Error;
 
+/// Appended to the host socket path to get the seqpacket listener's path.
+pub(super) const SEQPACKET_PATH_SUFFIX: &str = "_seqpacket";
+
 mod defs {
     /// Maximum number of established connections that we can handle.
     pub(super) const MAX_CONNECTIONS: usize = 1023;
