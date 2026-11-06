@@ -4,8 +4,8 @@
 //
 
 use std::panic::AssertUnwindSafe;
-use std::sync::Arc;
 use std::sync::atomic::AtomicU8;
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::{panic, result};
 
@@ -16,6 +16,97 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::epoll_helper::EpollHelperError;
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::{ActivateError, VirtioInterrupt, mark_device_needs_reset};
+
+#[derive(Default)]
+struct PauseState {
+    pause_requested: bool,
+    active_threads: usize,
+}
+
+#[derive(Default)]
+pub struct PauseCommon {
+    state: Mutex<PauseState>,
+    changed: Condvar,
+}
+
+#[expect(dead_code)]
+impl PauseCommon {
+    pub fn new(pause_requested: bool) -> Self {
+        Self {
+            state: Mutex::new(PauseState {
+                pause_requested,
+                ..Default::default()
+            }),
+            changed: Condvar::new(),
+        }
+    }
+
+    pub fn is_pause_requested(&self) -> bool {
+        self.state.lock().unwrap().pause_requested
+    }
+
+    fn run<F, H>(self: &Arc<Self>, f: F, on_exit: H)
+    where
+        F: FnOnce(&Self) -> result::Result<(), EpollHelperError>,
+        H: FnOnce(thread::Result<result::Result<(), EpollHelperError>>),
+    {
+        let mut active_thread_guard = None;
+        let result = panic::catch_unwind(AssertUnwindSafe(|| {
+            {
+                let mut state = self.state.lock().unwrap();
+                while state.pause_requested {
+                    state = self.changed.wait(state).unwrap();
+                }
+                state.active_threads += 1;
+                active_thread_guard = Some(ActiveThreadGuard {
+                    pause_common: Arc::clone(self),
+                });
+            }
+            f(self)
+        }));
+        on_exit(result);
+    }
+
+    pub(crate) fn request_pause(&self) {
+        self.state.lock().unwrap().pause_requested = true;
+    }
+
+    pub(crate) fn wait_for_pause(&self) {
+        let mut state = self.state.lock().unwrap();
+        while state.active_threads != 0 {
+            state = self.changed.wait(state).unwrap();
+        }
+    }
+
+    pub(crate) fn resume(&self) {
+        self.state.lock().unwrap().pause_requested = false;
+        self.changed.notify_all();
+    }
+
+    pub(crate) fn wait_if_paused(&self) {
+        let mut state = self.state.lock().unwrap();
+        if state.pause_requested {
+            state.active_threads -= 1;
+            self.changed.notify_all();
+            while state.pause_requested {
+                state = self.changed.wait(state).unwrap();
+            }
+            state.active_threads += 1;
+        }
+    }
+}
+
+struct ActiveThreadGuard {
+    pause_common: Arc<PauseCommon>,
+}
+
+impl Drop for ActiveThreadGuard {
+    fn drop(&mut self) {
+        let mut state = self.pause_common.state.lock().unwrap();
+        state.active_threads -= 1;
+        self.pause_common.changed.notify_all();
+    }
+}
 
 #[expect(clippy::too_many_arguments)]
 pub(crate) fn spawn_virtio_thread<F>(
