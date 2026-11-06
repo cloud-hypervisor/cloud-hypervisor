@@ -11,6 +11,7 @@ use vm_device::Resource;
 use vm_migration::Migratable;
 
 use crate::device_manager::PciDeviceHandle;
+use crate::vm_config::PciDeviceCommonConfig;
 
 #[serde_with::skip_serializing_none]
 #[derive(Clone, Serialize, Deserialize)]
@@ -99,6 +100,13 @@ impl DeviceTree {
         } else {
             None
         }
+    }
+
+    pub fn has_pci_device(&self, pci_common: &PciDeviceCommonConfig) -> bool {
+        pci_common
+            .id
+            .as_ref()
+            .is_none_or(|id| self.contains_key(id))
     }
 }
 
