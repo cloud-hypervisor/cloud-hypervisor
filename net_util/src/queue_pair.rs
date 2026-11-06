@@ -13,7 +13,10 @@ use rate_limiter::{RateLimiter, TokenType};
 use smallvec::SmallVec;
 use thiserror::Error;
 use virtio_bindings::virtio_net::{
-    VIRTIO_NET_HDR_F_NEEDS_CSUM, VIRTIO_NET_HDR_GSO_NONE, virtio_net_hdr_v1,
+    VIRTIO_NET_F_CSUM, VIRTIO_NET_F_HOST_ECN, VIRTIO_NET_F_HOST_TSO4, VIRTIO_NET_F_HOST_TSO6,
+    VIRTIO_NET_F_HOST_UFO, VIRTIO_NET_F_HOST_USO, VIRTIO_NET_HDR_F_NEEDS_CSUM,
+    VIRTIO_NET_HDR_GSO_ECN, VIRTIO_NET_HDR_GSO_NONE, VIRTIO_NET_HDR_GSO_TCPV4,
+    VIRTIO_NET_HDR_GSO_TCPV6, VIRTIO_NET_HDR_GSO_UDP, VIRTIO_NET_HDR_GSO_UDP_L4, virtio_net_hdr_v1,
 };
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
 use vm_memory::bitmap::Bitmap;
@@ -61,33 +64,51 @@ fn guest_ranges_to_iovecs<M: GuestMemoryBackend>(
 pub struct TxVirtio {
     pub counter_bytes: Wrapping<u64>,
     pub counter_frames: Wrapping<u64>,
-    host_checksum_offload: bool,
+    acked_features: u64,
 }
 
 impl TxVirtio {
-    /// Create a TX queue with the negotiated VIRTIO_NET_F_CSUM policy.
-    pub fn new(host_checksum_offload: bool) -> Self {
+    /// Create a TX queue that only accepts the offloads in `acked_features`.
+    pub fn new(acked_features: u64) -> Self {
         TxVirtio {
             counter_bytes: Wrapping(0),
             counter_frames: Wrapping(0),
-            host_checksum_offload,
+            acked_features,
         }
     }
 
-    pub fn set_host_checksum_offload(&mut self, host_checksum_offload: bool) {
-        self.host_checksum_offload = host_checksum_offload;
+    pub fn set_acked_features(&mut self, acked_features: u64) {
+        self.acked_features = acked_features;
     }
 
     fn tx_is_header_valid(
         header: &[u8; size_of::<virtio_net_hdr_v1>()],
         header_len: usize,
-        host_checksum_offload: bool,
+        acked_features: u64,
     ) -> bool {
+        let acked = |feature: u32| acked_features & (1 << feature) != 0;
+        let flags = u32::from(header[0]);
+        let gso_type = u32::from(header[1]);
+
+        // The tap does not know which offloads were negotiated and accepts
+        // any segmentation type, so only allow the negotiated ones.
+        let gso_acked = match gso_type & !VIRTIO_NET_HDR_GSO_ECN {
+            VIRTIO_NET_HDR_GSO_NONE => true,
+            VIRTIO_NET_HDR_GSO_TCPV4 => acked(VIRTIO_NET_F_HOST_TSO4),
+            VIRTIO_NET_HDR_GSO_TCPV6 => acked(VIRTIO_NET_F_HOST_TSO6),
+            VIRTIO_NET_HDR_GSO_UDP => acked(VIRTIO_NET_F_HOST_UFO),
+            VIRTIO_NET_HDR_GSO_UDP_L4 => acked(VIRTIO_NET_F_HOST_USO),
+            _ => false,
+        };
+        let ecn_acked = gso_type & VIRTIO_NET_HDR_GSO_ECN == 0 || acked(VIRTIO_NET_F_HOST_ECN);
+
         // Segmentation offloads also require checksum offload support.
         header_len == header.len()
-            && (host_checksum_offload
-                || (u32::from(header[0]) & VIRTIO_NET_HDR_F_NEEDS_CSUM == 0
-                    && u32::from(header[1]) == VIRTIO_NET_HDR_GSO_NONE))
+            && gso_acked
+            && ecn_acked
+            && (acked(VIRTIO_NET_F_CSUM)
+                || (flags & VIRTIO_NET_HDR_F_NEEDS_CSUM == 0
+                    && gso_type == VIRTIO_NET_HDR_GSO_NONE))
     }
 
     pub fn process_desc_chain<M: GuestMemoryBackend>(
@@ -174,7 +195,7 @@ impl TxVirtio {
                 }
             };
 
-            if Self::tx_is_header_valid(&header, header_len, self.host_checksum_offload) {
+            if Self::tx_is_header_valid(&header, header_len, self.acked_features) {
                 iovecs.insert(
                     0,
                     libc::iovec {
@@ -625,7 +646,7 @@ mod tests {
     use std::os::fd::OwnedFd;
     use std::os::unix::net::UnixDatagram;
 
-    use virtio_bindings::virtio_net::{VIRTIO_NET_HDR_F_DATA_VALID, VIRTIO_NET_HDR_GSO_TCPV4};
+    use virtio_bindings::virtio_net::VIRTIO_NET_HDR_F_DATA_VALID;
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::desc::RawDescriptor;
     use virtio_queue::desc::split::Descriptor;
@@ -635,13 +656,15 @@ mod tests {
 
     use super::*;
 
+    const CSUM: u64 = 1 << VIRTIO_NET_F_CSUM;
+
     #[test]
     fn tx_header_must_be_complete() {
         let header = [0; size_of::<virtio_net_hdr_v1>()];
         let len = header.len();
-        assert!(!TxVirtio::tx_is_header_valid(&header, len - 1, true));
-        assert!(!TxVirtio::tx_is_header_valid(&header, len - 1, false));
-        assert!(TxVirtio::tx_is_header_valid(&header, len, false));
+        assert!(!TxVirtio::tx_is_header_valid(&header, len - 1, CSUM));
+        assert!(!TxVirtio::tx_is_header_valid(&header, len - 1, 0));
+        assert!(TxVirtio::tx_is_header_valid(&header, len, 0));
     }
 
     #[test]
@@ -649,15 +672,47 @@ mod tests {
         let mut header = [0; size_of::<virtio_net_hdr_v1>()];
         let len = header.len();
         header[0] = VIRTIO_NET_HDR_F_NEEDS_CSUM as u8;
-        assert!(!TxVirtio::tx_is_header_valid(&header, len, false));
-        assert!(TxVirtio::tx_is_header_valid(&header, len, true));
+        assert!(!TxVirtio::tx_is_header_valid(&header, len, 0));
+        assert!(TxVirtio::tx_is_header_valid(&header, len, CSUM));
 
         header[0] = VIRTIO_NET_HDR_F_DATA_VALID as u8;
-        assert!(TxVirtio::tx_is_header_valid(&header, len, false));
+        assert!(TxVirtio::tx_is_header_valid(&header, len, 0));
 
         header[1] = VIRTIO_NET_HDR_GSO_TCPV4 as u8;
-        assert!(!TxVirtio::tx_is_header_valid(&header, len, false));
-        assert!(TxVirtio::tx_is_header_valid(&header, len, true));
+        let tso4 = 1 << VIRTIO_NET_F_HOST_TSO4;
+        assert!(!TxVirtio::tx_is_header_valid(&header, len, tso4));
+        assert!(TxVirtio::tx_is_header_valid(&header, len, CSUM | tso4));
+    }
+
+    #[test]
+    fn tx_header_respects_segmentation_offload() {
+        let mut header = [0; size_of::<virtio_net_hdr_v1>()];
+        let len = header.len();
+        header[0] = VIRTIO_NET_HDR_F_NEEDS_CSUM as u8;
+
+        for (gso_type, feature) in [
+            (VIRTIO_NET_HDR_GSO_TCPV4, VIRTIO_NET_F_HOST_TSO4),
+            (VIRTIO_NET_HDR_GSO_TCPV6, VIRTIO_NET_F_HOST_TSO6),
+            (VIRTIO_NET_HDR_GSO_UDP, VIRTIO_NET_F_HOST_UFO),
+            (VIRTIO_NET_HDR_GSO_UDP_L4, VIRTIO_NET_F_HOST_USO),
+        ] {
+            header[1] = gso_type as u8;
+            assert!(!TxVirtio::tx_is_header_valid(&header, len, CSUM));
+            assert!(TxVirtio::tx_is_header_valid(
+                &header,
+                len,
+                CSUM | (1 << feature)
+            ));
+        }
+
+        header[1] = (VIRTIO_NET_HDR_GSO_TCPV4 | VIRTIO_NET_HDR_GSO_ECN) as u8;
+        let tso4 = CSUM | (1 << VIRTIO_NET_F_HOST_TSO4);
+        assert!(!TxVirtio::tx_is_header_valid(&header, len, tso4));
+        assert!(TxVirtio::tx_is_header_valid(
+            &header,
+            len,
+            tso4 | (1 << VIRTIO_NET_F_HOST_ECN)
+        ));
     }
 
     #[test]
@@ -713,7 +768,7 @@ mod tests {
         // writev() of the first frame fails with EMSGSIZE, like a tap fails
         // with ENOBUFS for a frame it cannot allocate. The device must drop
         // that frame and still send the next one.
-        TxVirtio::new(false)
+        TxVirtio::new(0)
             .process_desc_chain(&mem, &tap, &mut queue, &mut None, None)
             .expect("an undeliverable frame should be dropped");
 
