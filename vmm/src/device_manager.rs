@@ -773,7 +773,8 @@ impl DeviceRelocation for AddressManager {
 
         // Update the device_tree resources associated with the device
         if let Some(id) = pci_dev.id() {
-            if let Some(node) = self.device_tree.lock().unwrap().get_mut(&id) {
+            let mut device_tree = self.device_tree.lock().unwrap();
+            let children = if let Some(node) = device_tree.get_mut(&id) {
                 let mut resource_updated = false;
                 for resource in node.resources.iter_mut() {
                     if let Resource::PciBar { index, base, .. } = resource
@@ -790,10 +791,25 @@ impl DeviceRelocation for AddressManager {
                         "Couldn't find a resource for BAR {bar_idx} of device {id}"
                     )));
                 }
+                node.children.clone()
             } else {
                 return Err(io::Error::other(format!(
                     "Couldn't find device {id} from device tree"
                 )));
+            };
+
+            if bar_idx == VIRTIO_SHM_BAR_INDEX {
+                for child_id in children {
+                    if let Some(child_node) = device_tree.get_mut(&child_id) {
+                        for resource in child_node.resources.iter_mut() {
+                            if let Resource::MmioAddressRange { base, .. } = resource
+                                && *base == old_base
+                            {
+                                *base = new_base;
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -818,6 +834,8 @@ impl DeviceRelocation for AddressManager {
                 let virtio_dev = virtio_pci_dev.virtio_device();
                 let mut virtio_dev = virtio_dev.lock().unwrap();
                 if let Some(mut shm_regions) = virtio_dev.get_shm_regions() {
+                    let readonly = (shm_regions.mapping.prot() & libc::PROT_WRITE) == 0;
+
                     // SAFETY: guaranteed by MmapRegion invariants
                     unsafe {
                         // Remove old mapping
@@ -842,7 +860,7 @@ impl DeviceRelocation for AddressManager {
                                 new_base,
                                 shm_regions.mapping.len(),
                                 shm_regions.mapping.as_ptr(),
-                                false,
+                                readonly,
                                 false,
                                 hypervisor::MemoryVisibility::Shared,
                             )
@@ -3539,6 +3557,7 @@ impl DeviceManager {
             return Err(DeviceManagerError::PmemSizeNotAligned);
         }
 
+        let bar_size = size.next_power_of_two();
         let (region_base, region_size) = if let Some((base, size)) = region_range {
             // The memory needs to be 2MiB aligned in order to support
             // hugepages.
@@ -3548,20 +3567,20 @@ impl DeviceManager {
                 .unwrap()
                 .allocate(
                     Some(GuestAddress(base)),
-                    size as GuestUsize,
-                    Some(0x0020_0000),
+                    bar_size as GuestUsize,
+                    Some(0x20_0000),
                 )
                 .ok_or(DeviceManagerError::PmemRangeAllocation)?;
 
             (base, size)
         } else {
             // The memory needs to be 2MiB aligned in order to support
-            // hugepages.
+            // hugepages, and aligned to its power-of-two BAR size.
             let base = self.pci_segments[pmem_cfg.pci_common.pci_segment as usize]
                 .mem64_allocator
                 .lock()
                 .unwrap()
-                .allocate(None, size as GuestUsize, Some(0x0020_0000))
+                .allocate_bottom_up(bar_size as GuestUsize, Some(bar_size))
                 .ok_or(DeviceManagerError::PmemRangeAllocation)?;
 
             (base.raw_value(), size)

@@ -161,6 +161,25 @@ impl AddressAllocator {
         None
     }
 
+    fn first_available_range_bottom_up(
+        &self,
+        req_size: GuestUsize,
+        alignment: GuestUsize,
+    ) -> Option<GuestAddress> {
+        let mut prev_end_address = self.base;
+        for (address, size) in self.ranges.iter() {
+            let aligned_addr = self.align_address(prev_end_address, alignment);
+            if let Some(size_delta) = address.checked_sub(aligned_addr.raw_value())
+                && size_delta.raw_value() >= req_size
+            {
+                return Some(aligned_addr);
+            }
+            prev_end_address = address.unchecked_add(*size);
+        }
+
+        None
+    }
+
     /// Allocates a range of addresses from the managed region. Returns `Some(allocated_address)`
     /// when successful, or `None` if an area of `size` can't be allocated or if alignment isn't
     /// a power of two.
@@ -194,6 +213,32 @@ impl AddressAllocator {
             },
             None => self.first_available_range(size, alignment)?,
         };
+
+        self.ranges.insert(new_addr, size);
+
+        Some(new_addr)
+    }
+
+    /// Allocates a range of addresses from the bottom of the managed region upward. Returns
+    /// `Some(allocated_address)` when successful, or `None` if an area of `size` can't be
+    /// allocated or if alignment isn't a power of two.
+    pub fn allocate_bottom_up(
+        &mut self,
+        size: GuestUsize,
+        align_size: Option<GuestUsize>,
+    ) -> Option<GuestAddress> {
+        if size == 0 {
+            debug!("Cannot allocate an address range of zero size");
+            return None;
+        }
+
+        let alignment = align_size.unwrap_or(4);
+        if !alignment.is_power_of_two() {
+            debug!("Cannot allocate an address range with invalid alignment {alignment:#x}");
+            return None;
+        }
+
+        let new_addr = self.first_available_range_bottom_up(size, alignment)?;
 
         self.ranges.insert(new_addr, size);
 
@@ -495,5 +540,51 @@ mod tests {
             None
         );
         assert_eq!(pool.ranges, old_ranges);
+    }
+
+    #[test]
+    fn allocate_bottom_up_alignment_and_coexistence() {
+        let mut pool = AddressAllocator::new(GuestAddress(0x1000), 0x10000).unwrap();
+
+        // Invalid size or alignment fails.
+        assert_eq!(pool.allocate_bottom_up(0, Some(0x100)), None);
+        assert_eq!(pool.allocate_bottom_up(0x100, Some(0)), None);
+        assert_eq!(pool.allocate_bottom_up(0x100, Some(200)), None);
+
+        // Bottom-up allocations start from base (0x1000) and grow upward.
+        assert_eq!(
+            pool.allocate_bottom_up(0x110, Some(0x100)),
+            Some(GuestAddress(0x1000))
+        );
+        assert_eq!(
+            pool.allocate_bottom_up(0x100, Some(0x100)),
+            Some(GuestAddress(0x1200))
+        );
+        assert_eq!(
+            pool.allocate_bottom_up(0x10, Some(0x100)),
+            Some(GuestAddress(0x1300))
+        );
+
+        // Top-down allocations still start from end (0x11000) and grow downward.
+        assert_eq!(
+            pool.allocate(None, 0x100, Some(0x100)),
+            Some(GuestAddress(0x10f00))
+        );
+
+        // Freeing the first bottom-up range allows a subsequent bottom-up allocation to reuse it
+        // if it fits, or skip past existing ranges if it does not fit.
+        pool.free(GuestAddress(0x1000), 0x110);
+        assert_eq!(
+            pool.allocate_bottom_up(0x300, Some(0x100)),
+            Some(GuestAddress(0x1400))
+        );
+        assert_eq!(
+            pool.allocate_bottom_up(0x200, Some(0x100)),
+            Some(GuestAddress(0x1000))
+        );
+
+        // Requesting more than the remaining gap between bottom-up (0x1700) and top-down (0x10f00)
+        // fails.
+        assert_eq!(pool.allocate_bottom_up(0xf900, Some(0x100)), None);
     }
 }
