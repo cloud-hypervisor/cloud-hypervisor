@@ -33,9 +33,15 @@ pub enum Error {
     /// The hypervisor rejected the memory region.
     #[error("Failed to create the user memory region")]
     CreateRegion(#[source] hypervisor::HypervisorVmError),
+    /// The hypervisor could not remove the old registration.
+    #[error("Failed to remove the user memory region")]
+    RemoveRegion(#[source] hypervisor::HypervisorVmError),
     /// The guest address range overflows.
     #[error("Guest memory range overflows at {0:#x}")]
     InvalidGuestAddress(u64),
+    /// Private memory cannot be recreated without preserving its guest_memfd.
+    #[error("Cannot move a private memory region")]
+    MovePrivateRegion,
 }
 
 /// A region of guest memory backed by an mmap allocation.
@@ -165,6 +171,60 @@ impl GuestRegion {
     /// The reserved slot, including before registration.
     pub fn slot(&self) -> Option<u32> {
         self.slot
+    }
+
+    /// Whether the region is registered or registration is in progress.
+    pub fn is_registered(&self) -> bool {
+        self.registered.load(Ordering::Acquire)
+    }
+
+    /// Move a region to a new guest address without replacing its mapping.
+    /// Unregistered regions remain unregistered. If removing a registered
+    /// region fails, its old registration remains. If replacement fails,
+    /// the slot stays reserved so the caller can restore the registration.
+    pub fn move_guest_address(&mut self, guest_addr: GuestAddress) -> Result<(), Error> {
+        let region = GuestRegionMmap::with_arc(self.region.get_mmap(), guest_addr)
+            .ok_or(Error::InvalidGuestAddress(guest_addr.raw_value()))?;
+        if !*self.registered.get_mut() {
+            self.region = region;
+            return Ok(());
+        }
+        if self.visibility != hypervisor::MemoryVisibility::Shared {
+            return Err(Error::MovePrivateRegion);
+        }
+        if self.region.start_addr() == guest_addr {
+            return Ok(());
+        }
+        let vm = self.vm.as_ref().unwrap();
+        let slot = self.slot.unwrap();
+        // SAFETY: exclusive access keeps the old region and its mapping alive.
+        unsafe {
+            vm.remove_user_memory_region(
+                slot,
+                self.region.start_addr().raw_value(),
+                self.region.size(),
+                self.region.as_ptr(),
+                false,
+            )
+        }
+        .map_err(Error::RemoveRegion)?;
+        *self.registered.get_mut() = false;
+        // SAFETY: both guest addresses refer to the same live mapping.
+        unsafe {
+            vm.create_user_memory_region(
+                slot,
+                guest_addr.raw_value(),
+                region.size(),
+                region.as_ptr(),
+                self.readonly,
+                self.log_dirty_pages,
+                self.visibility,
+            )
+        }
+        .map_err(Error::CreateRegion)?;
+        self.region = region;
+        *self.registered.get_mut() = true;
+        Ok(())
     }
 }
 
