@@ -199,6 +199,7 @@ impl VfioUserPciDevice {
                         // A vfio-user device exports no dma-buf.
                         #[cfg(feature = "kvm")]
                         dma_buf: None,
+                        p2p_dma_mapped: false,
                     };
 
                     // SAFETY: validity of len and host_addr guaranteed by hypervisor::mmap::MmapRegion
