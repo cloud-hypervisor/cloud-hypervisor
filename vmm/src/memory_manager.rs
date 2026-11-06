@@ -1797,17 +1797,14 @@ impl MemoryManager {
         let mut allow_mem_hotplug = false;
 
         if user_provided_zones {
-            if config.zones.is_none() {
+            let Some(zones) = config.zones.clone() else {
                 error!(
                     "User defined memory regions must be provided if the \
                     memory size is 0"
                 );
                 return Err(Error::MissingMemoryZones);
-            }
+            };
 
-            // Safe to unwrap as we checked right above there were some
-            // regions.
-            let zones = config.zones.clone().unwrap();
             if zones.is_empty() {
                 return Err(Error::MissingMemoryZones);
             }

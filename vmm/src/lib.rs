@@ -2651,12 +2651,9 @@ impl RequestHandler for Vmm {
                     return Err(VmError::VmAlreadyCreated);
                 }
 
-                let source_url = restore_cfg.source_url.as_path().to_str();
-                if source_url.is_none() {
+                let Some(source_url) = restore_cfg.source_url.as_path().to_str() else {
                     return Err(VmError::InvalidRestoreSourceUrl);
-                }
-                // Safe to unwrap as we checked it was Some(&str).
-                let source_url = source_url.unwrap();
+                };
 
                 let vm_config = Arc::new(Mutex::new(
                     recv_vm_config(source_url).map_err(VmError::Restore)?,
