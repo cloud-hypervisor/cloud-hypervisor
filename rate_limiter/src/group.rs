@@ -14,7 +14,7 @@ use log::{error, info, warn};
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::{RateLimiter, TokenType};
+use crate::{RateLimiter, TokenBucket, TokenType};
 
 /// Errors associated with rate-limiter group.
 #[derive(Debug, Error)]
@@ -157,22 +157,10 @@ impl RateLimiterGroup {
     /// Create a new RateLimiterGroup.
     pub fn new(
         id: &str,
-        bytes_total_capacity: u64,
-        bytes_one_time_burst: u64,
-        bytes_complete_refill_time_ms: u64,
-        ops_total_capacity: u64,
-        ops_one_time_burst: u64,
-        ops_complete_refill_time_ms: u64,
+        bandwidth: Option<TokenBucket>,
+        ops: Option<TokenBucket>,
     ) -> result::Result<Self, Error> {
-        let rate_limiter = RateLimiter::new(
-            bytes_total_capacity,
-            bytes_one_time_burst,
-            bytes_complete_refill_time_ms,
-            ops_total_capacity,
-            ops_one_time_burst,
-            ops_complete_refill_time_ms,
-        )
-        .map_err(Error::RateLimiter)?;
+        let rate_limiter = RateLimiter::from_buckets(bandwidth, ops).map_err(Error::RateLimiter)?;
 
         let epoll_fd = epoll::create(true).map_err(Error::Epoll)?;
         let kill_evt = EventFd::new(0).map_err(Error::EventFd)?;
@@ -322,7 +310,12 @@ pub(crate) mod tests {
 
     #[test]
     fn test_rate_limiter_group_new() {
-        let l = RateLimiterGroup::new("test", 1000, 1001, 1002, 1003, 1004, 1005).unwrap();
+        let l = RateLimiterGroup::new(
+            "test",
+            TokenBucket::new(1000, 1001, 1002),
+            TokenBucket::new(1003, 1004, 1005),
+        )
+        .unwrap();
         let h = l.new_handle().unwrap();
         let bw = h.bandwidth().unwrap();
         assert_eq!(bw.capacity(), 1000);
@@ -340,7 +333,12 @@ pub(crate) mod tests {
     #[test]
     fn test_rate_limiter_group_manual_replenish() {
         // rate limiter with limit of 1000 bytes/s and 1000 ops/s
-        let l = RateLimiterGroup::new("test", 1000, 0, 1000, 1000, 0, 1000).unwrap();
+        let l = RateLimiterGroup::new(
+            "test",
+            TokenBucket::new(1000, 0, 1000),
+            TokenBucket::new(1000, 0, 1000),
+        )
+        .unwrap();
         let h = l.new_handle().unwrap();
 
         // consume 123 bytes
@@ -362,7 +360,7 @@ pub(crate) mod tests {
     #[test]
     fn test_rate_limiter_group_bandwidth() {
         // rate limiter with limit of 1000 bytes/s
-        let mut l = RateLimiterGroup::new("test", 1000, 0, 1000, 0, 0, 0).unwrap();
+        let mut l = RateLimiterGroup::new("test", TokenBucket::new(1000, 0, 1000), None).unwrap();
         l.start_thread(EventFd::new(0).unwrap()).unwrap();
 
         let h = l.new_handle().unwrap();
@@ -398,7 +396,7 @@ pub(crate) mod tests {
     #[test]
     fn test_rate_limiter_group_ops() {
         // rate limiter with limit of 1000 ops/s
-        let mut l = RateLimiterGroup::new("test", 0, 0, 0, 1000, 0, 1000).unwrap();
+        let mut l = RateLimiterGroup::new("test", None, TokenBucket::new(1000, 0, 1000)).unwrap();
         l.start_thread(EventFd::new(0).unwrap()).unwrap();
 
         let h = l.new_handle().unwrap();
@@ -434,7 +432,12 @@ pub(crate) mod tests {
     #[test]
     fn test_rate_limiter_group_full() {
         // rate limiter with limit of 1000 bytes/s and 1000 ops/s
-        let mut l = RateLimiterGroup::new("test", 1000, 0, 1000, 1000, 0, 1000).unwrap();
+        let mut l = RateLimiterGroup::new(
+            "test",
+            TokenBucket::new(1000, 0, 1000),
+            TokenBucket::new(1000, 0, 1000),
+        )
+        .unwrap();
         l.start_thread(EventFd::new(0).unwrap()).unwrap();
 
         let h = l.new_handle().unwrap();
@@ -473,7 +476,12 @@ pub(crate) mod tests {
     #[test]
     fn test_rate_limiter_group_overconsumption() {
         // initialize the rate limiter
-        let mut l = RateLimiterGroup::new("test", 1000, 0, 1000, 1000, 0, 1000).unwrap();
+        let mut l = RateLimiterGroup::new(
+            "test",
+            TokenBucket::new(1000, 0, 1000),
+            TokenBucket::new(1000, 0, 1000),
+        )
+        .unwrap();
         l.start_thread(EventFd::new(0).unwrap()).unwrap();
 
         let h = l.new_handle().unwrap();
@@ -495,7 +503,12 @@ pub(crate) mod tests {
         assert!(!h.is_blocked());
 
         // reset the rate limiter
-        let mut l = RateLimiterGroup::new("test", 1000, 0, 1000, 1000, 0, 1000).unwrap();
+        let mut l = RateLimiterGroup::new(
+            "test",
+            TokenBucket::new(1000, 0, 1000),
+            TokenBucket::new(1000, 0, 1000),
+        )
+        .unwrap();
         l.start_thread(EventFd::new(0).unwrap()).unwrap();
 
         let h = l.new_handle().unwrap();
@@ -528,5 +541,25 @@ pub(crate) mod tests {
         h.event_handler().unwrap();
         assert!(!h.is_blocked());
         assert!(h.consume(100, TokenType::Bytes));
+    }
+
+    #[test]
+    fn test_rate_limiter_group_burst() {
+        let group = RateLimiterGroup::new(
+            "burst",
+            None,
+            TokenBucket::new_with_burst(10, 1000, 100, 2, 0),
+        )
+        .unwrap();
+        let first = group.new_handle().unwrap();
+        let second = group.new_handle().unwrap();
+
+        assert!(first.consume(40, TokenType::Ops));
+        assert!(second.consume(60, TokenType::Ops));
+        assert_eq!(first.ops().unwrap().budget(), 100);
+        assert!(!first.consume(1, TokenType::Ops));
+        assert!(second.is_blocked());
+        assert!(!second.consume(1, TokenType::Ops));
+        assert_eq!(second.ops().unwrap().budget(), 100);
     }
 }
