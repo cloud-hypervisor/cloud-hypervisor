@@ -2055,6 +2055,18 @@ impl MemoryManager {
         let (ram_size, zones, allow_mem_hotplug) =
             Self::validate_memory_config(config, user_provided_zones)?;
 
+        let next_memory_slot = Arc::new(AtomicU32::new(
+            restore_data.map_or(0, |data| data.next_memory_slot),
+        ));
+        let memory_slot_allocator = Arc::new(MemorySlotAllocator::new(
+            Arc::clone(&next_memory_slot),
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        #[cfg(not(feature = "sev_snp"))]
+        let dynamic = true;
+        #[cfg(feature = "sev_snp")]
+        let dynamic = !sev_snp_enabled;
+
         let (
             start_of_device_area,
             boot_ram,
@@ -2064,7 +2076,6 @@ impl MemoryManager {
             guest_memory,
             boot_guest_memory,
             hotplug_slots,
-            next_memory_slot,
             selected_slot,
             next_hotplug_slot,
         ) = if let Some(data) = restore_data {
@@ -2086,7 +2097,6 @@ impl MemoryManager {
                 guest_memory,
                 boot_guest_memory,
                 data.hotplug_slots.clone(),
-                data.next_memory_slot,
                 data.selected_slot,
                 data.next_hotplug_slot,
             )
@@ -2203,7 +2213,6 @@ impl MemoryManager {
                 hotplug_slots,
                 0,
                 0,
-                0,
             )
         };
 
@@ -2232,11 +2241,6 @@ impl MemoryManager {
             .ok_or(Error::CreateSystemAllocator)?,
         ));
 
-        #[cfg(not(feature = "sev_snp"))]
-        let dynamic = true;
-        #[cfg(feature = "sev_snp")]
-        let dynamic = !sev_snp_enabled;
-
         let acpi_address = if dynamic
             && config.hotplug_method == HotplugMethod::Acpi
             && (config.hotplug_size.unwrap_or_default() > 0)
@@ -2255,12 +2259,6 @@ impl MemoryManager {
         // The start of device area and RAM area are placed next to each other.
         let end_of_ram_area = start_of_device_area.unchecked_sub(1);
         let ram_allocator = AddressAllocator::new(GuestAddress(0), start_of_device_area.0).unwrap();
-
-        let next_memory_slot = Arc::new(AtomicU32::new(next_memory_slot));
-        let memory_slot_allocator = Arc::new(MemorySlotAllocator::new(
-            Arc::clone(&next_memory_slot),
-            Arc::new(Mutex::new(Vec::new())),
-        ));
 
         #[allow(unused_mut)]
         let mut memory_manager = MemoryManager {
