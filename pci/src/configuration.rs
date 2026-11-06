@@ -1050,6 +1050,8 @@ impl PciConfiguration {
             }
         }
 
+        let old_command = self.registers[COMMAND_REG];
+
         match data.len() {
             1 => self.write_byte(reg_idx * 4 + offset as usize, data[0]),
             2 => self.write_word(
@@ -1083,6 +1085,10 @@ impl PciConfiguration {
         let bar_written = !probe
             && ((BAR0_REG..BAR0_REG + NUM_BAR_REGS).contains(&reg_idx) || reg_idx == ROM_BAR_REG);
 
+        if reg_idx == COMMAND_REG {
+            self.release_disabled_bars(old_command, &mut reloc);
+        }
+
         // After a BAR or COMMAND write, install every released BAR whose space
         // is decoded: a moved BAR, a failed install or a newly enabled space.
         if bar_written || reg_idx == COMMAND_REG {
@@ -1090,6 +1096,23 @@ impl PciConfiguration {
         }
 
         reloc
+    }
+
+    /// Release every mapped BAR whose space a COMMAND write, from
+    /// `old_command`, stopped decoding: the device no longer claims the
+    /// range, so another device may be placed there, as Windows does while
+    /// a device is disabled.
+    pub(crate) fn release_disabled_bars(&mut self, old_command: u32, reloc: &mut BarRelocation) {
+        let disabled = old_command & !self.registers[COMMAND_REG];
+        for slot in (0..NUM_BAR_REGS).chain([ROM_BAR_IDX]) {
+            if self.bar_installed[slot]
+                && let Some(region_type) = self.bar_region_type(slot)
+                && disabled & Self::decode_mask(region_type) != 0
+            {
+                reloc.release.push(ReleaseParams { bar_idx: slot });
+                self.bar_installed[slot] = false;
+            }
+        }
     }
 
     /// Queue the installs of every released BAR whose space is decoded.

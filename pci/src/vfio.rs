@@ -1835,8 +1835,10 @@ impl VfioCommon {
         }
 
         // Mirror the write into the shadow, which snapshot() serializes and
-        // which installs released BARs on COMMAND writes. MSI-X was handled
-        // above and BAR writes returned early, so write the raw bytes.
+        // which releases and installs BARs on COMMAND writes. MSI-X was
+        // handled above and BAR writes returned early, so write the raw bytes.
+        let old_command =
+            (reg_idx == COMMAND_REG).then(|| self.configuration.read_config_register(COMMAND_REG));
         let byte_offset = reg_idx * PCI_CONFIG_REGISTER_SIZE + offset as usize;
         match data.len() {
             1 => self.configuration.write_byte(byte_offset, data[0]),
@@ -1850,7 +1852,9 @@ impl VfioCommon {
             _ => {}
         }
         let mut reloc = BarRelocation::default();
-        if reg_idx == COMMAND_REG {
+        if let Some(old_command) = old_command {
+            self.configuration
+                .release_disabled_bars(old_command, &mut reloc);
             self.configuration.drain_pending_installs(&mut reloc);
         }
 
