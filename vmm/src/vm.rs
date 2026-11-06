@@ -1812,13 +1812,18 @@ impl Vm {
             pci_space_info.push(pci_space);
         }
 
-        let virtio_iommu_bdf = self
+        let virtio_iommu_devices = self
             .device_manager
             .lock()
             .unwrap()
             .iommu_attached_devices()
             .as_ref()
-            .map(|(v, _)| *v);
+            .map(|(v, ids)| {
+                (
+                    (*v).into(),
+                    ids.iter().map(|id| (*id).into()).collect::<Vec<u32>>(),
+                )
+            });
 
         let vgic = self
             .device_manager
@@ -1864,7 +1869,9 @@ impl Vm {
             device_info,
             &initramfs_config,
             &pci_space_info,
-            virtio_iommu_bdf.map(|bdf| bdf.into()),
+            virtio_iommu_devices
+                .as_ref()
+                .map(|(v, ids)| (*v, ids.as_slice())),
             &vgic,
             &self.numa_nodes,
             pmu_supported,
