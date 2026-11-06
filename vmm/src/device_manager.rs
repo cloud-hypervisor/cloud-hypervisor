@@ -5433,15 +5433,6 @@ impl DeviceManager {
     }
 
     pub fn remove_device(&mut self, id: &str) -> DeviceManagerResult<()> {
-        // The node can be directly a PCI node in case the 'id' refers to a
-        // VFIO device or a virtio-pci one.
-        // In case the 'id' refers to a virtio device, we must find the PCI
-        // node by looking at the parent.
-        let device_tree = self.device_tree.lock().unwrap();
-        let node = device_tree
-            .get(id)
-            .ok_or_else(|| DeviceManagerError::UnknownDeviceId(id.to_string()))?;
-
         // Release advisory locks by dropping all references.
         // Linux automatically releases all locks of that file if the last open FD is closed.
         {
@@ -5458,6 +5449,19 @@ impl DeviceManager {
                 let _ = self.block_devices.swap_remove(index);
             }
         }
+
+        // The node can be directly a PCI node in case the 'id' refers to a
+        // VFIO device or a virtio-pci one.
+        // In case the 'id' refers to a virtio device, we must find the PCI
+        // node by looking at the parent.
+        let device_tree = self.device_tree.lock().unwrap();
+        let Some(node) = device_tree.get(id) else {
+            return if self.config.lock().unwrap().remove_device(id) {
+                Ok(())
+            } else {
+                Err(DeviceManagerError::UnknownDeviceId(id.to_string()))
+            };
+        };
 
         let pci_device_node = if node.pci_bdf.is_some() && node.pci_device_handle.is_some() {
             node
