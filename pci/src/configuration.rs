@@ -1060,6 +1060,8 @@ impl PciConfiguration {
             }
         }
 
+        let old_command = self.registers[COMMAND_REG];
+
         match data.len() {
             1 => self.write_byte(reg_idx * 4 + offset as usize, data[0]),
             2 => self.write_word(
@@ -1085,6 +1087,22 @@ impl PciConfiguration {
         } else {
             false
         };
+
+        // Release every mapped BAR whose space the guest just stopped
+        // decoding: the device no longer claims the range, so another device
+        // may be placed there, as Windows does while a device is disabled.
+        if reg_idx == COMMAND_REG {
+            let disabled = old_command & !self.registers[COMMAND_REG];
+            for slot in (0..NUM_BAR_REGS).chain([ROM_BAR_IDX]) {
+                if self.bar_installed[slot]
+                    && let Some(region_type) = self.bar_region_type(slot)
+                    && disabled & Self::decode_mask(region_type) != 0
+                {
+                    reloc.release.push(ReleaseParams { bar_idx: slot });
+                    self.bar_installed[slot] = false;
+                }
+            }
+        }
 
         // After a BAR or COMMAND write, install every released BAR whose space
         // is decoded: a moved BAR, a failed install or a newly enabled space.
@@ -1874,6 +1892,62 @@ mod tests {
         assert!(cfg.bar_installed[1]);
         assert_eq!(cfg.get_bar_addr(1), ADDR_A);
         assert!(cfg.pending_slots().is_empty());
+    }
+
+    /// Clearing a decode bit releases the mapped BARs of that space; setting
+    /// it again installs them at their registers. A write that leaves a space
+    /// undecoded releases nothing: at boot BARs stay mapped until enabled.
+    #[test]
+    fn test_command_decode_clear_releases_mapped_bars() {
+        const IO_ADDR: u64 = 0x1000;
+
+        let mut cfg = reloc_config(None);
+        add_mem32_bar(&mut cfg, 0, ADDR_A);
+        add_io_bar(&mut cfg, 1, IO_ADDR, 0x100);
+
+        // COMMAND starts at 0: writing it with both spaces still off is no
+        // release.
+        assert!(write_command(&mut cfg, 0).is_empty());
+        assert!(cfg.bar_installed[0]);
+        assert!(cfg.bar_installed[1]);
+        assert!(write_command(&mut cfg, MSE | IOSE).is_empty());
+
+        // Clearing MSE releases the memory BAR only.
+        let reloc = write_command(&mut cfg, IOSE);
+        assert_eq!(reloc.release.len(), 1);
+        assert_eq!(reloc.release[0].bar_idx, 0);
+        assert!(reloc.install.is_empty());
+        assert!(cfg.is_bar_released(0));
+        assert!(cfg.bar_installed[1]);
+
+        // Rewriting COMMAND with MSE still clear changes nothing.
+        assert!(write_command(&mut cfg, IOSE).is_empty());
+        assert!(cfg.is_bar_released(0));
+
+        // Setting MSE installs it at its unchanged register.
+        let reloc = write_command(&mut cfg, MSE | IOSE);
+        assert!(reloc.release.is_empty());
+        assert_eq!(reloc.install.len(), 1);
+        assert_eq!(reloc.install[0].bar_idx, 0);
+        assert_eq!(reloc.install[0].new_base, ADDR_A);
+        apply_ok(&mut cfg, &reloc);
+        assert!(cfg.bar_installed[0]);
+
+        // Clearing IOSE releases the IO BAR only.
+        let reloc = write_command(&mut cfg, MSE);
+        assert_eq!(reloc.release.len(), 1);
+        assert_eq!(reloc.release[0].bar_idx, 1);
+        assert!(reloc.install.is_empty());
+        assert!(cfg.bar_installed[0]);
+        assert!(cfg.is_bar_released(1));
+
+        // One write swapping the decodes releases and installs at once.
+        let reloc = write_command(&mut cfg, IOSE);
+        assert_eq!(reloc.release.len(), 1);
+        assert_eq!(reloc.release[0].bar_idx, 0);
+        assert_eq!(reloc.install.len(), 1);
+        assert_eq!(reloc.install[0].bar_idx, 1);
+        assert_eq!(reloc.install[0].new_base, IO_ADDR);
     }
 
     /// A 64-bit BAR moved low dword first with MSE off is released by the

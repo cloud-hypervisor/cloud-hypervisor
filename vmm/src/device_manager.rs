@@ -7917,6 +7917,73 @@ mod tests {
         assert_eq!(bench.tree_bar_base(0), Some(IO_NEW));
     }
 
+    // Clearing a decode bit unmaps the BARs of that space; setting it again
+    // maps them back at their registers.
+    #[test]
+    fn test_decode_clear_unmaps_bar_until_reenable() {
+        let mut bench = bar_bench(&[mem_bar(0, BAR0_ADDR), io_bar(1, IO_OLD)]);
+        bench.cfg_write(COMMAND_REG, MSE | IOSE);
+        bench.assert_mapped(0, BAR0_ADDR);
+        assert_eq!(bench.io_probe(IO_OLD), Some(1));
+
+        // MSE off: the memory BAR is released, the IO BAR untouched.
+        bench.cfg_write(COMMAND_REG, IOSE);
+        bench.assert_released(0, BAR0_ADDR);
+        assert_eq!(bench.io_probe(IO_OLD), Some(1));
+        assert_eq!(bench.cfg_read(BAR0_REG) & !0xf, BAR0_ADDR as u32);
+
+        // MSE on: installed at the unchanged register.
+        bench.cfg_write(COMMAND_REG, MSE | IOSE);
+        bench.assert_mapped(0, BAR0_ADDR);
+
+        // IOSE off: the IO BAR is released, the memory BAR untouched.
+        bench.cfg_write(COMMAND_REG, MSE);
+        assert!(bench.released(1));
+        assert_eq!(bench.io_probe(IO_OLD), None);
+        assert!(bench.io_range_free(IO_OLD, IO_SIZE));
+        assert_eq!(bench.tree_bar_base(1), Some(IO_OLD));
+        bench.assert_mapped(0, BAR0_ADDR);
+
+        bench.cfg_write(COMMAND_REG, MSE | IOSE);
+        assert!(!bench.released(1));
+        assert_eq!(bench.io_probe(IO_OLD), Some(1));
+    }
+
+    // A BAR moved onto a range whose holder then stops decoding is installed
+    // when the holder's space is disabled, as Windows expects while it cycles
+    // several devices.
+    #[test]
+    fn test_other_device_decode_clear_retries_failed_install() {
+        const DEV_B_SLOT: u8 = 2;
+
+        let mut bench = bar_bench(&[mem_bar(0, BAR0_ADDR)]);
+        let a = Arc::clone(&bench.device);
+        let b = bench.add_device(DEV_B_SLOT, &[mem_bar(0, BAR1_ADDR)]);
+        bench.cfg_write(COMMAND_REG, MSE);
+        bench.assert_mapped_of(&a, 0, BAR0_ADDR);
+        bench.assert_mapped_of(&b, 0, BAR1_ADDR);
+
+        // B moves onto A's range while A decodes: its install fails.
+        bench.cfg_write_at(DEV_B_SLOT, BAR0_REG, BAR0_ADDR as u32);
+        assert!(bench.released_of(&b, 0));
+        assert!(bench.mmio32_range_free(BAR1_ADDR, BAR_SIZE));
+        bench.assert_mapped_of(&a, 0, BAR0_ADDR);
+
+        // A stops decoding: its BAR is unmapped and B's install is retried.
+        bench.cfg_write(COMMAND_REG, 0);
+        assert!(bench.released_of(&a, 0));
+        bench.assert_mapped_of(&b, 0, BAR0_ADDR);
+
+        // A decodes again while B holds its range: A stays pending until it is
+        // moved away.
+        bench.cfg_write(COMMAND_REG, MSE);
+        assert!(bench.released_of(&a, 0));
+        bench.assert_mapped_of(&b, 0, BAR0_ADDR);
+        bench.cfg_write(BAR0_REG, BAR1_ADDR as u32);
+        bench.assert_mapped_of(&a, 0, BAR1_ADDR);
+        bench.assert_mapped_of(&b, 0, BAR0_ADDR);
+    }
+
     // The expansion ROM takes the memory BAR path, gated on MSE.
     #[test]
     fn test_rom_bar_reprogram_defers_and_lands_via_mse() {
@@ -7929,13 +7996,13 @@ mod tests {
         assert!(bench.released(ROM_BAR_IDX));
         assert!(bench.mmio32_range_free(ROM_ADDR, ROM_SIZE));
         assert_eq!(bench.mmio_probe(ROM_ADDR), None);
-        // The memory BAR was not touched.
-        assert!(!bench.released(0));
+        // Disabling MSE released the memory BAR as well.
+        bench.assert_released(0, BAR0_ADDR);
 
         bench.cfg_write(COMMAND_REG, MSE);
         assert!(!bench.released(ROM_BAR_IDX));
         assert_eq!(bench.mmio_probe(ROM_NEW_ADDR), Some(ROM_BAR_IDX as u8));
         assert_eq!(bench.tree_bar_base(ROM_BAR_IDX), Some(ROM_NEW_ADDR));
-        assert_eq!(bench.mmio_probe(BAR0_ADDR), Some(0));
+        bench.assert_mapped(0, BAR0_ADDR);
     }
 }
