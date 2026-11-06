@@ -3444,6 +3444,7 @@ mod tests {
 
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
+        let _ = vm.create_vcpu(0, None).unwrap();
         let vgic_config = Gic::create_config(1, None).unwrap();
         let gic = vm.create_vgic(&vgic_config).expect("Cannot create gic");
         arch::aarch64::fdt::create_fdt(
