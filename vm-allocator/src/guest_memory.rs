@@ -134,7 +134,7 @@ impl GuestRegion {
         // is dropped. The non-owning mmap Arc cannot escape GuestRegion.
         let mapping = unsafe {
             MmapRegionBuilder::new_with_bitmap(size, AtomicBitmap::with_len(size))
-                .with_raw_mmap_pointer(backing.addr())
+                .with_raw_mmap_pointer(backing.addr)
                 .with_file_offset(file_offset)
                 .with_mmap_prot(prot)
                 .with_mmap_flags(libc::MAP_SHARED)
