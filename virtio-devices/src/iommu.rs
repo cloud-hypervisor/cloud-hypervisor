@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Barrier, Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::{io, result};
 
 use anyhow::anyhow;
@@ -32,6 +32,7 @@ use super::{
 };
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
+use crate::thread_helper::PauseCommon;
 use crate::{DmaRemapping, GuestMemory, VirtioInterrupt, VirtioInterruptType};
 
 /// Queues sizes
@@ -947,14 +948,10 @@ impl IommuEpollHandler {
             })
     }
 
-    fn run(
-        &mut self,
-        paused: &AtomicBool,
-        paused_sync: &Barrier,
-    ) -> result::Result<(), EpollHelperError> {
+    fn run(&mut self, pause_common: &PauseCommon) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.request_queue_evt.as_raw_fd(), REQUEST_Q_EVENT)?;
-        helper.run(paused, paused_sync, self)?;
+        helper.run(pause_common, self)?;
 
         Ok(())
     }
@@ -1287,9 +1284,8 @@ impl Iommu {
                     queue_sizes: QUEUE_SIZES.to_vec(),
                     avail_features,
                     acked_features,
-                    paused_sync: Some(Arc::new(Barrier::new(2))),
                     min_queues: NUM_QUEUES,
-                    paused: Arc::new(AtomicBool::new(paused)),
+                    pause_common: Arc::new(PauseCommon::new(paused)),
                     ..Default::default()
                 },
                 config,
@@ -1432,8 +1428,6 @@ impl VirtioDevice for Iommu {
             input_range: self.input_range,
         };
 
-        let paused = Arc::clone(&self.common.paused);
-        let paused_sync = self.common.paused_sync.clone();
         self.common.spawn_worker(
             &self.id,
             &self.seccomp_action,
@@ -1441,7 +1435,7 @@ impl VirtioDevice for Iommu {
             &self.exit_evt,
             Arc::clone(&device_status),
             Arc::clone(&interrupt_cb),
-            move || handler.run(&paused, paused_sync.as_ref().unwrap()),
+            move |pause_common| handler.run(pause_common),
         )?;
 
         event!("virtio-device", "activated", "id", &self.id);
