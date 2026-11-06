@@ -40,7 +40,7 @@ use vm_allocator::page_size::{
     is_page_size_aligned,
 };
 use vm_allocator::{
-    AddressAllocator, AlignedMapping, GuestMemory, MemorySlotAllocator, SystemAllocator,
+    AddressAllocator, GuestMemory, GuestRegion, MemorySlotAllocator, SystemAllocator,
 };
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
@@ -327,7 +327,7 @@ impl Interrupt {
 pub(crate) struct UserMemoryRegion {
     pub slot: u32,
     pub start: u64,
-    pub mapping: Arc<AlignedMapping>,
+    pub mapping: Arc<Mutex<GuestRegion>>,
     pub p2p_mapped: bool,
     #[cfg(feature = "kvm")]
     pub dma_buf: Option<Arc<OwnedFd>>,
@@ -339,8 +339,8 @@ impl UserMemoryRegion {
         vm: &dyn hypervisor::Vm,
         new_address: u64,
     ) -> io::Result<()> {
-        let len = self.mapping.len();
-        let host_addr = self.mapping.addr();
+        let len = self.size();
+        let host_addr = self.host_address();
         // Remove old region
         // SAFETY: AlignedMapping invariants guarantee that
         // host_addr points to len bytes of
@@ -369,6 +369,14 @@ impl UserMemoryRegion {
         Ok(())
     }
 
+    pub(crate) fn size(&self) -> usize {
+        self.mapping.lock().unwrap().size()
+    }
+
+    pub(crate) fn host_address(&self) -> *mut u8 {
+        self.mapping.lock().unwrap().as_ptr()
+    }
+
     #[cfg_attr(not(feature = "kvm"), expect(unused_variables))]
     fn map_for_p2p(
         &mut self,
@@ -380,7 +388,7 @@ impl UserMemoryRegion {
         offset: u64,
     ) -> Result<(), VfioPciError> {
         let iova = self.start;
-        let length = self.mapping.len();
+        let length = self.size();
 
         #[cfg(feature = "kvm")]
         if let Some(vfio_iommufd) = vfio_ops.as_any().downcast_ref::<VfioIommufd>()
@@ -417,10 +425,10 @@ impl UserMemoryRegion {
              available"
         );
 
-        // SAFETY: AlignedMapping invariants guarantee that self.mapping.addr()
-        // points to self.mapping.len() bytes of valid memory that will only
+        // SAFETY: AlignedMapping invariants guarantee that self.host_address()
+        // points to self.size() bytes of valid memory that will only
         // be unmapped with munmap().
-        unsafe { vfio_ops.vfio_dma_map(self.start, self.mapping.len(), self.mapping.addr()) }
+        unsafe { vfio_ops.vfio_dma_map(self.start, self.size(), self.host_address()) }
             .map_err(|e| VfioPciError::DmaMap(e, device_path.to_path_buf(), bdf))?;
         self.p2p_mapped = true;
         Ok(())
@@ -429,7 +437,7 @@ impl UserMemoryRegion {
     fn unmap_p2p(&mut self, vfio_ops: &dyn VfioOps) -> io::Result<()> {
         if self.p2p_mapped {
             vfio_ops
-                .vfio_dma_unmap(self.start, self.mapping.len())
+                .vfio_dma_unmap(self.start, self.size())
                 .map_err(io::Error::other)?;
             self.p2p_mapped = false;
         }
@@ -493,9 +501,9 @@ unsafe impl MmioRegionRange for Vec<MmioRegion> {
     fn find_user_address(&self, guest_addr: u64, size: u64) -> Result<*mut u8, io::Error> {
         for region in self.iter() {
             for user_region in region.user_memory_regions.iter() {
-                let mapping: &AlignedMapping = &user_region.mapping;
+                let mapping = user_region.mapping.lock().unwrap();
                 let start: u64 = user_region.start;
-                let len: u64 = mapping.len().try_into().unwrap();
+                let len = mapping.len();
                 // See if the guest address is inside the region.
                 let Some(offset_from_start) = guest_addr.checked_sub(start) else {
                     continue;
@@ -513,7 +521,7 @@ unsafe impl MmioRegionRange for Vec<MmioRegion> {
                 // offset_from_start + size stays within that mapping. Also, since
                 // mapping.len() fit in usize, offset_from_start must as well, so the
                 // cast is safe.
-                return Ok(unsafe { mapping.addr().add(offset_from_start as usize) });
+                return Ok(unsafe { mapping.as_ptr().add(offset_from_start as usize) });
             }
         }
 
@@ -2522,45 +2530,45 @@ impl VfioPciDevice {
                     } else {
                         area.size
                     };
+                    let offset = mmap_offset
+                        .checked_add(area.offset)
+                        .ok_or(VfioPciError::MmapArea)?;
+                    let file = fd
+                        .try_clone_to_owned()
+                        .map_err(|_| VfioPciError::MmapArea)?;
                     let size = usize::try_from(mmap_len).map_err(|_| VfioPciError::MmapArea)?;
-                    let mapping = match AlignedMapping::mmap(
-                        mmap_len,
+                    let mapping = GuestRegion::from_file(
+                        vm_memory::FileOffset::new(file.into(), offset),
+                        size,
                         find_alignment(size),
+                        GuestAddress(region.start.0 + area.offset),
                         prot,
-                        fd,
-                        mmap_offset,
-                        area.offset,
-                    ) {
-                        Ok(mapping) => mapping,
-                        Err(_) => {
-                            error!(
-                                "Could not mmap sparse area (offset = 0x{:x}, size = 0x{:x}): {}",
-                                mmap_offset,
-                                mmap_len,
-                                io::Error::last_os_error()
-                            );
-                            return Err(VfioPciError::MmapArea);
-                        }
-                    };
+                        Arc::clone(&self.vm),
+                        Arc::clone(&self.memory_slot_allocator),
+                    )
+                    .map_err(|e| {
+                        error!("Could not mmap sparse area: {e}");
+                        VfioPciError::MmapArea
+                    })?;
 
                     let mut user_memory_region = UserMemoryRegion {
                         slot: self.memory_slot_allocator.next_memory_slot(),
                         start: region.start.0 + area.offset,
-                        mapping: Arc::new(mapping),
+                        mapping: Arc::new(Mutex::new(mapping)),
                         p2p_mapped: false,
                         #[cfg(feature = "kvm")]
                         dma_buf: None,
                     };
                     // SAFETY: AlignedMapping invariants guarantee that
-                    // user_memory_region.mapping.addr() points to
-                    // user_memory_region.mapping.len() bytes of
+                    // user_memory_region.host_address() points to
+                    // user_memory_region.size() bytes of
                     // valid memory that will only be unmapped with munmap().
                     unsafe {
                         self.vm.create_user_memory_region(
                             user_memory_region.slot,
                             user_memory_region.start,
-                            user_memory_region.mapping.len(),
-                            user_memory_region.mapping.addr(),
+                            user_memory_region.size(),
+                            user_memory_region.host_address(),
                             false,
                             false,
                             hypervisor::MemoryVisibility::Shared,
@@ -2621,7 +2629,7 @@ impl VfioPciDevice {
                     continue;
                 };
                 let iova = user_memory_region.start;
-                let length = user_memory_region.mapping.len() as u64;
+                let length = user_memory_region.size() as u64;
 
                 let res = if memory_space_enabled {
                     vfio_iommufd
@@ -2652,8 +2660,8 @@ impl VfioPciDevice {
     pub fn unmap_mmio_regions(&mut self) {
         for region in self.common.mmio_regions.iter_mut() {
             for mut user_memory_region in region.user_memory_regions.drain(..) {
-                let len = user_memory_region.mapping.len();
-                let host_addr = user_memory_region.mapping.addr();
+                let len = user_memory_region.size();
+                let host_addr = user_memory_region.host_address();
                 if let Err(e) = user_memory_region.unmap_p2p(self.vfio_ops.as_ref()) {
                     // The backing memory must remain alive while mapped for DMA.
                     error!("FATAL: Failed to remove P2P mapping: {e}");
@@ -2832,7 +2840,7 @@ impl PciDevice for VfioPciDevice {
                             .checked_add(user_memory_region.start - old_base)
                             .ok_or_else(|| io::Error::other("BAR address overflows"))?;
                         new_address
-                            .checked_add(user_memory_region.mapping.len() as u64)
+                            .checked_add(user_memory_region.size() as u64)
                             .ok_or_else(|| io::Error::other("BAR range overflows"))?;
                         Ok(new_address)
                     })
@@ -2842,7 +2850,7 @@ impl PciDevice for VfioPciDevice {
                 for (user_memory_region, new_address) in
                     region.user_memory_regions.iter_mut().zip(new_addresses)
                 {
-                    let len = user_memory_region.mapping.len();
+                    let len = user_memory_region.size();
                     let offset = user_memory_region.start - old_base;
                     let map_p2p = user_memory_region.p2p_mapped;
                     user_memory_region.unmap_p2p(self.vfio_ops.as_ref())?;
@@ -3056,7 +3064,6 @@ where
 #[cfg(test)]
 mod tests {
     use std::env::temp_dir;
-    use std::os::fd::AsFd;
     use std::sync::Mutex;
 
     use vmm_sys_util::tempfile::TempFile;
@@ -3091,28 +3098,30 @@ mod tests {
             TempFile::new_with_prefix(temp_dir().join("cloud-hypervisor-vfio-sparse-")).unwrap();
         file.as_file().set_len(2 * page_size).unwrap();
 
-        let mapping_a = Arc::new(
-            AlignedMapping::mmap(
-                page_size,
-                find_alignment(page_size as usize),
-                libc::PROT_READ | libc::PROT_WRITE,
-                file.as_file().as_fd(),
-                0,
-                0,
+        let mapping_a = Arc::new(Mutex::new(
+            vm_memory::GuestRegionMmap::from_range(
+                GuestAddress(page_size),
+                page_size as usize,
+                Some(vm_memory::FileOffset::new(
+                    file.as_file().try_clone().unwrap(),
+                    0,
+                )),
             )
-            .unwrap(),
-        );
-        let mapping_b = Arc::new(
-            AlignedMapping::mmap(
-                page_size,
-                find_alignment(page_size as usize),
-                libc::PROT_READ | libc::PROT_WRITE,
-                file.as_file().as_fd(),
-                page_size,
-                0,
+            .unwrap()
+            .into(),
+        ));
+        let mapping_b = Arc::new(Mutex::new(
+            vm_memory::GuestRegionMmap::from_range(
+                GuestAddress(3 * page_size),
+                page_size as usize,
+                Some(vm_memory::FileOffset::new(
+                    file.as_file().try_clone().unwrap(),
+                    page_size,
+                )),
             )
-            .unwrap(),
-        );
+            .unwrap()
+            .into(),
+        ));
 
         vec![MmioRegion {
             start: GuestAddress(page_size),
