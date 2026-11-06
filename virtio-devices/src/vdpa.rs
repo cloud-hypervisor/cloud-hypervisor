@@ -4,7 +4,6 @@
 //
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{io, result};
 
@@ -29,6 +28,7 @@ use vmm_sys_util::ioctl::ioctl;
 use vmm_sys_util::ioctl_io_nr;
 
 use crate::device::ActivationContext;
+use crate::thread_helper::PauseControl;
 use crate::{
     ActivateError, ActivateResult, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK,
     DEVICE_FEATURES_OK, GuestMemory, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon, VirtioDevice,
@@ -191,7 +191,7 @@ impl Vdpa {
                 avail_features,
                 acked_features,
                 min_queues: num_queues,
-                paused: Arc::new(AtomicBool::new(paused)),
+                pause_control: Arc::new(PauseControl::new(paused)),
                 ..Default::default()
             },
             id,
@@ -491,7 +491,7 @@ impl Pausable for Vdpa {
     }
 
     fn resume(&mut self) -> result::Result<(), MigratableError> {
-        if !self.common.paused.load(Ordering::SeqCst) {
+        if !self.common.pause_control.is_paused() {
             return Ok(());
         }
 

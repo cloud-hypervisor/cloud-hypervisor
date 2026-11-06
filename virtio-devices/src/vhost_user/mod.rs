@@ -6,7 +6,7 @@ use std::io::ErrorKind;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Mutex};
 use std::{io, result};
 
 use anyhow::anyhow;
@@ -30,6 +30,7 @@ use vmm_sys_util::eventfd::EventFd;
 use vu_common_ctrl::VhostUserHandle;
 
 use crate::seccomp_filters::Thread;
+use crate::thread_helper::PauseControl;
 use crate::{
     ActivateError, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
     GuestMemory, GuestRegion, VIRTIO_F_IN_ORDER, VIRTIO_F_NOTIFICATION_DATA,
@@ -271,11 +272,7 @@ pub struct VhostUserEpollHandler<S: VhostUserFrontendReqHandler> {
 }
 
 impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
-    pub fn run(
-        &mut self,
-        paused: &AtomicBool,
-        paused_sync: &Barrier,
-    ) -> result::Result<(), EpollHelperError> {
+    pub fn run(&mut self, pause_control: &PauseControl) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event_custom(
             self.vu.lock().unwrap().socket_handle().as_raw_fd(),
@@ -289,7 +286,7 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
 
         helper.add_event(self.resume_evt.as_raw_fd(), RESUME_EVENT)?;
 
-        helper.run(paused, paused_sync, self)?;
+        helper.run(pause_control, self)?;
 
         Ok(())
     }

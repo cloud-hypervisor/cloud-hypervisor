@@ -8,7 +8,7 @@ use std::net::TcpListener;
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixListener;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Mutex};
 use std::{cmp, io, result};
 
 use anyhow::anyhow;
@@ -34,6 +34,7 @@ use super::{
 };
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
+use crate::thread_helper::PauseControl;
 use crate::{GuestMemory, VirtioInterrupt};
 
 const QUEUE_SIZE: u16 = 256;
@@ -329,11 +330,7 @@ impl ConsoleEpollHandler {
             })
     }
 
-    fn run(
-        &mut self,
-        paused: &AtomicBool,
-        paused_sync: &Barrier,
-    ) -> result::Result<(), EpollHelperError> {
+    fn run(&mut self, pause_control: &PauseControl) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.input_queue_evt.as_raw_fd(), INPUT_QUEUE_EVENT)?;
         helper.add_event(self.output_queue_evt.as_raw_fd(), OUTPUT_QUEUE_EVENT)?;
@@ -370,7 +367,7 @@ impl ConsoleEpollHandler {
         } else {
             (-1, false)
         };
-        helper.run_with_timeout(paused, paused_sync, self, timeout, enable_event_list)?;
+        helper.run_with_timeout(pause_control, self, timeout, enable_event_list)?;
 
         Ok(())
     }
@@ -740,9 +737,8 @@ impl Console {
                     queue_sizes: QUEUE_SIZES.to_vec(),
                     avail_features,
                     acked_features,
-                    paused_sync: Some(Arc::new(Barrier::new(2))),
                     min_queues: NUM_QUEUES,
-                    paused: Arc::new(AtomicBool::new(paused)),
+                    pause_control: Arc::new(PauseControl::new(paused)),
                     ..Default::default()
                 },
                 id,
@@ -834,8 +830,7 @@ impl VirtioDevice for Console {
             self.common.access_platform(),
         );
 
-        let paused = Arc::clone(&self.common.paused);
-        let paused_sync = self.common.paused_sync.clone();
+        let pause_control = Arc::clone(&self.common.pause_control);
 
         self.common.spawn_worker(
             &self.id,
@@ -844,7 +839,7 @@ impl VirtioDevice for Console {
             &self.exit_evt,
             Arc::clone(&device_status),
             Arc::clone(&interrupt_cb),
-            move || handler.run(&paused, paused_sync.as_ref().unwrap()),
+            move || handler.run(&pause_control),
         )?;
 
         event!("virtio-device", "activated", "id", &self.id);

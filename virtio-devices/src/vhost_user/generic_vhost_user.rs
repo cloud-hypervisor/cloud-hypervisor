@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Mutex};
 use std::{io, result};
 
 use event_monitor::event;
@@ -22,6 +22,7 @@ use super::vu_common_ctrl::VhostUserHandle;
 use super::{Error, Result};
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
+use crate::thread_helper::PauseControl;
 use crate::vhost_user::{VhostUserCommon, VhostUserState};
 use crate::{
     ActivateResult, GuestRegion, MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon, VirtioDevice,
@@ -163,9 +164,8 @@ since the backend only supports {backend_num_queues}\n",
                     avail_features,
                     acked_features,
                     queue_sizes: request_queue_sizes,
-                    paused_sync: Some(Arc::new(Barrier::new(2))),
                     min_queues: 1,
-                    paused: Arc::new(AtomicBool::new(paused)),
+                    pause_control: Arc::new(PauseControl::new(paused)),
                     ..Default::default()
                 },
                 vu: Some(Arc::new(Mutex::new(vu))),
@@ -331,8 +331,7 @@ impl VirtioDevice for GenericVhostUser {
             pause_evt,
         )?;
 
-        let paused = Arc::clone(&self.vu_common.virtio_common.paused);
-        let paused_sync = self.vu_common.virtio_common.paused_sync.clone();
+        let pause_control = Arc::clone(&self.vu_common.virtio_common.pause_control);
 
         self.vu_common.spawn_worker(
             &self.id,
@@ -341,7 +340,7 @@ impl VirtioDevice for GenericVhostUser {
             &self.exit_evt,
             Arc::clone(&device_status),
             Arc::clone(&interrupt_cb),
-            move || handler.run(&paused, paused_sync.as_ref().unwrap()),
+            move || handler.run(&pause_control),
         )?;
 
         event!("virtio-device", "activated", "id", &self.id);

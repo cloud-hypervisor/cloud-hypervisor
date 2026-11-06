@@ -29,7 +29,6 @@ pub struct PauseControl {
     changed: Condvar,
 }
 
-#[expect(dead_code)]
 impl PauseControl {
     pub fn new(paused: bool) -> Self {
         Self {
@@ -103,6 +102,7 @@ pub(crate) fn spawn_virtio_thread<F>(
     exit_evt: &EventFd,
     device_status: Arc<AtomicU8>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
+    pause_control: Arc<PauseControl>,
     f: F,
 ) -> Result<(), ActivateError>
 where
@@ -125,7 +125,11 @@ where
                 thread_exit_evt.write(1).ok();
                 return;
             }
-            match panic::catch_unwind(AssertUnwindSafe(f)) {
+            let mut active_worker = None;
+            match panic::catch_unwind(AssertUnwindSafe(|| {
+                active_worker = Some(pause_control.activate_worker());
+                f()
+            })) {
                 Err(_) => {
                     error!("{thread_name} thread panicked");
                     thread_exit_evt.write(1).ok();
