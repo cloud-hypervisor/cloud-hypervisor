@@ -75,6 +75,10 @@ pub enum Error {
     VhostUserGetQueueMaxNum(#[source] VhostError),
     #[error("Get protocol features failed")]
     VhostUserGetProtocolFeatures(#[source] VhostError),
+    #[error("Get shmem config failed")]
+    VhostUserGetShmemConfig(#[source] VhostError),
+    #[error("Invalid shared memory region count: {0}")]
+    BadShmemRegionCount(u32),
     #[error("Backend does not support protocol features {0:#x}")]
     UnsupportedProtocolFeatures(u64),
     #[error("Protocol features {0:#x} saved without PROTOCOL_FEATURES acknowledged")]
@@ -207,6 +211,7 @@ impl Error {
             Error::VhostUserGetFeatures(e)
             | Error::VhostUserGetQueueMaxNum(e)
             | Error::VhostUserGetProtocolFeatures(e)
+            | Error::VhostUserGetShmemConfig(e)
             | Error::VhostUserGetVringBase(e)
             | Error::VhostUserSetOwner(e)
             | Error::VhostUserSetFeatures(e)
@@ -449,6 +454,8 @@ pub struct VhostUserState<C> {
     pub vring_bases: Option<Vec<u64>>,
     #[serde(default)]
     pub backend_state: Option<Vec<u8>>,
+    #[serde(default)]
+    pub shmem_sizes: Vec<u64>,
 }
 
 impl<C> VhostUserState<C> {
@@ -486,7 +493,7 @@ impl VhostUserCommon {
         queues: &[(u16, Queue, EventFd)],
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         acked_features: u64,
-        backend_req_handler: Option<FrontendReqHandler<T>>,
+        mut backend_req_handler: Option<FrontendReqHandler<T>>,
         kill_evt: EventFd,
         pause_evt: EventFd,
     ) -> result::Result<VhostUserEpollHandler<T>, ActivateError> {
@@ -530,6 +537,28 @@ impl VhostUserCommon {
                 vring_bases.as_deref(),
             )
             .map_err(ActivateError::VhostUserSetup)?;
+
+        // Drain any backend requests (such as `VHOST_USER_BACKEND_SHARED_MEM_MAP`)
+        // that the backend sent synchronously during `setup_vhost_user` (for example,
+        // while handling `SET_BACKEND_REQ_FD` on snapshot restore) before the worker
+        // thread is spawned and vCPUs are resumed.
+        if let Some(backend_req_handler) = backend_req_handler.as_mut() {
+            loop {
+                let mut pfd = libc::pollfd {
+                    fd: backend_req_handler.as_raw_fd(),
+                    events: libc::POLLIN,
+                    revents: 0,
+                };
+                // SAFETY: poll is called with a valid pollfd on stack.
+                let ret = unsafe { libc::poll(&mut pfd, 1, 0) };
+                if ret <= 0 || (pfd.revents & libc::POLLIN) == 0 {
+                    break;
+                }
+                backend_req_handler.handle_request().map_err(|e| {
+                    ActivateError::VhostUserSetup(Error::FrontendReqHandlerCreation(e))
+                })?;
+            }
+        }
 
         let resume_evt = EventFd::new(libc::EFD_NONBLOCK).map_err(ActivateError::CreateEventFd)?;
         self.resume_evt = Some(
@@ -881,7 +910,7 @@ impl VhostUserCommon {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use std::io::{Read, Write};
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::thread;
@@ -895,7 +924,7 @@ mod tests {
     use crate::vsock::tests::NoopVirtioInterrupt;
     use crate::{MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VirtioDevice};
 
-    fn read_request(stream: &mut UnixStream, expected_request: FrontendReq) -> Vec<u8> {
+    pub(super) fn read_request(stream: &mut UnixStream, expected_request: FrontendReq) -> Vec<u8> {
         let mut header = [0u8; 12];
         stream.read_exact(&mut header).unwrap();
         assert_eq!(
@@ -1003,18 +1032,18 @@ mod tests {
                     stream.write_all(&backend_features.to_ne_bytes()).unwrap();
                 });
 
-                let mut device = GenericVhostUser::new(
+                let (mut device, shmem_sizes) = GenericVhostUser::new(
                     "test".to_string(),
                     socket_path.to_str().unwrap(),
                     vec![256],
                     vm_virtio::VirtioDeviceType::Fs as u32,
-                    None,
                     SeccompAction::Allow,
                     EventFd::new(libc::EFD_NONBLOCK).unwrap(),
                     enabled,
                     None,
                 )
                 .unwrap();
+                assert!(shmem_sizes.is_empty());
                 assert_eq!(device.features() & access_platform != 0, enabled);
                 device.ack_features(access_platform);
                 let state: VhostUserState<()> = device.snapshot().unwrap().to_state().unwrap();
