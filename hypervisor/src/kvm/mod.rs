@@ -1237,8 +1237,19 @@ impl vm::Vm for KvmVm {
 
     /// Capture kvmclock (filling realtime) for snapshot/migration.
     #[cfg(target_arch = "x86_64")]
-    fn snapshot_clock(&self, _boot_vcpu: &dyn cpu::Vcpu) -> vm::Result<Option<ClockState>> {
-        Ok(Some(self.get_clock()?.with_realtime_filled()))
+    fn snapshot_clock(&self, boot_vcpu: &dyn cpu::Vcpu) -> vm::Result<Option<ClockState>> {
+        let data = self.get_clock()?.with_realtime_filled();
+        let mut msrs = vec![MsrEntry {
+            index: msr_index::MSR_IA32_TSC,
+            data: 0,
+        }];
+        boot_vcpu
+            .get_msrs(&mut msrs)
+            .map_err(|e| vm::HypervisorVmError::GetClock(e.into()))?;
+        Ok(Some(ClockState {
+            data,
+            tsc: Some(msrs[0].data),
+        }))
     }
 
     /// Capture the guest virtual counter and host wall clock for
@@ -1269,31 +1280,57 @@ impl vm::Vm for KvmVm {
         state: &ClockState,
         mode: ClockRestoreMode,
     ) -> vm::Result<()> {
-        self.set_clock(state)?;
-        // A snapshot restore moves kvmclock forward but not the TSC, so an armed TSC
-        // deadline would fire late. Make it due so the guest catches up on resume.
-        if mode == ClockRestoreMode::SnapshotRestore && state.has_realtime() {
-            for vcpu in vcpus {
-                let mut msrs = vec![
-                    MsrEntry {
-                        index: msr_index::MSR_IA32_TSC,
-                        data: 0,
-                    },
-                    MsrEntry {
-                        index: msr_index::MSR_IA32_TSC_DEADLINE,
-                        data: 0,
-                    },
-                ];
-                vcpu.get_msrs(&mut msrs)
-                    .map_err(|e| vm::HypervisorVmError::SetClock(e.into()))?;
-                let (tsc, deadline) = (msrs[0].data, msrs[1].data);
-                if deadline > tsc {
-                    vcpu.set_msrs(&[MsrEntry {
-                        index: msr_index::MSR_IA32_TSC_DEADLINE,
-                        data: tsc,
-                    }])
-                    .map_err(|e| vm::HypervisorVmError::SetClock(e.into()))?;
+        self.set_clock(&state.data)?;
+        if mode != ClockRestoreMode::SnapshotRestore || !state.data.has_realtime() {
+            return Ok(());
+        }
+        if let (Some(tsc), Some(vcpu)) = (state.tsc, vcpus.first()) {
+            let saved_clock = kvm_clock_data::from(state.data);
+            let clock = kvm_clock_data::from(self.get_clock()?);
+            let (Some(khz), Some(offset)) = (
+                vcpu.tsc_khz()
+                    .map_err(|e| vm::HypervisorVmError::SetClock(e.into()))?,
+                vcpu.tsc_offset()
+                    .map_err(|e| vm::HypervisorVmError::SetClock(e.into()))?,
+            ) else {
+                return Ok(());
+            };
+            let ticks = (u128::from(clock.clock.saturating_sub(saved_clock.clock))
+                * u128::from(khz)
+                / 1_000_000) as u64;
+            let mut msrs = vec![MsrEntry {
+                index: msr_index::MSR_IA32_TSC,
+                data: 0,
+            }];
+            vcpu.get_msrs(&mut msrs)
+                .map_err(|e| vm::HypervisorVmError::SetClock(e.into()))?;
+            let delta = tsc.wrapping_add(ticks).wrapping_sub(msrs[0].data);
+            if delta as i64 > 0 {
+                for vcpu in vcpus {
+                    vcpu.set_tsc_offset(offset.wrapping_add(delta))
+                        .map_err(|e| vm::HypervisorVmError::SetClock(e.into()))?;
                 }
+            }
+        }
+        for vcpu in vcpus {
+            let mut msrs = vec![
+                MsrEntry {
+                    index: msr_index::MSR_IA32_TSC,
+                    data: 0,
+                },
+                MsrEntry {
+                    index: msr_index::MSR_IA32_TSC_DEADLINE,
+                    data: 0,
+                },
+            ];
+            vcpu.get_msrs(&mut msrs)
+                .map_err(|e| vm::HypervisorVmError::SetClock(e.into()))?;
+            if msrs[1].data != 0 {
+                if state.tsc.is_none() && msrs[1].data > msrs[0].data {
+                    msrs[1].data = msrs[0].data;
+                }
+                vcpu.set_msrs(&msrs[1..])
+                    .map_err(|e| vm::HypervisorVmError::SetClock(e.into()))?;
             }
         }
         Ok(())
@@ -3722,6 +3759,77 @@ impl KvmVcpu {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_arch = "x86_64")]
+    use super::*;
+
+    #[cfg(target_arch = "x86_64")]
+    struct TscDeadlineVm {
+        vm: Arc<dyn vm::Vm>,
+        vcpu: Box<dyn cpu::Vcpu>,
+        tsc_hz: u64,
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    impl TscDeadlineVm {
+        fn new() -> Self {
+            let hypervisor = KvmHypervisor::new().unwrap();
+            let vm = hypervisor.create_vm(HypervisorVmConfig::default()).unwrap();
+            vm.enable_split_irq().unwrap();
+            let vcpu = vm.create_vcpu(0, None, Default::default()).unwrap();
+            let mut cpuid = hypervisor.get_supported_cpuid().unwrap();
+            for entry in cpuid.iter_mut().filter(|entry| entry.function == 1) {
+                entry.ecx |= 1 << 24;
+            }
+            vcpu.set_cpuid2(&cpuid).unwrap();
+            let mut lapic = vcpu.get_lapic().unwrap();
+            lapic.set_klapic_reg(0xf0, 0x1ff);
+            lapic.set_klapic_reg(0x320, 0x400f0);
+            vcpu.set_lapic(&lapic).unwrap();
+            let tsc_hz = u64::from(vcpu.tsc_khz().unwrap().unwrap()) * 1000;
+            Self { vm, vcpu, tsc_hz }
+        }
+
+        fn read_msr(&self, index: u32) -> u64 {
+            let mut msrs = vec![MsrEntry { index, data: 0 }];
+            assert_eq!(self.vcpu.get_msrs(&mut msrs).unwrap(), 1);
+            msrs[0].data
+        }
+
+        fn arm_deadline_after_secs(&self, seconds: u64) -> u64 {
+            let deadline = self.read_msr(msr_index::MSR_IA32_TSC) + seconds * self.tsc_hz;
+            assert_eq!(
+                self.vcpu
+                    .set_msrs(&[MsrEntry {
+                        index: msr_index::MSR_IA32_TSC_DEADLINE,
+                        data: deadline,
+                    }])
+                    .unwrap(),
+                1
+            );
+            assert_eq!(self.read_msr(msr_index::MSR_IA32_TSC_DEADLINE), deadline);
+            deadline
+        }
+
+        fn clock_state_with_gap(&self, seconds: u64) -> ClockState {
+            let mut state = self.vm.snapshot_clock(self.vcpu.as_ref()).unwrap().unwrap();
+            assert!(state.data.has_realtime());
+            let mut data = kvm_clock_data::from(state.data);
+            data.realtime -= seconds * 1_000_000_000;
+            state.data = data.into();
+            state
+        }
+
+        fn restore_clock(&self, state: &ClockState) {
+            self.vm
+                .restore_clock(
+                    &[self.vcpu.as_ref()],
+                    state,
+                    ClockRestoreMode::SnapshotRestore,
+                )
+                .unwrap();
+        }
+    }
+
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_tsc_offset_round_trip() {
@@ -3737,6 +3845,28 @@ mod tests {
         assert_eq!(vcpu.tsc_offset().unwrap(), Some(target));
         vcpu.set_tsc_offset(offset).unwrap();
         assert_eq!(vcpu.tsc_offset().unwrap(), Some(offset));
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_restore_clock_rearms_tsc_deadline() {
+        let vm = TscDeadlineVm::new();
+        let mut state = vm.clock_state_with_gap(10);
+        let deadline = vm.arm_deadline_after_secs(100);
+
+        vm.restore_clock(&state);
+        assert_eq!(vm.read_msr(msr_index::MSR_IA32_TSC_DEADLINE), deadline);
+        let tsc = vm.read_msr(msr_index::MSR_IA32_TSC);
+        assert!(tsc >= state.tsc.unwrap() + 10 * vm.tsc_hz);
+        assert!(tsc < deadline);
+
+        state.tsc = None;
+        let offset = vm.vcpu.tsc_offset().unwrap();
+        vm.restore_clock(&state);
+        assert_eq!(vm.vcpu.tsc_offset().unwrap(), offset);
+        assert!(
+            vm.read_msr(msr_index::MSR_IA32_TSC_DEADLINE) <= vm.read_msr(msr_index::MSR_IA32_TSC)
+        );
     }
 
     #[test]

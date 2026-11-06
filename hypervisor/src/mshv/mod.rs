@@ -2164,7 +2164,10 @@ impl vm::Vm for MshvVm {
     /// Capture the partition reference time for snapshot/migration.
     #[cfg(target_arch = "x86_64")]
     fn snapshot_clock(&self, _boot_vcpu: &dyn cpu::Vcpu) -> vm::Result<Option<ClockState>> {
-        Ok(Some(self.get_clock()?.with_realtime_filled()))
+        Ok(Some(ClockState {
+            data: self.get_clock()?.with_realtime_filled(),
+            tsc: None,
+        }))
     }
 
     /// Restore the partition reference time before the vCPUs resume.
@@ -2175,7 +2178,7 @@ impl vm::Vm for MshvVm {
         state: &ClockState,
         _mode: ClockRestoreMode,
     ) -> vm::Result<()> {
-        self.set_clock(state)
+        self.set_clock(&state.data)
     }
 
     /// Downcast to the underlying MshvVm type

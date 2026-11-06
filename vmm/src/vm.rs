@@ -2939,7 +2939,11 @@ impl Pausable for Vm {
 
 #[derive(Serialize, Deserialize)]
 pub struct VmSnapshot {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(target_arch = "x86_64", serde(flatten))]
+    #[cfg_attr(
+        not(target_arch = "x86_64"),
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub clock: Option<hypervisor::ClockState>,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     pub common_cpuid: Vec<x86::CpuIdEntry>,
