@@ -52,6 +52,7 @@ patched binaries.
 
 - Crusoe
 - Cyberus Technology
+- Deno
 - Fly.io
 - Google
 - Meta
