@@ -432,51 +432,23 @@ impl PciDevice for VfioUserPciDevice {
             if region.index as usize != bar_idx {
                 continue;
             }
-            let addresses = region
-                .user_memory_regions
-                .iter()
-                .map(|entry| {
-                    let address = new_base
-                        .checked_add(entry.offset)
-                        .ok_or_else(|| io::Error::other("BAR address overflows"))?;
-                    address
-                        .checked_add(entry.size() as u64)
-                        .ok_or_else(|| io::Error::other("BAR range overflows"))?;
-                    Ok((entry.start(), address))
-                })
-                .collect::<io::Result<Vec<_>>>()?;
-            for (i, &(_, address)) in addresses.iter().enumerate() {
-                let entry = &region.user_memory_regions[i];
-                let result = entry
-                    .mapping
-                    .lock()
-                    .unwrap()
-                    .move_guest_address(GuestAddress(address));
-                if let Err(e) = result {
-                    for (entry, &(old_address, _)) in region.user_memory_regions[..=i]
-                        .iter()
-                        .zip(&addresses[..=i])
-                        .rev()
-                    {
-                        let mut mapping = entry.mapping.lock().unwrap();
-                        let rollback = mapping
-                            .move_guest_address(GuestAddress(old_address))
-                            .and_then(|()| {
-                                if mapping.is_registered() {
-                                    Ok(())
-                                } else {
-                                    mapping.register()
-                                }
-                            });
-                        if let Err(rollback) = rollback {
-                            error!("Failed to restore BAR mapping: {rollback}");
-                            process::exit(1);
-                        }
-                    }
-                    return Err(io::Error::other(e));
+            match region.move_bar_mappings(
+                new_base,
+                UserMemoryRegion::move_guest_mapping,
+                |entry, address, _| entry.restore_guest_mapping(address),
+            ) {
+                Ok(()) => {}
+                Err(VfioPciError::RestoreBarMapping(error)) => {
+                    error!(
+                        "Failed to restore BAR mapping for vfio-user device {}: {:#}",
+                        self.bdf,
+                        anyhow::Error::new(error),
+                    );
+                    process::exit(1);
                 }
+                Err(VfioPciError::MoveBarMapping(error)) => return Err(error),
+                Err(error) => return Err(io::Error::other(error)),
             }
-            region.start = GuestAddress(new_base);
         }
         Ok(())
     }

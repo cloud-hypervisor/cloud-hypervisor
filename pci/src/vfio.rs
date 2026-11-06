@@ -9,7 +9,7 @@ use std::os::fd::BorrowedFd;
 #[cfg(feature = "kvm")]
 use std::os::fd::OwnedFd;
 use std::os::unix::io::AsRawFd;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, process, result};
 
@@ -129,6 +129,12 @@ pub enum VfioPciError {
     ExtendedCapMismatchedWriteMasks(u16),
     #[error("Failed to restore VFIO migration state")]
     RestoreMigration(#[source] anyhow::Error),
+    #[error("Failed to map P2P mapping for device {2} at {1}")]
+    MapP2p(#[source] io::Error, PathBuf, PciBdf),
+    #[error("Failed to move BAR mapping")]
+    MoveBarMapping(#[source] io::Error),
+    #[error("Failed to restore BAR mapping")]
+    RestoreBarMapping(#[source] io::Error),
 }
 
 #[derive(Copy, Clone)]
@@ -345,6 +351,91 @@ impl UserMemoryRegion {
         self.mapping.lock().unwrap().as_ptr()
     }
 
+    pub(crate) fn move_guest_mapping(&mut self, new_address: u64) -> Result<(), VfioPciError> {
+        let old_address = self.start();
+        if let Err(error) = {
+            let mut mapping = self.mapping.lock().unwrap();
+            mapping.move_guest_address(GuestAddress(new_address))
+        } {
+            self.restore_guest_mapping(old_address)
+                .map_err(VfioPciError::RestoreBarMapping)?;
+            return Err(VfioPciError::MoveBarMapping(io::Error::other(error)));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn restore_guest_mapping(&self, old_address: u64) -> io::Result<()> {
+        let mut mapping = self.mapping.lock().unwrap();
+        mapping
+            .move_guest_address(GuestAddress(old_address))
+            .map_err(io::Error::other)?;
+        if !mapping.is_registered() {
+            mapping.register().map_err(io::Error::other)?;
+        }
+        Ok(())
+    }
+
+    fn move_bar_mapping(
+        &mut self,
+        device: &VfioDevice,
+        vfio_ops: &Arc<dyn VfioOps>,
+        region_index: u32,
+        new_address: u64,
+    ) -> Result<(), VfioPciError> {
+        let old_address = self.start();
+        let was_p2p_mapped = self.p2p_mapped;
+        if let Err(error) =
+            self.relocate_bar_mapping(device, vfio_ops, region_index, new_address, was_p2p_mapped)
+        {
+            self.restore_bar_mapping(device, vfio_ops, region_index, old_address, was_p2p_mapped)
+                .map_err(VfioPciError::RestoreBarMapping)?;
+            return Err(VfioPciError::MoveBarMapping(error));
+        }
+        Ok(())
+    }
+
+    fn relocate_bar_mapping(
+        &mut self,
+        device: &VfioDevice,
+        vfio_ops: &Arc<dyn VfioOps>,
+        region_index: u32,
+        new_address: u64,
+        map_p2p: bool,
+    ) -> io::Result<()> {
+        self.unmap_p2p(vfio_ops)?;
+        self.mapping
+            .lock()
+            .unwrap()
+            .move_guest_address(GuestAddress(new_address))
+            .map_err(io::Error::other)?;
+        if map_p2p {
+            self.map_for_p2p(device, vfio_ops, region_index, self.offset)?;
+        }
+        Ok(())
+    }
+
+    fn restore_bar_mapping(
+        &mut self,
+        device: &VfioDevice,
+        vfio_ops: &Arc<dyn VfioOps>,
+        region_index: u32,
+        old_address: u64,
+        was_p2p_mapped: bool,
+    ) -> io::Result<()> {
+        if self.start() == old_address
+            && self.p2p_mapped == was_p2p_mapped
+            && self.mapping.lock().unwrap().is_registered()
+        {
+            return Ok(());
+        }
+        self.unmap_p2p(vfio_ops)?;
+        self.restore_guest_mapping(old_address)?;
+        if was_p2p_mapped {
+            self.map_for_p2p(device, vfio_ops, region_index, self.offset)?;
+        }
+        Ok(())
+    }
+
     fn unmap_p2p(&mut self, vfio_ops: &Arc<dyn VfioOps>) -> io::Result<()> {
         if self.p2p_mapped {
             vfio_ops
@@ -360,11 +451,9 @@ impl UserMemoryRegion {
         &mut self,
         device: &VfioDevice,
         vfio_ops: &Arc<dyn VfioOps>,
-        device_path: &Path,
-        bdf: PciBdf,
         region_index: u32,
         offset: u64,
-    ) -> Result<(), VfioPciError> {
+    ) -> io::Result<()> {
         let iova = self.start();
         let length = self.size();
 
@@ -379,17 +468,17 @@ impl UserMemoryRegion {
                     }],
                     libc::O_RDWR as u32,
                 )
-                .map_err(|e| VfioPciError::DmaMap(e, device_path.to_path_buf(), bdf))?
+                .map_err(io::Error::other)?
         {
             debug!(
-                "Mapped region {region_index} of device {bdf} at 0x{iova:x} \
+                "Mapped region {region_index} at 0x{iova:x} \
                  (0x{length:x} bytes) through dma-buf"
             );
 
             vfio_iommufd
                 .ioas()
                 .map_file(dma_buf.as_raw_fd(), 0, length as u64, iova, true)
-                .map_err(|e| VfioPciError::DmaMapFile(e, device_path.to_path_buf(), bdf))?;
+                .map_err(io::Error::other)?;
 
             self.dma_buf = Some(Arc::new(OwnedFd::from(dma_buf)));
             self.p2p_mapped = true;
@@ -398,7 +487,7 @@ impl UserMemoryRegion {
         }
 
         debug!(
-            "Mapped region {region_index} of device {bdf} at 0x{iova:x} \
+            "Mapped region {region_index} at 0x{iova:x} \
              (0x{length:x} bytes) through VFIO dma map since dma-buf isn't \
              available"
         );
@@ -406,8 +495,8 @@ impl UserMemoryRegion {
         // SAFETY: AlignedMapping invariants guarantee that self.host_address()
         // points to self.size() bytes of valid memory that will only
         // be unmapped with munmap().
-        unsafe { vfio_ops.vfio_dma_map(self.start(), self.size(), self.host_address()) }
-            .map_err(|e| VfioPciError::DmaMap(e, device_path.to_path_buf(), bdf))?;
+        unsafe { vfio_ops.vfio_dma_map(iova, length, self.host_address()) }
+            .map_err(io::Error::other)?;
         self.p2p_mapped = true;
         Ok(())
     }
@@ -423,6 +512,64 @@ pub struct MmioRegion {
 }
 
 impl MmioRegion {
+    pub(crate) fn move_bar_mappings(
+        &mut self,
+        new_base: u64,
+        mut move_mapping: impl FnMut(&mut UserMemoryRegion, u64) -> Result<(), VfioPciError>,
+        mut restore_mapping: impl FnMut(&mut UserMemoryRegion, u64, bool) -> io::Result<()>,
+    ) -> Result<(), VfioPciError> {
+        let moves = self.bar_mapping_moves(new_base)?;
+
+        for (i, &(_, address, _)) in moves.iter().enumerate() {
+            match move_mapping(&mut self.user_memory_regions[i], address) {
+                Ok(()) => {}
+                Err(VfioPciError::MoveBarMapping(error)) => {
+                    // The failed entry restored itself; restore earlier entries.
+                    self.restore_bar_mappings(&moves[..i], &mut restore_mapping)?;
+                    return Err(VfioPciError::MoveBarMapping(error));
+                }
+                Err(error @ VfioPciError::RestoreBarMapping(_)) => return Err(error),
+                Err(error) => {
+                    // Other errors do not guarantee the failed entry was restored.
+                    self.restore_bar_mappings(&moves[..=i], &mut restore_mapping)?;
+                    return Err(error);
+                }
+            }
+        }
+        self.start = GuestAddress(new_base);
+        Ok(())
+    }
+
+    fn bar_mapping_moves(&self, new_base: u64) -> Result<Vec<(u64, u64, bool)>, VfioPciError> {
+        self.user_memory_regions
+            .iter()
+            .map(|entry| {
+                let address = new_base
+                    .checked_add(entry.offset)
+                    .ok_or_else(|| io::Error::other("BAR address overflows"))?;
+                address
+                    .checked_add(entry.size() as u64)
+                    .ok_or_else(|| io::Error::other("BAR range overflows"))?;
+                Ok((entry.start(), address, entry.p2p_mapped))
+            })
+            .collect::<io::Result<Vec<_>>>()
+            .map_err(VfioPciError::MoveBarMapping)
+    }
+
+    fn restore_bar_mappings(
+        &mut self,
+        moves: &[(u64, u64, bool)],
+        restore_mapping: &mut impl FnMut(&mut UserMemoryRegion, u64, bool) -> io::Result<()>,
+    ) -> Result<(), VfioPciError> {
+        for (entry, &(old_address, _, was_p2p_mapped)) in
+            self.user_memory_regions.iter_mut().zip(moves).rev()
+        {
+            restore_mapping(entry, old_address, was_p2p_mapped)
+                .map_err(VfioPciError::RestoreBarMapping)?;
+        }
+        Ok(())
+    }
+
     /// Whether the BAR can be mapped for peer to peer DMA.
     fn is_p2p_mappable(&self) -> bool {
         self.length >= get_page_size()
@@ -2542,14 +2689,11 @@ impl VfioPciDevice {
                     // Map the MMIO BAR into the host IOMMU address space via VfioOps
                     // Only needed if p2p_dma is enabled.
                     if map_p2p {
-                        user_memory_region.map_for_p2p(
-                            &self.device,
-                            &self.vfio_ops,
-                            &self.device_path,
-                            self.bdf,
-                            region.index,
-                            area.offset,
-                        )?;
+                        user_memory_region
+                            .map_for_p2p(&self.device, &self.vfio_ops, region.index, area.offset)
+                            .map_err(|error| {
+                                VfioPciError::MapP2p(error, self.device_path.clone(), self.bdf)
+                            })?;
                     }
                     region.user_memory_regions.push(user_memory_region);
                 }
@@ -2773,90 +2917,35 @@ impl PciDevice for VfioPciDevice {
             if region.index as usize != bar_idx || region.start == GuestAddress(new_base) {
                 continue;
             }
-            let old_base = region.start.raw_value();
-            let moves = region
-                .user_memory_regions
-                .iter()
-                .map(|entry| {
-                    let address = new_base
-                        .checked_add(entry.offset)
-                        .ok_or_else(|| io::Error::other("BAR address overflows"))?;
-                    address
-                        .checked_add(entry.size() as u64)
-                        .ok_or_else(|| io::Error::other("BAR range overflows"))?;
-                    Ok((entry.start(), address, entry.p2p_mapped))
-                })
-                .collect::<io::Result<Vec<_>>>()?;
-            for (i, &(old_address, address, map_p2p)) in moves.iter().enumerate() {
-                let entry = &mut region.user_memory_regions[i];
-                let result = (|| {
-                    entry.unmap_p2p(&self.vfio_ops)?;
-                    entry
-                        .mapping
-                        .lock()
-                        .unwrap()
-                        .move_guest_address(GuestAddress(address))
-                        .map_err(io::Error::other)?;
-                    if map_p2p {
-                        entry
-                            .map_for_p2p(
-                                &self.device,
-                                &self.vfio_ops,
-                                &self.device_path,
-                                self.bdf,
-                                region.index,
-                                old_address - old_base,
-                            )
-                            .map_err(io::Error::other)?;
-                    }
-                    Ok(())
-                })();
-                if let Err(e) = result {
-                    for (entry, &(old_address, _, was_mapped)) in region.user_memory_regions[..=i]
-                        .iter_mut()
-                        .zip(&moves[..=i])
-                        .rev()
-                    {
-                        if entry.start() == old_address
-                            && entry.p2p_mapped == was_mapped
-                            && entry.mapping.lock().unwrap().is_registered()
-                        {
-                            continue;
-                        }
-                        let rollback: io::Result<()> = (|| {
-                            entry.unmap_p2p(&self.vfio_ops)?;
-                            {
-                                let mut mapping = entry.mapping.lock().unwrap();
-                                mapping
-                                    .move_guest_address(GuestAddress(old_address))
-                                    .map_err(io::Error::other)?;
-                                if !mapping.is_registered() {
-                                    mapping.register().map_err(io::Error::other)?;
-                                }
-                            }
-                            if was_mapped {
-                                entry
-                                    .map_for_p2p(
-                                        &self.device,
-                                        &self.vfio_ops,
-                                        &self.device_path,
-                                        self.bdf,
-                                        region.index,
-                                        old_address - old_base,
-                                    )
-                                    .map_err(io::Error::other)?;
-                            }
-                            Ok(())
-                        })();
-                        if let Err(rollback) = rollback {
-                            error!("Failed to restore BAR mapping: {rollback}");
-                            process::exit(1);
-                        }
-                    }
-                    return Err(e);
+            let region_index = region.index;
+            match region.move_bar_mappings(
+                new_base,
+                |entry, address| {
+                    entry.move_bar_mapping(&self.device, &self.vfio_ops, region_index, address)
+                },
+                |entry, address, was_p2p_mapped| {
+                    entry.restore_bar_mapping(
+                        &self.device,
+                        &self.vfio_ops,
+                        region_index,
+                        address,
+                        was_p2p_mapped,
+                    )
+                },
+            ) {
+                Ok(()) => {}
+                Err(VfioPciError::RestoreBarMapping(error)) => {
+                    error!(
+                        "Failed to restore BAR mapping for device {} at {}: {:#}",
+                        self.bdf,
+                        self.device_path.display(),
+                        anyhow::Error::new(error),
+                    );
+                    process::exit(1);
                 }
+                Err(VfioPciError::MoveBarMapping(error)) => return Err(error),
+                Err(error) => return Err(io::Error::other(error)),
             }
-            region.start = GuestAddress(new_base);
         }
         Ok(())
     }
@@ -3042,6 +3131,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::cell::{Cell, RefCell};
     use std::env::temp_dir;
     use std::sync::Mutex;
 
@@ -3049,6 +3139,174 @@ mod tests {
 
     use super::*;
     use crate::PasidCap;
+
+    #[test]
+    fn bar_mapping_move_commits_sparse_addresses() {
+        let mut region = sparse_mmio_regions().remove(0);
+        let page_size = get_page_size();
+        region
+            .move_bar_mappings(
+                10 * page_size,
+                UserMemoryRegion::move_guest_mapping,
+                |_, _, _| Err(io::Error::other("Unexpected rollback")),
+            )
+            .unwrap();
+        assert_eq!(region.start, GuestAddress(10 * page_size));
+        assert_eq!(region.user_memory_regions[0].start(), 10 * page_size);
+        assert_eq!(region.user_memory_regions[1].start(), 12 * page_size);
+    }
+
+    #[test]
+    fn bar_mapping_move_validates_all_addresses_before_mutation() {
+        let mut region = sparse_mmio_regions().remove(0);
+        let old_base = region.start;
+        region.user_memory_regions[1].offset = u64::MAX;
+        let called = Cell::new(false);
+        assert!(matches!(
+            region.move_bar_mappings(
+                get_page_size(),
+                |_, _| {
+                    called.set(true);
+                    Ok(())
+                },
+                |_, _, _| Err(io::Error::other("Unexpected rollback")),
+            ),
+            Err(VfioPciError::MoveBarMapping(_))
+        ));
+        assert!(!called.get());
+        assert_eq!(region.start, old_base);
+    }
+
+    #[test]
+    fn bar_mapping_move_rejects_range_overflow_before_mutation() {
+        let mut region = sparse_mmio_regions().remove(0);
+        let called = Cell::new(false);
+        assert!(matches!(
+            region.move_bar_mappings(
+                u64::MAX - get_page_size() + 1,
+                |_, _| {
+                    called.set(true);
+                    Ok(())
+                },
+                |_, _, _| Err(io::Error::other("Unexpected rollback")),
+            ),
+            Err(VfioPciError::MoveBarMapping(_))
+        ));
+        assert!(!called.get());
+    }
+
+    #[test]
+    fn bar_mapping_move_restores_previous_entries_in_reverse_order() {
+        let mut region = sparse_mmio_regions().remove(0);
+        let page_size = get_page_size();
+        region.user_memory_regions.push(UserMemoryRegion {
+            offset: 4 * page_size,
+            mapping: Arc::new(Mutex::new(
+                vm_memory::GuestRegionMmap::from_range(
+                    GuestAddress(5 * page_size),
+                    page_size as usize,
+                    None,
+                )
+                .unwrap()
+                .into(),
+            )),
+            p2p_mapped: false,
+            #[cfg(feature = "kvm")]
+            dma_buf: None,
+        });
+        let restored = RefCell::new(Vec::new());
+        assert!(matches!(
+            region.move_bar_mappings(
+                10 * page_size,
+                |entry, address| {
+                    if entry.offset == 4 * page_size {
+                        return Err(VfioPciError::MoveBarMapping(io::Error::other(
+                            "Injected move failure",
+                        )));
+                    }
+                    entry.move_guest_mapping(address)?;
+                    entry.p2p_mapped = true;
+                    Ok(())
+                },
+                |entry, address, was_p2p_mapped| {
+                    restored.borrow_mut().push(entry.offset);
+                    entry
+                        .mapping
+                        .lock()
+                        .unwrap()
+                        .move_guest_address(GuestAddress(address))
+                        .map_err(io::Error::other)?;
+                    entry.p2p_mapped = was_p2p_mapped;
+                    Ok(())
+                },
+            ),
+            Err(VfioPciError::MoveBarMapping(_))
+        ));
+        assert_eq!(*restored.borrow(), vec![2 * page_size, 0]);
+        assert_eq!(region.start, GuestAddress(page_size));
+        for entry in &region.user_memory_regions {
+            assert_eq!(entry.start(), page_size + entry.offset);
+            assert!(!entry.p2p_mapped);
+        }
+    }
+
+    #[test]
+    fn bar_mapping_move_propagates_failed_entry_restoration_error() {
+        let mut region = sparse_mmio_regions().remove(0);
+        let restored = Cell::new(false);
+        assert!(matches!(
+            region.move_bar_mappings(
+                10 * get_page_size(),
+                |_, _| {
+                    Err(VfioPciError::RestoreBarMapping(io::Error::other(
+                        "Injected restoration failure",
+                    )))
+                },
+                |_, _, _| {
+                    restored.set(true);
+                    Ok(())
+                },
+            ),
+            Err(VfioPciError::RestoreBarMapping(_))
+        ));
+        assert!(!restored.get());
+        assert_eq!(region.start, GuestAddress(get_page_size()));
+    }
+
+    #[test]
+    fn bar_mapping_move_classifies_previous_entry_restoration_failure() {
+        let mut region = sparse_mmio_regions().remove(0);
+        assert!(matches!(
+            region.move_bar_mappings(
+                10 * get_page_size(),
+                |entry, address| {
+                    if entry.offset != 0 {
+                        return Err(VfioPciError::MoveBarMapping(io::Error::other(
+                            "Injected move failure",
+                        )));
+                    }
+                    entry.move_guest_mapping(address)
+                },
+                |_, _, _| Err(io::Error::other("Injected restoration failure")),
+            ),
+            Err(VfioPciError::RestoreBarMapping(_))
+        ));
+        assert_eq!(region.start, GuestAddress(get_page_size()));
+    }
+
+    #[test]
+    fn guest_mapping_move_releases_lock_before_restoration() {
+        let mut region = sparse_mmio_regions().remove(0);
+        let entry = &mut region.user_memory_regions[0];
+        let old_address = entry.start();
+        // The fixture has no VM, so attempting to restore registration fails.
+        assert!(matches!(
+            entry.move_guest_mapping(u64::MAX),
+            Err(VfioPciError::RestoreBarMapping(_))
+        ));
+        assert_eq!(entry.start(), old_address);
+        drop(entry.mapping.try_lock().unwrap());
+    }
 
     #[test]
     fn find_alignment_scales_with_length() {
