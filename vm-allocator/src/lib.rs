@@ -18,7 +18,7 @@ pub mod page_size;
 mod system;
 
 pub use crate::address::AddressAllocator;
-pub use crate::aligned_mapping::MmapRegion;
+pub use crate::aligned_mapping::AlignedMapping;
 #[cfg(target_arch = "x86_64")]
 pub use crate::gsi::GsiApic;
 pub use crate::gsi::{GsiAllocator, InterruptAllocError};
