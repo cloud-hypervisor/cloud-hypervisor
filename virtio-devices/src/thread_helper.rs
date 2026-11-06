@@ -29,7 +29,6 @@ pub struct PauseCommon {
     changed: Condvar,
 }
 
-#[expect(dead_code)]
 impl PauseCommon {
     pub fn new(pause_requested: bool) -> Self {
         Self {
@@ -117,10 +116,11 @@ pub(crate) fn spawn_virtio_thread<F>(
     exit_evt: &EventFd,
     device_status: Arc<AtomicU8>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
+    pause_common: Arc<PauseCommon>,
     f: F,
 ) -> Result<(), ActivateError>
 where
-    F: FnOnce() -> result::Result<(), EpollHelperError>,
+    F: FnOnce(&PauseCommon) -> result::Result<(), EpollHelperError>,
     F: Send + 'static,
 {
     let seccomp_filter = get_seccomp_filter(seccomp_action, thread_type)
@@ -139,7 +139,7 @@ where
                 thread_exit_evt.write(1).ok();
                 return;
             }
-            match panic::catch_unwind(AssertUnwindSafe(f)) {
+            pause_common.run(f, |result| match result {
                 Err(_) => {
                     error!("{thread_name} thread panicked");
                     thread_exit_evt.write(1).ok();
@@ -152,7 +152,7 @@ where
                     );
                 }
                 Ok(Ok(())) => {}
-            }
+            });
         })
         .map(|thread| epoll_threads.push(thread))
         .map_err(|e| {

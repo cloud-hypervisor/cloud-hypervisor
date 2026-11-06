@@ -16,8 +16,8 @@ use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
 use std::{io, mem, result, thread};
 
@@ -55,6 +55,7 @@ use super::{
 };
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
+use crate::thread_helper::PauseCommon;
 use crate::{GuestMemory, VirtioInterrupt};
 
 const SECTOR_SHIFT: u8 = 9;
@@ -695,11 +696,7 @@ impl BlockEpollHandler {
         }
     }
 
-    fn run(
-        &mut self,
-        paused: &AtomicBool,
-        paused_sync: &Barrier,
-    ) -> result::Result<(), EpollHelperError> {
+    fn run(&mut self, pause_common: &PauseCommon) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.queue_evt.as_raw_fd(), QUEUE_AVAIL_EVENT)?;
         helper.add_event(self.disk_image.notifier().as_raw_fd(), COMPLETION_EVENT)?;
@@ -707,7 +704,7 @@ impl BlockEpollHandler {
             helper.add_event(rate_limiter.as_raw_fd(), RATE_LIMITER_EVENT)?;
         }
         self.set_queue_thread_affinity();
-        helper.run(paused, paused_sync, self)?;
+        helper.run(pause_common, self)?;
 
         Ok(())
     }
@@ -941,10 +938,9 @@ impl Block {
                 device_type: VirtioDeviceType::Block as u32,
                 avail_features,
                 acked_features,
-                paused_sync: Some(Arc::new(Barrier::new(num_queues as usize + 1))),
                 queue_sizes: vec![queue_size; num_queues as usize],
                 min_queues: 1,
-                paused: Arc::new(AtomicBool::new(paused)),
+                pause_common: Arc::new(PauseCommon::new(paused)),
                 ..Default::default()
             },
             id,
@@ -1119,7 +1115,7 @@ impl Block {
 
         let nsectors = new_size / SECTOR_SIZE;
 
-        let was_paused = self.common.paused.load(Ordering::SeqCst);
+        let was_paused = self.common.pause_common.is_pause_requested();
         self.common.pause().map_err(Error::Pause)?;
 
         self.disk_nsectors.store(nsectors, Ordering::SeqCst);
@@ -1196,9 +1192,6 @@ impl VirtioDevice for Block {
         }
         self.common.activate(&queues, Arc::clone(&interrupt_cb))?;
 
-        // Recompute the barrier size from the queues that are actually activated.
-        self.common.paused_sync = Some(Arc::new(Barrier::new(queues.len() + 1)));
-
         let writeback = self.is_writeback_enabled(self.config.writeback == 1);
         self.set_writeback_mode(writeback);
 
@@ -1248,9 +1241,6 @@ impl VirtioDevice for Block {
                 draining_active_requests: Arc::clone(&self.draining_active_requests),
             };
 
-            let paused = Arc::clone(&self.common.paused);
-            let paused_sync = self.common.paused_sync.clone();
-
             self.common.spawn_worker(
                 &format!("{}_q{}", self.id.clone(), queue_idx),
                 &self.seccomp_action,
@@ -1258,7 +1248,7 @@ impl VirtioDevice for Block {
                 &self.exit_evt,
                 Arc::clone(&self.device_status),
                 Arc::clone(&interrupt_cb),
-                move || handler.run(&paused, paused_sync.as_ref().unwrap()),
+                move |pause_common| handler.run(pause_common),
             )?;
         }
 

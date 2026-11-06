@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::mem::offset_of;
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Mutex};
 use std::{io, result};
 
 use block::VirtioBlockConfig;
@@ -28,6 +27,7 @@ use super::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
 use super::{DEFAULT_VIRTIO_FEATURES, Error, Result};
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
+use crate::thread_helper::PauseCommon;
 use crate::vhost_user::{PostcopyHandler, VhostUserCommon, VhostUserState};
 use crate::{GuestRegion, VIRTIO_F_ACCESS_PLATFORM, VirtioInterrupt, VirtioInterruptType};
 
@@ -221,9 +221,8 @@ impl Blk {
                     queue_sizes: vec![vu_cfg.queue_size; num_queues as usize],
                     avail_features,
                     acked_features,
-                    paused_sync: Some(Arc::new(Barrier::new(2))),
                     min_queues: DEFAULT_QUEUE_NUMBER,
-                    paused: Arc::new(AtomicBool::new(paused)),
+                    pause_common: Arc::new(PauseCommon::new(paused)),
                     ..Default::default()
                 },
                 vu: Some(Arc::new(Mutex::new(vu))),
@@ -362,9 +361,6 @@ impl VirtioDevice for Blk {
             pause_evt,
         )?;
 
-        let paused = Arc::clone(&self.vu_common.virtio_common.paused);
-        let paused_sync = self.vu_common.virtio_common.paused_sync.clone();
-
         self.vu_common.spawn_worker(
             &self.id,
             &self.seccomp_action,
@@ -372,7 +368,7 @@ impl VirtioDevice for Blk {
             &self.exit_evt,
             Arc::clone(&device_status),
             Arc::clone(&interrupt_cb),
-            move || handler.run(&paused, paused_sync.as_ref().unwrap()),
+            move |pause_common| handler.run(pause_common),
         )?;
 
         Ok(())
