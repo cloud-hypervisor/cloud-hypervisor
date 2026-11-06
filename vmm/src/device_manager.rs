@@ -5979,6 +5979,17 @@ impl DeviceManager {
             self.shared_vfio_devices = self.shared_vfio_devices.saturating_sub(1);
         }
 
+        // The ejected device may have held the range another device's BAR
+        // failed to install on. Drop it first, as a VFIO device removes its
+        // memslots on drop.
+        drop(pci_device);
+        drop(bus_device);
+        self.pci_segments[pci_segment_id as usize]
+            .pci_bus
+            .lock()
+            .unwrap()
+            .retry_pending_installs(None);
+
         Ok(())
     }
 
@@ -7842,6 +7853,41 @@ mod tests {
         bench.cfg_write_at(DEV_B_SLOT, BAR0_REG, BAR0_ADDR as u32);
         bench.assert_mapped_of(&a, 0, BAR1_ADDR);
         bench.assert_mapped_of(&b, 0, BAR0_ADDR);
+    }
+
+    // A BAR moved onto another device's range is installed once that device
+    // is removed, as eject_device() does.
+    #[test]
+    fn test_device_removal_retries_failed_install() {
+        const DEV_B_SLOT: u8 = 2;
+
+        let mut bench = bar_bench(&[mem_bar(0, BAR0_ADDR)]);
+        let a = Arc::clone(&bench.device);
+        let b = bench.add_device(DEV_B_SLOT, &[mem_bar(0, BAR1_ADDR)]);
+
+        // A moves onto B's range: its install fails.
+        bench.cfg_write(BAR0_REG, BAR1_ADDR as u32);
+        assert!(bench.released_of(&a, 0));
+        bench.assert_mapped_of(&b, 0, BAR1_ADDR);
+
+        // Remove B and free its ranges, then retry.
+        bench.address_manager.pci_mmio32_allocators[0]
+            .lock()
+            .unwrap()
+            .free(GuestAddress(BAR1_ADDR), BAR_SIZE as GuestUsize);
+        bench
+            .address_manager
+            .mmio_bus
+            .remove_by_device(&*(Arc::clone(&b) as Arc<dyn BusDeviceSync>))
+            .unwrap();
+        let mut pci_bus = bench.pci_bus.lock().unwrap();
+        pci_bus
+            .remove_by_device(&(Arc::clone(&b) as Arc<Mutex<dyn PciDevice>>))
+            .unwrap();
+        pci_bus.retry_pending_installs(None);
+        drop(pci_bus);
+
+        bench.assert_mapped_of(&a, 0, BAR1_ADDR);
     }
 
     // IO BARs are gated on IOSE, through the real PIO path.

@@ -175,11 +175,11 @@ impl PciBus {
         Ok(())
     }
 
-    fn retry_pending_installs(&self, writer_device_id: u8) {
+    pub fn retry_pending_installs(&self, writer_device_id: Option<u8>) {
         let mut ids: Vec<u8> = self.devices.keys().copied().collect();
         ids.sort_unstable();
         for id in ids {
-            if id == writer_device_id {
+            if Some(id) == writer_device_id {
                 continue;
             }
             let d = &self.devices[&id];
@@ -388,7 +388,7 @@ impl PciConfigIo {
             // Never hold two device locks at once.
             drop(device);
             if !reloc.release.is_empty() {
-                pci_bus.retry_pending_installs(device_id);
+                pci_bus.retry_pending_installs(Some(device_id));
             }
 
             ret
@@ -508,7 +508,7 @@ impl PciConfigMmio {
             // Never hold two device locks at once.
             drop(device);
             if !reloc.release.is_empty() {
-                pci_bus.retry_pending_installs(device_id);
+                pci_bus.retry_pending_installs(Some(device_id));
             }
         }
     }
