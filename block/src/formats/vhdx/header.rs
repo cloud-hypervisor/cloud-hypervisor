@@ -298,15 +298,10 @@ impl RegionInfo {
             }
         }
 
-        if bat_entry.is_none() || mdr_entry.is_none() {
+        let (Some(bat_entry), Some(mdr_entry)) = (bat_entry, mdr_entry) else {
             region_entries.clear();
             return Err(VhdxHeaderError::RegionEntryCollectionFailed);
-        }
-
-        // It's safe to unwrap as we checked both entries have been filled.
-        // Otherwise, an error is already returned.
-        let bat_entry = bat_entry.unwrap();
-        let mdr_entry = mdr_entry.unwrap();
+        };
 
         Ok(RegionInfo {
             bat_entry,
