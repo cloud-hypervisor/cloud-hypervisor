@@ -133,7 +133,11 @@ fn access_redists_aux(
 
             while base < end {
                 if set {
-                    redist_attr_set(gic, base, *i, state[*idx])?;
+                    let value = match rdreg.base {
+                        GICR_ICENABLER0 | GICR_ICACTIVER0 => !state[*idx],
+                        _ => state[*idx],
+                    };
+                    redist_attr_set(gic, base, *i, value)?;
                     *idx += 1;
                 } else {
                     state.push(redist_attr_get(gic, base, *i)?);
