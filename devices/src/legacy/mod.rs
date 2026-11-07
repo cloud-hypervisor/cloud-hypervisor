@@ -34,7 +34,7 @@ pub use self::gpio_pl061::Error as GpioDeviceError;
 pub use self::gpio_pl061::Gpio;
 pub use self::i8042::I8042Device;
 #[cfg(target_arch = "aarch64")]
-pub use self::rtc_pl031::Rtc;
+pub use self::rtc_pl031::{RTC_SNAPSHOT_ID, Rtc};
 pub use self::serial::Serial;
 #[cfg(target_arch = "aarch64")]
 pub use self::uart_pl011::Pl011;

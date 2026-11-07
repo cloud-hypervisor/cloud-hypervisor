@@ -2261,7 +2261,15 @@ impl DeviceManager {
             .allocate_irq()
             .unwrap();
 
-        let rtc_device = Arc::new(Mutex::new(legacy::Rtc::new()));
+        let rtc_device = Arc::new(Mutex::new(legacy::Rtc::new(
+            state_from_id(snapshot, legacy::RTC_SNAPSHOT_ID)
+                .map_err(DeviceManagerError::RestoreGetState)?,
+        )));
+        let id = legacy::RTC_SNAPSHOT_ID.to_string();
+        self.device_tree
+            .lock()
+            .unwrap()
+            .insert(id.clone(), device_node!(id, rtc_device));
 
         self.bus_devices
             .push(Arc::clone(&rtc_device) as Arc<dyn BusDeviceSync>);

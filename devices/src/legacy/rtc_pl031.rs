@@ -15,8 +15,10 @@ use std::sync::{Arc, Barrier};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use log::{debug, warn};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_device::BusDevice;
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 
 use crate::{read_le_u32, write_le_u32};
 
@@ -61,6 +63,15 @@ pub(super) fn seconds_to_nanoseconds(value: i64) -> Option<i64> {
     value.checked_mul(NANOS_PER_SECOND as i64)
 }
 
+pub const RTC_SNAPSHOT_ID: &str = "__rtc_pl031";
+
+#[derive(Default, Serialize, Deserialize)]
+pub struct RtcState {
+    offset_nanoseconds: i64,
+    match_value: u32,
+    load: u32,
+}
+
 /// A RTC device following the PL031 specification..
 pub struct Rtc {
     previous_now: Instant,
@@ -73,16 +84,18 @@ pub struct Rtc {
 
 impl Rtc {
     /// Constructs an AMBA PL031 RTC device.
-    pub fn new() -> Self {
+    pub fn new(state: Option<RtcState>) -> Self {
+        let state = state.unwrap_or_default();
         Self {
             // This is used only for duration measuring purposes.
             previous_now: Instant::now(),
             tick_offset: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
-                .as_nanos() as i64,
-            match_value: 0,
-            load: 0,
+                .as_nanos() as i64
+                + state.offset_nanoseconds,
+            match_value: state.match_value,
+            load: state.load,
         }
     }
 
@@ -122,9 +135,34 @@ impl Rtc {
 
 impl Default for Rtc {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
+
+impl Snapshottable for Rtc {
+    fn id(&self) -> String {
+        RTC_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
+        // Keep the guest's offset from wall time so the RTC advances during downtime.
+        let guest_time =
+            i128::from(self.tick_offset) + self.previous_now.elapsed().as_nanos() as i128;
+        let host_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as i128;
+        Snapshot::new_from_state(&RtcState {
+            offset_nanoseconds: (guest_time - host_time) as i64,
+            match_value: self.match_value,
+            load: self.load,
+        })
+    }
+}
+
+impl Pausable for Rtc {}
+impl Transportable for Rtc {}
+impl Migratable for Rtc {}
 
 impl BusDevice for Rtc {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
@@ -181,6 +219,9 @@ impl BusDevice for Rtc {
 
 #[cfg(test)]
 mod tests {
+    use std::thread;
+    use std::time::Duration;
+
     use super::*;
     use crate::{
         read_be_u16, read_be_u32, read_le_i32, read_le_u16, read_le_u64, write_be_u16,
@@ -188,6 +229,27 @@ mod tests {
     };
 
     const LEGACY_RTC_MAPPED_IO_START: u64 = 0x0901_0000;
+
+    #[test]
+    fn restore_preserves_guest_time_and_registers() {
+        let mut rtc = Rtc::new(None);
+        let start = Instant::now();
+        rtc.write(0, RTCLR, &1234u32.to_le_bytes());
+        rtc.write(0, RTCMR, &5678u32.to_le_bytes());
+        let state = rtc.snapshot().unwrap().to_state().unwrap();
+        // The RTC follows wall time, including time spent off-host.
+        thread::sleep(Duration::from_millis(1100));
+        let mut restored = Rtc::new(Some(state));
+        let mut data = [0; 4];
+        restored.read(0, RTCLR, &mut data);
+        assert_eq!(u32::from_le_bytes(data), 1234);
+        restored.read(0, RTCMR, &mut data);
+        assert_eq!(u32::from_le_bytes(data), 5678);
+        restored.read(0, RTCDR, &mut data);
+        let time = u32::from_le_bytes(data);
+        assert!(time >= 1235);
+        assert!(time <= 1235 + start.elapsed().as_secs() as u32);
+    }
 
     #[test]
     fn test_seconds_to_nanoseconds() {
@@ -201,7 +263,7 @@ mod tests {
 
     #[test]
     fn test_rtc_read_write_and_event() {
-        let mut rtc = Rtc::new();
+        let mut rtc = Rtc::new(None);
         let mut data = [0; 4];
 
         // Read and write to the MR register.
