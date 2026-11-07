@@ -9,7 +9,6 @@
 use std::fs::File;
 use std::io::ErrorKind;
 use std::os::unix::fs::FileExt;
-use std::process::Command;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -19,6 +18,8 @@ use block::formats::qcow::{BackingFileConfig, ImageType, QcowDisk, QcowTempDisk}
 use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::tempfile::TempFile;
+
+use crate::qemu_img::QemuImg;
 
 pub(crate) const BLOCK_SIZE: u64 = 4096;
 pub(crate) const QCOW_CLUSTER_SIZE: u64 = 65536;
@@ -292,9 +293,7 @@ fn create_compressed_qcow_tempfile(num_clusters: usize) -> TempFile {
     }
 
     let qcow_tmp = TempFile::new().expect("failed to create qcow2 tempfile");
-    let qcow_path = qcow_tmp.as_path().to_str().unwrap().to_string();
-    let raw_path = raw_tmp.as_path().to_str().unwrap().to_string();
-    let status = Command::new("qemu-img")
+    QemuImg::new()
         .args([
             "convert",
             "-f",
@@ -304,12 +303,10 @@ fn create_compressed_qcow_tempfile(num_clusters: usize) -> TempFile {
             "-c",
             "-o",
             "compression_type=zlib",
-            &raw_path,
-            &qcow_path,
         ])
-        .status()
-        .expect("failed to run qemu-img");
-    assert!(status.success(), "qemu-img convert failed");
+        .arg(raw_tmp.as_path())
+        .arg(qcow_tmp.as_path())
+        .run("qemu-img convert failed");
 
     qcow_tmp
 }

@@ -6,6 +6,9 @@
 #![expect(clippy::undocumented_unsafe_blocks)]
 #![expect(clippy::panic, reason = "test code")]
 
+#[path = "../../cloud-hypervisor/tests/common/qemu_img.rs"]
+mod qemu_img;
+
 use std::any::Any;
 use std::collections::HashMap;
 use std::ffi::{CString, OsStr};
@@ -30,6 +33,8 @@ use ssh2::Session;
 use thiserror::Error;
 use vmm_sys_util::tempdir::TempDir;
 use wait_timeout::ChildExt;
+
+use crate::qemu_img::QemuImg;
 
 // ---------------------------------------------------------------------------
 // Process group registry, one group per test.
@@ -694,20 +699,12 @@ impl DiskConfig for WindowsDiskConfig {
         workload_path.push("workloads");
         let qcow2_name = format!("windows-qcow2-{}.qcow2", random_extension.to_str().unwrap());
         let qcow2_path = workload_path.join(&qcow2_name);
-        let output = Command::new("qemu-img")
-            .args([
-                "create",
-                "-f",
-                "qcow2",
-                "-b",
-                osdisk_path.to_str().unwrap(),
-                "-F",
-                "raw",
-                qcow2_path.to_str().unwrap(),
-            ])
-            .output()
-            .expect("Expect creating qcow2 overlay to succeed");
-        assert!(output.status.success(), "qemu-img create failed");
+        QemuImg::new()
+            .args(["create", "-f", "qcow2", "-b"])
+            .arg(&osdisk_path)
+            .args(["-F", "raw"])
+            .arg(&qcow2_path)
+            .run("Expect creating qcow2 overlay to succeed");
         self.osdisk_qcow2_path = qcow2_path.to_str().unwrap().to_string();
     }
 

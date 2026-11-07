@@ -4,22 +4,17 @@
 
 //! Shared test helpers for VHDX image tests.
 
-use std::process::Command;
-
 use vmm_sys_util::tempfile::TempFile;
 
-/// Generate a small dynamic VHDX with `qemu-img`. Returns `None` (and the
-/// test is skipped) when `qemu-img` is unavailable, e.g. in minimal CI.
-pub(crate) fn create_dynamic_vhdx(size_mib: u64) -> Option<TempFile> {
+use crate::test_util::qemu_img::QemuImg;
+
+/// Generate a small dynamic VHDX with `qemu-img`.
+pub(crate) fn create_dynamic_vhdx(size_mib: u64) -> TempFile {
     let tf = TempFile::new().unwrap();
-    let path = tf.as_path();
-    let status = Command::new("qemu-img")
+    QemuImg::new()
         .args(["create", "-f", "vhdx", "-o", "subformat=dynamic"])
-        .arg(path)
+        .arg(tf.as_path())
         .arg(format!("{size_mib}M"))
-        .status();
-    match status {
-        Ok(s) if s.success() => Some(tf),
-        _ => None,
-    }
+        .run("Failed to create dynamic VHDX image");
+    tf
 }

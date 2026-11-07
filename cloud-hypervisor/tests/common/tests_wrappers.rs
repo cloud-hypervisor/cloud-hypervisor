@@ -20,6 +20,7 @@ use vmm_sys_util::tempdir::TempDir;
 use vmm_sys_util::tempfile::TempFile;
 use wait_timeout::ChildExt;
 
+use crate::common::qemu_img::QemuImg;
 use crate::common::utils::{TargetApi, *};
 
 // Start cloud-hypervisor with no VM parameters, only the API server running.
@@ -2092,13 +2093,11 @@ pub(crate) fn _test_virtio_block_dynamic_vhdx_expand(guest: &Guest) {
     let vhdx_path = vhdx_pathbuf.to_str().unwrap();
 
     // Generate a 100 MiB dynamic VHDX file
-    Command::new("qemu-img")
-        .arg("create")
-        .args(["-f", "vhdx"])
-        .arg(vhdx_path)
+    QemuImg::new()
+        .args(["create", "-f", "vhdx"])
+        .arg(&vhdx_pathbuf)
         .arg(VIRTUAL_DISK_SIZE.to_string())
-        .output()
-        .expect("Expect generating dynamic VHDX image");
+        .run("Expect generating dynamic VHDX image");
 
     // Check if the size matches with empty VHDx file size
     assert_eq!(vhdx_image_size(vhdx_path), EMPTY_VHDX_FILE_SIZE);
@@ -2155,20 +2154,14 @@ pub(crate) fn _test_virtio_block_vmdk(guest: &Guest, subformat: &str) {
 
     // Convert the prepared RAW OS disk into a flat VMDK. qemu-img writes the
     // extent file(s) next to the descriptor automatically.
-    let convert = Command::new("qemu-img")
-        .arg("convert")
-        .args(["-f", "raw"])
-        .args(["-O", "vmdk"])
-        .args(["-o", &format!("subformat={subformat}")])
+    QemuImg::new()
+        .args(["convert", "-f", "raw", "-O", "vmdk", "-o"])
+        .arg(format!("subformat={subformat}"))
         .arg(&raw_os_disk)
-        .arg(vmdk_path_str)
-        .output()
-        .expect("Expect generating flat VMDK image from RAW image");
-    assert!(
-        convert.status.success(),
-        "qemu-img convert to VMDK (subformat={subformat}) failed: {}",
-        String::from_utf8_lossy(&convert.stderr)
-    );
+        .arg(&vmdk_path)
+        .run(&format!(
+            "qemu-img convert to VMDK (subformat={subformat}) failed"
+        ));
 
     let mut cloud_child = GuestCommand::new(guest)
         .default_cpus()
@@ -2222,19 +2215,14 @@ pub(crate) fn _test_virtio_block_vmdk_enospc(guest: &Guest, subformat: &str) {
     let vmdk_path = guest.tmp_dir.as_path().join("data.vmdk");
     let vmdk_path_str = vmdk_path.to_str().unwrap();
 
-    let create = Command::new("qemu-img")
-        .arg("create")
-        .args(["-f", "vmdk"])
-        .args(["-o", &format!("subformat={subformat}")])
-        .arg(vmdk_path_str)
+    QemuImg::new()
+        .args(["create", "-f", "vmdk", "-o"])
+        .arg(format!("subformat={subformat}"))
+        .arg(&vmdk_path)
         .arg(format!("{DISK_SIZE_MIB}M"))
-        .output()
-        .expect("Expect creating flat VMDK data disk");
-    assert!(
-        create.status.success(),
-        "qemu-img create VMDK (subformat={subformat}) failed: {}",
-        String::from_utf8_lossy(&create.stderr)
-    );
+        .run(&format!(
+            "qemu-img create VMDK (subformat={subformat}) failed"
+        ));
 
     let mut cloud_child = GuestCommand::new(guest)
         .default_cpus()
@@ -2321,19 +2309,11 @@ pub(crate) fn _test_virtio_block_vmdk_extent_spanning(guest: &Guest, direct: boo
     let vmdk_path = base_dir.join("spanning.vmdk");
     let vmdk_path_str = vmdk_path.to_str().unwrap();
 
-    let create = Command::new("qemu-img")
-        .arg("create")
-        .args(["-f", "vmdk"])
-        .args(["-o", "subformat=twoGbMaxExtentFlat"])
-        .arg(vmdk_path_str)
+    QemuImg::new()
+        .args(["create", "-f", "vmdk", "-o", "subformat=twoGbMaxExtentFlat"])
+        .arg(&vmdk_path)
         .arg("3G")
-        .output()
-        .expect("Expect creating twoGbMaxExtentFlat VMDK data disk");
-    assert!(
-        create.status.success(),
-        "qemu-img create twoGbMaxExtentFlat VMDK failed: {}",
-        String::from_utf8_lossy(&create.stderr)
-    );
+        .run("qemu-img create twoGbMaxExtentFlat VMDK failed");
 
     let descriptor = fs::read_to_string(&vmdk_path).expect("read VMDK descriptor");
     let extent_lines: Vec<&str> = descriptor
