@@ -27,8 +27,8 @@ use vm_memory::{
     Address as _, Bytes as _, GuestAddress, GuestMemoryBackend, GuestMemoryError,
     GuestMemoryLoadGuard,
 };
-use vm_virtio::AccessPlatform;
 use vm_virtio::checked_descriptor::DescriptorChainExt;
+use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::file_traits::FileSync;
 
 use crate::async_io::{
@@ -84,6 +84,17 @@ impl Request {
     pub fn parse<M: GuestMemoryBackend>(
         desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<M>>,
         access_platform: Option<&dyn AccessPlatform>,
+    ) -> Result<Request, (Error, Option<GuestAddress>)> {
+        let status_addr = Self::find_status_addr(&mut desc_chain.clone(), access_platform)
+            .map_err(|e| (e, None))?;
+        Self::parse_descriptors(desc_chain, access_platform, status_addr)
+            .map_err(|e| (e, Some(status_addr)))
+    }
+
+    fn parse_descriptors<M: GuestMemoryBackend>(
+        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<M>>,
+        access_platform: Option<&dyn AccessPlatform>,
+        status_addr: GuestAddress,
     ) -> Result<Request, Error> {
         let hdr_desc = desc_chain
             .next_checked(access_platform)
@@ -108,12 +119,11 @@ impl Request {
             request_type: request_type(desc_chain.memory(), hdr_desc_addr)?,
             sector: sector(desc_chain.memory(), hdr_desc_addr)?,
             data_descriptors: SmallVec::with_capacity(DEFAULT_DESCRIPTOR_VEC_SIZE),
-            status_addr: GuestAddress(0),
+            status_addr,
             writeback: true,
             start: Instant::now(),
         };
 
-        let status_desc;
         let mut desc = desc_chain
             .next_checked(access_platform)
             .map_err(|addr| Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(addr)))?
@@ -152,9 +162,7 @@ impl Request {
                         Error::DescriptorChainTooShort
                     })?;
             }
-            status_desc = desc;
         } else {
-            status_desc = desc;
             // Only flush requests are allowed to skip the data descriptor.
             if req.request_type != RequestType::Flush {
                 error!("Need a data descriptor: request = {req:?}");
@@ -162,18 +170,43 @@ impl Request {
             }
         }
 
+        Ok(req)
+    }
+
+    fn find_status_addr<M: GuestMemoryBackend>(
+        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<M>>,
+        access_platform: Option<&dyn AccessPlatform>,
+    ) -> Result<GuestAddress, Error> {
+        let status_desc = desc_chain
+            .by_ref()
+            .last()
+            .ok_or(Error::DescriptorChainTooShort)?;
+        // A descriptor that still chains on means the iteration stopped
+        // early, on a bad next index or at the chain limit, so this is not
+        // the end of the chain.
+        if status_desc.has_next() {
+            return Err(Error::DescriptorChainTooShort);
+        }
         // The status MUST always be writable.
         if !status_desc.is_write_only() {
             return Err(Error::UnexpectedReadOnlyDescriptor);
         }
-
-        if status_desc.is_empty() {
+        if status_desc.len() == 0 {
             return Err(Error::DescriptorLengthTooSmall);
         }
-
-        req.status_addr = status_desc.addr();
-
-        Ok(req)
+        let addr = status_desc
+            .addr()
+            .translate_gva(access_platform, 1)
+            .map_err(|_| {
+                Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(status_desc.addr()))
+            })?;
+        desc_chain
+            .memory()
+            .check_range(addr, 1)
+            .then_some(addr)
+            .ok_or(Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(
+                addr,
+            )))
     }
 
     pub fn execute<T: FileExt + FileSync, M: GuestMemoryBackend>(
@@ -892,7 +925,7 @@ mod tests {
                 assert_eq!(result.unwrap().request_type(), RequestType::In);
             } else {
                 assert!(
-                    matches!(result, Err(Error::DescriptorLengthTooSmall)),
+                    matches!(result, Err((Error::DescriptorLengthTooSmall, Some(_)))),
                     "header of {hdr_len} bytes was accepted"
                 );
             }
