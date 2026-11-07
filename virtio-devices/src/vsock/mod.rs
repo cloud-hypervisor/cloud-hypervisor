@@ -151,6 +151,10 @@ pub trait VsockBackend: VsockChannel + VsockEpollListener + Send {
         Vec::new()
     }
     fn queue_rst_for_connections(&mut self, _conns: Vec<(u32, u32)>) {}
+    fn local_port_last(&self) -> Option<u32> {
+        None
+    }
+    fn set_local_port_last(&mut self, _local_port_last: u32) {}
 }
 
 #[cfg(any(test, fuzzing))]

@@ -354,6 +354,14 @@ impl VsockBackend for VsockMuxer {
             });
         }
     }
+
+    fn local_port_last(&self) -> Option<u32> {
+        Some(self.local_port_last)
+    }
+
+    fn set_local_port_last(&mut self, local_port_last: u32) {
+        self.local_port_last = local_port_last;
+    }
 }
 
 impl VsockMuxer {
