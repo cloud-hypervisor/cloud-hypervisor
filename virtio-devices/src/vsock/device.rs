@@ -10,8 +10,7 @@
 
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Barrier, RwLock};
+use std::sync::{Arc, RwLock};
 use std::{fs, io, result};
 
 use anyhow::anyhow;
@@ -47,6 +46,7 @@ use vmm_sys_util::eventfd::EventFd;
 use super::{VsockBackend, VsockPacket};
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
+use crate::thread_helper::PauseControl;
 use crate::{
     ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
     Error as DeviceError, GuestMemory, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_IN_ORDER,
@@ -230,17 +230,13 @@ where
         Ok(used_descs)
     }
 
-    fn run(
-        &mut self,
-        paused: &AtomicBool,
-        paused_sync: &Barrier,
-    ) -> result::Result<(), EpollHelperError> {
+    fn run(&mut self, pause_control: &PauseControl) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.queue_evts[0].as_raw_fd(), RX_QUEUE_EVENT)?;
         helper.add_event(self.queue_evts[1].as_raw_fd(), TX_QUEUE_EVENT)?;
         helper.add_event(self.queue_evts[2].as_raw_fd(), EVT_QUEUE_EVENT)?;
         helper.add_event(self.backend.read().unwrap().get_polled_fd(), BACKEND_EVENT)?;
-        helper.run(paused, paused_sync, self)?;
+        helper.run(pause_control, self)?;
 
         Ok(())
     }
@@ -394,10 +390,9 @@ where
                 device_type: VirtioDeviceType::Vsock as u32,
                 avail_features,
                 acked_features,
-                paused_sync: Some(Arc::new(Barrier::new(2))),
                 queue_sizes: QUEUE_SIZES.to_vec(),
                 min_queues: NUM_QUEUES,
-                paused: Arc::new(AtomicBool::new(paused)),
+                pause_control: Arc::new(PauseControl::new(paused)),
                 ..Default::default()
             },
             id,
@@ -489,8 +484,7 @@ where
             backend_parked: false,
         };
 
-        let paused = Arc::clone(&self.common.paused);
-        let paused_sync = self.common.paused_sync.clone();
+        let pause_control = Arc::clone(&self.common.pause_control);
 
         self.common.spawn_worker(
             &self.id,
@@ -499,7 +493,7 @@ where
             &self.exit_evt,
             Arc::clone(&device_status),
             Arc::clone(&interrupt_cb),
-            move || handler.run(&paused, paused_sync.as_ref().unwrap()),
+            move || handler.run(&pause_control),
         )?;
 
         event!("virtio-device", "activated", "id", &self.id);

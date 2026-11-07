@@ -12,8 +12,8 @@ use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::fd::{AsRawFd, BorrowedFd};
 use std::result;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU64, Ordering};
-use std::sync::{Arc, Barrier};
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
@@ -45,6 +45,7 @@ use super::{
 };
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
+use crate::thread_helper::PauseControl;
 use crate::{GuestMemory, VirtioInterrupt};
 
 /// Control queue
@@ -85,8 +86,7 @@ impl NetCtrlEpollHandler {
 
     pub fn run_ctrl(
         &mut self,
-        paused: &AtomicBool,
-        paused_sync: &Barrier,
+        pause_control: &PauseControl,
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.queue_evt.as_raw_fd(), CTRL_QUEUE_EVENT)?;
@@ -95,7 +95,7 @@ impl NetCtrlEpollHandler {
             self.announce_retry_timer.as_raw_fd(),
             RETRY_ANNOUNCEMENTS_EVENT,
         )?;
-        helper.run(paused, paused_sync, self)?;
+        helper.run(pause_control, self)?;
 
         Ok(())
     }
@@ -322,11 +322,7 @@ impl NetEpollHandler {
         Ok(())
     }
 
-    fn run(
-        &mut self,
-        paused: &AtomicBool,
-        paused_sync: &Barrier,
-    ) -> result::Result<(), EpollHelperError> {
+    fn run(&mut self, pause_control: &PauseControl) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.queue_evt_pair.0.as_raw_fd(), RX_QUEUE_EVENT)?;
         helper.add_event(self.queue_evt_pair.1.as_raw_fd(), TX_QUEUE_EVENT)?;
@@ -359,7 +355,7 @@ impl NetEpollHandler {
         // The NetQueuePair needs the epoll fd.
         self.net.epoll_fd = Some(helper.as_raw_fd());
 
-        helper.run(paused, paused_sync, self)?;
+        helper.run(pause_control, self)?;
 
         Ok(())
     }
@@ -632,9 +628,8 @@ impl Net {
                 avail_features,
                 acked_features,
                 queue_sizes,
-                paused_sync: Some(Arc::new(Barrier::new((num_queues / 2) as usize + 1))),
                 min_queues: 2,
-                paused: Arc::new(AtomicBool::new(paused)),
+                pause_control: Arc::new(PauseControl::new(paused)),
                 ..Default::default()
             },
             id,
@@ -863,14 +858,10 @@ impl VirtioDevice for Net {
         let num_queues = u16::try_from(queues.len()).map_err(|_| ActivateError::BadActivate)?;
         let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());
 
-        // Recompute the barrier size from the queues that are actually activated.
         let has_ctrl_queue =
             self.common.feature_acked(VIRTIO_NET_F_CTRL_VQ.into()) && !num_queues.is_multiple_of(2);
         let ctrl_threads = if has_ctrl_queue { 1 } else { 0 };
         let qp_threads = (num_queues - ctrl_threads) / 2;
-        self.common.paused_sync = Some(Arc::new(Barrier::new(usize::from(
-            1 + qp_threads + ctrl_threads,
-        ))));
 
         // Only a queue pair with a worker drains its tap queue, so detach the
         // rest before the workers start.
@@ -938,8 +929,7 @@ impl VirtioDevice for Net {
                 announcer,
             };
 
-            let paused = Arc::clone(&self.common.paused);
-            let paused_sync = self.common.paused_sync.clone();
+            let pause_control = Arc::clone(&self.common.pause_control);
 
             self.common.spawn_worker(
                 &format!("{}_ctrl", self.id),
@@ -948,7 +938,7 @@ impl VirtioDevice for Net {
                 &self.exit_evt,
                 Arc::clone(&self.device_status),
                 Arc::clone(&interrupt_cb),
-                move || ctrl_handler.run_ctrl(&paused, paused_sync.as_ref().unwrap()),
+                move || ctrl_handler.run_ctrl(&pause_control),
             )?;
         }
 
@@ -1014,8 +1004,7 @@ impl VirtioDevice for Net {
                 pause_evt,
             };
 
-            let paused = Arc::clone(&self.common.paused);
-            let paused_sync = self.common.paused_sync.clone();
+            let pause_control = Arc::clone(&self.common.pause_control);
 
             self.common.spawn_worker(
                 &format!("{}_qp{}", self.id.clone(), i),
@@ -1024,7 +1013,7 @@ impl VirtioDevice for Net {
                 &self.exit_evt,
                 Arc::clone(&self.device_status),
                 Arc::clone(&interrupt_cb),
-                move || handler.run(&paused, paused_sync.as_ref().unwrap()),
+                move || handler.run(&pause_control),
             )?;
         }
 
