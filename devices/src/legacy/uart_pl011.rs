@@ -10,15 +10,18 @@ use std::sync::{Arc, Barrier};
 use std::time::Instant;
 use std::{io, result};
 
-use log::{debug, warn};
+use log::{debug, error, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_device::BusDevice;
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::errno;
+use vmm_sys_util::eventfd::EventFd;
 
 use crate::{read_le_u32, write_le_u32};
+
+const PL011_FIFO_SIZE: usize = 16;
 
 /* Registers */
 const UARTDR: u64 = 0;
@@ -85,6 +88,7 @@ pub struct Pl011 {
     irq: Arc<dyn InterruptSourceGroup>,
     out: Option<Box<dyn io::Write + Send>>,
     timestamp: Instant,
+    in_buffer_empty_evt: Option<EventFd>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -189,6 +193,7 @@ impl Pl011 {
             irq,
             out,
             timestamp,
+            in_buffer_empty_evt: None,
         }
     }
 
@@ -216,8 +221,20 @@ impl Pl011 {
         }
     }
 
-    /// Queues raw bytes for the guest to read and signals the interrupt
+    /// Sets an event signaled when the guest has read all queued input.
+    pub fn set_in_buffer_empty_evt(&mut self, evt: EventFd) {
+        self.in_buffer_empty_evt = Some(evt);
+    }
+
+    /// Returns how many input bytes the receive FIFO can still accept.
+    pub fn fifo_capacity(&self) -> usize {
+        PL011_FIFO_SIZE.saturating_sub(self.read_fifo.len())
+    }
+
+    /// Queues raw bytes for the guest to read and signals the interrupt. Bytes beyond
+    /// `fifo_capacity()` are dropped.
     pub fn queue_input_bytes(&mut self, c: &[u8]) -> errno::Result<()> {
+        let c = &c[..c.len().min(self.fifo_capacity())];
         self.read_fifo.extend(c);
         self.read_count += c.len() as u32;
         self.flags &= !PL011_FLAG_RXFE;
@@ -377,7 +394,15 @@ impl BusDevice for Pl011 {
             match offset >> 2 {
                 UARTDR => {
                     self.flags &= !PL011_FLAG_RXFF;
-                    let c: u32 = self.read_fifo.pop_front().unwrap_or_default().into();
+                    let popped = self.read_fifo.pop_front();
+                    if popped.is_some()
+                        && self.read_fifo.is_empty()
+                        && let Some(evt) = self.in_buffer_empty_evt.as_ref()
+                        && let Err(e) = evt.write(1)
+                    {
+                        error!("Failed to signal PL011 input buffer empty: {e}");
+                    }
+                    let c: u32 = popped.unwrap_or_default().into();
                     if self.read_count > 0 {
                         self.read_count -= 1;
                     }
