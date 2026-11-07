@@ -15701,6 +15701,66 @@ mod fw_cfg {
     use crate::*;
 
     #[test]
+    fn test_fw_cfg_snapshot_restore() {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let api_socket = temp_api_path(&guest.tmp_dir);
+        let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
+        let file = guest.tmp_dir.as_path().join("fw-cfg-item");
+        fs::write(&file, "snapshot contents").unwrap();
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket])
+            .default_cpus()
+            .default_memory()
+            .default_kernel_cmdline()
+            .default_disks()
+            .default_net()
+            .args([
+                "--fw-cfg-config",
+                &format!(
+                    "initramfs=off,items=[name=opt/test,file={}]",
+                    file.display()
+                ),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+        let read_item = "sudo cat /sys/firmware/qemu_fw_cfg/by_name/opt/test/raw";
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+            assert_eq!(guest.ssh_command(read_item).unwrap(), "snapshot contents");
+            assert!(remote_command(&api_socket, "pause", None));
+            assert!(remote_command(
+                &api_socket,
+                "snapshot",
+                Some(&format!("file://{snapshot_dir}"))
+            ));
+        });
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        let mut child = GuestCommand::new(&guest)
+            .args([
+                "--restore",
+                &format!("source_url=file://{snapshot_dir},resume=on"),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+        let r = panic::catch_unwind(|| {
+            guest.wait_for_ssh(Duration::from_secs(30)).unwrap();
+            assert_eq!(
+                guest.ssh_command(read_item).unwrap(),
+                "snapshot contents",
+                "Restored fw_cfg content should equal the original content"
+            );
+        });
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+    }
+
+    #[test]
     fn test_fw_cfg() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
