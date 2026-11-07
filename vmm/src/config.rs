@@ -241,6 +241,9 @@ pub enum ValidationError {
     ConsoleTcpClientUnsupported,
     #[error("TCP console port must not be zero")]
     ConsoleTcpPortZero,
+    /// Boot has no vCPUs
+    #[error("Number of boot vCPUs must be greater than 0")]
+    CpusBootZero,
     /// Max is less than boot
     #[error("Max CPUs ({0}) lower than boot CPUs ({1})")]
     CpusMaxLowerThanBoot(u32 /* max vCPUs */, u32 /* boot vCPUs */),
@@ -3704,6 +3707,10 @@ impl VmConfig {
             return Err(ValidationError::ConsoleFileMissing);
         }
 
+        if self.cpus.boot_vcpus == 0 {
+            return Err(ValidationError::CpusBootZero);
+        }
+
         if self.cpus.max_vcpus < self.cpus.boot_vcpus {
             return Err(ValidationError::CpusMaxLowerThanBoot(
                 self.cpus.max_vcpus,
@@ -6979,6 +6986,14 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             invalid_config.validate(),
             Err(ValidationError::ConsoleSocketPathUnexpected)
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.cpus.max_vcpus = 0;
+        invalid_config.cpus.boot_vcpus = 0;
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::CpusBootZero)
         );
 
         let mut invalid_config = valid_config.clone();
