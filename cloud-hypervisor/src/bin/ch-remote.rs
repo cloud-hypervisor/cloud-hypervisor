@@ -112,10 +112,12 @@ trait DBusApi1 {
     fn vm_delete(&self) -> zbus::Result<()>;
     fn vm_info(&self) -> zbus::Result<String>;
     fn vm_pause(&self) -> zbus::Result<()>;
+    fn vm_nmi(&self) -> zbus::Result<()>;
     fn vm_power_button(&self) -> zbus::Result<()>;
     fn vm_reboot(&self) -> zbus::Result<()>;
     fn vm_remove_device(&self, vm_remove_device: &str) -> zbus::Result<()>;
     fn vm_resize(&self, vm_resize: &str) -> zbus::Result<()>;
+    fn vm_resize_disk(&self, vm_resize_disk: &str) -> zbus::Result<()>;
     fn vm_resize_zone(&self, vm_resize_zone: &str) -> zbus::Result<()>;
     fn vm_restore(&self, restore_config: &str) -> zbus::Result<()>;
     fn vm_cancel_migration(&self) -> zbus::Result<()>;
@@ -247,8 +249,17 @@ impl<'a> DBusApi1ProxyBlocking<'a> {
             .map_err(Error::DBusApiClient)
     }
 
+    fn api_vm_nmi(&self) -> ApiResult {
+        self.vm_nmi().map_err(Error::DBusApiClient)
+    }
+
     fn api_vm_resize(&self, vm_resize: &str) -> ApiResult {
         self.vm_resize(vm_resize).map_err(Error::DBusApiClient)
+    }
+
+    fn api_vm_resize_disk(&self, vm_resize_disk: &str) -> ApiResult {
+        self.vm_resize_disk(vm_resize_disk)
+            .map_err(Error::DBusApiClient)
     }
 
     fn api_vm_resize_zone(&self, vm_resize_zone: &str) -> ApiResult {
@@ -610,6 +621,7 @@ fn dbus_api_do_command(
         Some("balloon-stats") => proxy.api_vm_balloon_stats(),
         Some("counters") => proxy.api_vm_counters(),
         Some("ping") => proxy.api_vmm_ping(),
+        Some("nmi") => proxy.api_vm_nmi(),
         Some("shutdown") => proxy.api_vm_shutdown(),
         Some("resize") => {
             let resize = resize_config(
@@ -630,6 +642,21 @@ fn dbus_api_do_command(
                     .map(|x| x as &str),
             )?;
             proxy.api_vm_resize(&resize)
+        }
+        Some("resize-disk") => {
+            let resize_disk = resize_disk_config(
+                matches
+                    .subcommand_matches("resize-disk")
+                    .unwrap()
+                    .get_one::<String>("disk")
+                    .unwrap(),
+                matches
+                    .subcommand_matches("resize-disk")
+                    .unwrap()
+                    .get_one::<String>("size")
+                    .unwrap(),
+            )?;
+            proxy.api_vm_resize_disk(&resize_disk)
         }
         Some("resize-zone") => {
             let resize_zone = resize_zone_config(

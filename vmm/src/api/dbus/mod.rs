@@ -22,9 +22,9 @@ use crate::api::VmCoredump;
 use crate::api::{
     AddDisk, Body, VmAddDevice, VmAddFs, VmAddGenericVhostUser, VmAddNet, VmAddPmem,
     VmAddUserDevice, VmAddVdpa, VmAddVsock, VmBalloonStats, VmBoot, VmCancelMigration, VmCounters,
-    VmCreate, VmDelete, VmInfo, VmPause, VmPowerButton, VmReboot, VmReceiveMigration,
-    VmRemoveDevice, VmResize, VmResizeZone, VmRestore, VmResume, VmSendMigration, VmShutdown,
-    VmSnapshot, VmmPing, VmmShutdown,
+    VmCreate, VmDelete, VmInfo, VmNmi, VmPause, VmPowerButton, VmReboot, VmReceiveMigration,
+    VmRemoveDevice, VmResize, VmResizeDisk, VmResizeZone, VmRestore, VmResume, VmSendMigration,
+    VmShutdown, VmSnapshot, VmmPing, VmmShutdown,
 };
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::{Error as VmmError, NetConfig, Result as VmmResult, VmConfig};
@@ -250,6 +250,10 @@ impl DBusApi {
         self.vm_action(&VmPause, ()).await.map(|_| ())
     }
 
+    async fn vm_nmi(&self) -> Result<()> {
+        self.vm_action(&VmNmi, ()).await.map(|_| ())
+    }
+
     async fn vm_power_button(&self) -> Result<()> {
         self.vm_action(&VmPowerButton, ()).await.map(|_| ())
     }
@@ -268,6 +272,13 @@ impl DBusApi {
     async fn vm_resize(&self, vm_resize: String) -> Result<()> {
         let vm_resize = serde_json::from_str(&vm_resize).map_err(api_error)?;
         self.vm_action(&VmResize, vm_resize).await.map(|_| ())
+    }
+
+    async fn vm_resize_disk(&self, vm_resize_disk: String) -> Result<()> {
+        let vm_resize_disk = serde_json::from_str(&vm_resize_disk).map_err(api_error)?;
+        self.vm_action(&VmResizeDisk, vm_resize_disk)
+            .await
+            .map(|_| ())
     }
 
     async fn vm_resize_zone(&self, vm_resize_zone: String) -> Result<()> {
