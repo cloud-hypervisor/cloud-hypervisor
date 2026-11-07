@@ -1535,6 +1535,7 @@ impl DeviceManager {
             self.reset_evt
                 .try_clone()
                 .map_err(DeviceManagerError::EventFd)?,
+            snapshot,
         )?;
 
         #[cfg(target_arch = "aarch64")]
@@ -2164,7 +2165,11 @@ impl DeviceManager {
     }
 
     #[cfg(target_arch = "x86_64")]
-    fn add_legacy_devices(&mut self, reset_evt: EventFd) -> DeviceManagerResult<()> {
+    fn add_legacy_devices(
+        &mut self,
+        reset_evt: EventFd,
+        snapshot: Option<&Snapshot>,
+    ) -> DeviceManagerResult<()> {
         let vcpus_kill_signalled =
             Arc::clone(self.cpu_manager.lock().unwrap().vcpus_kill_signalled());
         // Add a shutdown device (i8042)
@@ -2200,7 +2205,15 @@ impl DeviceManager {
                 mem_above_4g,
                 reset_evt,
                 vcpus_kill_signalled,
+                state_from_id(snapshot, legacy::CMOS_SNAPSHOT_ID)
+                    .map_err(DeviceManagerError::RestoreGetState)?,
             )));
+
+            let id = legacy::CMOS_SNAPSHOT_ID.to_string();
+            self.device_tree
+                .lock()
+                .unwrap()
+                .insert(id.clone(), device_node!(id, cmos));
 
             self.bus_devices
                 .push(Arc::clone(&cmos) as Arc<dyn BusDeviceSync>);

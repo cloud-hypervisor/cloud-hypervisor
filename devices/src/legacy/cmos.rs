@@ -15,13 +15,22 @@ use std::{mem, thread};
 use libc::time_t;
 use libc::{CLOCK_REALTIME, clock_gettime, gmtime_r, timespec, tm};
 use log::{debug, info};
+use serde::{Deserialize, Serialize};
 use vm_device::BusDevice;
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 const INDEX_MASK: u8 = 0x7f;
 const INDEX_OFFSET: u64 = 0x0;
 const DATA_OFFSET: u64 = 0x1;
 const DATA_LEN: usize = 128;
+pub const CMOS_SNAPSHOT_ID: &str = "__cmos";
+
+#[derive(Serialize, Deserialize)]
+pub struct CmosState {
+    index: u8,
+    data: Vec<u8>,
+}
 
 /// A CMOS/RTC device commonly seen on x86 I/O port 0x70/0x71.
 pub struct Cmos {
@@ -40,6 +49,7 @@ impl Cmos {
         mem_above_4g: u64,
         reset_evt: EventFd,
         vcpus_kill_signalled: Arc<AtomicBool>,
+        state: Option<CmosState>,
     ) -> Cmos {
         let mut data = [0u8; DATA_LEN];
 
@@ -57,14 +67,38 @@ impl Cmos {
         data[0x5c] = (high_mem >> 8) as u8;
         data[0x5d] = (high_mem >> 16) as u8;
 
+        let index = if let Some(state) = state {
+            data.copy_from_slice(&state.data);
+            state.index
+        } else {
+            0
+        };
+
         Cmos {
-            index: 0,
+            index,
             data,
             reset_evt,
             vcpus_kill_signalled,
         }
     }
 }
+
+impl Snapshottable for Cmos {
+    fn id(&self) -> String {
+        CMOS_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&mut self) -> Result<Snapshot, MigratableError> {
+        Snapshot::new_from_state(&CmosState {
+            index: self.index,
+            data: self.data.to_vec(),
+        })
+    }
+}
+
+impl Pausable for Cmos {}
+impl Transportable for Cmos {}
+impl Migratable for Cmos {}
 
 impl BusDevice for Cmos {
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
@@ -168,5 +202,30 @@ impl BusDevice for Cmos {
                 0
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restore_preserves_selected_register_and_data() {
+        let kill = Arc::new(AtomicBool::new(false));
+        let reset = EventFd::new(libc::EFD_NONBLOCK).unwrap();
+        let mut cmos = Cmos::new(0, 0, reset.try_clone().unwrap(), Arc::clone(&kill), None);
+        cmos.write(0, INDEX_OFFSET, &[0x41]);
+        cmos.write(0, DATA_OFFSET, &[0xab]);
+
+        let state = cmos.snapshot().unwrap().to_state().unwrap();
+        let mut restored = Cmos::new(0, 0, reset, kill, Some(state));
+        let mut data = [0];
+        restored.read(0, DATA_OFFSET, &mut data);
+        assert_eq!(data, [0xab]);
+        restored.write(0, DATA_OFFSET, &[0xcd]);
+        restored.read(0, INDEX_OFFSET, &mut data);
+        assert_eq!(data, [0x41]);
+        restored.read(0, DATA_OFFSET, &mut data);
+        assert_eq!(data, [0xcd]);
     }
 }
