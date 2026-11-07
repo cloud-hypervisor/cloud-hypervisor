@@ -908,6 +908,7 @@ mod tests {
         let fd = ctx.handler.backend.read().unwrap().get_polled_fd();
         helper.add_event(fd, BACKEND_EVENT).unwrap();
 
+        // The backend has data but the guest posted only one RX buffer, so the backend is parked.
         ctx.handler.backend.write().unwrap().set_pending_rx(true);
         let event = epoll::Event::new(epoll::Events::EPOLLIN, BACKEND_EVENT as u64);
         ctx.handler.handle_event(&mut helper, &event).unwrap();
@@ -915,6 +916,7 @@ mod tests {
         assert!(ctx.handler.backend_parked);
 
         ctx.handler.backend.write().unwrap().evset = None;
+        // A TX kick still lets the backend handle its events while it stays parked.
         ctx.handler.queue_evts[1].write(1).unwrap();
         let event = epoll::Event::new(epoll::Events::EPOLLIN, TX_QUEUE_EVENT as u64);
         ctx.handler.handle_event(&mut helper, &event).unwrap();
@@ -925,6 +927,7 @@ mod tests {
         assert!(ctx.handler.backend_parked);
 
         ctx.handler.backend.write().unwrap().evset = None;
+        // Once the backend has no more data, an RX kick polls it again.
         ctx.handler.backend.write().unwrap().set_pending_rx(false);
         ctx.handler.queue_evts[0].write(1).unwrap();
         let event = epoll::Event::new(epoll::Events::EPOLLIN, RX_QUEUE_EVENT as u64);

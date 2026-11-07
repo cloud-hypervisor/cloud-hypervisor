@@ -1291,6 +1291,7 @@ mod tests {
         second.write_all(&vec![2u8; cap * 2]).unwrap();
         ctx.notify_muxer();
 
+        // Each connection has two buffers of data, and the batch alternates between them.
         for (port, byte) in [(1025, 1u8), (1026, 2u8), (1025, 1u8), (1026, 2u8)] {
             ctx.recv();
             assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RW);
@@ -1304,6 +1305,7 @@ mod tests {
     fn test_rxq_rebuild_rotates_past_served_connections() {
         let size = defs::MUXER_RXQ_SIZE;
         let mut conn_map = HashMap::new();
+        // One more connection with pending RX than the RX queue holds.
         for port in 0..=size as u32 {
             let (stream, _peer) = UnixStream::pair().unwrap();
             let conn = MuxerConnection::new_peer_init(
@@ -1331,6 +1333,7 @@ mod tests {
             }
             keys
         };
+        // The rebuild after a full queue starts past the connections it served.
         let first = MuxerRxQ::from_conn_map(&conn_map, 0);
         assert_eq!(first.len(), size);
         assert!(!first.is_synced());
@@ -1356,6 +1359,7 @@ mod tests {
         ctx.send();
         assert!(ctx.muxer.rxq.pop().is_some());
 
+        // Overflow the RX queue with entries for connections that no longer exist.
         for port in 0..=defs::MUXER_RXQ_SIZE as u32 {
             ctx.muxer.rxq.push(MuxerRx::ConnRx(ConnMapKey {
                 local_port: 5000 + port,
@@ -1364,6 +1368,7 @@ mod tests {
         }
         assert!(!ctx.muxer.rxq.is_synced());
 
+        // Draining the stale entries rebuilds the queue, so the pending response is still sent.
         ctx.recv();
         assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RESPONSE);
         assert_eq!(ctx.pkt.dst_port(), peer_port);

@@ -1119,6 +1119,7 @@ mod tests {
     #[test]
     fn test_peer_recv_shutdown_drops_stale_rx() {
         let mut ctx = CsmTestContext::new_established();
+        // A full read leaves RX pending while the host stream cannot take writes.
         let cap = ctx.pkt.buf_capacity().unwrap();
         let mut stream = TestStream::new_with_read_buf(&vec![7u8; cap]);
         stream.write_state = StreamState::WouldBlock;
@@ -1127,12 +1128,14 @@ mod tests {
         ctx.recv();
         assert!(ctx.conn.has_pending_rx());
 
+        // The guest data is buffered, then the guest shuts down both directions.
         ctx.init_data_pkt(&[1, 2, 3, 4]);
         ctx.send();
         ctx.init_pkt(uapi::VSOCK_OP_SHUTDOWN, 0)
             .set_flags(uapi::VSOCK_FLAGS_SHUTDOWN_RCV | uapi::VSOCK_FLAGS_SHUTDOWN_SEND);
         ctx.send();
         assert_eq!(ctx.conn.state, ConnState::PeerClosed(true, true));
+        // The shutdown drops the pending RX, but the buffered guest data still reaches the host.
         match ctx.conn.recv_pkt(&mut ctx.pkt) {
             Err(VsockError::NoData) => (),
             other => panic!("{other:?}"),
@@ -1149,10 +1152,12 @@ mod tests {
     fn test_peer_recv_shutdown_keeps_host_hangup() {
         let mut ctx = CsmTestContext::new_established();
         ctx.set_stream(TestStream::new());
+        // The host hangs up before the guest shuts down its receive side.
         ctx.notify_epollin_hup();
         ctx.init_pkt(uapi::VSOCK_OP_SHUTDOWN, 0)
             .set_flags(uapi::VSOCK_FLAGS_SHUTDOWN_RCV);
         ctx.send();
+        // The hang-up still reaches the guest as an RST.
         assert_eq!(ctx.conn.state, ConnState::PeerClosed(true, false));
         assert!(ctx.conn.has_pending_rx());
         ctx.recv();
@@ -1167,6 +1172,7 @@ mod tests {
         ctx.set_stream(TestStream::new_with_read_buf(&data));
         ctx.notify_epollin();
 
+        // Full reads keep the connection due until the stream runs dry.
         for chunk in data.chunks(cap) {
             ctx.recv();
             assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RW);
@@ -1174,6 +1180,7 @@ mod tests {
         }
         assert!(!ctx.conn.has_pending_rx());
 
+        // A read that exactly fills the buffer stays due, and the next read clears it.
         ctx.set_stream(TestStream::new_with_read_buf(&data[..cap]));
         ctx.notify_epollin();
         ctx.recv();
@@ -1186,6 +1193,7 @@ mod tests {
         assert_eq!(ctx.conn.state, ConnState::Established);
 
         ctx.set_stream(TestStream::new_with_read_buf(&data));
+        // With credit for only one buffer, the connection is not kept due.
         ctx.set_peer_credit(cap as u32);
         ctx.notify_epollin();
         ctx.recv();
