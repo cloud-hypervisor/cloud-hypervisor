@@ -1601,10 +1601,20 @@ impl DeviceManager {
     }
 
     #[cfg(feature = "fw_cfg")]
-    pub fn create_fw_cfg_device(&mut self) -> Result<(), DeviceManagerError> {
+    pub fn create_fw_cfg_device(
+        &mut self,
+        snapshot: Option<&Snapshot>,
+    ) -> Result<(), DeviceManagerError> {
         let fw_cfg = Arc::new(Mutex::new(legacy::FwCfg::new(
             self.memory_manager.lock().as_ref().unwrap().guest_memory(),
+            state_from_id(snapshot, legacy::fw_cfg::FW_CFG_SNAPSHOT_ID)
+                .map_err(DeviceManagerError::RestoreGetState)?,
         )));
+        let id = legacy::fw_cfg::FW_CFG_SNAPSHOT_ID.to_string();
+        self.device_tree
+            .lock()
+            .unwrap()
+            .insert(id.clone(), device_node!(id, fw_cfg));
 
         self.fw_cfg = Some(Arc::clone(&fw_cfg));
 

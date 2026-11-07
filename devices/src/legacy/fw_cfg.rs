@@ -11,7 +11,6 @@
 //! https://cateee.net/lkddb/web-lkddb/FW_CFG_SYSFS.html
 //! No kernel requirement if above functionality is not required,
 //! only firmware must implement mechanism to interact with this fw_cfg device
-use std::cmp;
 use std::ffi::CString;
 use std::fs::File;
 #[cfg(target_arch = "x86_64")]
@@ -20,6 +19,7 @@ use std::io::{ErrorKind, Result};
 use std::mem::offset_of;
 use std::os::unix::fs::FileExt;
 use std::sync::{Arc, Barrier};
+use std::{cmp, result};
 
 use acpi_tables::rsdp::Rsdp;
 use acpi_tables::{Aml, AmlSink, aml};
@@ -29,11 +29,13 @@ use bitfield_struct::bitfield;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::bootparam::boot_params;
 use log::{debug, error};
+use serde::{Deserialize, Serialize};
 use vm_allocator::GuestMemory;
 use vm_device::BusDevice;
 #[cfg(target_arch = "x86_64")]
 use vm_memory::ByteValued;
 use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::sock_ctrl_msg::IntoIovec;
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes};
 
@@ -142,6 +144,15 @@ impl FwCfgContent {
 pub struct FwCfgItem {
     pub name: String,
     pub content: FwCfgContent,
+}
+
+pub const FW_CFG_SNAPSHOT_ID: &str = "__fw_cfg";
+
+#[derive(Default, Serialize, Deserialize)]
+pub struct FwCfgState {
+    selector: u16,
+    data_offset: u32,
+    dma_address: u64,
 }
 
 /// https://www.qemu.org/docs/master/specs/fw_cfg.html
@@ -379,7 +390,8 @@ fn create_acpi_loader(acpi_table: AcpiTable) -> [FwCfgItem; 3] {
 }
 
 impl FwCfg {
-    pub fn new(memory: GuestMemoryAtomic<GuestMemory>) -> FwCfg {
+    pub fn new(memory: GuestMemoryAtomic<GuestMemory>, state: Option<FwCfgState>) -> FwCfg {
+        let state = state.unwrap_or_default();
         const DEFAULT_ITEM: FwCfgContent = FwCfgContent::Slice(&[]);
         let mut known_items = [DEFAULT_ITEM; FW_CFG_KNOWN_ITEMS];
         known_items[FW_CFG_SIGNATURE as usize] = FwCfgContent::Slice(&FW_CFG_SIGNATURE_CONTENT);
@@ -388,9 +400,9 @@ impl FwCfg {
         known_items[FW_CFG_FILE_DIR as usize] = FwCfgContent::Bytes(file_buf);
 
         FwCfg {
-            selector: 0,
-            data_offset: 0,
-            dma_address: 0,
+            selector: state.selector,
+            data_offset: state.data_offset,
+            dma_address: state.dma_address,
             items: vec![],
             known_items,
             memory,
@@ -702,6 +714,24 @@ impl FwCfg {
     }
 }
 
+impl Snapshottable for FwCfg {
+    fn id(&self) -> String {
+        FW_CFG_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
+        Snapshot::new_from_state(&FwCfgState {
+            selector: self.selector,
+            data_offset: self.data_offset,
+            dma_address: self.dma_address,
+        })
+    }
+}
+
+impl Pausable for FwCfg {}
+impl Transportable for FwCfg {}
+impl Migratable for FwCfg {}
+
 impl Aml for FwCfg {
     fn to_aml_bytes(&self, sink: &mut dyn AmlSink) {
         aml::Device::new(
@@ -822,11 +852,49 @@ mod tests {
     }
 
     #[test]
+    fn restore_continues_selected_file_and_partial_dma_address() {
+        let memory =
+            GuestMemoryAtomic::new(GuestMemory::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap());
+        let file = TempFile::new().unwrap();
+        file.as_file().write_all(b"abcdef").unwrap();
+        let mut fw_cfg = FwCfg::new(memory.clone(), None);
+        fw_cfg
+            .add_item(FwCfgItem {
+                name: "test".into(),
+                content: FwCfgContent::File(1, file.as_file().try_clone().unwrap()),
+            })
+            .unwrap();
+        select(&mut fw_cfg, FW_CFG_FILE_FIRST);
+        let mut data = [0; 2];
+        fw_cfg.read(0, FW_CFG_DATA_OFFSET, &mut data);
+        assert_eq!(&data, b"bc");
+        fw_cfg.write(0, FW_CFG_DMA_HI_OFFSET, &0x1234u32.to_be_bytes());
+
+        let state = fw_cfg.snapshot().unwrap().to_state().unwrap();
+        let mut restored = FwCfg::new(memory, Some(state));
+        restored
+            .add_item(FwCfgItem {
+                name: "test".into(),
+                content: FwCfgContent::File(1, file.as_file().try_clone().unwrap()),
+            })
+            .unwrap();
+        restored.read(0, FW_CFG_DATA_OFFSET, &mut data);
+        assert_eq!(&data, b"de");
+        let mut address = [0; 4];
+        restored.read(0, FW_CFG_DMA_HI_OFFSET, &mut address);
+        assert_eq!(u32::from_be_bytes(address), 0x1234);
+        select(&mut restored, FW_CFG_SIGNATURE);
+        let mut signature = [0; 4];
+        restored.read(0, FW_CFG_DATA_OFFSET, &mut signature);
+        assert_eq!(&signature, b"QEMU");
+    }
+
+    #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_stage0_reserved_only_for_sev_snp() {
         for sev_snp in [false, true] {
             let gm = GuestMemory::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap();
-            let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(gm.clone()));
+            let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(gm.clone()), None);
             fw_cfg.add_e820(&gm, sev_snp).unwrap();
 
             let FwCfgContent::Bytes(bytes) = &fw_cfg.items[0].content else {
@@ -856,7 +924,7 @@ mod tests {
         let boot_entries = arch::x86_64::generate_e820_memory_map(&gm).unwrap();
 
         for sev_snp in [false, true] {
-            let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(gm.clone()));
+            let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(gm.clone()), None);
             // Noncontiguous boot RAM must be represented without inferring
             // its layout from the configured total memory size.
             fw_cfg.add_e820(&gm, sev_snp).unwrap();
@@ -898,7 +966,7 @@ mod tests {
             GuestMemory::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap(),
         );
 
-        let mut fw_cfg = FwCfg::new(gm);
+        let mut fw_cfg = FwCfg::new(gm, None);
 
         let mut data = vec![0u8];
 
@@ -920,7 +988,7 @@ mod tests {
             GuestMemory::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap(),
         );
 
-        let mut fw_cfg = FwCfg::new(gm);
+        let mut fw_cfg = FwCfg::new(gm, None);
 
         let cmdline = *b"cmdline\0";
 
@@ -946,7 +1014,7 @@ mod tests {
         let gm = GuestMemoryAtomic::new(
             GuestMemory::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap(),
         );
-        let mut fw_cfg = FwCfg::new(gm);
+        let mut fw_cfg = FwCfg::new(gm, None);
         let kernel = b"test kernel image";
         let temp = TempFile::new().unwrap();
         temp.as_file().write_all(kernel).unwrap();
@@ -970,7 +1038,7 @@ mod tests {
             GuestMemory::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap(),
         );
 
-        let mut fw_cfg = FwCfg::new(gm);
+        let mut fw_cfg = FwCfg::new(gm, None);
 
         let temp = TempFile::new().unwrap();
         let mut temp_file = temp.as_file();
@@ -1000,7 +1068,7 @@ mod tests {
             GuestMemory::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap(),
         );
 
-        let mut fw_cfg = FwCfg::new(gm);
+        let mut fw_cfg = FwCfg::new(gm, None);
 
         // Simulate OVMF X-PciMmio64Mb string item for GPU CC passthrough
         let item = FwCfgItem {
@@ -1059,7 +1127,7 @@ mod tests {
         // writing the FwCfgDmaAccess to mem (this would just be self.dma_access.as_ref() in guest)
         let _ = mem.write(access.as_mut_bytes(), access_address);
         let mem_m = GuestMemoryAtomic::new(mem.clone());
-        let mut fw_cfg = FwCfg::new(mem_m);
+        let mut fw_cfg = FwCfg::new(mem_m, None);
         let cfg_item = FwCfgItem {
             name: "code".to_string(),
             content,
@@ -1128,7 +1196,7 @@ mod tests {
     #[test]
     fn test_dma_select_and_skip() {
         let mem: GuestMemory = GuestMemory::from_ranges(&[(DMA_DESCRIPTOR, 0x1000)]).unwrap();
-        let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(mem.clone()));
+        let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(mem.clone()), None);
         let item_a = FW_CFG_FILE_FIRST;
         let item_b = FW_CFG_FILE_FIRST + 1;
         for (name, data) in [
@@ -1183,7 +1251,7 @@ mod tests {
     #[test]
     fn test_dma_truncated_file() {
         let mem: GuestMemory = GuestMemory::from_ranges(&[(DMA_DESCRIPTOR, 0x1000)]).unwrap();
-        let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(mem.clone()));
+        let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(mem.clone()), None);
         let temp = TempFile::new().unwrap();
         let file = temp.as_file();
         file.set_len(16).unwrap();
@@ -1210,7 +1278,7 @@ mod tests {
     #[test]
     fn test_dma_skip_after_truncation_keeps_offset() {
         let mem: GuestMemory = GuestMemory::from_ranges(&[(DMA_DESCRIPTOR, 0x1000)]).unwrap();
-        let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(mem.clone()));
+        let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(mem.clone()), None);
         let temp = TempFile::new().unwrap();
         let file = temp.as_file();
         file.set_len(8).unwrap();
