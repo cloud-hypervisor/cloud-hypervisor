@@ -283,9 +283,6 @@ pub struct VmCoredumpData {
 #[derive(Copy, Clone, Default, Deserialize, Serialize, Debug, PartialEq, Eq)]
 pub enum MigrationMode {
     /// Transfer memory as memory FDs.
-    ///
-    /// Only works via a UNIX domain socket. All guest memory must be shared
-    /// memory or use hugepage backing.
     MemFDs,
     /// Transfer all guest memory before the destination resumes.
     #[default]

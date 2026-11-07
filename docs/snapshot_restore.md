@@ -379,6 +379,48 @@ prefault on the receiving side:
     receive-migration receiver_url=unix:/tmp/restore.sock,background_fetch_pages=off &
 ```
 
+### Diff snapshots
+
+Restore an existing offload snapshot with `--copy-on-write`, following the
+[restore setup](#restore-offload-usage):
+
+```bash
+./offload_daemon restore \
+    --socket /tmp/restore.sock \
+    --input-dir /var/snapshots/vm1 \
+    --copy-on-write --resume
+```
+
+The restore daemon exits once the VM has been restored.
+
+Start a new daemon invocation to capture a diff in a new directory:
+
+```bash
+./offload_daemon snapshot \
+    --socket /tmp/diff-snapshot.sock \
+    --output-dir /var/snapshots/vm1-diff &
+while [ ! -S /tmp/diff-snapshot.sock ]; do sleep 0.1; done
+./ch-remote --api-socket /tmp/cloud-hypervisor.sock \
+    send-migration destination_url=unix:/tmp/diff-snapshot.sock,memory_mode=memfds,preserve_source=on
+wait
+```
+
+Resume the VM after capture:
+
+```bash
+./ch-remote --api-socket /tmp/cloud-hypervisor.sock resume
+```
+
+To restore the diff, start another CH process and prepare its receive socket
+as in the restore setup, then use the diff directory:
+
+```bash
+./offload_daemon restore \
+    --socket /tmp/diff-restore.sock \
+    --input-dir /var/snapshots/vm1-diff \
+    --copy-on-write --resume
+```
+
 ### The daemon protocol
 
 The daemon implements the local live-migration wire protocol defined in

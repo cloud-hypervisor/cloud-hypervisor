@@ -35,6 +35,19 @@ impl PageMap {
     /// Returns the private copies in `[addr, addr + len)` as byte ranges
     /// relative to `addr`.
     pub(crate) fn private_ranges(&self, addr: u64, len: u64) -> io::Result<Vec<Range<u64>>> {
+        self.private_ranges_with_gap(addr, len, MERGE_GAP_PAGES)
+    }
+
+    pub(crate) fn private_ranges_exact(&self, addr: u64, len: u64) -> io::Result<Vec<Range<u64>>> {
+        self.private_ranges_with_gap(addr, len, 0)
+    }
+
+    fn private_ranges_with_gap(
+        &self,
+        addr: u64,
+        len: u64,
+        merge_gap_pages: u64,
+    ) -> io::Result<Vec<Range<u64>>> {
         let page_size = get_page_size();
         let first_page = addr / page_size;
         let pages = len / page_size;
@@ -52,7 +65,7 @@ impl PageMap {
                 }
                 let index = page + i as u64;
                 match ranges.last_mut() {
-                    Some(last) if index - last.end <= MERGE_GAP_PAGES => last.end = index + 1,
+                    Some(last) if index - last.end <= merge_gap_pages => last.end = index + 1,
                     _ => ranges.push(index..index + 1),
                 }
             }
