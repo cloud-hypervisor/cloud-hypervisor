@@ -24,6 +24,8 @@ pub const VIRTIO_PCI_COMMON_CONFIG_ID: &str = "virtio_pci_common_config";
 pub struct VirtioPciCommonConfigState {
     pub driver_status: u8,
     pub config_generation: u8,
+    #[serde(default)]
+    pub config_changed: bool,
     pub device_feature_select: u32,
     pub driver_feature_select: u32,
     pub queue_select: u16,
@@ -144,7 +146,7 @@ impl VirtioPciCommonConfig {
             device,
             driver_status: Arc::new(AtomicU8::new(state.driver_status)),
             config_generation: Arc::new(AtomicU8::new(state.config_generation)),
-            config_changed: Arc::new(AtomicBool::new(false)),
+            config_changed: Arc::new(AtomicBool::new(state.config_changed)),
             device_feature_select: state.device_feature_select,
             driver_feature_select: state.driver_feature_select,
             queue_select: state.queue_select,
@@ -167,6 +169,7 @@ impl VirtioPciCommonConfig {
         VirtioPciCommonConfigState {
             driver_status: self.driver_status.load(Ordering::Acquire),
             config_generation: self.config_generation.load(Ordering::Acquire),
+            config_changed: self.config_changed.load(Ordering::Acquire),
             device_feature_select: self.device_feature_select,
             driver_feature_select: self.driver_feature_select,
             queue_select: self.queue_select,
@@ -634,6 +637,19 @@ mod tests {
             msix_config: Arc::new(AtomicU16::new(0)),
             msix_queues: Arc::new(Mutex::new(vec![0; 1])),
         }
+    }
+
+    #[test]
+    fn restore_preserves_pending_config_change() {
+        let mut regs = make_regs(0x10);
+        regs.config_changed.store(true, Ordering::Release);
+        let state = regs.snapshot().unwrap().to_state().unwrap();
+        let restored = VirtioPciCommonConfig::new(state, Arc::clone(&regs.device));
+
+        restored.consume_config_change();
+        assert_eq!(restored.config_generation.load(Ordering::Acquire), 0x11);
+        restored.consume_config_change();
+        assert_eq!(restored.config_generation.load(Ordering::Acquire), 0x11);
     }
 
     #[test]
