@@ -10,6 +10,7 @@ use std::{io, thread};
 
 use acpi_tables::{Aml, AmlSink, aml};
 use log::{debug, error, info};
+use serde::{Deserialize, Serialize};
 #[cfg(not(target_arch = "riscv64"))]
 use thiserror::Error;
 #[cfg(not(target_arch = "riscv64"))]
@@ -21,11 +22,18 @@ use vm_memory::GuestAddress;
 use vm_memory::VolatileMemory;
 #[cfg(not(target_arch = "riscv64"))]
 use vm_memory::volatile_memory::Error as VolatileMemoryError;
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 use super::AcpiNotificationFlags;
 
 pub const GED_DEVICE_ACPI_SIZE: usize = 0x1;
+pub const ACPI_GED_SNAPSHOT_ID: &str = "__acpi_ged";
+
+#[derive(Default, Serialize, Deserialize)]
+pub struct AcpiGedState {
+    notification_type: u8,
+}
 
 #[cfg(not(target_arch = "riscv64"))]
 pub const VMGENID_SIZE: usize = 16;
@@ -120,10 +128,13 @@ impl AcpiGedDevice {
         interrupt: Arc<dyn InterruptSourceGroup>,
         ged_irq: u32,
         address: GuestAddress,
+        state: Option<AcpiGedState>,
     ) -> AcpiGedDevice {
         AcpiGedDevice {
             interrupt,
-            notification_type: AcpiNotificationFlags::NO_DEVICES_CHANGED,
+            notification_type: AcpiNotificationFlags::from_bits_retain(
+                state.unwrap_or_default().notification_type,
+            ),
             ged_irq,
             address,
         }
@@ -151,6 +162,22 @@ impl BusDevice for AcpiGedDevice {
         self.notification_type = AcpiNotificationFlags::NO_DEVICES_CHANGED;
     }
 }
+
+impl Snapshottable for AcpiGedDevice {
+    fn id(&self) -> String {
+        ACPI_GED_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&mut self) -> Result<Snapshot, MigratableError> {
+        Snapshot::new_from_state(&AcpiGedState {
+            notification_type: self.notification_type.bits(),
+        })
+    }
+}
+
+impl Pausable for AcpiGedDevice {}
+impl Transportable for AcpiGedDevice {}
+impl Migratable for AcpiGedDevice {}
 
 impl Aml for AcpiGedDevice {
     fn to_aml_bytes(&self, sink: &mut dyn AmlSink) {
@@ -356,8 +383,55 @@ impl BusDevice for AcpiPmTimerDevice {
 #[cfg(all(test, not(target_arch = "riscv64")))]
 mod tests {
     use vm_allocator::page_size::get_page_size;
+    use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};
 
     use super::*;
+
+    struct TestInterrupt;
+
+    impl InterruptSourceGroup for TestInterrupt {
+        fn trigger(&self, _index: InterruptIndex) -> io::Result<()> {
+            Ok(())
+        }
+        fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {
+            None
+        }
+        fn update(
+            &self,
+            _index: InterruptIndex,
+            _config: InterruptSourceConfig,
+            _masked: bool,
+            _set_gsi: bool,
+        ) -> io::Result<()> {
+            Ok(())
+        }
+        fn set_gsi(&self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn restore_preserves_unread_ged_notifications() {
+        let mut ged = AcpiGedDevice::new(Arc::new(TestInterrupt), 5, GuestAddress(0), None);
+        ged.notify(AcpiNotificationFlags::POWER_BUTTON_CHANGED)
+            .unwrap();
+        let state = ged.snapshot().unwrap().to_state().unwrap();
+        let mut restored =
+            AcpiGedDevice::new(Arc::new(TestInterrupt), 5, GuestAddress(0), Some(state));
+        restored
+            .notify(AcpiNotificationFlags::PCI_DEVICES_CHANGED)
+            .unwrap();
+        let mut data = [0];
+        restored.read(0, 0, &mut data);
+        assert_eq!(
+            data[0],
+            (AcpiNotificationFlags::POWER_BUTTON_CHANGED
+                | AcpiNotificationFlags::PCI_DEVICES_CHANGED)
+                .bits()
+        );
+        restored.read(0, 0, &mut data);
+        assert_eq!(data, [0]);
+    }
 
     #[test]
     fn test_vmgenid_regenerate() {
