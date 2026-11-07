@@ -1092,7 +1092,70 @@ impl Vm {
     }
 
     #[cfg(feature = "fw_cfg")]
-    fn populate_fw_cfg(
+    fn populate_fw_cfg(&self) -> Result<()> {
+        let fw_cfg_enabled = self
+            .config
+            .lock()
+            .unwrap()
+            .payload
+            .as_ref()
+            .is_some_and(|p| p.fw_cfg_config.is_some());
+        if !fw_cfg_enabled {
+            return Ok(());
+        }
+
+        let fw_cfg_config = self
+            .config
+            .lock()
+            .unwrap()
+            .payload
+            .as_ref()
+            .map(|p| p.fw_cfg_config.clone())
+            .unwrap_or_default()
+            .ok_or(Error::VmMissingConfig)?;
+        #[cfg(target_arch = "x86_64")]
+        let kvm_sev_snp_enabled = {
+            #[cfg(feature = "sev_snp")]
+            {
+                let sev_snp_enabled = self.config.lock().unwrap().is_sev_snp_enabled();
+                sev_snp_enabled
+                    && self.cpu_manager.lock().unwrap().hypervisor_type()
+                        == hypervisor::HypervisorType::Kvm
+            }
+            #[cfg(not(feature = "sev_snp"))]
+            {
+                false
+            }
+        };
+
+        #[cfg(target_arch = "x86_64")]
+        let boot_memory = self.memory_manager.lock().unwrap().boot_guest_memory();
+        Self::populate_fw_cfg_items(
+            &fw_cfg_config,
+            &self.device_manager,
+            &self.config,
+            #[cfg(target_arch = "x86_64")]
+            &boot_memory,
+            #[cfg(target_arch = "x86_64")]
+            kvm_sev_snp_enabled,
+        )?;
+
+        if fw_cfg_config.acpi_tables {
+            let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
+            acpi::create_acpi_tables_for_fw_cfg(
+                &self.device_manager.lock().unwrap(),
+                &self.cpu_manager.lock().unwrap(),
+                &self.memory_manager.lock().unwrap(),
+                &self.numa_nodes,
+                tpm_enabled,
+            )
+            .map_err(Error::CreatingAcpiTables)?;
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "fw_cfg")]
+    fn populate_fw_cfg_items(
         fw_cfg_config: &FwCfgConfig,
         device_manager: &Arc<Mutex<DeviceManager>>,
         config: &Arc<Mutex<VmConfig>>,
@@ -2432,64 +2495,7 @@ impl Vm {
             .map_err(Error::LockingError)?;
 
         #[cfg(feature = "fw_cfg")]
-        {
-            let fw_cfg_enabled = self
-                .config
-                .lock()
-                .unwrap()
-                .payload
-                .as_ref()
-                .is_some_and(|p| p.fw_cfg_config.is_some());
-            if fw_cfg_enabled {
-                let fw_cfg_config = self
-                    .config
-                    .lock()
-                    .unwrap()
-                    .payload
-                    .as_ref()
-                    .map(|p| p.fw_cfg_config.clone())
-                    .unwrap_or_default()
-                    .ok_or(Error::VmMissingConfig)?;
-                #[cfg(target_arch = "x86_64")]
-                let kvm_sev_snp_enabled = {
-                    #[cfg(feature = "sev_snp")]
-                    {
-                        let sev_snp_enabled = self.config.lock().unwrap().is_sev_snp_enabled();
-                        sev_snp_enabled
-                            && self.cpu_manager.lock().unwrap().hypervisor_type()
-                                == hypervisor::HypervisorType::Kvm
-                    }
-                    #[cfg(not(feature = "sev_snp"))]
-                    {
-                        false
-                    }
-                };
-
-                #[cfg(target_arch = "x86_64")]
-                let boot_memory = self.memory_manager.lock().unwrap().boot_guest_memory();
-                Self::populate_fw_cfg(
-                    &fw_cfg_config,
-                    &self.device_manager,
-                    &self.config,
-                    #[cfg(target_arch = "x86_64")]
-                    &boot_memory,
-                    #[cfg(target_arch = "x86_64")]
-                    kvm_sev_snp_enabled,
-                )?;
-
-                if fw_cfg_config.acpi_tables {
-                    let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
-                    acpi::create_acpi_tables_for_fw_cfg(
-                        &self.device_manager.lock().unwrap(),
-                        &self.cpu_manager.lock().unwrap(),
-                        &self.memory_manager.lock().unwrap(),
-                        &self.numa_nodes,
-                        tpm_enabled,
-                    )
-                    .map_err(Error::CreatingAcpiTables)?;
-                }
-            }
-        }
+        self.populate_fw_cfg()?;
 
         // Do earlier to parallelise with loading kernel
         #[cfg(target_arch = "x86_64")]
@@ -2595,6 +2601,9 @@ impl Vm {
             .unwrap()
             .try_lock_disks()
             .map_err(Error::LockingError)?;
+
+        #[cfg(feature = "fw_cfg")]
+        self.populate_fw_cfg()?;
 
         // Any restore may be a fork, so reseed before the guest runs.
         #[cfg(not(target_arch = "riscv64"))]
