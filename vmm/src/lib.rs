@@ -1410,6 +1410,10 @@ impl Vmm {
                 .map_err(MigratableError::MigrateReceive)
         })?;
 
+        if let Some(memory_snapshot) = snapshot.snapshots.get(MEMORY_MANAGER_SNAPSHOT_ID) {
+            mm.lock().unwrap().restore_state(memory_snapshot)?;
+        }
+
         let exit_evt = self
             .exit_evt
             .try_clone()
