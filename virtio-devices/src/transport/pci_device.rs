@@ -556,6 +556,7 @@ impl VirtioPciDevice {
                 VirtioPciCommonConfigState {
                     driver_status: 0,
                     config_generation: 0,
+                    config_changed: false,
                     device_feature_select: 0,
                     driver_feature_select: 0,
                     queue_select: 0,
