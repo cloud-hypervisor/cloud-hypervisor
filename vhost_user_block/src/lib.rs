@@ -157,8 +157,18 @@ impl VhostUserBlkThread {
                         len
                     }
                 }
-                Err(err) => {
+                Err((err, status_addr)) => {
                     error!("failed to parse available descriptor chain: {err:?}");
+                    if let Some(status_addr) = status_addr
+                        && let Err(e) = desc_chain
+                            .memory()
+                            .write_obj(VIRTIO_BLK_S_IOERR as u8, status_addr)
+                    {
+                        info!(
+                            "vhost-user-blk: failed to write status to 0x{:x}: {e:?}",
+                            status_addr.0
+                        );
+                    }
                     0
                 }
             };
