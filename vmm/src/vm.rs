@@ -923,7 +923,7 @@ impl Vm {
 
         // Create fw_cfg device if configured
         #[cfg(feature = "fw_cfg")]
-        Self::create_fw_cfg_if_enabled(config, device_manager)?;
+        Self::create_fw_cfg_if_enabled(config, device_manager, snapshot)?;
 
         Ok(load_payload_handle)
     }
@@ -991,7 +991,7 @@ impl Vm {
             .map_err(Error::DeviceManager)?;
 
         #[cfg(feature = "fw_cfg")]
-        Self::create_fw_cfg_if_enabled(config, device_manager)?;
+        Self::create_fw_cfg_if_enabled(config, device_manager, snapshot)?;
 
         Ok(load_payload_handle)
     }
@@ -1072,6 +1072,7 @@ impl Vm {
     fn create_fw_cfg_if_enabled(
         config: &Arc<Mutex<VmConfig>>,
         device_manager: &Arc<Mutex<DeviceManager>>,
+        snapshot: Option<&Snapshot>,
     ) -> Result<()> {
         let fw_cfg_enabled = config
             .lock()
@@ -1084,7 +1085,7 @@ impl Vm {
             device_manager
                 .lock()
                 .unwrap()
-                .create_fw_cfg_device()
+                .create_fw_cfg_device(snapshot_from_id(snapshot, DEVICE_MANAGER_SNAPSHOT_ID))
                 .map_err(Error::DeviceManager)?;
         }
 
