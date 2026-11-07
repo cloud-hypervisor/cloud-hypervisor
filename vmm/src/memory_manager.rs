@@ -24,8 +24,6 @@ use anyhow::{Context, anyhow};
 use arch::{RegionType, layout};
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
-#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
-use hypervisor::HypervisorVmError;
 use log::{debug, error, info, trace, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -35,10 +33,10 @@ use virtio_devices::mem::Error as VirtioMemError;
 #[cfg(target_arch = "x86_64")]
 use vm_allocator::GsiApic;
 use vm_allocator::page_size::get_page_size;
-use vm_allocator::{AddressAllocator, MemorySlotAllocator, SystemAllocator};
+use vm_allocator::{AddressAllocator, GuestRegionError, MemorySlotAllocator, SystemAllocator};
 use vm_device::BusDevice;
 use vm_memory::bitmap::AtomicBitmap;
-use vm_memory::guest_memory::{Error as MmapError, FileOffset};
+use vm_memory::guest_memory::FileOffset;
 use vm_memory::mmap::MmapRegionError;
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend,
@@ -278,7 +276,7 @@ pub struct MemoryManager {
     ram_allocator: AddressAllocator,
     dynamic: bool,
 
-    // Keep track of calls to create_userspace_mapping() for guest RAM.
+    // Keep slot and range metadata for guest RAM snapshots.
     // This is useful for getting the dirty pages as we need to know the
     // slots that the mapping is created in.
     guest_ram_mappings: Vec<GuestRamMapping>,
@@ -302,10 +300,6 @@ pub enum Error {
     /// Failed to seal shared file.
     #[error("Failed to seal shared file")]
     SharedFileSeal(#[source] io::Error),
-
-    /// Mmap backed guest memory error
-    #[error("Mmap backed guest memory error")]
-    GuestMemory(#[source] MmapError),
 
     /// Guest region collection error
     #[error("Guest region collection error")]
@@ -331,9 +325,9 @@ pub enum Error {
     #[error("The requested hotplug memory addition is not a valid size")]
     InvalidSize,
 
-    /// Failed to create the user memory region.
-    #[error("Failed to create the user memory region")]
-    CreateUserMemoryRegion(#[source] hypervisor::HypervisorVmError),
+    /// Failed to register a guest region.
+    #[error("Failed to register a guest region")]
+    RegisterGuestRegion(#[source] GuestRegionError),
 
     /// Failed to remove the user memory region.
     #[error("Failed to remove the user memory region")]
@@ -452,7 +446,7 @@ pub enum Error {
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     /// Failed to create UEFI flash
     #[error("Failed to create UEFI flash")]
-    CreateUefiFlash(#[source] HypervisorVmError),
+    CreateUefiFlash(#[source] GuestRegionError),
 
     /// Using a directory as a backing file for memory is not supported
     #[error("Using a directory as a backing file for memory is not supported")]
@@ -684,6 +678,9 @@ impl MemoryManager {
         ram_regions: &[(GuestAddress, usize)],
         zones: &[MemoryZoneConfig],
         thp: bool,
+        vm: &Arc<dyn hypervisor::Vm>,
+        slot_allocator: &Arc<MemorySlotAllocator>,
+        log_dirty: bool,
     ) -> Result<(Vec<Arc<GuestRegion>>, MemoryZones), Error> {
         let mut zone_iter = zones.iter();
         let mut mem_regions = Vec::new();
@@ -756,6 +753,11 @@ impl MemoryManager {
                     zone.host_numa_node,
                     None,
                     thp,
+                    Arc::clone(vm),
+                    Arc::clone(slot_allocator),
+                    zone.mergeable,
+                    log_dirty,
+                    hypervisor::MemoryVisibility::Private,
                 )?;
 
                 // Add region to the list of regions associated with the
@@ -862,6 +864,9 @@ impl MemoryManager {
         zones_config: &[MemoryZoneConfig],
         mut existing_memory_files: HashMap<u32, File>,
         thp: bool,
+        vm: &Arc<dyn hypervisor::Vm>,
+        slot_allocator: &Arc<MemorySlotAllocator>,
+        log_dirty: bool,
     ) -> Result<(Vec<Arc<GuestRegion>>, MemoryZones), Error> {
         let mut memory_regions = Vec::new();
         let mut memory_zones = HashMap::new();
@@ -898,6 +903,11 @@ impl MemoryManager {
                         zone_config.host_numa_node,
                         existing_memory_files.remove(&guest_ram_mapping.slot),
                         thp,
+                        Arc::clone(vm),
+                        Arc::clone(slot_allocator),
+                        zone_config.mergeable,
+                        log_dirty,
+                        hypervisor::MemoryVisibility::Private,
                     )?;
                     memory_regions.push(Arc::clone(&region));
                     if let Some(memory_zone) = memory_zones.get_mut(&guest_ram_mapping.zone_id) {
@@ -1926,23 +1936,13 @@ impl MemoryManager {
                 regions.push((Arc::clone(virtio_mem_zone.region()), true));
             }
 
-            list.push((zone_id.clone(), regions, memory_zone.mergeable));
+            list.push((zone_id.clone(), regions));
         }
 
-        for (zone_id, regions, zone_mergeable) in list {
+        for (zone_id, regions) in list {
             for (region, virtio_mem) in regions {
-                // SAFETY: guaranteed by GuestRegion invariants
-                let slot = unsafe {
-                    self.create_userspace_mapping(
-                        region.start_addr().raw_value(),
-                        region.len().try_into().unwrap(),
-                        region.as_ptr(),
-                        zone_mergeable,
-                        false,
-                        self.log_dirty,
-                        hypervisor::MemoryVisibility::Private,
-                    )
-                }?;
+                region.register().map_err(Error::RegisterGuestRegion)?;
+                let slot = region.slot().unwrap();
 
                 let file_offset = if let Some(file_offset) = region.file_offset() {
                     file_offset.start()
@@ -1996,28 +1996,18 @@ impl MemoryManager {
     pub fn add_uefi_flash(&mut self) -> Result<(), Error> {
         // The UEFI binary requires a flash device at address 0.
         // 4 MiB memory is mapped to simulate the flash.
-        let uefi_mem_slot = self.allocate_memory_slot();
-        let uefi_region = GuestRegion::new(
+        let uefi_region = GuestRegion::from_mmap(
             MmapRegion::new(layout::UEFI_SIZE as usize).unwrap(),
             layout::UEFI_START,
+            Arc::clone(&self.vm),
+            Arc::clone(self.memory_slot_allocator()),
+            false,
+            false,
+            false,
+            hypervisor::MemoryVisibility::Private,
         )
-        .unwrap();
-        const _: () = assert!(size_of::<usize>() == size_of::<u64>());
-
-        // SAFETY: guaranteed by GuestRegion
-        unsafe {
-            self.vm
-                .create_user_memory_region(
-                    uefi_mem_slot,
-                    uefi_region.start_addr().raw_value(),
-                    uefi_region.len() as usize,
-                    uefi_region.as_ptr(),
-                    false,
-                    false,
-                    hypervisor::MemoryVisibility::Private,
-                )
-                .map_err(Error::CreateUefiFlash)?;
-        }
+        .map_err(Error::CreateUefiFlash)?;
+        uefi_region.register().map_err(Error::CreateUefiFlash)?;
         let uefi_flash =
             GuestMemoryAtomic::new(GuestMemory::from_regions(vec![uefi_region]).unwrap());
 
@@ -2051,6 +2041,18 @@ impl MemoryManager {
         let (ram_size, zones, allow_mem_hotplug) =
             Self::validate_memory_config(config, user_provided_zones)?;
 
+        let next_memory_slot = Arc::new(AtomicU32::new(
+            restore_data.map_or(0, |data| data.next_memory_slot),
+        ));
+        let memory_slot_allocator = Arc::new(MemorySlotAllocator::new(
+            Arc::clone(&next_memory_slot),
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        #[cfg(not(feature = "sev_snp"))]
+        let dynamic = true;
+        #[cfg(feature = "sev_snp")]
+        let dynamic = !sev_snp_enabled;
+
         let (
             start_of_device_area,
             boot_ram,
@@ -2060,7 +2062,6 @@ impl MemoryManager {
             guest_memory,
             boot_guest_memory,
             hotplug_slots,
-            next_memory_slot,
             selected_slot,
             next_hotplug_slot,
         ) = if let Some(data) = restore_data {
@@ -2069,6 +2070,9 @@ impl MemoryManager {
                 &zones,
                 existing_memory_files,
                 config.thp,
+                &vm,
+                &memory_slot_allocator,
+                dynamic,
             )?;
             let guest_memory =
                 GuestMemory::from_arc_regions(regions).map_err(Error::GuestRegionCollection)?;
@@ -2082,7 +2086,6 @@ impl MemoryManager {
                 guest_memory,
                 boot_guest_memory,
                 data.hotplug_slots.clone(),
-                data.next_memory_slot,
                 data.selected_slot,
                 data.next_hotplug_slot,
             )
@@ -2105,8 +2108,14 @@ impl MemoryManager {
                 })
                 .collect();
 
-            let (mem_regions, mut memory_zones) =
-                Self::create_memory_regions_from_zones(&ram_regions, &zones, config.thp)?;
+            let (mem_regions, mut memory_zones) = Self::create_memory_regions_from_zones(
+                &ram_regions,
+                &zones,
+                config.thp,
+                &vm,
+                &memory_slot_allocator,
+                dynamic,
+            )?;
 
             let mut guest_memory =
                 GuestMemory::from_arc_regions(mem_regions).map_err(Error::GuestRegionCollection)?;
@@ -2159,6 +2168,11 @@ impl MemoryManager {
                                 zone.host_numa_node,
                                 None,
                                 config.thp,
+                                Arc::clone(&vm),
+                                Arc::clone(&memory_slot_allocator),
+                                zone.mergeable,
+                                dynamic,
+                                hypervisor::MemoryVisibility::Private,
                             )?;
 
                             guest_memory = guest_memory
@@ -2199,7 +2213,6 @@ impl MemoryManager {
                 hotplug_slots,
                 0,
                 0,
-                0,
             )
         };
 
@@ -2228,11 +2241,6 @@ impl MemoryManager {
             .ok_or(Error::CreateSystemAllocator)?,
         ));
 
-        #[cfg(not(feature = "sev_snp"))]
-        let dynamic = true;
-        #[cfg(feature = "sev_snp")]
-        let dynamic = !sev_snp_enabled;
-
         let acpi_address = if dynamic
             && config.hotplug_method == HotplugMethod::Acpi
             && (config.hotplug_size.unwrap_or_default() > 0)
@@ -2251,12 +2259,6 @@ impl MemoryManager {
         // The start of device area and RAM area are placed next to each other.
         let end_of_ram_area = start_of_device_area.unchecked_sub(1);
         let ram_allocator = AddressAllocator::new(GuestAddress(0), start_of_device_area.0).unwrap();
-
-        let next_memory_slot = Arc::new(AtomicU32::new(next_memory_slot));
-        let memory_slot_allocator = Arc::new(MemorySlotAllocator::new(
-            Arc::clone(&next_memory_slot),
-            Arc::new(Mutex::new(Vec::new())),
-        ));
 
         #[allow(unused_mut)]
         let mut memory_manager = MemoryManager {
@@ -2575,6 +2577,11 @@ impl MemoryManager {
         host_numa_node: Option<u32>,
         existing_memory_file: Option<File>,
         thp: bool,
+        vm: Arc<dyn hypervisor::Vm>,
+        slot_allocator: Arc<MemorySlotAllocator>,
+        mergeable: bool,
+        log_dirty: bool,
+        visibility: hypervisor::MemoryVisibility,
     ) -> Result<Arc<GuestRegion>, Error> {
         let r = Self::create_ram_region_raw(
             backing_file,
@@ -2589,9 +2596,18 @@ impl MemoryManager {
             thp,
         )?;
 
-        Ok(Arc::new(GuestRegion::new(r, start_addr).ok_or(
-            Error::GuestMemory(MmapError::InvalidGuestAddress(start_addr)),
-        )?))
+        let region = GuestRegion::from_mmap(
+            r,
+            start_addr,
+            vm,
+            slot_allocator,
+            mergeable,
+            false,
+            log_dirty,
+            visibility,
+        )
+        .map_err(Error::RegisterGuestRegion)?;
+        Ok(Arc::new(region))
     }
 
     // Duplicate of `memory_zone_get_align_size` that does not require a `zone`
@@ -2687,6 +2703,13 @@ impl MemoryManager {
             None,
             None,
             self.thp,
+            Arc::clone(&self.vm),
+            Arc::clone(self.memory_slot_allocator()),
+            self.memory_zones
+                .get(DEFAULT_MEMORY_ZONE)
+                .map_or(self.mergeable, |z| z.mergeable),
+            self.log_dirty,
+            hypervisor::MemoryVisibility::Private,
         )?;
 
         if self.prefault {
@@ -2700,21 +2723,10 @@ impl MemoryManager {
             }])?;
         }
 
-        // Map it into the guest
-        // SAFETY: guaranteed by GuestMmapRegion invariants
-        let slot = unsafe {
-            self.create_userspace_mapping(
-                region.start_addr().0,
-                region.len().try_into().unwrap(),
-                region.as_ptr(),
-                self.memory_zones
-                    .get(DEFAULT_MEMORY_ZONE)
-                    .map_or(self.mergeable, |z| z.mergeable),
-                false,
-                self.log_dirty,
-                hypervisor::MemoryVisibility::Private,
-            )
-        }?;
+        region.register().map_err(Error::RegisterGuestRegion)?;
+        let slot = region.slot().unwrap();
+        self.add_region(Arc::clone(&region))?;
+
         self.guest_ram_mappings.push(GuestRamMapping {
             gpa: region.start_addr().raw_value(),
             size: region.len(),
@@ -2723,8 +2735,6 @@ impl MemoryManager {
             virtio_mem: false,
             file_offset: 0,
         });
-
-        self.add_region(Arc::clone(&region))?;
 
         Ok(region)
     }
@@ -2827,98 +2837,10 @@ impl MemoryManager {
         &self.memory_slot_allocator
     }
 
-    pub fn allocate_memory_slot(&mut self) -> u32 {
-        self.memory_slot_allocator().next_memory_slot()
-    }
-
-    /// # Safety
-    ///
-    /// `userspace_addr` and `memory_size` must be and remain valid
-    /// until `remove_userspace_mapping` is called.
-    #[expect(clippy::too_many_arguments)]
-    pub unsafe fn create_userspace_mapping(
-        &mut self,
-        guest_phys_addr: u64,
-        memory_size: usize,
-        userspace_addr: *mut u8,
-        mergeable: bool,
-        readonly: bool,
-        log_dirty: bool,
-        visibility: hypervisor::MemoryVisibility,
-    ) -> Result<u32, Error> {
-        let slot = self.allocate_memory_slot();
-
-        info!(
-            "Creating userspace mapping: {guest_phys_addr:x} -> {userspace_addr_:x} {memory_size:x}, slot {slot}",
-            userspace_addr_ = userspace_addr as u64
-        );
-
-        // SAFETY: caller promises parameters are correct.
-        unsafe {
-            self.vm
-                .create_user_memory_region(
-                    slot,
-                    guest_phys_addr,
-                    memory_size,
-                    userspace_addr,
-                    readonly,
-                    log_dirty,
-                    visibility,
-                )
-                .map_err(Error::CreateUserMemoryRegion)?;
-        }
-
-        // SAFETY: the address and size are valid since the
-        // mmap succeeded.
-        let ret = unsafe {
-            libc::madvise(
-                userspace_addr.cast(),
-                memory_size as libc::size_t,
-                libc::MADV_DONTDUMP,
-            )
-        };
-        if ret != 0 {
-            let e = io::Error::last_os_error();
-            warn!("Failed to mark mapping as MADV_DONTDUMP: {e}");
-        }
-
-        // Mark the pages as mergeable if explicitly asked for.
-        if mergeable {
-            // SAFETY: the address and size are valid since the
-            // mmap succeeded.
-            let ret = unsafe {
-                libc::madvise(
-                    userspace_addr.cast(),
-                    memory_size as libc::size_t,
-                    libc::MADV_MERGEABLE,
-                )
-            };
-            if ret != 0 {
-                let err = io::Error::last_os_error();
-                // Safe to unwrap because the error is constructed with
-                // last_os_error(), which ensures the output will be Some().
-                let errno = err.raw_os_error().unwrap();
-                if errno == libc::EINVAL {
-                    warn!("kernel not configured with CONFIG_KSM");
-                } else {
-                    warn!("madvise error: {err}");
-                }
-                warn!("failed to mark pages as mergeable");
-            }
-        }
-
-        info!(
-            "Created userspace mapping: {guest_phys_addr:x} -> {userspace_addr_:x} {memory_size:x}",
-            userspace_addr_ = userspace_addr as u64
-        );
-
-        Ok(slot)
-    }
-
     /// # Safety
     ///
     /// `userspace_addr` and `memory_size` must have previously been passed
-    /// to `create_userspace_mapping`.
+    /// to the matching hypervisor registration.
     ///
     /// # Errors
     ///
@@ -4349,9 +4271,12 @@ mod tests {
             libc::MAP_SHARED,
         )
         .unwrap();
-        let gm =
-            GuestMemory::from_regions(vec![GuestRegion::new(region, GuestAddress(0)).unwrap()])
-                .unwrap();
+        let gm = GuestMemory::from_regions(vec![
+            vm_memory::GuestRegionMmap::new(region, GuestAddress(0))
+                .unwrap()
+                .into(),
+        ])
+        .unwrap();
 
         let mut table = MemoryRangeTable::default();
         table.push(MemoryRange {
@@ -4375,9 +4300,12 @@ mod tests {
                 libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | extra_flags,
             )
             .unwrap();
-            let gm =
-                GuestMemory::from_regions(vec![GuestRegion::new(region, GuestAddress(0)).unwrap()])
-                    .unwrap();
+            let gm = GuestMemory::from_regions(vec![
+                vm_memory::GuestRegionMmap::new(region, GuestAddress(0))
+                    .unwrap()
+                    .into(),
+            ])
+            .unwrap();
 
             let mut table = MemoryRangeTable::default();
             table.push(MemoryRange {

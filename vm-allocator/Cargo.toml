@@ -7,8 +7,10 @@ version = "0.1.0"
 
 [features]
 default = []
+kvm = ["hypervisor/kvm"]
 
 [dependencies]
+hypervisor = { path = "../hypervisor" }
 libc = { workspace = true }
 log = { workspace = true }
 thiserror = { workspace = true }
