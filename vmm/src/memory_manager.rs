@@ -3241,6 +3241,15 @@ impl MemoryManager {
         }
     }
 
+    /// Restore the final ACPI state after migration has populated guest memory.
+    pub(crate) fn restore_state(&mut self, snapshot: &Snapshot) -> Result<(), MigratableError> {
+        let state: MemoryManagerSnapshotData = snapshot.to_state()?;
+        self.hotplug_slots = state.hotplug_slots;
+        self.selected_slot = state.selected_slot;
+        self.next_hotplug_slot = state.next_hotplug_slot;
+        Ok(())
+    }
+
     pub fn memory_slot_fds(&self) -> HashMap<u32, RawFd> {
         let mut memory_slot_fds = HashMap::new();
         for guest_ram_mapping in &self.guest_ram_mappings {
