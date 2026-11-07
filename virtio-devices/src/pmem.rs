@@ -32,7 +32,7 @@ use vmm_sys_util::eventfd::EventFd;
 use super::{
     ActivateError, ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError,
     EpollHelperHandler, Error as DeviceError, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_VERSION_1,
-    VirtioCommon, VirtioDevice, VirtioDeviceType,
+    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioSharedMemoryList,
 };
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
@@ -422,6 +422,30 @@ impl VirtioDevice for Pmem {
         event!("virtio-device", "reset", "id", &self.id);
     }
 
+    fn get_shm_regions(&self) -> Option<VirtioSharedMemoryList> {
+        Some(VirtioSharedMemoryList {
+            mem_slot: self.mapping.mem_slot,
+            addr: self.mapping.addr,
+            mapping: Arc::clone(&self.mapping.mapping),
+            region_list: Vec::new(),
+        })
+    }
+
+    fn set_shm_regions(
+        &mut self,
+        shm_regions: VirtioSharedMemoryList,
+    ) -> result::Result<(), DeviceError> {
+        if shm_regions.mem_slot == self.mapping.mem_slot
+            && shm_regions.mapping.size() == self.mapping.mapping.size()
+        {
+            self.mapping.addr = shm_regions.addr;
+            self.config.start = shm_regions.addr.raw_value().to_le();
+            Ok(())
+        } else {
+            Err(DeviceError::SetShmRegionsNotSupported)
+        }
+    }
+
     fn userspace_mappings(&self) -> Vec<UserspaceMapping> {
         vec![self.mapping.clone()]
     }
@@ -457,3 +481,58 @@ impl Snapshottable for Pmem {
 
 impl Transportable for Pmem {}
 impl Migratable for Pmem {}
+
+#[cfg(test)]
+mod tests {
+    use vm_memory::MmapRegion;
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::*;
+
+    #[test]
+    fn test_pmem_shm_regions() {
+        let temp_file = TempFile::new().unwrap();
+        let size = 16 << 20;
+        temp_file.as_file().set_len(size as u64).unwrap();
+        let disk = temp_file.into_file();
+
+        let mmap_region = MmapRegion::new(size).unwrap();
+        let initial_addr = GuestAddress(0x1_0000_0000);
+        let mapping = UserspaceMapping {
+            mem_slot: 7,
+            addr: initial_addr,
+            mapping: Arc::new(mmap_region),
+            mergeable: false,
+        };
+
+        let mut pmem = Pmem::new(
+            "pmem0".to_string(),
+            disk,
+            initial_addr,
+            mapping,
+            false,
+            SeccompAction::Trap,
+            EventFd::new(libc::EFD_NONBLOCK).unwrap(),
+            None,
+        )
+        .unwrap();
+
+        let mut shm = pmem.get_shm_regions().expect("pmem should expose BAR 2");
+        assert_eq!(shm.mem_slot, 7);
+        assert_eq!(shm.addr, initial_addr);
+        assert_eq!(shm.mapping.size(), size);
+        assert!(shm.region_list.is_empty());
+
+        let moved_addr = GuestAddress(0x1_0800_0000);
+        shm.addr = moved_addr;
+        pmem.set_shm_regions(shm).unwrap();
+
+        let mut cfg_bytes = [0u8; 16];
+        pmem.read_config(0, &mut cfg_bytes);
+        let start = u64::from_le_bytes(cfg_bytes[0..8].try_into().unwrap());
+        let len = u64::from_le_bytes(cfg_bytes[8..16].try_into().unwrap());
+        assert_eq!(start, moved_addr.raw_value());
+        assert_eq!(len, size as u64);
+        assert_eq!(pmem.userspace_mappings()[0].addr, moved_addr);
+    }
+}
