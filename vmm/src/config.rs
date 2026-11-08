@@ -3873,11 +3873,22 @@ impl VmConfig {
                 return Err(ValidationError::CpuTopologyDiesPerPackage);
             }
 
-            let total: u32 = (t.threads_per_core as u32)
-                * (t.cores_per_die as u32)
-                * (t.dies_per_package as u32)
-                * (t.packages as u32);
-            if total != self.cpus.max_vcpus {
+            for count in [
+                t.threads_per_core,
+                t.cores_per_die,
+                t.dies_per_package,
+                t.packages,
+            ] {
+                if u32::from(count) > MAX_SUPPORTED_CPUS {
+                    return Err(ValidationError::TooManyCpus(u32::from(count)));
+                }
+            }
+
+            let total = u64::from(t.threads_per_core)
+                * u64::from(t.cores_per_die)
+                * u64::from(t.dies_per_package)
+                * u64::from(t.packages);
+            if total != u64::from(self.cpus.max_vcpus) {
                 return Err(ValidationError::CpuTopologyCount);
             }
         }
@@ -7039,6 +7050,20 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             packages: 1,
         });
         still_valid_config.validate().unwrap();
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.cpus.boot_vcpus = 1;
+        invalid_config.cpus.max_vcpus = 1;
+        invalid_config.cpus.topology = Some(CpuTopology {
+            threads_per_core: 2,
+            cores_per_die: 65535,
+            dies_per_package: 1,
+            packages: 1,
+        });
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::TooManyCpus(65535))
+        );
 
         // Don't test MAX_SUPPORTED_CPUS because it's not guaranteed
         // as other limitation might come in earlier.
