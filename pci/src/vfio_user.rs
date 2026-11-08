@@ -126,13 +126,14 @@ impl VfioUserPciDevice {
     /// Map all of the MMIO regions.
     pub fn map_mmio_regions(&mut self) -> Result<(), VfioUserPciDeviceError> {
         for mmio_region in &mut self.common.mmio_regions {
-            let (region_flags, file_offset, sparse_areas) = {
+            let (region_flags, region_size, file_offset, sparse_areas) = {
                 let client = self.client.lock().unwrap();
                 let region = client
                     .region(mmio_region.index)
                     .ok_or(VfioUserPciDeviceError::MissingRegion(mmio_region.index))?;
                 (
                     region.flags,
+                    region.size,
                     region.file_offset.clone(),
                     region.sparse_areas.clone(),
                 )
@@ -150,7 +151,7 @@ impl VfioUserPciDevice {
                 let mmaps = if sparse_areas.is_empty() {
                     vec![vfio_region_sparse_mmap_area {
                         offset: 0,
-                        size: mmio_region.length,
+                        size: region_size,
                     }]
                 } else {
                     sparse_areas
@@ -160,17 +161,20 @@ impl VfioUserPciDevice {
                     .as_ref()
                     .ok_or(VfioUserPciDeviceError::MissingRegionFd(mmio_region.index))?;
 
+                // MSI-X relocation can enlarge the guest BAR beyond the
+                // backend region. Both limits must constrain the mappings.
+                let mmap_limit = region_size.min(mmio_region.length);
                 for s in mmaps.iter() {
                     // The area layout comes from the untrusted backend. Never
-                    // mmap or create a memory slot outside the BAR window.
+                    // mmap or create a memory slot outside either region.
                     if s.offset
                         .checked_add(s.size)
-                        .is_none_or(|end| end > mmio_region.length)
+                        .is_none_or(|end| end > mmap_limit)
                     {
                         return Err(VfioUserPciDeviceError::SparseAreaOutsideRegion {
                             offset: s.offset,
                             size: s.size,
-                            region_size: mmio_region.length,
+                            region_size: mmap_limit,
                         });
                     }
 
