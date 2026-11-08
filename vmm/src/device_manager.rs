@@ -5881,11 +5881,6 @@ impl DeviceManager {
         &mut self,
         handle: MetaVirtioDevice,
     ) -> DeviceManagerResult<PciDeviceInfo> {
-        // Add the virtio device to the device manager list. This is important
-        // as the list is used to notify virtio devices about memory updates
-        // for instance.
-        self.virtio_devices.push(handle.clone());
-
         let mapping: Option<Arc<IommuMapping>> = if handle.pci_common.iommu.attached() {
             self.iommu_mapping.clone()
         } else {
@@ -5893,22 +5888,63 @@ impl DeviceManager {
         };
 
         let id = handle.id().to_owned();
-        let bdf = self.add_virtio_pci_device(
-            handle.virtio_device,
-            &mapping,
-            &id,
-            handle.pci_common.pci_segment,
-            true,
-            handle.dma_handler,
-            handle.pci_common.pci_device_id,
-            None,
-        )?;
+        let bdf = self
+            .add_virtio_pci_device(
+                Arc::clone(&handle.virtio_device),
+                &mapping,
+                &id,
+                handle.pci_common.pci_segment,
+                true,
+                handle.dma_handler.clone(),
+                handle.pci_common.pci_device_id,
+                None,
+            )
+            .inspect_err(|_| self.release_virtio_device(&handle))?;
 
         // Update the PCIU bitmap
         self.pci_segments[handle.pci_common.pci_segment as usize].pci_devices_up |=
             1 << bdf.device();
 
+        // Add the virtio device to the device manager list. This is important
+        // as the list is used to notify virtio devices about memory updates
+        // for instance.
+        self.virtio_devices.push(handle);
+
         Ok(PciDeviceInfo { id, bdf })
+    }
+
+    // Undo what make_virtio_*_device() did for a device that failed to be
+    // hot-plugged. Otherwise its id stays taken and its backend (disk image
+    // lock, TAP, vsock socket...) is never released, so the request can't
+    // be retried.
+    fn release_virtio_device(&mut self, handle: &MetaVirtioDevice) {
+        let id = handle.id();
+
+        self.device_tree.lock().unwrap().remove(id);
+        self.block_devices
+            .retain(|dev| dev.lock().unwrap().id() != id);
+
+        let mappings = handle.virtio_device.lock().unwrap().userspace_mappings();
+        for mapping in mappings {
+            // SAFETY: userspace_mappings() only returns mappings that were
+            // created with create_userspace_mapping() for this device.
+            if let Err(e) = unsafe {
+                self.memory_manager
+                    .lock()
+                    .unwrap()
+                    .remove_userspace_mapping(
+                        mapping.addr.raw_value(),
+                        mapping.mapping.size(),
+                        mapping.mapping.as_ptr().cast(),
+                        mapping.mergeable,
+                        mapping.mem_slot,
+                    )
+            } {
+                error!("Failed to remove userspace mapping for {id}: {e}");
+            }
+        }
+
+        handle.virtio_device.lock().unwrap().shutdown();
     }
 
     fn is_iommu_segment(&self, pci_segment_id: u16) -> bool {
