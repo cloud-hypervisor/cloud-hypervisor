@@ -3019,6 +3019,21 @@ pub(crate) fn _test_disk_hotplug(guest: &Guest, landlock_enabled: bool, use_fw: 
             0
         );
 
+        // Slot 1 is already taken by a boot device, so this must fail. It must
+        // also not leave anything behind, otherwise the add-disk below would
+        // fail because the id is still in use.
+        assert!(!remote_command(
+            &api_socket,
+            "add-disk",
+            Some(
+                format!(
+                    "path={},id=test0,readonly=true,image_type=raw,pci_device_id=1",
+                    blk_file_path.to_str().unwrap()
+                )
+                .as_str(),
+            ),
+        ));
+
         // Now let's add the extra disk.
         let (cmd_success, cmd_output, _) = remote_command_w_output(
             &api_socket,
