@@ -1,0 +1,22 @@
+Cloud Hypervisor fork
+
+This distribution is a fork of Cloud Hypervisor. The upstream project does
+not accept changes to block devices that add non-local disk backends such
+as NBD and iSCSI. This fork carries that work so other projects can use it.
+NBD is the backend implemented here.
+
+Upstream: https://github.com/cloud-hypervisor/cloud-hypervisor
+
+The license of the software is unchanged. Source and object forms are
+covered by the Apache License 2.0 and the BSD 3-Clause License. Copies of
+both licenses are in the LICENSES/ directory. Some files are under
+Apache-2.0 only, some under BSD-3-Clause only, and some under both; the
+SPDX-License-Identifier in each file controls. Copyright, patent,
+trademark, and attribution notices in the source files belong to their
+respective holders and must be retained.
+
+Documentation is licensed under CC-BY-4.0. A copy is in
+LICENSES/CC-BY-4.0.txt.
+
+Redistributors of this fork, in source or binary form, must give recipients
+this NOTICE and the applicable license texts.

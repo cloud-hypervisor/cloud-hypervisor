@@ -1,3 +1,4 @@
+# Changed in this fork for non-local disk backends. See NOTICE.
 openapi: 3.0.1
 info:
   title: Cloud Hypervisor API

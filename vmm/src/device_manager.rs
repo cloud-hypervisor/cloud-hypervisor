@@ -7,6 +7,7 @@
 // Copyright © 2019 Intel Corporation
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
+// Changed in this fork for non-local disk backends. See NOTICE.
 //
 
 #[cfg(feature = "kvm")]

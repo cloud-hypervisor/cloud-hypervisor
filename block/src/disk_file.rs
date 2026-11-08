@@ -1,6 +1,7 @@
 // Copyright 2026 The Cloud Hypervisor Authors. All rights reserved.
 //
 // SPDX-License-Identifier: Apache-2.0
+// Changed in this fork for non-local disk backends. See NOTICE.
 
 //! Composable disk capability traits for the block crate.
 //!

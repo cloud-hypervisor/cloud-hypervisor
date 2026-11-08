@@ -3,6 +3,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 //
 // SPDX-License-Identifier: Apache-2.0
+// Changed in this fork for non-local disk backends. See NOTICE.
 
 //! Fixed VHD disk image format.
 //!

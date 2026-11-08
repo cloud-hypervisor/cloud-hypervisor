@@ -3,6 +3,7 @@
 // Copyright © 2020 Intel Corporation
 //
 // SPDX-License-Identifier: Apache-2.0
+// Changed in this fork for non-local disk backends. See NOTICE.
 
 use std::env::consts;
 

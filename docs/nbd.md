@@ -1,5 +1,8 @@
 # NBD disks
 
+Added in this fork for non-local disk backends. See
+[NOTICE](../NOTICE). Documentation is licensed under CC-BY-4.0.
+
 Cloud Hypervisor can back a virtio-block disk with a remote export served
 over the [Network Block Device](https://github.com/NetworkBlockDevice/nbd/blob/master/doc/proto.md)
 protocol, for example by `qemu-nbd`, `qemu-storage-daemon` or `nbdkit`.

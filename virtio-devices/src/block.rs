@@ -9,6 +9,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
+// Changed in this fork for non-local disk backends. See NOTICE.
 
 use std::cmp::max;
 use std::collections::{BTreeMap, HashMap, VecDeque};

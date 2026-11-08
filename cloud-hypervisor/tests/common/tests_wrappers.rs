@@ -1,6 +1,7 @@
 // Copyright 2025 The Cloud Hypervisor Authors. All rights reserved.
 //
 // SPDX-License-Identifier: Apache-2.0
+// Changed in this fork for non-local disk backends. See NOTICE.
 use std::ffi::{CStr, CString};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};

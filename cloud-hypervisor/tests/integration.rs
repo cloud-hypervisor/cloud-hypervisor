@@ -1,6 +1,7 @@
 // Copyright © 2020 Intel Corporation
 //
 // SPDX-License-Identifier: Apache-2.0
+// Changed in this fork for non-local disk backends. See NOTICE.
 //
 #![cfg(any(devcli_testenv, clippy))]
 #![expect(clippy::undocumented_unsafe_blocks)]

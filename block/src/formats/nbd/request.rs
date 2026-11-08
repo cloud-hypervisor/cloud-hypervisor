@@ -1,6 +1,7 @@
 // Copyright 2026 The Cloud Hypervisor Authors. All rights reserved.
 //
 // SPDX-License-Identifier: Apache-2.0
+// Added in this fork for non-local disk backends. See NOTICE.
 
 //! Splitting of block requests into NBD commands and aggregation of
 //! their replies, shared by the NBD I/O engines.

@@ -1,6 +1,7 @@
 // Copyright © 2026, Microsoft Corporation
 //
 // SPDX-License-Identifier: Apache-2.0
+// Changed in this fork for non-local disk backends. See NOTICE.
 
 //! Flat VMDK block backend.
 //!
