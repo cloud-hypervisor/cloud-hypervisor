@@ -26,7 +26,9 @@ use vmm_sys_util::errno;
 use crate::Vmm;
 use crate::locked_unix_listener::{LockedUnixListener, LockedUnixListenerError};
 use crate::sigwinch_listener::listen_for_sigwinch_on_tty;
-use crate::vm_config::{ConsoleOutputMode, TcpConsoleConfig};
+#[cfg(target_arch = "x86_64")]
+use crate::vm_config::ConsoleOutputMode;
+use crate::vm_config::{ConsoleOutput, TcpConsoleConfig};
 
 const TIOCSPTLCK: libc::c_int = 0x4004_5431;
 const TIOCGPTPEER: libc::c_int = 0x5441;
@@ -50,17 +52,9 @@ pub enum ConsoleDeviceError {
     #[error("Console socket {0:?} is already in use by another running instance")]
     ConsoleSocketInUse(PathBuf),
 
-    /// Socket path missing for socket console mode
-    #[error("Socket path missing for socket console mode")]
-    MissingSocketPath,
-
     /// File path missing for file console mode
     #[error("File path missing for file console mode")]
     MissingFilePath,
-
-    /// Address missing for TCP console mode
-    #[error("Address missing for TCP console mode")]
-    MissingTcpAddress,
 
     #[error("TCP console address {0} is not loopback")]
     TcpAddressNotLoopback(SocketAddr),
@@ -239,29 +233,23 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
     let mut original_termios_opt = vmm.original_termios_opt.lock().unwrap();
 
     let console_info = ConsoleInfo {
-        console: match vmconfig.console.common.mode {
-            ConsoleOutputMode::File => {
-                let path = vmconfig
-                    .console
-                    .common
-                    .file
-                    .as_ref()
-                    .ok_or(ConsoleDeviceError::MissingFilePath)?;
+        console: match &mut vmconfig.console.output {
+            ConsoleOutput::File { file: path } => {
                 let file = File::create(path).map_err(ConsoleDeviceError::CreateConsoleDevice)?;
                 ConsoleTransport::File(Arc::new(file))
             }
-            ConsoleOutputMode::Pty => {
+            ConsoleOutput::Pty { file } => {
                 let (main_fd, sub_fd, path) =
                     create_pty().map_err(ConsoleDeviceError::CreateConsoleDevice)?;
                 set_raw_mode(&sub_fd.as_raw_fd(), &mut original_termios_opt)?;
-                vmconfig.console.common.file = Some(path.clone());
+                *file = Some(path.clone());
                 vmm.console_resize_pipe = Some(Arc::new(
                     listen_for_sigwinch_on_tty(sub_fd, &vmm.seccomp_action)
                         .map_err(ConsoleDeviceError::StartSigwinchListener)?,
                 ));
                 ConsoleTransport::Pty(Arc::new(main_fd))
             }
-            ConsoleOutputMode::Tty => {
+            ConsoleOutput::Tty => {
                 // Duplicating the file descriptors like this is needed as otherwise
                 // they will be closed on a reboot and the numbers reused
 
@@ -282,15 +270,11 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                 set_raw_mode(&stdout, &mut original_termios_opt)?;
                 ConsoleTransport::Tty(Arc::new(stdout))
             }
-            ConsoleOutputMode::Socket => {
-                let socket_path = vmconfig
-                    .console
-                    .common
-                    .socket
-                    .as_ref()
-                    .ok_or(ConsoleDeviceError::MissingSocketPath)?;
+            ConsoleOutput::Socket {
+                socket: socket_path,
+            } => {
                 if let Some(listener) = vmm.console_socket_listener.as_ref()
-                    && listener.path() == socket_path
+                    && listener.path() == socket_path.as_path()
                 {
                     ConsoleTransport::Socket(Arc::clone(listener))
                 } else {
@@ -305,37 +289,25 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                     ConsoleTransport::Socket(Arc::new(listener))
                 }
             }
-            ConsoleOutputMode::Tcp => {
-                let tcp = vmconfig
-                    .console
-                    .common
-                    .tcp
-                    .as_ref()
-                    .ok_or(ConsoleDeviceError::MissingTcpAddress)?;
+            ConsoleOutput::Tcp { tcp } => {
                 tcp_console_transport(tcp, vmm.console_tcp_listener.as_ref())?
             }
-            ConsoleOutputMode::Null => ConsoleTransport::Null,
-            ConsoleOutputMode::Off => ConsoleTransport::Off,
+            ConsoleOutput::Null => ConsoleTransport::Null,
+            ConsoleOutput::Off => ConsoleTransport::Off,
         },
-        serial: match vmconfig.serial.common.mode {
-            ConsoleOutputMode::File => {
-                let path = vmconfig
-                    .serial
-                    .common
-                    .file
-                    .as_ref()
-                    .ok_or(ConsoleDeviceError::MissingFilePath)?;
+        serial: match &mut vmconfig.serial.output {
+            ConsoleOutput::File { file: path } => {
                 let file = File::create(path).map_err(ConsoleDeviceError::CreateConsoleDevice)?;
                 ConsoleTransport::File(Arc::new(file))
             }
-            ConsoleOutputMode::Pty => {
+            ConsoleOutput::Pty { file } => {
                 let (main_fd, sub_fd, path) =
                     create_pty().map_err(ConsoleDeviceError::CreateConsoleDevice)?;
                 set_raw_mode(&sub_fd.as_raw_fd(), &mut original_termios_opt)?;
-                vmconfig.serial.common.file = Some(path.clone());
+                *file = Some(path.clone());
                 ConsoleTransport::Pty(Arc::new(main_fd))
             }
-            ConsoleOutputMode::Tty => {
+            ConsoleOutput::Tty => {
                 // During vm_shutdown, when serial device is closed, FD#2(STDOUT)
                 // will be closed and FD#2 could be reused in a future boot of the
                 // guest by a different file.
@@ -351,15 +323,11 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
 
                 ConsoleTransport::Tty(Arc::new(stdout))
             }
-            ConsoleOutputMode::Socket => {
-                let socket_path = vmconfig
-                    .serial
-                    .common
-                    .socket
-                    .as_ref()
-                    .ok_or(ConsoleDeviceError::MissingSocketPath)?;
+            ConsoleOutput::Socket {
+                socket: socket_path,
+            } => {
                 if let Some(listener) = vmm.serial_socket_listener.as_ref()
-                    && listener.path() == socket_path
+                    && listener.path() == socket_path.as_path()
                 {
                     ConsoleTransport::Socket(Arc::clone(listener))
                 } else {
@@ -374,17 +342,11 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                     ConsoleTransport::Socket(Arc::new(listener))
                 }
             }
-            ConsoleOutputMode::Tcp => {
-                let tcp = vmconfig
-                    .serial
-                    .common
-                    .tcp
-                    .as_ref()
-                    .ok_or(ConsoleDeviceError::MissingTcpAddress)?;
+            ConsoleOutput::Tcp { tcp } => {
                 tcp_console_transport(tcp, vmm.serial_tcp_listener.as_ref())?
             }
-            ConsoleOutputMode::Null => ConsoleTransport::Null,
-            ConsoleOutputMode::Off => ConsoleTransport::Off,
+            ConsoleOutput::Null => ConsoleTransport::Null,
+            ConsoleOutput::Off => ConsoleTransport::Off,
         },
         #[cfg(target_arch = "x86_64")]
         debug: match vmconfig.debug_console.mode {

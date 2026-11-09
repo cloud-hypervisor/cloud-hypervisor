@@ -775,32 +775,49 @@ impl TcpConsoleConfig {
     }
 }
 
-/// Common configuration for plain console configs.
+/// Output of a serial or virtio console.
 ///
-/// Independent of PCI or legacy devices.
+/// Serialized as a `mode` tag next to the fields of the variant. The HTTP API,
+/// snapshots, and migration all rely on this flat JSON format.
 #[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct CommonConsoleConfig {
-    #[serde(default)]
-    pub file: Option<PathBuf>,
-    pub mode: ConsoleOutputMode,
-    #[serde(default)]
-    pub socket: Option<PathBuf>,
-    #[serde(default)]
-    pub tcp: Option<TcpConsoleConfig>,
+#[serde(tag = "mode")]
+pub enum ConsoleOutput {
+    Off,
+    Pty {
+        /// Path of the PTY. Unknown until the device has been created.
+        #[serde(default)]
+        file: Option<PathBuf>,
+    },
+    Tty,
+    File {
+        file: PathBuf,
+    },
+    Socket {
+        socket: PathBuf,
+    },
+    Tcp {
+        tcp: TcpConsoleConfig,
+    },
+    Null,
 }
 
-impl ApplyLandlock for CommonConsoleConfig {
+impl ApplyLandlock for ConsoleOutput {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        if self.mode == ConsoleOutputMode::Pty {
-            landlock.add_rule_with_access(Path::new("/dev/pts"), "rw")?;
-            landlock.add_rule_with_access(Path::new("/dev/ptmx"), "rw")?;
-        }
-        if let Some(file) = &self.file {
-            landlock.add_rule_with_access(file, "rw")?;
-        }
-        if let Some(socket) = &self.socket {
-            landlock.add_rule_with_access(socket, "rw")?;
+        match self {
+            ConsoleOutput::Pty { file } => {
+                landlock.add_rule_with_access(Path::new("/dev/pts"), "rw")?;
+                landlock.add_rule_with_access(Path::new("/dev/ptmx"), "rw")?;
+                if let Some(file) = file {
+                    landlock.add_rule_with_access(file, "rw")?;
+                }
+            }
+            ConsoleOutput::File { file } => landlock.add_rule_with_access(file, "rw")?,
+            ConsoleOutput::Socket { socket } => landlock.add_rule_with_access(socket, "rw")?,
+            ConsoleOutput::Off
+            | ConsoleOutput::Tty
+            | ConsoleOutput::Tcp { .. }
+            | ConsoleOutput::Null => {}
         }
         Ok(())
     }
@@ -810,7 +827,7 @@ impl ApplyLandlock for CommonConsoleConfig {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct SerialConfig {
     #[serde(flatten)]
-    pub common: CommonConsoleConfig,
+    pub output: ConsoleOutput,
 }
 
 impl SerialConfig {
@@ -820,19 +837,14 @@ impl SerialConfig {
 impl Default for SerialConfig {
     fn default() -> Self {
         Self {
-            common: CommonConsoleConfig {
-                file: None,
-                mode: ConsoleOutputMode::Null,
-                socket: None,
-                tcp: None,
-            },
+            output: ConsoleOutput::Null,
         }
     }
 }
 
 impl ApplyLandlock for SerialConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        self.common.apply_landlock(landlock)
+        self.output.apply_landlock(landlock)
     }
 }
 
@@ -840,7 +852,7 @@ impl ApplyLandlock for SerialConfig {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ConsoleConfig {
     #[serde(flatten)]
-    pub common: CommonConsoleConfig,
+    pub output: ConsoleOutput,
     #[serde(default, flatten)]
     pub pci_common: PciDeviceCommonConfig,
 }
@@ -852,12 +864,7 @@ impl ConsoleConfig {
 impl Default for ConsoleConfig {
     fn default() -> Self {
         Self {
-            common: CommonConsoleConfig {
-                file: None,
-                mode: ConsoleOutputMode::Tty,
-                socket: None,
-                tcp: None,
-            },
+            output: ConsoleOutput::Tty,
             pci_common: PciDeviceCommonConfig::default(),
         }
     }
@@ -865,7 +872,7 @@ impl Default for ConsoleConfig {
 
 impl ApplyLandlock for ConsoleConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        self.common.apply_landlock(landlock)
+        self.output.apply_landlock(landlock)
     }
 }
 
