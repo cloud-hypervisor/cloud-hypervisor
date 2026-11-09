@@ -309,6 +309,9 @@ pub enum ValidationError {
     /// Huge page size is not power of 2
     #[error("Huge page size is not power of 2: {0}")]
     InvalidHugePageSize(u64),
+    /// Invalid number of queues
+    #[error("Invalid number of queues: {0}")]
+    InvalidNumQueues(usize),
     /// Insufficient vCPUs for queues
     #[error("Queue count ({0}) must not exceed boot vCPUs ({1})")]
     TooManyQueues(u16 /* queues */, usize /* vCPUs */),
@@ -1868,6 +1871,10 @@ impl DiskConfig {
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
         self.pci_common.validate(vm_config, true)?;
 
+        if self.num_queues == 0 {
+            return Err(ValidationError::InvalidNumQueues(self.num_queues.into()));
+        }
+
         if self.num_queues as u32 > vm_config.cpus.boot_vcpus {
             return Err(ValidationError::TooManyQueues(
                 self.num_queues,
@@ -2430,6 +2437,10 @@ impl FsConfig {
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        if self.num_queues == 0 {
+            return Err(ValidationError::InvalidNumQueues(self.num_queues.into()));
+        }
+
         if self.num_queues as u32 > vm_config.cpus.boot_vcpus {
             return Err(ValidationError::TooManyQueues(
                 self.num_queues,
@@ -2932,7 +2943,13 @@ impl VdpaConfig {
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        self.pci_common.validate(vm_config, true)
+        self.pci_common.validate(vm_config, true)?;
+
+        if self.num_queues == 0 {
+            return Err(ValidationError::InvalidNumQueues(self.num_queues.into()));
+        }
+
+        Ok(())
     }
 }
 
@@ -7503,6 +7520,41 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             invalid_config.validate(),
             Err(ValidationError::ImageTypeRequired)
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.disks = Some(vec![DiskConfig {
+            num_queues: 0,
+            ..raw_disk_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::InvalidNumQueues(0))
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.vdpa = Some(vec![VdpaConfig {
+            pci_common: PciDeviceCommonConfig::default(),
+            path: PathBuf::from("/dev/vhost-vdpa-0"),
+            num_queues: 0,
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::InvalidNumQueues(0))
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.memory.shared = true;
+        invalid_config.fs = Some(vec![FsConfig {
+            pci_common: PciDeviceCommonConfig::default(),
+            tag: "test".to_string(),
+            socket: PathBuf::from("/tmp/fs.sock"),
+            num_queues: 0,
+            queue_size: 1024,
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::InvalidNumQueues(0))
         );
 
         let mut invalid_config = valid_config.clone();
