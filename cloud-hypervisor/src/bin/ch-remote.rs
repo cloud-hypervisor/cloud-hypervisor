@@ -310,18 +310,14 @@ impl TargetApi<'_> {
 
 fn prepare_fd_command(command: &Command) -> Result<Option<FdCommand>, Error> {
     let fd_command = match command {
-        Command::AddDevice { device_config } => {
-            Some(add_device_config(device_config.as_deref().unwrap())?)
-        }
-        Command::AddNet { net_config } => Some(add_net_config(net_config.as_deref().unwrap())?),
+        Command::AddDevice { device_config } => Some(add_device_config(device_config)?),
+        Command::AddNet { net_config } => Some(add_net_config(net_config)?),
         Command::Restore {
             restore_config: config,
         } => Some(restore_config(config)?),
         Command::ReceiveMigration {
             receive_migration_config,
-        } => Some(receive_migration_data(
-            receive_migration_config.as_deref().unwrap(),
-        )?),
+        } => Some(receive_migration_data(receive_migration_config)?),
         _ => None,
     };
     Ok(fd_command)
@@ -390,8 +386,7 @@ fn rest_api_do_command(
             disk: arg_disk,
             size: arg_size,
         } => {
-            let resize_disk =
-                resize_disk_config(arg_disk.as_ref().unwrap(), arg_size.as_ref().unwrap())?;
+            let resize_disk = resize_disk_config(arg_disk, arg_size)?;
             simple_api_command(socket, "PUT", "resize-disk", Some(&resize_disk))
                 .map_err(Error::HttpApiClient)
         }
@@ -399,8 +394,7 @@ fn rest_api_do_command(
             id: arg_id,
             size: arg_size,
         } => {
-            let resize_zone =
-                resize_zone_config(arg_id.as_ref().unwrap(), arg_size.as_ref().unwrap())?;
+            let resize_zone = resize_zone_config(arg_id, arg_size)?;
             simple_api_command(socket, "PUT", "resize-zone", Some(&resize_zone))
                 .map_err(Error::HttpApiClient)
         }
@@ -413,29 +407,28 @@ fn rest_api_do_command(
         )
         .map_err(Error::HttpApiClient),
         Command::RemoveDevice { id: arg_id } => {
-            let remove_device_data = remove_device_config(arg_id.as_ref().unwrap());
+            let remove_device_data = remove_device_config(arg_id);
             simple_api_command(socket, "PUT", "remove-device", Some(&remove_device_data))
                 .map_err(Error::HttpApiClient)
         }
         Command::AddDisk {
             disk_config: arg_disk_config,
         } => {
-            let disk_config = add_disk_config(arg_disk_config.as_ref().unwrap())?;
+            let disk_config = add_disk_config(arg_disk_config)?;
             simple_api_command(socket, "PUT", "add-disk", Some(&disk_config))
                 .map_err(Error::HttpApiClient)
         }
         Command::AddFs {
             fs_config: arg_fs_config,
         } => {
-            let fs_config = add_fs_config(arg_fs_config.as_ref().unwrap())?;
+            let fs_config = add_fs_config(arg_fs_config)?;
             simple_api_command(socket, "PUT", "add-fs", Some(&fs_config))
                 .map_err(Error::HttpApiClient)
         }
         Command::AddGenericVhostUser {
             generic_vhost_user_config: arg_generic_vhost_user_config,
         } => {
-            let device_config =
-                add_generic_vhost_user_config(arg_generic_vhost_user_config.as_ref().unwrap())?;
+            let device_config = add_generic_vhost_user_config(arg_generic_vhost_user_config)?;
             simple_api_command(
                 socket,
                 "PUT",
@@ -447,7 +440,7 @@ fn rest_api_do_command(
         Command::AddPmem {
             pmem_config: arg_pmem_config,
         } => {
-            let pmem_config = add_pmem_config(arg_pmem_config.as_ref().unwrap())?;
+            let pmem_config = add_pmem_config(arg_pmem_config)?;
             simple_api_command(socket, "PUT", "add-pmem", Some(&pmem_config))
                 .map_err(Error::HttpApiClient)
         }
@@ -462,21 +455,21 @@ fn rest_api_do_command(
         Command::AddUserDevice {
             device_config: arg_device_config,
         } => {
-            let device_config = add_user_device_config(arg_device_config.as_ref().unwrap())?;
+            let device_config = add_user_device_config(arg_device_config)?;
             simple_api_command(socket, "PUT", "add-user-device", Some(&device_config))
                 .map_err(Error::HttpApiClient)
         }
         Command::AddVdpa {
             vdpa_config: arg_vdpa_config,
         } => {
-            let vdpa_config = add_vdpa_config(arg_vdpa_config.as_ref().unwrap())?;
+            let vdpa_config = add_vdpa_config(arg_vdpa_config)?;
             simple_api_command(socket, "PUT", "add-vdpa", Some(&vdpa_config))
                 .map_err(Error::HttpApiClient)
         }
         Command::AddVsock {
             vsock_config: arg_vsock_config,
         } => {
-            let vsock_config = add_vsock_config(arg_vsock_config.as_ref().unwrap())?;
+            let vsock_config = add_vsock_config(arg_vsock_config)?;
             simple_api_command(socket, "PUT", "add-vsock", Some(&vsock_config))
                 .map_err(Error::HttpApiClient)
         }
@@ -498,15 +491,14 @@ fn rest_api_do_command(
         Command::Coredump {
             coredump_config: arg_coredump_config,
         } => {
-            let coredump_config = coredump_config(arg_coredump_config.as_ref().unwrap());
+            let coredump_config = coredump_config(arg_coredump_config);
             simple_api_command(socket, "PUT", "coredump", Some(&coredump_config))
                 .map_err(Error::HttpApiClient)
         }
         Command::SendMigration {
             send_migration_config: arg_send_migration_config,
         } => {
-            let send_migration_data =
-                send_migration_data(arg_send_migration_config.as_ref().unwrap())?;
+            let send_migration_data = send_migration_data(arg_send_migration_config)?;
             simple_api_command(socket, "PUT", "send-migration", Some(&send_migration_data))
                 .map_err(Error::HttpApiClient)
         }
@@ -566,65 +558,63 @@ fn dbus_api_do_command(
             disk: arg_disk,
             size: arg_size,
         } => {
-            let resize_disk =
-                resize_disk_config(arg_disk.as_ref().unwrap(), arg_size.as_ref().unwrap())?;
+            let resize_disk = resize_disk_config(arg_disk, arg_size)?;
             proxy.api_vm_resize_disk(&resize_disk)
         }
         Command::ResizeZone {
             id: arg_id,
             size: arg_size,
         } => {
-            let resize_zone =
-                resize_zone_config(arg_id.as_ref().unwrap(), arg_size.as_ref().unwrap())?;
+            let resize_zone = resize_zone_config(arg_id, arg_size)?;
             proxy.api_vm_resize_zone(&resize_zone)
         }
         Command::AddDevice { .. } => proxy.api_vm_add_device(fd_request_body.as_deref().unwrap()),
         Command::RemoveDevice { id: arg_id } => {
-            let remove_device_data = remove_device_config(arg_id.as_ref().unwrap());
+            let remove_device_data = remove_device_config(arg_id);
             proxy.api_vm_remove_device(&remove_device_data)
         }
         Command::AddDisk {
             disk_config: arg_disk_config,
         } => {
-            let disk_config = add_disk_config(arg_disk_config.as_ref().unwrap())?;
+            let disk_config = add_disk_config(arg_disk_config)?;
             proxy.api_vm_add_disk(&disk_config)
         }
         Command::AddFs {
             fs_config: arg_fs_config,
         } => {
-            let fs_config = add_fs_config(arg_fs_config.as_ref().unwrap())?;
+            let fs_config = add_fs_config(arg_fs_config)?;
             proxy.api_vm_add_fs(&fs_config)
         }
         Command::AddGenericVhostUser {
             generic_vhost_user_config: arg_generic_vhost_user_config,
         } => {
             let generic_vhost_user_config =
-                add_generic_vhost_user_config(arg_generic_vhost_user_config.as_ref().unwrap())?;
+                add_generic_vhost_user_config(arg_generic_vhost_user_config)?;
             proxy.api_vm_add_generic_vhost_user(&generic_vhost_user_config)
         }
         Command::AddPmem {
             pmem_config: arg_pmem_config,
         } => {
-            let pmem_config = add_pmem_config(arg_pmem_config.as_ref().unwrap())?;
+            let pmem_config = add_pmem_config(arg_pmem_config)?;
             proxy.api_vm_add_pmem(&pmem_config)
         }
         Command::AddNet { .. } => proxy.api_vm_add_net(fd_request_body.as_deref().unwrap()),
         Command::AddUserDevice {
             device_config: arg_device_config,
         } => {
-            let device_config = add_user_device_config(arg_device_config.as_ref().unwrap())?;
+            let device_config = add_user_device_config(arg_device_config)?;
             proxy.api_vm_add_user_device(&device_config)
         }
         Command::AddVdpa {
             vdpa_config: arg_vdpa_config,
         } => {
-            let vdpa_config = add_vdpa_config(arg_vdpa_config.as_ref().unwrap())?;
+            let vdpa_config = add_vdpa_config(arg_vdpa_config)?;
             proxy.api_vm_add_vdpa(&vdpa_config)
         }
         Command::AddVsock {
             vsock_config: arg_vsock_config,
         } => {
-            let vsock_config = add_vsock_config(arg_vsock_config.as_ref().unwrap())?;
+            let vsock_config = add_vsock_config(arg_vsock_config)?;
             proxy.api_vm_add_vsock(&vsock_config)
         }
         Command::Snapshot {
@@ -637,15 +627,14 @@ fn dbus_api_do_command(
         Command::Coredump {
             coredump_config: arg_coredump_config,
         } => {
-            let coredump_config = coredump_config(arg_coredump_config.as_ref().unwrap());
+            let coredump_config = coredump_config(arg_coredump_config);
             proxy.api_vm_coredump(&coredump_config)
         }
         Command::CancelMigration => proxy.api_vm_cancel_migration(),
         Command::SendMigration {
             send_migration_config: arg_send_migration_config,
         } => {
-            let send_migration_data =
-                send_migration_data(arg_send_migration_config.as_ref().unwrap())?;
+            let send_migration_data = send_migration_data(arg_send_migration_config)?;
             proxy.api_vm_send_migration(&send_migration_data)
         }
         Command::ReceiveMigration { .. } => {
@@ -936,7 +925,7 @@ enum Command {
             index = 1,
             help = DeviceConfig::SYNTAX,
         )]
-        device_config: Option<String>,
+        device_config: String,
     },
     #[command(about = "Add block device")]
     AddDisk {
@@ -945,7 +934,7 @@ enum Command {
             index = 1,
             help = DiskConfig::SYNTAX,
         )]
-        disk_config: Option<String>,
+        disk_config: String,
     },
     #[command(about = "Add virtio-fs backed fs device")]
     AddFs {
@@ -954,7 +943,7 @@ enum Command {
             index = 1,
             help = FsConfig::SYNTAX,
         )]
-        fs_config: Option<String>,
+        fs_config: String,
     },
     #[command(about = "Add generic vhost-user device")]
     AddGenericVhostUser {
@@ -963,7 +952,7 @@ enum Command {
             index = 1,
             help = GenericVhostUserConfig::SYNTAX,
         )]
-        generic_vhost_user_config: Option<String>,
+        generic_vhost_user_config: String,
     },
     #[command(about = "Add network device")]
     AddNet {
@@ -972,7 +961,7 @@ enum Command {
             index = 1,
             help = NetConfig::SYNTAX,
         )]
-        net_config: Option<String>,
+        net_config: String,
     },
     #[command(about = "Add persistent memory device")]
     AddPmem {
@@ -981,7 +970,7 @@ enum Command {
             index = 1,
             help = PmemConfig::SYNTAX,
         )]
-        pmem_config: Option<String>,
+        pmem_config: String,
     },
     #[command(about = "Add userspace device")]
     AddUserDevice {
@@ -990,7 +979,7 @@ enum Command {
             index = 1,
             help = UserDeviceConfig::SYNTAX,
         )]
-        device_config: Option<String>,
+        device_config: String,
     },
     #[command(about = "Add vDPA device")]
     AddVdpa {
@@ -999,7 +988,7 @@ enum Command {
             index = 1,
             help = VdpaConfig::SYNTAX,
         )]
-        vdpa_config: Option<String>,
+        vdpa_config: String,
     },
     #[command(about = "Add vsock device")]
     AddVsock {
@@ -1008,7 +997,7 @@ enum Command {
             index = 1,
             help = VsockConfig::SYNTAX,
         )]
-        vsock_config: Option<String>,
+        vsock_config: String,
     },
     #[command(about = "Statistics from the virtio-balloon device")]
     BalloonStats,
@@ -1019,7 +1008,7 @@ enum Command {
     #[command(about = "Create a coredump from VM")]
     Coredump {
         #[arg(value_name = "coredump_config", index = 1, help = "<file_path>")]
-        coredump_config: Option<String>,
+        coredump_config: String,
     },
     #[command(about = "Counters from the VM")]
     Counters,
@@ -1049,12 +1038,12 @@ enum Command {
             index = 1,
             help = api::VmReceiveMigrationData::SYNTAX,
         )]
-        receive_migration_config: Option<String>,
+        receive_migration_config: String,
     },
     #[command(about = "Remove VFIO and PCI device")]
     RemoveDevice {
         #[arg(value_name = "id", index = 1, help = "<device_id>")]
-        id: Option<String>,
+        id: String,
     },
     #[command(about = "Resize the VM")]
     Resize {
@@ -1076,20 +1065,20 @@ enum Command {
     #[command(about = "Resize an attached disk")]
     ResizeDisk {
         #[arg(value_name = "disk", long, help = "Disk identifier")]
-        disk: Option<String>,
+        disk: String,
         #[arg(value_name = "size", long, help = "New disk size")]
-        size: Option<String>,
+        size: String,
     },
     #[command(about = "Resize a memory zone")]
     ResizeZone {
         #[arg(value_name = "id", long, help = "Memory zone identifier")]
-        id: Option<String>,
+        id: String,
         #[arg(
             value_name = "size",
             long,
             help = "New memory zone size in bytes (supports K/M/G suffix)"
         )]
-        size: Option<String>,
+        size: String,
     },
     #[command(about = "Restore VM from a snapshot")]
     Restore {
@@ -1109,7 +1098,7 @@ enum Command {
             index = 1,
             help = api::VmSendMigrationData::SYNTAX,
         )]
-        send_migration_config: Option<String>,
+        send_migration_config: String,
     },
     #[command(about = "Shutdown the VM")]
     Shutdown,
