@@ -9,7 +9,6 @@ use std::fs;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::LazyLock;
 use std::{io, result};
 
 use arch::CpuProfileConfig;
@@ -797,6 +796,16 @@ fn parse_cpuid_override_entry(
 }
 
 impl CpusConfig {
+    pub const SYNTAX: &'static str = "boot=<boot_vcpus>,max=<max_vcpus>,\
+        topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,\
+        kvm_hyperv=on|off,kvm_hint_realtime=on|off,\
+        max_phys_bits=<maximum_number_of_physical_bits>,\
+        affinity=<list_of_vcpus_with_their_associated_cpuset>,\
+        features=<list_of_features_to_enable>,\
+        nested=on|off,core_scheduling=vm|vcpu|off,\
+        profile=host|path:<file>,\
+        x-cpuid-overrides=[[<leaf>,<subleaf>,<eax>,<ebx>,<ecx>,<edx>],...]";
+
     pub fn parse(cpus: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
@@ -977,30 +986,29 @@ impl PciSegmentConfig {
     }
 }
 
-impl PlatformConfig {
-    pub fn syntax() -> &'static str {
-        static SYNTAX: LazyLock<String> = LazyLock::new(|| {
-            let mut syntax = "Platform configuration parameters \
+// Shared by both variants of `PlatformConfig::SYNTAX`.
+macro_rules! platform_syntax {
+    ($($extra:literal)?) => {
+        concat!(
+            "Platform configuration parameters \
             \"num_pci_segments=<num_pci_segments>,iommu_segments=<list_of_segments>,\
             iommu_address_width=<bits>,iommufd=on|off,iommufd_fd=<fd>,vfio_p2p_dma=on|off,\
             system_manufacturer=<dmi_system_manufacturer>,\
             system_product_name=<dmi_system_product_name>,system_version=<dmi_system_version>,\
             system_serial_number=<dmi_system_serial_number>,system_uuid=<dmi_system_uuid>,\
             system_sku_number=<dmi_system_sku_number>,system_family=<dmi_system_family>,\
-            oem_strings=<list_of_strings>,chassis_asset_tag=<dmi_chassis_asset_tag>"
-                .to_string();
+            oem_strings=<list_of_strings>,chassis_asset_tag=<dmi_chassis_asset_tag>",
+            $($extra,)?
+            "\""
+        )
+    };
+}
 
-            if cfg!(feature = "sev_snp") {
-                syntax.push_str(",sev_snp=on|off");
-            }
-
-            syntax.push('"');
-
-            syntax
-        });
-
-        &SYNTAX
-    }
+impl PlatformConfig {
+    #[cfg(feature = "sev_snp")]
+    pub const SYNTAX: &'static str = platform_syntax!(",sev_snp=on|off");
+    #[cfg(not(feature = "sev_snp"))]
+    pub const SYNTAX: &'static str = platform_syntax!();
 
     /// # Safety
     /// Live FDs named in the input must be exclusively owned by the caller.
@@ -1164,7 +1172,26 @@ impl PlatformConfig {
     }
 }
 
+impl MemoryZoneConfig {
+    pub const SYNTAX: &'static str = "User defined memory zone parameters \
+        \"size=<guest_memory_region_size>,file=<backing_file>,\
+        shared=on|off,\
+        hugepages=on|off,hugepage_size=<hugepage_size>,\
+        host_numa_node=<node_id>,\
+        id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>,\
+        hotplugged_size=<hotplugged_memory_size>,\
+        prefault=on|off,reserve=on|off\"";
+}
+
 impl MemoryConfig {
+    pub const SYNTAX: &'static str = "Memory parameters \
+        \"size=<guest_memory_size>,mergeable=on|off,shared=on|off,\
+        hugepages=on|off,hugepage_size=<hugepage_size>,\
+        hotplug_method=acpi|virtio-mem,\
+        hotplug_size=<hotpluggable_memory_size>,\
+        hotplugged_size=<hotplugged_memory_size>,\
+        prefault=on|off,reserve=on|off,thp=on|off\"";
+
     #[expect(clippy::needless_pass_by_value)]
     pub fn parse(memory: &str, memory_zones: Option<Vec<&str>>) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2594,6 +2621,8 @@ impl SerialConfig {
 
 #[cfg(target_arch = "x86_64")]
 impl DebugConsoleConfig {
+    pub const SYNTAX: &'static str = "Debug console: off|pty|tty|file=<path>,iobase=<port in hex>";
+
     pub fn parse(debug_console_ops: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
