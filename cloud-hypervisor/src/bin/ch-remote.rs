@@ -1220,16 +1220,20 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
     .into_boxed_slice()
 }
 
-fn main() {
-    env_logger::init();
-    let app = Command::new("ch-remote")
+fn build_clap_cli() -> Command {
+    Command::new("ch-remote")
         .author(env!("CARGO_PKG_AUTHORS"))
         .version(env!("BUILD_VERSION"))
         .about("Remotely control a cloud-hypervisor VMM.")
         .arg_required_else_help(true)
         .subcommand_required(true)
         .args(get_cli_args())
-        .subcommands(get_cli_commands_sorted());
+        .subcommands(get_cli_commands_sorted())
+}
+
+fn main() {
+    env_logger::init();
+    let app = build_clap_cli();
 
     let matches = app.get_matches();
 
@@ -1366,6 +1370,11 @@ mod tests {
 
     use super::*;
     use crate::test_util::assert_args_sorted;
+
+    #[test]
+    fn clap_cli_definition_is_valid() {
+        build_clap_cli().debug_assert();
+    }
 
     #[test]
     fn test_cli_args_sorted() {
