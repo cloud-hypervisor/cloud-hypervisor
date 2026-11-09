@@ -12,7 +12,7 @@ use std::marker::PhantomData;
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
-use std::{error, fs, iter, num, process};
+use std::{error, fs, iter, process};
 
 use api_client::{
     Error as ApiClientError, simple_api_command, simple_api_command_with_fds,
@@ -20,7 +20,7 @@ use api_client::{
 };
 use clap::{Parser, Subcommand};
 use log::error;
-use option_parser::{ByteSized, ByteSizedParseError};
+use option_parser::ByteSized;
 use thiserror::Error;
 use vmm::api;
 use vmm::config::{self, RestoreConfig};
@@ -41,12 +41,6 @@ enum Error {
     #[cfg(feature = "dbus_api")]
     #[error("D-Bus API Client Error")]
     DBusApiClient(#[source] zbus::Error),
-    #[error("Error parsing CPU count")]
-    InvalidCpuCount(#[source] num::ParseIntError),
-    #[error("Error parsing memory size")]
-    InvalidMemorySize(#[source] ByteSizedParseError),
-    #[error("Error parsing balloon size")]
-    InvalidBalloonSize(#[source] ByteSizedParseError),
     #[error("Error parsing device syntax")]
     AddDeviceConfig(#[source] config::Error),
     #[error("Error parsing disk syntax")]
@@ -71,8 +65,6 @@ enum Error {
     ReadingStdin(#[source] io::Error),
     #[error("Error reading from file")]
     ReadingFile(#[source] io::Error),
-    #[error("Invalid disk size")]
-    InvalidDiskSize(#[source] ByteSizedParseError),
     #[error("Error parsing receive migration configuration")]
     ReceiveMigrationConfig(#[from] api::VmReceiveMigrationConfigError),
     #[error("Error parsing send migration configuration")]
@@ -375,18 +367,14 @@ fn rest_api_do_command(
             cpus: arg_cpus,
             memory: arg_memory,
         } => {
-            let resize = resize_config(
-                arg_cpus.as_deref(),
-                arg_memory.as_deref(),
-                arg_balloon.as_deref(),
-            )?;
+            let resize = resize_config(*arg_cpus, *arg_memory, *arg_balloon);
             simple_api_command(socket, "PUT", "resize", Some(&resize)).map_err(Error::HttpApiClient)
         }
         Command::ResizeDisk {
             disk: arg_disk,
             size: arg_size,
         } => {
-            let resize_disk = resize_disk_config(arg_disk, arg_size)?;
+            let resize_disk = resize_disk_config(arg_disk, *arg_size);
             simple_api_command(socket, "PUT", "resize-disk", Some(&resize_disk))
                 .map_err(Error::HttpApiClient)
         }
@@ -394,7 +382,7 @@ fn rest_api_do_command(
             id: arg_id,
             size: arg_size,
         } => {
-            let resize_zone = resize_zone_config(arg_id, arg_size)?;
+            let resize_zone = resize_zone_config(arg_id, *arg_size);
             simple_api_command(socket, "PUT", "resize-zone", Some(&resize_zone))
                 .map_err(Error::HttpApiClient)
         }
@@ -547,25 +535,21 @@ fn dbus_api_do_command(
             cpus: arg_cpus,
             memory: arg_memory,
         } => {
-            let resize = resize_config(
-                arg_cpus.as_deref(),
-                arg_memory.as_deref(),
-                arg_balloon.as_deref(),
-            )?;
+            let resize = resize_config(*arg_cpus, *arg_memory, *arg_balloon);
             proxy.api_vm_resize(&resize)
         }
         Command::ResizeDisk {
             disk: arg_disk,
             size: arg_size,
         } => {
-            let resize_disk = resize_disk_config(arg_disk, arg_size)?;
+            let resize_disk = resize_disk_config(arg_disk, *arg_size);
             proxy.api_vm_resize_disk(&resize_disk)
         }
         Command::ResizeZone {
             id: arg_id,
             size: arg_size,
         } => {
-            let resize_zone = resize_zone_config(arg_id, arg_size)?;
+            let resize_zone = resize_zone_config(arg_id, *arg_size);
             proxy.api_vm_resize_zone(&resize_zone)
         }
         Command::AddDevice { .. } => proxy.api_vm_add_device(fd_request_body.as_deref().unwrap()),
@@ -648,66 +632,35 @@ fn dbus_api_do_command(
 }
 
 fn resize_config(
-    cpus: Option<&str>,
-    memory: Option<&str>,
-    balloon: Option<&str>,
-) -> Result<String, Error> {
-    let desired_vcpus: Option<u32> = if let Some(cpus) = cpus {
-        Some(cpus.parse().map_err(Error::InvalidCpuCount)?)
-    } else {
-        None
-    };
-
-    let desired_ram: Option<u64> = if let Some(memory) = memory {
-        Some(
-            memory
-                .parse::<ByteSized>()
-                .map_err(Error::InvalidMemorySize)?
-                .0,
-        )
-    } else {
-        None
-    };
-
-    let desired_balloon: Option<u64> = if let Some(balloon) = balloon {
-        Some(
-            balloon
-                .parse::<ByteSized>()
-                .map_err(Error::InvalidBalloonSize)?
-                .0,
-        )
-    } else {
-        None
-    };
-
+    cpus: Option<u32>,
+    memory: Option<ByteSized>,
+    balloon: Option<ByteSized>,
+) -> String {
     let resize = api::VmResizeData {
-        desired_vcpus,
-        desired_ram,
-        desired_balloon,
+        desired_vcpus: cpus,
+        desired_ram: memory.map(|size| size.0),
+        desired_balloon: balloon.map(|size| size.0),
     };
 
-    Ok(serde_json::to_string(&resize).unwrap())
+    serde_json::to_string(&resize).unwrap()
 }
 
-fn resize_disk_config(id: &str, size: &str) -> Result<String, Error> {
+fn resize_disk_config(id: &str, size: ByteSized) -> String {
     let resize_disk = api::VmResizeDiskData {
         id: id.to_owned(),
-        desired_size: size.parse::<ByteSized>().map_err(Error::InvalidDiskSize)?.0,
+        desired_size: size.0,
     };
 
-    Ok(serde_json::to_string(&resize_disk).unwrap())
+    serde_json::to_string(&resize_disk).unwrap()
 }
 
-fn resize_zone_config(id: &str, size: &str) -> Result<String, Error> {
+fn resize_zone_config(id: &str, size: ByteSized) -> String {
     let resize_zone = api::VmResizeZoneData {
         id: id.to_owned(),
-        desired_ram: size
-            .parse::<ByteSized>()
-            .map_err(Error::InvalidMemorySize)?
-            .0,
+        desired_ram: size.0,
     };
 
-    Ok(serde_json::to_string(&resize_zone).unwrap())
+    serde_json::to_string(&resize_zone).unwrap()
 }
 
 fn add_device_config(config: &str) -> Result<FdCommand, Error> {
@@ -1052,22 +1005,22 @@ enum Command {
             long,
             help = "New balloon size in bytes (supports K/M/G suffix)"
         )]
-        balloon: Option<String>,
+        balloon: Option<ByteSized>,
         #[arg(value_name = "cpus", long, help = "New vCPUs count")]
-        cpus: Option<String>,
+        cpus: Option<u32>,
         #[arg(
             value_name = "memory",
             long,
             help = "New memory size in bytes (supports K/M/G suffix)"
         )]
-        memory: Option<String>,
+        memory: Option<ByteSized>,
     },
     #[command(about = "Resize an attached disk")]
     ResizeDisk {
         #[arg(value_name = "disk", long, help = "Disk identifier")]
         disk: String,
         #[arg(value_name = "size", long, help = "New disk size")]
-        size: String,
+        size: ByteSized,
     },
     #[command(about = "Resize a memory zone")]
     ResizeZone {
@@ -1078,7 +1031,7 @@ enum Command {
             long,
             help = "New memory zone size in bytes (supports K/M/G suffix)"
         )]
-        size: String,
+        size: ByteSized,
     },
     #[command(about = "Restore VM from a snapshot")]
     Restore {
