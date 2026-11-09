@@ -41,7 +41,9 @@ use virtio_bindings::virtio_blk::*;
 use virtio_bindings::virtio_config::*;
 use virtio_bindings::virtio_ring::{VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC};
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
-use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError};
+use vm_memory::{
+    ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError,
+};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
@@ -176,7 +178,7 @@ struct BlockEpollHandler {
     writeback: Arc<AtomicBool>,
     counters: BlockCounters,
     queue_evt: EventFd,
-    inflight_requests: VecDeque<(u16, Request)>,
+    inflight_requests: VecDeque<(u16, Request, GuestAddress)>,
     // The active count includes `inflight_requests` plus requests in transition
     // from the queue to inflight or inflight to completion.
     active_request_count: Arc<AtomicUsize>,
@@ -217,11 +219,11 @@ impl BlockEpollHandler {
     // corresponding chain is still available (virtio 1.x §2.7.13.4).
     // Double check the guest driver is behaving.
     fn is_head_in_flight(
-        inflight: &VecDeque<(u16, Request)>,
-        batch: &[(u16, Request)],
+        inflight: &VecDeque<(u16, Request, GuestAddress)>,
+        batch: &[(u16, Request, GuestAddress)],
         head: u16,
     ) -> bool {
-        batch.iter().any(|(h, _)| *h == head) || inflight.iter().any(|(h, _)| *h == head)
+        batch.iter().any(|(h, ..)| *h == head) || inflight.iter().any(|(h, ..)| *h == head)
     }
 
     fn process_queue_submit(&mut self) -> Result<()> {
@@ -357,10 +359,13 @@ impl BlockEpollHandler {
             {
                 if let Some(batch_request) = batch_request {
                     batch_requests.push(batch_request);
-                    batch_inflight_requests.push((desc_chain.head_index(), request));
+                    batch_inflight_requests.push((desc_chain.head_index(), request, status_addr));
                 } else {
-                    self.inflight_requests
-                        .push_back((desc_chain.head_index(), request));
+                    self.inflight_requests.push_back((
+                        desc_chain.head_index(),
+                        request,
+                        status_addr,
+                    ));
                     self.active_request_count.fetch_add(1, Ordering::SeqCst);
                 }
             } else {
@@ -405,11 +410,11 @@ impl BlockEpollHandler {
                 }
                 Err(e) => {
                     // If batch submission fails, report VIRTIO_BLK_S_IOERR for all requests.
-                    for (user_data, request) in batch_inflight_requests {
+                    for (user_data, request, status_addr) in batch_inflight_requests {
                         warn!("Request failed with batch submission: {request:x?} {e:?}");
                         let desc_index = user_data;
                         let mem = self.mem.memory();
-                        mem.write_obj(VIRTIO_BLK_S_IOERR as u8, request.status_addr())
+                        mem.write_obj(VIRTIO_BLK_S_IOERR as u8, status_addr)
                             .map_err(Error::RequestStatus)?;
                         queue
                             .add_used(mem.deref(), desc_index, 1)
@@ -461,7 +466,7 @@ impl BlockEpollHandler {
     }
 
     #[inline]
-    fn find_inflight_request(&mut self, completed_head: u16) -> Result<Request> {
+    fn find_inflight_request(&mut self, completed_head: u16) -> Result<(Request, GuestAddress)> {
         // This loop neatly handles the fast path where the completions are
         // in order (it turns into just a pop_front()) and the 1% of the time
         // (analysis during boot) where slight out of ordering has been
@@ -472,9 +477,11 @@ impl BlockEpollHandler {
         // This is a O(1) operation and is prepared for the future as it it likely
         // the next completion would be for the one that was skipped which will
         // now be the new front.
-        for (i, (head, _)) in self.inflight_requests.iter().enumerate() {
+        for (i, (head, ..)) in self.inflight_requests.iter().enumerate() {
             if head == &completed_head {
-                return Ok(self.inflight_requests.swap_remove_front(i).unwrap().1);
+                let (_, request, status_addr) =
+                    self.inflight_requests.swap_remove_front(i).unwrap();
+                return Ok((request, status_addr));
             }
         }
 
@@ -492,7 +499,7 @@ impl BlockEpollHandler {
             let mut result = completion.result;
             let desc_index = completion.user_data as u16;
 
-            let mut request = self.find_inflight_request(desc_index)?;
+            let (mut request, status_addr) = self.find_inflight_request(desc_index)?;
             let _active_request = ActiveRequestGuard::new(&self.active_request_count);
 
             request
@@ -619,7 +626,7 @@ impl BlockEpollHandler {
                 (VIRTIO_BLK_S_OK as u8, len)
             };
 
-            mem.write_obj(status, request.status_addr())
+            mem.write_obj(status, status_addr)
                 .map_err(Error::RequestStatus)?;
 
             let queue = &mut self.queue;
