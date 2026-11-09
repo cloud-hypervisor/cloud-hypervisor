@@ -153,7 +153,7 @@ This option defines the maximum number of physical bits for all vCPUs, which
 sets a limit for the size of the guest's addressable space. This is mainly
 useful for debugging purposes.
 
-The value is an unsigned integer of 8 bits.
+The value is an unsigned integer of 8 bits. It must be between 32 and 64, inclusive.
 
 _Example_
 

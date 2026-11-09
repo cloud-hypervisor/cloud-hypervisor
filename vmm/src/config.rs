@@ -37,6 +37,8 @@ use crate::vm_config::*;
 
 const MAX_NUM_PCI_SEGMENTS: u16 = 96;
 const MAX_IOMMU_ADDRESS_WIDTH_BITS: u8 = 64;
+const MIN_PHYS_BITS: u8 = 32;
+const MAX_PHYS_BITS: u8 = 64;
 
 // Maximum queue size is largest power of 2 that fits into a u16
 const VIRTIO_MAX_QUEUE_SIZE: u16 = 32768;
@@ -250,6 +252,11 @@ pub enum ValidationError {
     /// Too many CPUs.
     #[error("Too many CPUs: specified {0} but {MAX_SUPPORTED_CPUS} is the limit")]
     TooManyCpus(u32 /* specified CPUs */),
+    /// Maximum physical address bits outside the supported range
+    #[error(
+        "Maximum physical address bits must be between {MIN_PHYS_BITS} and {MAX_PHYS_BITS}: {0}"
+    )]
+    InvalidMaxPhysBits(u8 /* specified bits */),
     #[cfg(target_arch = "aarch64")]
     /// The GICv3 layout does not fit this many CPUs.
     #[error("Too many CPUs for the GICv3 layout: specified {0} but {1} is the limit")]
@@ -3758,6 +3765,10 @@ impl VmConfig {
         #[cfg(target_arch = "x86_64")]
         if self.cpus.kvm_hint_realtime && self.cpus.kvm_hyperv {
             return Err(ValidationError::KvmHintRealtimeWithKvmHyperv);
+        }
+
+        if !(MIN_PHYS_BITS..=MAX_PHYS_BITS).contains(&self.cpus.max_phys_bits) {
+            return Err(ValidationError::InvalidMaxPhysBits(self.cpus.max_phys_bits));
         }
 
         if self.cpus.max_vcpus > MAX_SUPPORTED_CPUS {
@@ -7521,6 +7532,21 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             invalid_config.validate(),
             Err(ValidationError::ImageTypeRequired)
         );
+
+        for max_phys_bits in [0, 31, 65, u8::MAX] {
+            let mut invalid_config = valid_config.clone();
+            invalid_config.cpus.max_phys_bits = max_phys_bits;
+            assert_eq!(
+                invalid_config.validate(),
+                Err(ValidationError::InvalidMaxPhysBits(max_phys_bits))
+            );
+        }
+
+        for max_phys_bits in [MIN_PHYS_BITS, MAX_PHYS_BITS] {
+            let mut valid_phys_config = valid_config.clone();
+            valid_phys_config.cpus.max_phys_bits = max_phys_bits;
+            valid_phys_config.validate().unwrap();
+        }
 
         let mut invalid_config = valid_config.clone();
         invalid_config.disks = Some(vec![DiskConfig {
