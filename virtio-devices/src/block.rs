@@ -267,8 +267,9 @@ impl BlockEpollHandler {
             }
 
             let result = Request::parse(&mut desc_chain, self.access_platform.as_deref());
-            let mut request = match result {
-                (Ok(r), _) => r,
+            let (mut request, status_addr) = match result {
+                (Ok(request), Some(status_addr)) => (request, status_addr),
+                (Ok(_), None) => unreachable!("parse() returns the status address with a request"),
                 (Err(e), status_addr) => {
                     warn!("Failed to parse virtio-blk request at head {head}: {e}");
                     if let Some(status_addr) = status_addr {
@@ -294,7 +295,7 @@ impl BlockEpollHandler {
                 warn!("Request check failed: {request:x?} {e:?}");
                 desc_chain
                     .memory()
-                    .write_obj(VIRTIO_BLK_S_IOERR as u8, request.status_addr())
+                    .write_obj(VIRTIO_BLK_S_IOERR as u8, status_addr)
                     .map_err(Error::RequestStatus)?;
 
                 // If no asynchronous operation has been submitted, we can
@@ -373,7 +374,7 @@ impl BlockEpollHandler {
 
                 desc_chain
                     .memory()
-                    .write_obj(status as u8, request.status_addr())
+                    .write_obj(status as u8, status_addr)
                     .map_err(Error::RequestStatus)?;
 
                 let len = if status == VIRTIO_BLK_S_OK
