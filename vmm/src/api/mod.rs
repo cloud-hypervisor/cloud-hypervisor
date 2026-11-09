@@ -355,6 +355,9 @@ fn default_receive_migration_background_fetch_pages() -> bool {
 
 #[derive(Debug, Error)]
 pub enum VmReceiveMigrationConfigError {
+    // TODO(fd): Remove after the deprecation period for the legacy FD fields.
+    #[error("Cannot combine external_fds with legacy FD fields")]
+    MixedFdFormats,
     #[error("Invalid inherited file descriptor")]
     InheritedFd(#[from] ConfigError),
     /// Parsing of `VmReceiveMigrationData` failed
@@ -393,7 +396,8 @@ impl VmReceiveMigrationData {
         [,serial_file=<path>|serial_socket=<path>|serial_tcp=<ip>:<port>]\
         [,console_file=<path>|console_socket=<path>|console_tcp=<ip>:<port>]\"\
         \n`vfio_fds=<list_of_vfio_ids_with_their_associated_fd>` and \
-        `iommufd_fd=<fd>` are deprecated; use `external_fds` instead.";
+        `iommufd_fd=<fd>` are deprecated; use `external_fds` instead. \
+        Do not combine the two formats.";
 
     /// # Safety
     /// Live FDs named in the input must be exclusively owned by the caller.
@@ -470,6 +474,9 @@ impl VmReceiveMigrationData {
             .transpose()?
             .unwrap_or_default();
         // TODO(fd): Remove after `vfio_fds` and `iommufd_fd` are deprecated and removed.
+        if !external_fds.is_empty() && (vfio_fds.is_some() || iommufd_fd.is_some()) {
+            return Err(VmReceiveMigrationConfigError::MixedFdFormats);
+        }
         external_fds.import_restored_iommufd_fd(&mut iommufd_fd, false);
         external_fds.import_restored_vfio_configs(&mut vfio_fds);
 
