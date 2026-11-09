@@ -33,15 +33,17 @@ use vmm::config::{self, RestoreConfig, VmParams};
 use vmm::landlock::{Landlock, LandlockError};
 use vmm::seccomp_filters::{Thread, get_seccomp_filter};
 use vmm::vm::Vm;
+#[cfg(target_arch = "x86_64")]
+use vmm::vm_config::DebugConsoleConfig;
 #[cfg(feature = "fw_cfg")]
 use vmm::vm_config::FwCfgConfig;
 #[cfg(feature = "ivshmem")]
 use vmm::vm_config::IvshmemConfig;
 use vmm::vm_config::{
-    BalloonConfig, ConsoleConfig, DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig,
-    LandlockConfig, NetConfig, NumaConfig, PciSegmentConfig, PlatformConfig, PmemConfig,
-    RateLimiterGroupConfig, RngConfig, RtcConfig, SerialConfig, TpmConfig, UserDeviceConfig,
-    VdpaConfig, VmConfig, VsockConfig,
+    BalloonConfig, ConsoleConfig, CpusConfig, DeviceConfig, DiskConfig, FsConfig,
+    GenericVhostUserConfig, LandlockConfig, MemoryConfig, MemoryZoneConfig, NetConfig, NumaConfig,
+    PciSegmentConfig, PlatformConfig, PmemConfig, RateLimiterGroupConfig, RngConfig, RtcConfig,
+    SerialConfig, TpmConfig, UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
 };
 use vmm::{GuestResetAction, GuestShutdownAction, vm_config};
 use vmm_sys_util::eventfd::EventFd;
@@ -339,15 +341,7 @@ struct Cli {
     #[arg(
         value_name = "cpus",
         long,
-        help = "boot=<boot_vcpus>,max=<max_vcpus>,\
-                    topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,\
-                    kvm_hyperv=on|off,kvm_hint_realtime=on|off,\
-                    max_phys_bits=<maximum_number_of_physical_bits>,\
-                    affinity=<list_of_vcpus_with_their_associated_cpuset>,\
-                    features=<list_of_features_to_enable>,\
-                    nested=on|off,core_scheduling=vm|vcpu|off,\
-                    profile=host|path:<file>,\
-                    x-cpuid-overrides=[[<leaf>,<subleaf>,<eax>,<ebx>,<ecx>,<edx>],...]",
+        help = CpusConfig::SYNTAX,
         default_value = default_vcpus(),
         group = "vm-config",
     )]
@@ -379,7 +373,7 @@ struct Cli {
     #[arg(
         value_name = "debug-console",
         long,
-        help = "Debug console: off|pty|tty|file=<path>,iobase=<port in hex>",
+        help = DebugConsoleConfig::SYNTAX,
         default_value = "off,iobase=0xe9",
         group = "vm-config"
     )]
@@ -537,13 +531,7 @@ struct Cli {
     #[arg(
         value_name = "memory",
         long,
-        help = "Memory parameters \
-                     \"size=<guest_memory_size>,mergeable=on|off,shared=on|off,\
-                     hugepages=on|off,hugepage_size=<hugepage_size>,\
-                     hotplug_method=acpi|virtio-mem,\
-                     hotplug_size=<hotpluggable_memory_size>,\
-                     hotplugged_size=<hotplugged_memory_size>,\
-                     prefault=on|off,reserve=on|off,thp=on|off\"",
+        help = MemoryConfig::SYNTAX,
         default_value = default_memory(),
         group = "vm-config",
     )]
@@ -551,14 +539,7 @@ struct Cli {
     #[arg(
         value_name = "memory-zone",
         long,
-        help = "User defined memory zone parameters \
-                     \"size=<guest_memory_region_size>,file=<backing_file>,\
-                     shared=on|off,\
-                     hugepages=on|off,hugepage_size=<hugepage_size>,\
-                     host_numa_node=<node_id>,\
-                     id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>,\
-                     hotplugged_size=<hotplugged_memory_size>,\
-                     prefault=on|off,reserve=on|off\"",
+        help = MemoryZoneConfig::SYNTAX,
         num_args = 1..,
         group = "vm-config",
     )]
@@ -598,7 +579,7 @@ struct Cli {
     #[arg(
         value_name = "platform",
         long,
-        help = PlatformConfig::syntax(),
+        help = PlatformConfig::SYNTAX,
         group = "vm-config",
     )]
     platform: Option<String>,
