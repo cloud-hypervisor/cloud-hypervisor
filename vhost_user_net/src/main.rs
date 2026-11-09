@@ -6,39 +6,44 @@
 //
 // SPDX-License-Identifier: (Apache-2.0 AND BSD-3-Clause)
 
-use clap::{Arg, Command};
+use clap::Parser;
 use vhost_user_net::start_net_backend;
 
-fn build_clap_cli() -> Command {
-    Command::new("vhost-user-net backend")
-        .version(env!("CARGO_PKG_VERSION"))
-        .author(env!("CARGO_PKG_AUTHORS"))
-        .about("Launch a vhost-user-net backend.")
-        .arg_required_else_help(true)
-        .arg(
-            Arg::new("net-backend")
-                .long("net-backend")
-                .help(vhost_user_net::SYNTAX)
-                .num_args(1)
-                .required(true),
-        )
+#[derive(Parser)]
+#[command(
+    name = "vhost-user-net backend",
+    version,
+    author,
+    about = "Launch a vhost-user-net backend.",
+    arg_required_else_help = true
+)]
+struct Cli {
+    #[arg(long, value_name = "net-backend", help = vhost_user_net::SYNTAX)]
+    net_backend: String,
 }
 
 fn main() {
     env_logger::init();
-
-    let cmd_arguments = build_clap_cli().get_matches();
-
-    let backend_command = cmd_arguments.get_one::<String>("net-backend").unwrap();
-    start_net_backend(backend_command);
+    let cli = Cli::parse();
+    start_net_backend(&cli.net_backend);
 }
 
 #[cfg(test)]
 mod tests {
-    use super::build_clap_cli;
+    use clap::CommandFactory;
+
+    use super::*;
 
     #[test]
     fn clap_cli_definition_is_valid() {
-        build_clap_cli().debug_assert();
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn test_backend_argument() {
+        let cli = Cli::try_parse_from(["backend", "--net-backend", "socket=/tmp/backend"])
+            .expect("the backend option should parse");
+        assert_eq!(cli.net_backend, "socket=/tmp/backend");
+        assert!(Cli::try_parse_from(["backend"]).is_err());
     }
 }
