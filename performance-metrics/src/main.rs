@@ -1822,7 +1822,7 @@ struct Cli {
         long,
         help = "Override number of test iterations"
     )]
-    iterations: Option<String>,
+    iterations: Option<u32>,
     #[arg(long, help = "Print the list of available metrics tests")]
     list_tests: bool,
     #[arg(
@@ -1854,7 +1854,7 @@ struct Cli {
         long,
         help = "Override test timeout, Ex. --timeout 5"
     )]
-    timeout: Option<String>,
+    timeout: Option<u32>,
     #[arg(
         value_name = "vm-type",
         long,
@@ -1898,18 +1898,8 @@ fn main() {
     let mut metrics_report: MetricsReport = Default::default();
 
     let overrides = Arc::new(PerformanceTestOverrides {
-        test_iterations: cmd_arguments
-            .iterations
-            .as_ref()
-            .map(|s| s.parse())
-            .transpose()
-            .unwrap_or_default(),
-        test_timeout: cmd_arguments
-            .timeout
-            .as_ref()
-            .map(|s| s.parse())
-            .transpose()
-            .unwrap_or_default(),
+        test_iterations: cmd_arguments.iterations,
+        test_timeout: cmd_arguments.timeout,
         test_image_format: cmd_arguments.image_format,
         vm_type: match cmd_arguments.vm_type {
             CliVmType::Regular => GuestVmType::Regular,
