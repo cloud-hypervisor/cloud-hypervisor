@@ -53,6 +53,9 @@ const MAX_SUPPORTED_CPUS: u32 = 255;
 /// Errors associated with VM configuration parameters.
 #[derive(Debug, Error)]
 pub enum Error {
+    // TODO(fd): Remove after the deprecation period for the legacy FD fields.
+    #[error("Cannot combine external_fds with legacy FD fields")]
+    MixedFdFormats,
     #[error("Inherited file descriptor {0} is specified more than once")]
     DuplicateInheritedFd(RawFd),
     #[error("Invalid inherited file descriptor")]
@@ -3145,6 +3148,7 @@ impl RestoreConfig {
         \n`external_fds` provides replacement file descriptors. `net(<id>)` entries replace \
         the FDs of network devices, `vfio(<id>)` entries replace VFIO cdev FDs, and `iommu` \
         provides the iommufd FD. \
+        Do not combine `external_fds` with legacy FD fields.\
         \n`net_fds=<list_of_net_ids_with_their_associated_fds>`, \
         `vfio_fds=<list_of_vfio_ids_with_their_associated_fd>` and \
         `iommufd_fd=<fd>` are deprecated; use `external_fds` instead.\
@@ -3258,6 +3262,11 @@ impl RestoreConfig {
             .transpose()?
             .unwrap_or_default();
         // TODO(fd): Remove after the deprecation period for the legacy FD fields.
+        if !external_fds.is_empty()
+            && (net_fds.is_some() || vfio_fds.is_some() || iommufd_fd.is_some())
+        {
+            return Err(Error::MixedFdFormats);
+        }
         external_fds.import_restored_iommufd_fd(&mut iommufd_fd, false);
         external_fds.import_restored_vfio_configs(&mut vfio_fds);
         external_fds.import_restored_net_configs(&mut net_fds);
