@@ -266,10 +266,10 @@ impl BlockEpollHandler {
                 return Err(Error::QueueDuplicatedHeadIndex);
             }
 
-            let mut request = match Request::parse(&mut desc_chain, self.access_platform.as_deref())
-            {
-                Ok(r) => r,
-                Err(e) => {
+            let result = Request::parse(&mut desc_chain, self.access_platform.as_deref());
+            let mut request = match result {
+                (Ok(r), _) => r,
+                (Err(e), _) => {
                     warn!("Failed to parse virtio-blk request at head {head}: {e}");
                     queue
                         .add_used(desc_chain.memory(), head, 0)

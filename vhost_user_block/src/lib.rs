@@ -131,7 +131,7 @@ impl VhostUserBlkThread {
         {
             debug!("got an element in the queue");
             let len = match Request::parse(&mut desc_chain, None) {
-                Ok(mut request) => {
+                (Ok(mut request), _) => {
                     debug!("element is a valid request");
                     request.writeback = self.writeback.load(Ordering::Acquire);
                     let (status, len) = match request.execute(
@@ -157,7 +157,7 @@ impl VhostUserBlkThread {
                         len
                     }
                 }
-                Err(err) => {
+                (Err(err), _) => {
                     error!("failed to parse available descriptor chain: {err:?}");
                     0
                 }

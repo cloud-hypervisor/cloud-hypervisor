@@ -27,8 +27,8 @@ use vm_memory::{
     Address as _, Bytes as _, GuestAddress, GuestMemoryBackend, GuestMemoryError,
     GuestMemoryLoadGuard,
 };
-use vm_virtio::AccessPlatform;
 use vm_virtio::checked_descriptor::DescriptorChainExt;
+use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::file_traits::FileSync;
 
 use crate::async_io::{
@@ -84,8 +84,13 @@ impl Request {
     pub fn parse<M: GuestMemoryBackend>(
         desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<M>>,
         access_platform: Option<&dyn AccessPlatform>,
-    ) -> Result<Request, Error> {
-        (|| -> Result<Request, Error> {
+    ) -> (Result<Request, Error>, Option<GuestAddress>) {
+        let status_addr = match Self::find_status_addr(&mut desc_chain.clone(), access_platform) {
+            Ok(status_addr) => status_addr,
+            Err(e) => return (Err(e), None),
+        };
+
+        let result = (|| -> Result<Request, Error> {
             let hdr_desc = desc_chain
                 .next_checked(access_platform)
                 .map_err(|addr| Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(addr)))?
@@ -109,12 +114,11 @@ impl Request {
                 request_type: request_type(desc_chain.memory(), hdr_desc_addr)?,
                 sector: sector(desc_chain.memory(), hdr_desc_addr)?,
                 data_descriptors: SmallVec::with_capacity(DEFAULT_DESCRIPTOR_VEC_SIZE),
-                status_addr: GuestAddress(0),
+                status_addr,
                 writeback: true,
                 start: Instant::now(),
             };
 
-            let status_desc;
             let mut desc = desc_chain
                 .next_checked(access_platform)
                 .map_err(|addr| Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(addr)))?
@@ -153,9 +157,7 @@ impl Request {
                             Error::DescriptorChainTooShort
                         })?;
                 }
-                status_desc = desc;
             } else {
-                status_desc = desc;
                 // Only flush requests are allowed to skip the data descriptor.
                 if req.request_type != RequestType::Flush {
                     error!("Need a data descriptor: request = {req:?}");
@@ -163,19 +165,45 @@ impl Request {
                 }
             }
 
-            // The status MUST always be writable.
-            if !status_desc.is_write_only() {
-                return Err(Error::UnexpectedReadOnlyDescriptor);
-            }
-
-            if status_desc.is_empty() {
-                return Err(Error::DescriptorLengthTooSmall);
-            }
-
-            req.status_addr = status_desc.addr();
-
             Ok(req)
-        })()
+        })();
+
+        (result, Some(status_addr))
+    }
+
+    fn find_status_addr<M: GuestMemoryBackend>(
+        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<M>>,
+        access_platform: Option<&dyn AccessPlatform>,
+    ) -> Result<GuestAddress, Error> {
+        let status_desc = desc_chain
+            .by_ref()
+            .last()
+            .ok_or(Error::DescriptorChainTooShort)?;
+
+        if status_desc.has_next() {
+            return Err(Error::DescriptorChainTooShort);
+        }
+        // The status MUST always be writable.
+        if !status_desc.is_write_only() {
+            return Err(Error::UnexpectedReadOnlyDescriptor);
+        }
+        if status_desc.len() == 0 {
+            return Err(Error::DescriptorLengthTooSmall);
+        }
+
+        let addr = status_desc
+            .addr()
+            .translate_gva(access_platform, 1)
+            .map_err(|_| {
+                Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(status_desc.addr()))
+            })?;
+        desc_chain
+            .memory()
+            .check_range(addr, 1)
+            .then_some(addr)
+            .ok_or(Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(
+                addr,
+            )))
     }
 
     pub fn execute<T: FileExt + FileSync, M: GuestMemoryBackend>(
@@ -889,7 +917,7 @@ mod tests {
 
             let mut queue = vq.create_queue();
             let mut chain = queue.pop_descriptor_chain(mem_atomic.memory()).unwrap();
-            let result = Request::parse(&mut chain, None);
+            let (result, _) = Request::parse(&mut chain, None);
             if valid {
                 assert_eq!(result.unwrap().request_type(), RequestType::In);
             } else {
