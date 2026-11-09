@@ -1852,7 +1852,7 @@ struct Cli {
     #[arg(
         value_name = "timeout",
         long,
-        help = "Override test timeout, Ex. --timeout 5"
+        help = "Override test timeout in seconds"
     )]
     timeout: Option<u32>,
     #[arg(
