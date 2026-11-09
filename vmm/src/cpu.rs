@@ -69,6 +69,7 @@ use libc::{c_void, siginfo_t};
 use linux_loader::elf::Elf64_Nhdr;
 use log::{debug, error, info, warn};
 use seccompiler::{BpfProgram, SeccompAction, apply_filter};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracer::trace_scoped;
 use vm_device::BusDevice;
@@ -791,6 +792,7 @@ pub struct CpuManager {
     // Shared with AcpiCpuHotplugController
     vcpu_states: Arc<Mutex<Vec<VcpuState>>>,
     vcpus: Vec<Arc<Mutex<Vcpu>>>,
+    state: Option<CpuManagerState>,
     seccomp_action: SeccompAction,
     vm_ops: Arc<dyn VmOps>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
@@ -835,6 +837,11 @@ impl TryFrom<i32> for CoreSchedulingLeader {
             _ => Err(()),
         }
     }
+}
+
+#[derive(Serialize, Deserialize)]
+struct CpuManagerState {
+    active_vcpus: Vec<bool>,
 }
 
 /// Management structure for a vCPU (thread).
@@ -1036,6 +1043,7 @@ impl CpuManager {
             #[cfg(feature = "guest_debug")]
             vm_debug_evt,
             vcpus: Vec::with_capacity(max_vcpus),
+            state: None,
             seccomp_action,
             vm_ops,
             acpi_address: None,
@@ -1636,7 +1644,15 @@ impl CpuManager {
     ) -> Result<Vec<Arc<Mutex<Vcpu>>>> {
         trace_scoped!("create_boot_vcpus");
 
-        let num_vcpus = self.boot_vcpus();
+        self.state = snapshot
+            .filter(|snapshot| snapshot.snapshot_data.is_some())
+            .map(Snapshot::to_state)
+            .transpose()
+            .map_err(|e| Error::VcpuCreate(e.into()))?;
+        let num_vcpus = self
+            .state
+            .as_ref()
+            .map_or(self.boot_vcpus(), |state| state.active_vcpus.len() as u32);
         #[cfg(all(feature = "kvm", feature = "sev_snp"))]
         let num_vcpus =
             if self.sev_snp_enabled && self.hypervisor.hypervisor_type() == HypervisorType::Kvm {
@@ -1674,6 +1690,34 @@ impl CpuManager {
     }
 
     pub fn start_restored_vcpus(&mut self) -> Result<()> {
+        if let Some(state) = self.state.take() {
+            self.vcpus_pause_signalled.store(true, Ordering::SeqCst);
+            let active_vcpus = state.active_vcpus.iter().filter(|&&active| active).count();
+            let barrier = Arc::new(Barrier::new(active_vcpus + 1));
+            let seccomp_filter = Arc::new(
+                get_seccomp_filter(
+                    &self.seccomp_action,
+                    Thread::Vcpu,
+                    Some(self.hypervisor.hypervisor_type()),
+                )
+                .map_err(Error::CreateSeccompFilter)?,
+            );
+
+            for (id, active) in state.active_vcpus.into_iter().enumerate() {
+                if active {
+                    self.start_vcpu(
+                        Arc::clone(&self.vcpus[id]),
+                        id as u32,
+                        Arc::clone(&barrier),
+                        Arc::clone(&seccomp_filter),
+                        false,
+                    )?;
+                }
+            }
+            barrier.wait();
+            return Ok(());
+        }
+
         self.activate_vcpus(self.vcpus.len() as u32, false, Some(true))
             .map_err(|e| {
                 Error::StartRestoreVcpu(anyhow!("Failed to start restored vCPUs: {e:#?}"))
@@ -2878,8 +2922,18 @@ impl Snapshottable for CpuManager {
             VCPU_SERIALIZE_MIN_CHUNKS_PER_THREAD,
         )?;
 
+        let state = CpuManagerState {
+            active_vcpus: self
+                .vcpu_states
+                .lock()
+                .unwrap()
+                .iter()
+                .take(self.vcpus.len())
+                .map(VcpuState::active)
+                .collect(),
+        };
         // The CpuManager snapshot is a collection of all vCPUs snapshots.
-        let mut cpu_manager_snapshot = Snapshot::default();
+        let mut cpu_manager_snapshot = Snapshot::new_from_state(&state)?;
         for (id, snapshot) in snapshots {
             cpu_manager_snapshot.add_snapshot(id, snapshot);
         }
@@ -3519,6 +3573,103 @@ mod tests {
     use vm_migration::MigratableError;
 
     use crate::cpu::parallel_map;
+
+    #[test]
+    fn cpu_active_vcpus_restore() {
+        use hypervisor::HypervisorVmError;
+
+        use super::*;
+
+        struct TestVmOps;
+        impl VmOps for TestVmOps {
+            fn guest_mem_write(
+                &self,
+                _gpa: u64,
+                _buf: &[u8],
+            ) -> result::Result<usize, HypervisorVmError> {
+                unreachable!()
+            }
+            fn guest_mem_read(
+                &self,
+                _gpa: u64,
+                _buf: &mut [u8],
+            ) -> result::Result<usize, HypervisorVmError> {
+                unreachable!()
+            }
+            fn mmio_read(
+                &self,
+                _gpa: u64,
+                _data: &mut [u8],
+            ) -> result::Result<(), HypervisorVmError> {
+                unreachable!()
+            }
+            fn mmio_write(&self, _gpa: u64, _data: &[u8]) -> result::Result<(), HypervisorVmError> {
+                unreachable!()
+            }
+            fn pio_read(
+                &self,
+                _port: u64,
+                _data: &mut [u8],
+            ) -> result::Result<(), HypervisorVmError> {
+                unreachable!()
+            }
+            fn pio_write(&self, _port: u64, _data: &[u8]) -> result::Result<(), HypervisorVmError> {
+                unreachable!()
+            }
+        }
+
+        let hypervisor = hypervisor::new().unwrap();
+        let vm = hypervisor.create_vm(HypervisorVmConfig::default()).unwrap();
+        vm.create_irq_chip().unwrap();
+        let event = EventFd::new(libc::EFD_NONBLOCK).unwrap();
+        let cpu_manager = CpuManager::new(
+            &CpusConfig {
+                boot_vcpus: 1,
+                max_vcpus: 3,
+                ..Default::default()
+            },
+            vm,
+            event.try_clone().unwrap(),
+            event.try_clone().unwrap(),
+            event.try_clone().unwrap(),
+            #[cfg(feature = "guest_debug")]
+            event.try_clone().unwrap(),
+            hypervisor,
+            SeccompAction::Allow,
+            Arc::new(TestVmOps),
+            &Default::default(),
+            #[cfg(feature = "sev_snp")]
+            false,
+            #[cfg(feature = "igvm")]
+            false,
+        )
+        .unwrap();
+        let mut cpu_manager = cpu_manager.lock().unwrap();
+        let snapshot = Snapshot::new_from_state(&CpuManagerState {
+            active_vcpus: vec![true, false, true],
+        })
+        .unwrap();
+        let vcpus = cpu_manager.create_boot_vcpus(Some(&snapshot)).unwrap();
+        assert_eq!(vcpus.len(), 3);
+        for vcpu in &vcpus {
+            cpu_manager
+                .configure_vcpu(&mut vcpu.lock().unwrap(), None)
+                .unwrap();
+        }
+        cpu_manager.start_restored_vcpus().unwrap();
+        let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            cpu_manager.pause().unwrap();
+            let vcpus = cpu_manager.vcpu_states.lock().unwrap();
+            assert!(vcpus[0].active());
+            assert!(!vcpus[1].active());
+            assert!(vcpus[2].active());
+            drop(vcpus);
+            let saved: CpuManagerState = cpu_manager.snapshot().unwrap().to_state().unwrap();
+            assert_eq!(saved.active_vcpus, [true, false, true]);
+        }));
+        cpu_manager.shutdown().unwrap();
+        result.unwrap();
+    }
 
     #[test]
     fn test_parallel_map() {
