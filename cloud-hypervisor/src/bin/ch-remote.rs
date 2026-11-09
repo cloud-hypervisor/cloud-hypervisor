@@ -845,7 +845,7 @@ struct Cli {
     #[arg(
         value_name = "api-socket",
         long,
-        help = "HTTP API socket path (UNIX domain socket)."
+        help = "HTTP API socket path (UNIX domain socket)"
     )]
     api_socket: Option<String>,
     #[cfg(feature = "dbus_api")]
@@ -960,14 +960,23 @@ enum Command {
     CancelMigration,
     #[command(about = "Create a coredump from VM")]
     Coredump {
-        #[arg(value_name = "coredump_config", index = 1, help = "<file_path>")]
+        #[arg(
+            value_name = "coredump_config",
+            index = 1,
+            help = "Destination URL of the coredump"
+        )]
         coredump_config: String,
     },
     #[command(about = "Counters from the VM")]
     Counters,
     #[command(about = "Create VM from a JSON configuration")]
     Create {
-        #[arg(value_name = "path", index = 1, default_value = "-")]
+        #[arg(
+            value_name = "path",
+            index = 1,
+            help = "Path to the JSON configuration, or '-' for standard input",
+            default_value = "-"
+        )]
         path: String,
     },
     #[command(about = "Delete a VM")]
@@ -995,7 +1004,7 @@ enum Command {
     },
     #[command(about = "Remove VFIO and PCI device")]
     RemoveDevice {
-        #[arg(value_name = "id", index = 1, help = "<device_id>")]
+        #[arg(value_name = "id", index = 1, help = "Device identifier")]
         id: String,
     },
     #[command(about = "Resize the VM")]
@@ -1019,7 +1028,11 @@ enum Command {
     ResizeDisk {
         #[arg(value_name = "disk", long, help = "Disk identifier")]
         disk: String,
-        #[arg(value_name = "size", long, help = "New disk size")]
+        #[arg(
+            value_name = "size",
+            long,
+            help = "New disk size in bytes (supports K/M/G suffix)"
+        )]
         size: ByteSized,
     },
     #[command(about = "Resize a memory zone")]
@@ -1059,7 +1072,11 @@ enum Command {
     ShutdownVmm,
     #[command(about = "Create a snapshot from VM")]
     Snapshot {
-        #[arg(value_name = "snapshot_config", index = 1, help = "<destination_url>")]
+        #[arg(
+            value_name = "snapshot_config",
+            index = 1,
+            help = "Destination URL of the snapshot"
+        )]
         snapshot_config: String,
     },
 }
