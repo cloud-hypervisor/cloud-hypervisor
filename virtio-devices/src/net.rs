@@ -923,6 +923,7 @@ impl VirtioDevice for Net {
                     Arc::clone(&self.announce.pending),
                     self.config.max_virtqueue_pairs,
                     Arc::clone(&self.curr_queue_pairs),
+                    self.common.acked_features,
                 ),
                 queue: ctrl_queue,
                 queue_evt: ctrl_queue_evt,

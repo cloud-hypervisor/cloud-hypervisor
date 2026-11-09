@@ -402,6 +402,7 @@ impl VirtioDevice for Net {
                     Arc::clone(&self.announce.pending),
                     self.config.max_virtqueue_pairs,
                     Arc::new(AtomicU16::new(1)),
+                    self.vu_common.virtio_common.acked_features,
                 ),
                 queue: ctrl_queue,
                 queue_evt: ctrl_queue_evt,
