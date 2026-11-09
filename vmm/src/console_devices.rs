@@ -26,8 +26,6 @@ use vmm_sys_util::errno;
 use crate::Vmm;
 use crate::locked_unix_listener::{LockedUnixListener, LockedUnixListenerError};
 use crate::sigwinch_listener::listen_for_sigwinch_on_tty;
-#[cfg(target_arch = "x86_64")]
-use crate::vm_config::ConsoleOutputMode;
 use crate::vm_config::{ConsoleOutput, TcpConsoleConfig};
 
 const TIOCSPTLCK: libc::c_int = 0x4004_5431;
@@ -51,10 +49,6 @@ pub enum ConsoleDeviceError {
     /// The console socket is already in use by another running instance
     #[error("Console socket {0:?} is already in use by another running instance")]
     ConsoleSocketInUse(PathBuf),
-
-    /// File path missing for file console mode
-    #[error("File path missing for file console mode")]
-    MissingFilePath,
 
     #[error("TCP console address {0} is not loopback")]
     TcpAddressNotLoopback(SocketAddr),
@@ -349,37 +343,29 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
             ConsoleOutput::Off => ConsoleTransport::Off,
         },
         #[cfg(target_arch = "x86_64")]
-        debug: match vmconfig.debug_console.mode {
-            ConsoleOutputMode::File => {
-                let path = vmconfig
-                    .debug_console
-                    .file
-                    .as_ref()
-                    .ok_or(ConsoleDeviceError::MissingFilePath)?;
+        debug: match &mut vmconfig.debug_console.output {
+            ConsoleOutput::File { file: path } => {
                 let file = File::create(path).map_err(ConsoleDeviceError::CreateConsoleDevice)?;
                 ConsoleTransport::File(Arc::new(file))
             }
-            ConsoleOutputMode::Pty => {
+            ConsoleOutput::Pty { file } => {
                 let (main_fd, sub_fd, path) =
                     create_pty().map_err(ConsoleDeviceError::CreateConsoleDevice)?;
                 set_raw_mode(&sub_fd.as_raw_fd(), &mut original_termios_opt)?;
-                vmconfig.debug_console.file = Some(path.clone());
+                *file = Some(path.clone());
                 ConsoleTransport::Pty(Arc::new(main_fd))
             }
-            ConsoleOutputMode::Tty => {
+            ConsoleOutput::Tty => {
                 let out =
                     dup_stdout().map_err(|e| ConsoleDeviceError::CreateConsoleDevice(e.into()))?;
                 set_raw_mode(&out, &mut original_termios_opt)?;
                 ConsoleTransport::Tty(Arc::new(out))
             }
-            ConsoleOutputMode::Socket => {
+            ConsoleOutput::Socket { .. } | ConsoleOutput::Tcp { .. } => {
                 return Err(ConsoleDeviceError::NoSocketOptionSupportForConsoleDevice);
             }
-            ConsoleOutputMode::Tcp => {
-                return Err(ConsoleDeviceError::NoSocketOptionSupportForConsoleDevice);
-            }
-            ConsoleOutputMode::Null => ConsoleTransport::Null,
-            ConsoleOutputMode::Off => ConsoleTransport::Off,
+            ConsoleOutput::Null => ConsoleTransport::Null,
+            ConsoleOutput::Off => ConsoleTransport::Off,
         },
     };
 

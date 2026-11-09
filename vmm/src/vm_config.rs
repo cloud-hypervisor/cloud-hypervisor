@@ -736,17 +736,6 @@ impl ApplyLandlock for PmemConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub enum ConsoleOutputMode {
-    Off,
-    Pty,
-    Tty,
-    File,
-    Socket,
-    Tcp,
-    Null,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TcpConsoleConfig {
     #[serde(deserialize_with = "deserialize_tcp_address")]
@@ -880,9 +869,8 @@ impl ApplyLandlock for ConsoleConfig {
 #[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DebugConsoleConfig {
-    #[serde(default)]
-    pub file: Option<PathBuf>,
-    pub mode: ConsoleOutputMode,
+    #[serde(flatten)]
+    pub output: ConsoleOutput,
     /// Optionally dedicated I/O-port, if the default port should not be used.
     pub iobase: Option<u16>,
 }
@@ -891,8 +879,7 @@ pub struct DebugConsoleConfig {
 impl Default for DebugConsoleConfig {
     fn default() -> Self {
         Self {
-            file: None,
-            mode: ConsoleOutputMode::Off,
+            output: ConsoleOutput::Off,
             iobase: Some(debug_console::DEFAULT_PORT as u16),
         }
     }
@@ -900,14 +887,7 @@ impl Default for DebugConsoleConfig {
 #[cfg(target_arch = "x86_64")]
 impl ApplyLandlock for DebugConsoleConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        if self.mode == ConsoleOutputMode::Pty {
-            landlock.add_rule_with_access(Path::new("/dev/pts"), "rw")?;
-            landlock.add_rule_with_access(Path::new("/dev/ptmx"), "rw")?;
-        }
-        if let Some(file) = &self.file {
-            landlock.add_rule_with_access(file, "rw")?;
-        }
-        Ok(())
+        self.output.apply_landlock(landlock)
     }
 }
 
