@@ -1801,8 +1801,8 @@ fn date() -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
-fn main() {
-    let cmd_arguments = ClapCommand::new("performance-metrics")
+fn build_clap_cli() -> ClapCommand {
+    ClapCommand::new("performance-metrics")
         .version(env!("CARGO_PKG_VERSION"))
         .author(env!("CARGO_PKG_AUTHORS"))
         .about("Generate the performance metrics data for Cloud Hypervisor")
@@ -1876,7 +1876,10 @@ fn main() {
                 .value_parser(["regular","confidential"])
                 .default_value("regular"),
         )
-        .get_matches();
+}
+
+fn main() {
+    let cmd_arguments = build_clap_cli().get_matches();
 
     // It seems that the tool (ethr) used for testing the virtio-net latency
     // is not stable on AArch64, and therefore the latency test is currently
@@ -2006,5 +2009,15 @@ fn main() {
 
     if has_failure {
         process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_clap_cli;
+
+    #[test]
+    fn clap_cli_definition_is_valid() {
+        build_clap_cli().debug_assert();
     }
 }
