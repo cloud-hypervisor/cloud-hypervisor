@@ -2731,26 +2731,8 @@ impl DebugConsoleConfig {
             .parse(debug_console_ops)
             .map_err(Error::ParseConsole)?;
 
-        let mut file: Option<PathBuf> = None;
+        let output = ConsoleOutput::parse(debug_console_ops, Error::ParseConsole)?;
         let mut iobase: Option<u16> = None;
-        let mut mode: ConsoleOutputMode = ConsoleOutputMode::Off;
-
-        if parser.is_set("off") {
-        } else if parser.is_set("pty") {
-            mode = ConsoleOutputMode::Pty;
-        } else if parser.is_set("tty") {
-            mode = ConsoleOutputMode::Tty;
-        } else if parser.is_set("null") {
-            mode = ConsoleOutputMode::Null;
-        } else if parser.is_set("file") {
-            mode = ConsoleOutputMode::File;
-            file =
-                Some(PathBuf::from(parser.get("file").ok_or(
-                    Error::Validation(ValidationError::ConsoleFileMissing),
-                )?));
-        } else {
-            return Err(Error::ParseConsoleInvalidModeGiven);
-        }
 
         if parser.is_set("iobase")
             && let Some(iobase_opt) = parser.get("iobase")
@@ -2766,7 +2748,7 @@ impl DebugConsoleConfig {
                 })?);
         }
 
-        Ok(Self { file, mode, iobase })
+        Ok(Self { output, iobase })
     }
 }
 
@@ -3710,7 +3692,7 @@ impl VmConfig {
             tty_consoles.push("serial-console");
         }
         #[cfg(target_arch = "x86_64")]
-        if self.debug_console.mode == ConsoleOutputMode::Tty {
+        if self.debug_console.output == ConsoleOutput::Tty {
             tty_consoles.push("debug-console");
         }
         if tty_consoles.len() > 1 {
@@ -6440,6 +6422,37 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         for mode in ["File", "Socket", "Tcp"] {
             serde_json::from_value::<SerialConfig>(serde_json::json!({ "mode": mode }))
                 .unwrap_err();
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn test_debug_console_config() {
+        let config = DebugConsoleConfig {
+            output: ConsoleOutput::File {
+                file: PathBuf::from("/tmp/console"),
+            },
+            iobase: Some(0xe9),
+        };
+        assert_eq!(
+            DebugConsoleConfig::parse("file=/tmp/console,iobase=0xe9").unwrap(),
+            config
+        );
+
+        let json = serde_json::json!({
+            "mode": "File",
+            "file": "/tmp/console",
+            "iobase": 0xe9
+        });
+        assert_eq!(
+            serde_json::from_value::<DebugConsoleConfig>(json.clone()).unwrap(),
+            config
+        );
+        assert_eq!(serde_json::to_value(&config).unwrap(), json);
+
+        // The debug console has no socket or TCP backend.
+        for options in ["socket=/tmp/console.sock", "tcp=127.0.0.1:4444"] {
+            DebugConsoleConfig::parse(options).unwrap_err();
         }
     }
 
