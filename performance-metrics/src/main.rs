@@ -18,7 +18,7 @@ use std::sync::mpsc::channel;
 use std::time::Duration;
 use std::{fmt, fs, io, panic, path, str, thread};
 
-use clap::{ArgAction, Parser};
+use clap::{ArgAction, Parser, ValueEnum};
 use performance_tests::*;
 use serde::{Deserialize, Serialize};
 use test_infra::{FioOps, GuestVmType, ProcessRegistry};
@@ -145,27 +145,17 @@ impl Default for MetricsReport {
     }
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, ValueEnum)]
 pub enum ImageFormat {
+    /// Raw image (default)
     #[default]
     Raw,
+    /// Fully preallocated QCOW2 image
     Qcow2,
+    /// Fixed-size VHD image
     Vhd,
+    /// Fixed-size VHDX image
     Vhdx,
-}
-
-impl str::FromStr for ImageFormat {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "raw" => Ok(ImageFormat::Raw),
-            "qcow2" => Ok(ImageFormat::Qcow2),
-            "vhd" => Ok(ImageFormat::Vhd),
-            "vhdx" => Ok(ImageFormat::Vhdx),
-            _ => Err(()),
-        }
-    }
 }
 
 impl fmt::Display for ImageFormat {
@@ -1803,6 +1793,14 @@ fn date() -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
+#[derive(Clone, Copy, ValueEnum)]
+enum CliVmType {
+    /// Non-confidential VM
+    Regular,
+    /// Confidential VM (e.g. AMD SEV-SNP, x86_64 only)
+    Confidential,
+}
+
 #[derive(Parser)]
 #[command(
     name = "performance-metrics",
@@ -1816,11 +1814,9 @@ struct Cli {
     #[arg(
         value_name = "image-format",
         long,
-        help = "Override the image format used for block tests, supported values: qcow2, raw, vhd, vhdx. \
-                     Default is 'raw'.",
-        value_parser = ["raw", "qcow2", "vhd", "vhdx"],
+        help = "Override the image format used for block tests"
     )]
-    image_format: Option<String>,
+    image_format: Option<ImageFormat>,
     #[arg(
         value_name = "iterations",
         long,
@@ -1862,11 +1858,10 @@ struct Cli {
     #[arg(
         value_name = "vm-type",
         long,
-        help = "Set the VM type: 'regular' (default) or 'confidential' (CVM).",
-        value_parser = ["regular","confidential"],
-        default_value = "regular",
+        help = "Set the VM type",
+        default_value = "regular"
     )]
-    vm_type: String,
+    vm_type: CliVmType,
 }
 
 fn main() {
@@ -1915,13 +1910,11 @@ fn main() {
             .map(|s| s.parse())
             .transpose()
             .unwrap_or_default(),
-        test_image_format: cmd_arguments
-            .image_format
-            .as_ref()
-            .map(|s| s.parse())
-            .transpose()
-            .unwrap_or_default(),
-        vm_type: cmd_arguments.vm_type.parse().unwrap_or_default(),
+        test_image_format: cmd_arguments.image_format,
+        vm_type: match cmd_arguments.vm_type {
+            CliVmType::Regular => GuestVmType::Regular,
+            CliVmType::Confidential => GuestVmType::Confidential,
+        },
     });
 
     #[cfg(target_arch = "aarch64")]
@@ -2028,7 +2021,7 @@ mod tests {
             Some(vec!["boot".to_owned(), "restore".to_owned()])
         );
         assert!(cli.list_tests);
-        assert_eq!(cli.vm_type, "regular");
+        assert!(matches!(cli.vm_type, CliVmType::Regular));
         assert!(
             Cli::try_parse_from([
                 "performance-metrics",
