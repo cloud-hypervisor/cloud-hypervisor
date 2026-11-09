@@ -796,7 +796,8 @@ fn parse_cpuid_override_entry(
 }
 
 impl CpusConfig {
-    pub const SYNTAX: &'static str = "boot=<boot_vcpus>,max=<max_vcpus>,\
+    pub const SYNTAX: &'static str = "CPU parameters \
+        \"boot=<boot_vcpus>,max=<max_vcpus>,\
         topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,\
         kvm_hyperv=on|off,kvm_hint_realtime=on|off,\
         max_phys_bits=<maximum_number_of_physical_bits>,\
@@ -804,7 +805,7 @@ impl CpusConfig {
         features=<list_of_features_to_enable>,\
         nested=on|off,core_scheduling=vm|vcpu|off,\
         profile=host|path:<file>,\
-        x-cpuid-overrides=[[<leaf>,<subleaf>,<eax>,<ebx>,<ecx>,<edx>],...]";
+        x-cpuid-overrides=[[<leaf>,<subleaf>,<eax>,<ebx>,<ecx>,<edx>],...]\"";
 
     pub fn parse(cpus: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2364,7 +2365,7 @@ impl FsConfig {
 #[cfg(feature = "fw_cfg")]
 impl FwCfgConfig {
     pub const SYNTAX: &'static str = "Boot params to pass to FW CFG device \
-    \"e820=on|off,kernel=on|off,cmdline=on|off,initramfs=on|off,acpi_table=on|off, \
+    \"e820=on|off,kernel=on|off,cmdline=on|off,initramfs=on|off,acpi_table=on|off,\
     items=[name=<item_name>,file=<file_path>:name=<item_name>,string=<string_value>]\"";
     pub fn parse(fw_cfg_config: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2621,7 +2622,8 @@ impl SerialConfig {
 
 #[cfg(target_arch = "x86_64")]
 impl DebugConsoleConfig {
-    pub const SYNTAX: &'static str = "Debug console: off|pty|tty|file=<path>,iobase=<port in hex>";
+    pub const SYNTAX: &'static str =
+        "Debug console: \"off|null|pty|tty|file=<path>,iobase=<port in hex>\"";
 
     pub fn parse(debug_console_ops: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2754,7 +2756,7 @@ impl DeviceConfig {
 }
 
 impl UserDeviceConfig {
-    pub const SYNTAX: &'static str = "Userspace device socket=<socket_path>,id=<device_id>,\
+    pub const SYNTAX: &'static str = "Userspace device \"socket=<socket_path>,id=<device_id>,\
         pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 
     pub fn parse(user_device: &str) -> Result<Self> {

@@ -661,7 +661,7 @@ impl VmSendMigrationData {
         downtime_ms=<milliseconds>,timeout_s=<seconds>,\
         timeout_strategy=cancel|ignore,connections=<amount>,\
         tls_dir=<path>,memory_mode=memfds|precopy|postcopy,\
-        local=on|off (deprecated; use memory_mode=memfds)]\"";
+        local=on|off (deprecated: use memory_mode=memfds)]\"";
 
     // Same as QEMU.
     pub const DEFAULT_DOWNTIME: Duration = Duration::from_millis(300);
