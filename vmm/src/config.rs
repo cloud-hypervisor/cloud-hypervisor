@@ -3148,10 +3148,13 @@ pub struct RestoreConfig {
     pub prefault: bool,
     #[serde(default)]
     pub memory_restore_mode: MemoryRestoreMode,
+    /// Deprecated: use `external_fds` with network targets instead.
     #[serde(default)]
     pub net_fds: Option<Vec<RestoredNetConfig>>,
+    /// Deprecated: use `external_fds` with VFIO targets instead.
     #[serde(default)]
     pub vfio_fds: Option<Vec<RestoredVfioConfig>>,
+    /// Deprecated: use `external_fds` with an IOMMU target instead.
     // Deserialized FDs are discarded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iommufd_fd: ExternalFd,
@@ -3173,6 +3176,7 @@ impl RestoreConfig {
         \n`memory_restore_mode=copy` preserves the existing eager read-copy restore behavior, `memory_restore_mode=ondemand` enables lazy demand paging and fails restore if userfaultfd support is unavailable, and `memory_restore_mode=copyonwrite` maps the snapshot file copy-on-write (plain private RAM only; falls back to copy otherwise) \
         \n`external_fds` provides replacement file descriptors. `net(<id>)` entries replace the FDs of network devices, `vfio(<id>)` entries replace VFIO cdev FDs, and `iommu` provides the iommufd FD. \
         The listed FDs are passed to the VMM via SCM_RIGHTS.\
+        \n`net_fds=<list_of_net_ids_with_their_associated_fds>`, `vfio_fds=<list_of_vfio_ids_with_their_associated_fd>` and `iommufd_fd=<fd>` are deprecated; use `external_fds` instead.\
         \n `resume` controls whether the VM will be directly resumed after restore \
         \n `zone_updates` can be used to update NUMA memory zones. Expects a list of elements in the form `id@host_numa_node`";
 
@@ -3193,6 +3197,12 @@ impl RestoreConfig {
             .add("zone_updates")
             .add("external_fds");
         parser.parse(restore).map_err(Error::ParseRestore)?;
+
+        for field in ["net_fds", "vfio_fds", "iommufd_fd"] {
+            if parser.get(field).is_some() {
+                warn!("The '{field}' option is deprecated; use 'external_fds' instead");
+            }
+        }
 
         let source_url = parser
             .get("source_url")
@@ -3274,7 +3284,7 @@ impl RestoreConfig {
             })
             .transpose()?
             .unwrap_or_default();
-        // TODO(fd): Remove after `net_fds`, `vfio_fds` and `iommufd_fd` are deprecated and removed.
+        // TODO(fd): Remove after the deprecation period for the legacy FD fields.
         external_fds.import_restored_iommufd_fd(&mut iommufd_fd, false);
         external_fds.import_restored_vfio_configs(&mut vfio_fds);
         external_fds.import_restored_net_configs(&mut net_fds);

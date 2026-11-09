@@ -1829,6 +1829,36 @@ components:
         - type: string
           enum: [Iommu]
 
+    RestoredNetConfig:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+        num_fds:
+          type: integer
+          format: uint64
+          default: 0
+        fds:
+          type: array
+          description: Descriptor numbers in JSON are ignored; use SCM_RIGHTS.
+          items:
+            type: integer
+            format: int32
+
+    RestoredVfioConfig:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+        fd:
+          type: integer
+          format: int32
+          description: The descriptor number in JSON is ignored; use SCM_RIGHTS.
+
     RestoreConfig:
       required:
         - source_url
@@ -1840,6 +1870,26 @@ components:
           type: boolean
         memory_restore_mode:
           $ref: "#/components/schemas/MemoryRestoreMode"
+        net_fds:
+          type: array
+          deprecated: true
+          description: >
+            Deprecated: use external_fds with Net targets instead.
+          items:
+            $ref: "#/components/schemas/RestoredNetConfig"
+        vfio_fds:
+          type: array
+          deprecated: true
+          description: >
+            Deprecated: use external_fds with Vfio targets instead.
+          items:
+            $ref: "#/components/schemas/RestoredVfioConfig"
+        iommufd_fd:
+          type: integer
+          format: int32
+          deprecated: true
+          description: >
+            Deprecated: use external_fds with an Iommu target instead.
         resume:
           type: boolean
         zone_updates:
@@ -1871,6 +1921,19 @@ components:
       properties:
         receiver_url:
           type: string
+        vfio_fds:
+          type: array
+          deprecated: true
+          description: >
+            Deprecated: use external_fds with Vfio targets instead.
+          items:
+            $ref: "#/components/schemas/RestoredVfioConfig"
+        iommufd_fd:
+          type: integer
+          format: int32
+          deprecated: true
+          description: >
+            Deprecated: use external_fds with an Iommu target instead.
         tls_dir:
           type: string
           description: >

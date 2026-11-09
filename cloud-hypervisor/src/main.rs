@@ -731,6 +731,21 @@ fn start_vmm(
         .map(|()| log::set_max_level(log_level))
         .map_err(Error::LoggerSetup)?;
 
+    if restore_config.is_some()
+        && let Some(restore) = cmd_arguments.get_one::<String>("restore")
+    {
+        let fields = ["net_fds", "vfio_fds", "iommufd_fd"];
+        let mut parser = OptionParser::new();
+        parser.add_all(&fields);
+        if parser.parse_subset(restore).is_ok() {
+            for field in fields {
+                if parser.get(field).is_some() {
+                    warn!("The '{field}' option is deprecated; use 'external_fds' instead");
+                }
+            }
+        }
+    }
+
     let shutdown_action = parse_shutdown_action(cmd_arguments);
     let reset_action = parse_reset_action(cmd_arguments);
     let seccomp_action = parse_seccomp_action(cmd_arguments);
