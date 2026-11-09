@@ -128,30 +128,30 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Mode {
-    /// Receive a snapshot from CH and persist it to disk.
-    Snapshot {
-        /// Path to a UNIX socket to bind and listen on.
-        #[arg(long)]
-        socket: PathBuf,
-        /// Directory to write snapshot artifacts into.
-        #[arg(long)]
-        output_dir: PathBuf,
-    },
     /// Read a snapshot from disk and stream it to a listening CH instance.
     Restore {
-        /// Path of the UNIX socket that CH is listening on.
-        #[arg(long)]
-        socket: PathBuf,
         /// Directory to read snapshot artifacts from.
         #[arg(long)]
         input_dir: PathBuf,
+        /// On demand paging.
+        #[arg(long)]
+        ondemand: bool,
         /// If set, the restored VM is resumed (Complete) instead of left
         /// paused (CompletePaused).
         #[arg(long)]
         resume: bool,
-        /// On demand paging.
+        /// Path of the UNIX socket that CH is listening on.
         #[arg(long)]
-        ondemand: bool,
+        socket: PathBuf,
+    },
+    /// Receive a snapshot from CH and persist it to disk.
+    Snapshot {
+        /// Directory to write snapshot artifacts into.
+        #[arg(long)]
+        output_dir: PathBuf,
+        /// Path to a UNIX socket to bind and listen on.
+        #[arg(long)]
+        socket: PathBuf,
     },
 }
 
@@ -624,6 +624,35 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn test_cli_options_sorted() {
+        let command = Cli::command();
+        for subcommand in command.get_subcommands() {
+            let names: Vec<_> = subcommand
+                .get_arguments()
+                .map(|arg| arg.get_long().expect("CLI options should have long names"))
+                .collect();
+            assert!(
+                names.is_sorted(),
+                "CLI options for {} are not alphabetically sorted",
+                subcommand.get_name()
+            );
+        }
+    }
+
+    #[test]
+    fn test_cli_commands_sorted() {
+        let command = Cli::command();
+        let names: Vec<_> = command
+            .get_subcommands()
+            .map(|cmd| cmd.get_name())
+            .collect();
+        assert!(
+            names.is_sorted(),
+            "CLI commands are not alphabetically sorted"
+        );
+    }
 
     #[test]
     fn clap_cli_definition_is_valid() {
