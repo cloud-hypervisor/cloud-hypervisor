@@ -588,8 +588,7 @@ fn get_cli_options_sorted(
     .into_boxed_slice()
 }
 
-/// Creates the CLI definition of Cloud Hypervisor.
-fn create_app(default_vcpus: String, default_memory: String, default_rng: String) -> Command {
+fn build_clap_cli(default_vcpus: String, default_memory: String, default_rng: String) -> Command {
     let groups = [
         ArgGroup::new("vm-config")
             .multiple(true)
@@ -1052,7 +1051,7 @@ fn main() {
     let _ = unsafe { libc::umask(0o077) };
 
     let (default_vcpus, default_memory, default_rng) = prepare_default_values();
-    let cmd_arguments = create_app(default_vcpus, default_memory, default_rng).get_matches();
+    let cmd_arguments = build_clap_cli(default_vcpus, default_memory, default_rng).get_matches();
 
     if cmd_arguments.get_flag("version") {
         println!("{} {}", env!("CARGO_BIN_NAME"), env!("BUILD_VERSION"));
@@ -1108,9 +1107,15 @@ mod tests {
 
     use crate::test_util::assert_args_sorted;
     use crate::{
-        GuestResetAction, GuestShutdownAction, SeccompSiginfo, create_app, get_cli_options_sorted,
-        parse_reset_action, parse_shutdown_action, prepare_default_values,
+        GuestResetAction, GuestShutdownAction, SeccompSiginfo, build_clap_cli,
+        get_cli_options_sorted, parse_reset_action, parse_shutdown_action, prepare_default_values,
     };
+
+    #[test]
+    fn clap_cli_definition_is_valid() {
+        let (default_vcpus, default_memory, default_rng) = prepare_default_values();
+        build_clap_cli(default_vcpus, default_memory, default_rng).debug_assert();
+    }
 
     #[test]
     fn test_reset_action() {
@@ -1140,7 +1145,7 @@ mod tests {
             let mut args = vec!["cloud-hypervisor", "--api-socket", "/tmp/api.sock"];
             args.extend(options);
             let (default_vcpus, default_memory, default_rng) = prepare_default_values();
-            let matches = create_app(default_vcpus, default_memory, default_rng)
+            let matches = build_clap_cli(default_vcpus, default_memory, default_rng)
                 .try_get_matches_from(&args)
                 .unwrap();
             assert!(
@@ -1166,7 +1171,7 @@ mod tests {
             let mut args = vec!["cloud-hypervisor", "--api-socket", "/tmp/api.sock"];
             args.extend(options);
             let (default_vcpus, default_memory, default_rng) = prepare_default_values();
-            let error = create_app(default_vcpus, default_memory, default_rng)
+            let error = build_clap_cli(default_vcpus, default_memory, default_rng)
                 .try_get_matches_from(&args)
                 .unwrap_err();
             assert_eq!(error.kind(), ErrorKind::InvalidValue);
@@ -1185,7 +1190,7 @@ mod tests {
             let mut args = vec!["cloud-hypervisor", "--api-socket", "/tmp/api.sock"];
             args.extend(options);
             let (default_vcpus, default_memory, default_rng) = prepare_default_values();
-            let matches = create_app(default_vcpus, default_memory, default_rng)
+            let matches = build_clap_cli(default_vcpus, default_memory, default_rng)
                 .try_get_matches_from(&args)
                 .unwrap();
             assert_eq!(
@@ -1221,7 +1226,7 @@ mod tests {
             let mut args = vec!["cloud-hypervisor", "--api-socket", "/tmp/api.sock"];
             args.extend(options);
             let (default_vcpus, default_memory, default_rng) = prepare_default_values();
-            let error = create_app(default_vcpus, default_memory, default_rng)
+            let error = build_clap_cli(default_vcpus, default_memory, default_rng)
                 .try_get_matches_from(&args)
                 .unwrap_err();
             assert_eq!(error.kind(), expected_error, "args: {args:?}");
@@ -1259,7 +1264,7 @@ mod tests {
         // A VMM that receives its VM config later through vm.create can
         // still confine its own threads.
         let (default_vcpus, default_memory, default_rng) = prepare_default_values();
-        let cmd_arguments = create_app(default_vcpus, default_memory, default_rng)
+        let cmd_arguments = build_clap_cli(default_vcpus, default_memory, default_rng)
             .try_get_matches_from(["cloud-hypervisor", "--api-socket", "/tmp/api", "--landlock"])
             .unwrap();
         assert!(cmd_arguments.get_flag("landlock"));
@@ -1268,7 +1273,7 @@ mod tests {
     fn get_vm_config_from_vec(args: &[&str]) -> VmConfig {
         let (default_vcpus, default_memory, default_rng) = prepare_default_values();
         let cmd_arguments =
-            create_app(default_vcpus, default_memory, default_rng).get_matches_from(args);
+            build_clap_cli(default_vcpus, default_memory, default_rng).get_matches_from(args);
         let vm_params = VmParams::from_arg_matches(&cmd_arguments);
 
         // SAFETY: These CLI test cases supply no inherited descriptors.
