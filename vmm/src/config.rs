@@ -3105,10 +3105,13 @@ pub struct RestoreConfig {
     pub prefault: bool,
     #[serde(default)]
     pub memory_restore_mode: MemoryRestoreMode,
+    /// Deprecated: use `external_fds` with network targets instead.
     #[serde(default)]
     pub net_fds: Option<Vec<RestoredNetConfig>>,
+    /// Deprecated: use `external_fds` with VFIO targets instead.
     #[serde(default)]
     pub vfio_fds: Option<Vec<RestoredVfioConfig>>,
+    /// Deprecated: use `external_fds` with an IOMMU target instead.
     // Deserialized FDs are discarded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iommufd_fd: ExternalFd,
@@ -3142,6 +3145,9 @@ impl RestoreConfig {
         \n`external_fds` provides replacement file descriptors. `net(<id>)` entries replace \
         the FDs of network devices, `vfio(<id>)` entries replace VFIO cdev FDs, and `iommu` \
         provides the iommufd FD. \
+        \n`net_fds=<list_of_net_ids_with_their_associated_fds>`, \
+        `vfio_fds=<list_of_vfio_ids_with_their_associated_fd>` and \
+        `iommufd_fd=<fd>` are deprecated; use `external_fds` instead.\
         \n`resume` controls whether the VM will be directly resumed after restore\
         \n`zone_updates` can be used to update NUMA memory zones. \
         Expects a list of elements in the form `id@host_numa_node`";
@@ -3164,6 +3170,12 @@ impl RestoreConfig {
             .add_all(ConsoleOutput::UPDATE_OPTIONS)
             .add("external_fds");
         parser.parse(restore).map_err(Error::ParseRestore)?;
+
+        for field in ["net_fds", "vfio_fds", "iommufd_fd"] {
+            if parser.get(field).is_some() {
+                warn!("The '{field}' option is deprecated; use 'external_fds' instead");
+            }
+        }
 
         let source_url = parser
             .get("source_url")
@@ -3245,7 +3257,7 @@ impl RestoreConfig {
             })
             .transpose()?
             .unwrap_or_default();
-        // TODO(fd): Remove after `net_fds`, `vfio_fds` and `iommufd_fd` are deprecated and removed.
+        // TODO(fd): Remove after the deprecation period for the legacy FD fields.
         external_fds.import_restored_iommufd_fd(&mut iommufd_fd, false);
         external_fds.import_restored_vfio_configs(&mut vfio_fds);
         external_fds.import_restored_net_configs(&mut net_fds);

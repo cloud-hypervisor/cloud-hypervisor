@@ -326,8 +326,10 @@ pub struct VmReceiveMigrationData {
     pub tls_dir: Option<PathBuf>,
     /// Optional VFIO device id to cdev FD pairs, used to substitute each
     /// device's saved path or stale FD in the received VmConfig.
+    /// Deprecated: use `external_fds` with VFIO targets instead.
     #[serde(default)]
     pub vfio_fds: Option<Vec<RestoredVfioConfig>>,
+    /// Deprecated: use `external_fds` with an IOMMU target instead.
     // Deserialized FDs are discarded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iommufd_fd: ExternalFd,
@@ -389,7 +391,9 @@ impl VmReceiveMigrationData {
         [,external_fds=[net(<id>)@[<fd>,...],vfio(<id>)@[<fd>],iommu@[<fd>]]]\
         [,zone_updates=[<id@host_numa_node>]][,background_fetch_pages=on|off]\
         [,serial_file=<path>|serial_socket=<path>|serial_tcp=<ip>:<port>]\
-        [,console_file=<path>|console_socket=<path>|console_tcp=<ip>:<port>]\"";
+        [,console_file=<path>|console_socket=<path>|console_tcp=<ip>:<port>]\"\
+        \n`vfio_fds=<list_of_vfio_ids_with_their_associated_fd>` and \
+        `iommufd_fd=<fd>` are deprecated; use `external_fds` instead.";
 
     /// # Safety
     /// Live FDs named in the input must be exclusively owned by the caller.
@@ -409,6 +413,12 @@ impl VmReceiveMigrationData {
         parser
             .parse(migration)
             .map_err(VmReceiveMigrationConfigError::ParseError)?;
+
+        for field in ["vfio_fds", "iommufd_fd"] {
+            if parser.get(field).is_some() {
+                warn!("The '{field}' option is deprecated; use 'external_fds' instead");
+            }
+        }
 
         let receiver_url = parser.get("receiver_url").ok_or_else(|| {
             VmReceiveMigrationConfigError::ParseError(OptionParserError::InvalidSyntax(
