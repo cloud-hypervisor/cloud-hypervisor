@@ -620,9 +620,15 @@ fn create_memfd_with_contents(
 
 #[cfg(test)]
 mod tests {
+    use clap::CommandFactory;
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn clap_cli_definition_is_valid() {
+        Cli::command().debug_assert();
+    }
 
     #[test]
     fn test_memory_slot_filename() {
