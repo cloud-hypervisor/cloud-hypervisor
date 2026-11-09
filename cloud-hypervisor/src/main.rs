@@ -16,7 +16,7 @@ use std::ptr::from_ref;
 use std::sync::mpsc::channel;
 use std::{any, cmp, env, io, num, process};
 
-use clap::{ArgAction, ArgGroup, ArgMatches, CommandFactory, Parser};
+use clap::{ArgAction, ArgGroup, Parser};
 use event_monitor::event;
 use libc::EFD_NONBLOCK;
 use log::{LevelFilter, error, info, warn};
@@ -248,7 +248,6 @@ fn default_rng() -> String {
 #[group(skip)]
 struct Cli {
     #[arg(
-        id = "api-socket",
         value_name = "api-socket",
         long,
         help = "HTTP API socket (UNIX domain socket): path=<path> or fd=<fd>.",
@@ -295,7 +294,6 @@ struct Cli {
     cpus: String,
     #[cfg(feature = "dbus_api")]
     #[arg(
-        id = "dbus-object-path",
         value_name = "dbus-object-path",
         long,
         help = "Object path to serve the dbus interface",
@@ -304,7 +302,6 @@ struct Cli {
     dbus_object_path: Option<String>,
     #[cfg(feature = "dbus_api")]
     #[arg(
-        id = "dbus-service-name",
         value_name = "dbus-service-name",
         long,
         help = "Well known name of the device",
@@ -313,7 +310,6 @@ struct Cli {
     dbus_service_name: Option<String>,
     #[cfg(feature = "dbus_api")]
     #[arg(
-        id = "dbus-system-bus",
         long,
         help = "Use the system bus instead of a session bus",
         group = "vmm-config"
@@ -321,7 +317,6 @@ struct Cli {
     dbus_system_bus: bool,
     #[cfg(target_arch = "x86_64")]
     #[arg(
-        id = "debug-console",
         value_name = "debug-console",
         long,
         help = "Debug console: off|pty|tty|file=<path>,iobase=<port in hex>",
@@ -346,7 +341,6 @@ struct Cli {
     )]
     disk: Option<Vec<String>>,
     #[arg(
-        id = "event-monitor",
         value_name = "event-monitor",
         long,
         help = "Path to report events on: path=<path> or fd=<fd>",
@@ -370,7 +364,6 @@ struct Cli {
     fs: Option<Vec<String>>,
     #[cfg(feature = "fw_cfg")]
     #[arg(
-        id = "fw-cfg-config",
         value_name = "fw-cfg-config",
         long,
         help = FwCfgConfig::SYNTAX,
@@ -386,7 +379,6 @@ struct Cli {
     )]
     gdb: Option<String>,
     #[arg(
-        id = "generic-vhost-user",
         value_name = "generic-vhost-user",
         long,
         help = GenericVhostUserConfig::SYNTAX,
@@ -395,7 +387,6 @@ struct Cli {
     )]
     generic_vhost_user: Option<Vec<String>>,
     #[arg(
-        id = "guest-reset-action",
         value_name = "guest-reset-action",
         long,
         help = "Action when the guest resets: reset the VM, exit the VMM, \
@@ -406,7 +397,6 @@ struct Cli {
     )]
     guest_reset_action: String,
     #[arg(
-        id = "guest-shutdown-action",
         value_name = "guest-shutdown-action",
         long,
         help = "Action when the guest shuts down: exit the VMM, \
@@ -418,7 +408,6 @@ struct Cli {
     guest_shutdown_action: String,
     #[cfg(feature = "sev_snp")]
     #[arg(
-        id = "host-data",
         value_name = "host-data",
         long,
         help = "Host specific data to SEV SNP guest",
@@ -464,7 +453,6 @@ struct Cli {
     )]
     landlock: bool,
     #[arg(
-        id = "landlock-rules",
         value_name = "landlock-rules",
         long,
         help = LandlockConfig::SYNTAX,
@@ -473,7 +461,6 @@ struct Cli {
     )]
     landlock_rules: Option<Vec<String>>,
     #[arg(
-        id = "log-file",
         value_name = "log-file",
         long,
         help = "Log file. Standard error is used if not specified",
@@ -481,7 +468,6 @@ struct Cli {
     )]
     log_file: Option<String>,
     #[arg(
-        id = "log-format",
         value_name = "log-format",
         long,
         help = "Log format. Common tokens: {boottime}, {wallclock}, {glog}, \
@@ -507,7 +493,6 @@ struct Cli {
     )]
     memory: String,
     #[arg(
-        id = "memory-zone",
         value_name = "memory-zone",
         long,
         help = "User defined memory zone parameters \
@@ -531,11 +516,10 @@ struct Cli {
     )]
     net: Option<Vec<String>>,
     #[arg(
-        id = "no-shutdown",
         long,
         help = "Do not exit the VMM when the guest shuts down \
                  (deprecated: use --guest-shutdown-action=shutdown-vm)",
-        conflicts_with = "guest-shutdown-action",
+        conflicts_with = "guest_shutdown_action",
         group = "vmm-config"
     )]
     no_shutdown: bool,
@@ -548,7 +532,6 @@ struct Cli {
     )]
     numa: Option<Vec<String>>,
     #[arg(
-        id = "pci-segment",
         value_name = "pci-segment",
         long,
         help = PciSegmentConfig::SYNTAX,
@@ -577,7 +560,6 @@ struct Cli {
     #[arg(long, help = "Enable pvpanic device", group = "vm-config")]
     pvpanic: bool,
     #[arg(
-        id = "rate-limit-group",
         value_name = "rate-limit-group",
         long,
         help = RateLimiterGroupConfig::SYNTAX,
@@ -632,7 +614,6 @@ struct Cli {
     )]
     tpm: Option<String>,
     #[arg(
-        id = "user-device",
         value_name = "user-device",
         long,
         help = UserDeviceConfig::SYNTAX,
@@ -668,128 +649,98 @@ struct Cli {
     watchdog: bool,
 }
 
-fn vm_params_from_arg_matches(args: &ArgMatches) -> VmParams<'_> {
-    // These .unwrap()s cannot fail as there is a default value defined
-    let cpus = args.get_one::<String>("cpus").unwrap();
-    let memory = args.get_one::<String>("memory").unwrap();
-    let memory_zones: Option<Vec<&str>> = args
-        .get_many::<String>("memory-zone")
-        .map(|x| x.map(|y| y as &str).collect());
-    let rng = args.get_one::<String>("rng").unwrap();
-    let serial = args.get_one::<String>("serial").unwrap();
-    let firmware = args.get_one::<String>("firmware").map(|x| x as &str);
-    let kernel = args.get_one::<String>("kernel").map(|x| x as &str);
-    let initramfs = args.get_one::<String>("initramfs").map(|x| x as &str);
-    let cmdline = args.get_one::<String>("cmdline").map(|x| x as &str);
-    let rate_limit_groups: Option<Vec<&str>> = args
-        .get_many::<String>("rate-limit-group")
-        .map(|x| x.map(|y| y as &str).collect());
-    let disks: Option<Vec<&str>> = args
-        .get_many::<String>("disk")
-        .map(|x| x.map(|y| y as &str).collect());
-    let net: Option<Vec<&str>> = args
-        .get_many::<String>("net")
-        .map(|x| x.map(|y| y as &str).collect());
-    let console = args.get_one::<String>("console").unwrap();
-    #[cfg(target_arch = "x86_64")]
-    let debug_console = args.get_one::<String>("debug-console").unwrap().as_str();
-    let balloon = args.get_one::<String>("balloon").map(|x| x as &str);
-    let fs: Option<Vec<&str>> = args
-        .get_many::<String>("fs")
-        .map(|x| x.map(|y| y as &str).collect());
-    let generic_vhost_user: Option<Vec<&str>> = args
-        .get_many::<String>("generic-vhost-user")
-        .map(|x| x.map(|y| y as &str).collect());
-    let pmem: Option<Vec<&str>> = args
-        .get_many::<String>("pmem")
-        .map(|x| x.map(|y| y as &str).collect());
-    let devices: Option<Vec<&str>> = args
-        .get_many::<String>("device")
-        .map(|x| x.map(|y| y as &str).collect());
-    let user_devices: Option<Vec<&str>> = args
-        .get_many::<String>("user-device")
-        .map(|x| x.map(|y| y as &str).collect());
-    let vdpa: Option<Vec<&str>> = args
-        .get_many::<String>("vdpa")
-        .map(|x| x.map(|y| y as &str).collect());
-    let vsock: Option<&str> = args.get_one::<String>("vsock").map(|x| x as &str);
-    #[cfg(feature = "pvmemcontrol")]
-    let pvmemcontrol = args.get_flag("pvmemcontrol");
-    let pvpanic = args.get_flag("pvpanic");
-    let numa: Option<Vec<&str>> = args
-        .get_many::<String>("numa")
-        .map(|x| x.map(|y| y as &str).collect());
-    let watchdog = args.get_flag("watchdog");
-    let rtc: Option<&str> = args.get_one::<String>("rtc").map(|x| x as &str);
-    let pci_segments: Option<Vec<&str>> = args
-        .get_many::<String>("pci-segment")
-        .map(|x| x.map(|y| y as &str).collect());
-    let platform = args.get_one::<String>("platform").map(|x| x as &str);
-    #[cfg(feature = "guest_debug")]
-    let gdb = args.contains_id("gdb");
-    let tpm: Option<&str> = args.get_one::<String>("tpm").map(|x| x as &str);
-    #[cfg(feature = "igvm")]
-    let igvm = args.get_one::<String>("igvm").map(|x| x as &str);
-    #[cfg(feature = "sev_snp")]
-    let host_data = args.get_one::<String>("host-data").map(|x| x as &str);
-    let landlock_enable = args.get_flag("landlock");
-    let landlock_rules: Option<Vec<&str>> = args
-        .get_many::<String>("landlock-rules")
-        .map(|x| x.map(|y| y as &str).collect());
-    #[cfg(feature = "fw_cfg")]
-    let fw_cfg_config: Option<&str> = args.get_one::<String>("fw-cfg-config").map(|x| x as &str);
-    #[cfg(feature = "ivshmem")]
-    let ivshmem: Option<&str> = args.get_one::<String>("ivshmem").map(|x| x as &str);
-    VmParams {
-        cpus,
-        memory,
-        memory_zones,
-        firmware,
-        kernel,
-        initramfs,
-        cmdline,
-        rate_limit_groups,
-        disks,
-        net,
-        rng,
-        balloon,
-        fs,
-        generic_vhost_user,
-        pmem,
-        serial,
-        console,
-        #[cfg(target_arch = "x86_64")]
-        debug_console,
-        devices,
-        user_devices,
-        vdpa,
-        vsock,
-        #[cfg(feature = "pvmemcontrol")]
-        pvmemcontrol,
-        pvpanic,
-        numa,
-        watchdog,
-        rtc,
-        #[cfg(feature = "guest_debug")]
-        gdb,
-        pci_segments,
-        platform,
-        tpm,
-        #[cfg(feature = "igvm")]
-        igvm,
-        #[cfg(feature = "sev_snp")]
-        host_data,
-        landlock_enable,
-        landlock_rules,
-        #[cfg(feature = "fw_cfg")]
-        fw_cfg_config,
-        #[cfg(feature = "ivshmem")]
-        ivshmem,
+impl<'a> From<&'a Cli> for VmParams<'a> {
+    fn from(cli: &'a Cli) -> Self {
+        Self {
+            cpus: &cli.cpus,
+            memory: &cli.memory,
+            memory_zones: cli
+                .memory_zone
+                .as_ref()
+                .map(|values| values.iter().map(String::as_str).collect()),
+            firmware: cli.firmware.as_deref(),
+            kernel: cli.kernel.as_deref(),
+            initramfs: cli.initramfs.as_deref(),
+            cmdline: cli.cmdline.as_deref(),
+            rate_limit_groups: cli
+                .rate_limit_group
+                .as_ref()
+                .map(|values| values.iter().map(String::as_str).collect()),
+            disks: cli
+                .disk
+                .as_ref()
+                .map(|values| values.iter().map(String::as_str).collect()),
+            net: cli
+                .net
+                .as_ref()
+                .map(|values| values.iter().map(String::as_str).collect()),
+            rng: &cli.rng,
+            balloon: cli.balloon.as_deref(),
+            fs: cli
+                .fs
+                .as_ref()
+                .map(|values| values.iter().map(String::as_str).collect()),
+            generic_vhost_user: cli
+                .generic_vhost_user
+                .as_ref()
+                .map(|values| values.iter().map(String::as_str).collect()),
+            pmem: cli
+                .pmem
+                .as_ref()
+                .map(|values| values.iter().map(String::as_str).collect()),
+            serial: &cli.serial,
+            console: &cli.console,
+            #[cfg(target_arch = "x86_64")]
+            debug_console: &cli.debug_console,
+            devices: cli
+                .device
+                .as_ref()
+                .map(|values| values.iter().map(String::as_str).collect()),
+            user_devices: cli
+                .user_device
+                .as_ref()
+                .map(|values| values.iter().map(String::as_str).collect()),
+            vdpa: cli
+                .vdpa
+                .as_ref()
+                .map(|values| values.iter().map(String::as_str).collect()),
+            vsock: cli.vsock.as_deref(),
+            #[cfg(feature = "pvmemcontrol")]
+            pvmemcontrol: cli.pvmemcontrol,
+            pvpanic: cli.pvpanic,
+            numa: cli
+                .numa
+                .as_ref()
+                .map(|values| values.iter().map(String::as_str).collect()),
+            watchdog: cli.watchdog,
+            rtc: cli.rtc.as_deref(),
+            #[cfg(feature = "guest_debug")]
+            gdb: cli.gdb.is_some(),
+            pci_segments: cli
+                .pci_segment
+                .as_ref()
+                .map(|values| values.iter().map(String::as_str).collect()),
+            platform: cli.platform.as_deref(),
+            tpm: cli.tpm.as_deref(),
+            #[cfg(feature = "igvm")]
+            igvm: cli.igvm.as_deref(),
+            #[cfg(feature = "sev_snp")]
+            host_data: cli.host_data.as_deref(),
+            landlock_enable: cli.landlock,
+            landlock_rules: cli
+                .landlock_rules
+                .as_ref()
+                .map(|values| values.iter().map(String::as_str).collect()),
+            #[cfg(feature = "fw_cfg")]
+            fw_cfg_config: cli.fw_cfg_config.as_deref(),
+            #[cfg(feature = "ivshmem")]
+            ivshmem: cli.ivshmem.as_deref(),
+        }
     }
 }
 
-fn parse_api_socket(cmd_arguments: &ArgMatches) -> Result<(Option<String>, Option<RawFd>), Error> {
-    if let Some(socket_config) = cmd_arguments.get_one::<String>("api-socket") {
+fn parse_api_socket(cmd_arguments: &Cli) -> Result<(Option<String>, Option<RawFd>), Error> {
+    if let Some(socket_config) = cmd_arguments.api_socket.as_ref() {
         let mut parser = OptionParser::new();
         parser.add("path").add("fd");
         parser.parse(socket_config).unwrap_or_default();
@@ -803,9 +754,7 @@ fn parse_api_socket(cmd_arguments: &ArgMatches) -> Result<(Option<String>, Optio
             Ok((Some(path), None))
         } else {
             Ok((
-                cmd_arguments
-                    .get_one::<String>("api-socket")
-                    .map(|s| s.to_string()),
+                cmd_arguments.api_socket.as_ref().map(|s| s.to_string()),
                 None,
             ))
         }
@@ -814,29 +763,21 @@ fn parse_api_socket(cmd_arguments: &ArgMatches) -> Result<(Option<String>, Optio
     }
 }
 
-fn parse_shutdown_action(cmd_arguments: &ArgMatches) -> GuestShutdownAction {
-    if cmd_arguments.get_flag("no-shutdown") {
+fn parse_shutdown_action(cmd_arguments: &Cli) -> GuestShutdownAction {
+    if cmd_arguments.no_shutdown {
         warn!("--no-shutdown is deprecated: use --guest-shutdown-action=shutdown-vm instead");
         return GuestShutdownAction::ShutdownVm;
     }
 
-    match cmd_arguments
-        .get_one::<String>("guest-shutdown-action")
-        .unwrap()
-        .as_str()
-    {
+    match cmd_arguments.guest_shutdown_action.as_str() {
         "exit-vmm" => GuestShutdownAction::ExitVmm,
         "shutdown-vm" => GuestShutdownAction::ShutdownVm,
         _ => unreachable!("Clap validates --guest-shutdown-action values"),
     }
 }
 
-fn parse_reset_action(cmd_arguments: &ArgMatches) -> GuestResetAction {
-    match cmd_arguments
-        .get_one::<String>("guest-reset-action")
-        .unwrap()
-        .as_str()
-    {
+fn parse_reset_action(cmd_arguments: &Cli) -> GuestResetAction {
+    match cmd_arguments.guest_reset_action.as_str() {
         "reset-vm" => GuestResetAction::ResetVm,
         "exit-vmm" => GuestResetAction::ExitVmm,
         "shutdown-vm" => GuestResetAction::ShutdownVm,
@@ -844,8 +785,8 @@ fn parse_reset_action(cmd_arguments: &ArgMatches) -> GuestResetAction {
     }
 }
 
-fn parse_seccomp_action(cmd_arguments: &ArgMatches) -> SeccompAction {
-    match cmd_arguments.get_one::<String>("seccomp").unwrap().as_str() {
+fn parse_seccomp_action(cmd_arguments: &Cli) -> SeccompAction {
+    match cmd_arguments.seccomp.as_str() {
         "true" => SeccompAction::Trap,
         "false" => SeccompAction::Allow,
         "log" => SeccompAction::Log,
@@ -855,20 +796,19 @@ fn parse_seccomp_action(cmd_arguments: &ArgMatches) -> SeccompAction {
 }
 
 fn start_vmm(
-    cmd_arguments: &ArgMatches,
+    cmd_arguments: &Cli,
     api_socket_path: &Option<String>,
     api_socket_fd: Option<RawFd>,
 ) -> Result<(), Error> {
     #[cfg(feature = "igvm")]
-    let payload_present = cmd_arguments.contains_id("kernel")
-        || cmd_arguments.contains_id("firmware")
-        || cmd_arguments.contains_id("igvm");
+    let payload_present = cmd_arguments.kernel.is_some()
+        || cmd_arguments.firmware.is_some()
+        || cmd_arguments.igvm.is_some();
     #[cfg(not(feature = "igvm"))]
-    let payload_present =
-        cmd_arguments.contains_id("kernel") || cmd_arguments.contains_id("firmware");
+    let payload_present = cmd_arguments.kernel.is_some() || cmd_arguments.firmware.is_some();
 
     let vm_config = if payload_present {
-        let vm_params = vm_params_from_arg_matches(cmd_arguments);
+        let vm_params = VmParams::from(cmd_arguments);
         // SAFETY: The CLI transfers inherited FDs before the VMM opens new FDs.
         Some(unsafe { VmConfig::parse(vm_params) }.map_err(Error::ParsingConfig)?)
     } else {
@@ -876,7 +816,8 @@ fn start_vmm(
     };
     let restore_config = if vm_config.is_none() {
         cmd_arguments
-            .get_one::<String>("restore")
+            .restore
+            .as_ref()
             // SAFETY: The CLI transfers inherited FDs before the VMM opens new FDs.
             .map(|restore| unsafe { RestoreConfig::parse(restore) })
             .transpose()
@@ -889,7 +830,7 @@ fn start_vmm(
         warn!("Error expanding FD table: {e}");
     }
 
-    let log_level = match cmd_arguments.get_count("v") {
+    let log_level = match cmd_arguments.v {
         0 => LevelFilter::Warn,
         1 => LevelFilter::Info,
         2 => LevelFilter::Debug,
@@ -897,13 +838,13 @@ fn start_vmm(
     };
 
     let log_file: Box<dyn io::Write + Send> =
-        if let Some(ref file) = cmd_arguments.get_one::<String>("log-file") {
+        if let Some(ref file) = cmd_arguments.log_file.as_ref() {
             Box::new(File::create(Path::new(file)).map_err(Error::LogFileCreation)?)
         } else {
             Box::new(io::stderr())
         };
 
-    let format = cmd_arguments.get_one::<String>("log-format").unwrap();
+    let format = &cmd_arguments.log_format;
     let logger = Logger::new(log_file, format).map_err(Error::LoggerFormat)?;
     log::set_boxed_logger(Box::new(logger))
         .map(|()| log::set_max_level(log_level))
@@ -952,7 +893,7 @@ fn start_vmm(
         .map_err(Error::CreateSeccompFilter)?;
 
     #[cfg(feature = "guest_debug")]
-    let gdb_socket_path = if let Some(gdb_config) = cmd_arguments.get_one::<String>("gdb") {
+    let gdb_socket_path = if let Some(gdb_config) = cmd_arguments.gdb.as_ref() {
         let mut parser = OptionParser::new();
         parser.add("path");
         parser.parse(gdb_config).map_err(Error::ParsingGdb)?;
@@ -971,11 +912,12 @@ fn start_vmm(
     let vm_debug_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateDebugEventFd)?;
 
     let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateExitEventFd)?;
-    let landlock_enable = cmd_arguments.get_flag("landlock");
+    let landlock_enable = cmd_arguments.landlock;
 
     #[allow(unused_mut)]
     let mut event_monitor = cmd_arguments
-        .get_one::<String>("event-monitor")
+        .event_monitor
+        .as_ref()
         .as_ref()
         .map(|monitor_config| {
             let mut parser = OptionParser::new();
@@ -1012,8 +954,8 @@ fn start_vmm(
 
     #[cfg(feature = "dbus_api")]
     let dbus_options = match (
-        cmd_arguments.get_one::<String>("dbus-service-name"),
-        cmd_arguments.get_one::<String>("dbus-object-path"),
+        cmd_arguments.dbus_service_name.as_ref(),
+        cmd_arguments.dbus_object_path.as_ref(),
     ) {
         (Some(name), Some(path)) => {
             // monitor is either set (file based) or not.
@@ -1025,7 +967,7 @@ fn start_vmm(
             let options = DBusApiOptions {
                 service_name: name.to_string(),
                 object_path: path.to_string(),
-                system_bus: cmd_arguments.get_flag("dbus-system-bus"),
+                system_bus: cmd_arguments.dbus_system_bus,
                 event_monitor_rx: monitor.subscribe(),
             };
 
@@ -1227,12 +1169,11 @@ fn main() {
     // Ensure all created files (.e.g sockets) are only accessible by this user
     // SAFETY: trivially safe
     let _ = unsafe { libc::umask(0o077) };
+    let cmd_arguments = Cli::parse();
 
-    let cmd_arguments = Cli::command().get_matches();
-
-    if cmd_arguments.get_flag("version") {
+    if cmd_arguments.version {
         println!("{} {}", env!("CARGO_BIN_NAME"), env!("BUILD_VERSION"));
-        if cmd_arguments.get_count("v") != 0 {
+        if cmd_arguments.v != 0 {
             println!("Enabled features: {:?}", vmm::feature_list());
         }
 
@@ -1273,7 +1214,8 @@ mod tests {
     use std::ptr::from_mut;
     use std::thread;
 
-    use clap::CommandFactory;
+    use clap::{CommandFactory, Parser};
+    use vmm::config::VmParams;
     #[cfg(target_arch = "x86_64")]
     use vmm::vm_config::DebugConsoleConfig;
     use vmm::vm_config::{
@@ -1285,12 +1227,18 @@ mod tests {
     use crate::test_util::assert_args_sorted;
     use crate::{
         Cli, GuestResetAction, GuestShutdownAction, SeccompSiginfo, parse_reset_action,
-        parse_shutdown_action, vm_params_from_arg_matches,
+        parse_shutdown_action,
     };
 
     #[test]
     fn clap_cli_definition_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn test_cli_options_sorted() {
+        let command = Cli::command();
+        assert_args_sorted(|| command.get_arguments());
     }
 
     #[test]
@@ -1320,7 +1268,7 @@ mod tests {
         ] {
             let mut args = vec!["cloud-hypervisor", "--api-socket", "/tmp/api.sock"];
             args.extend(options);
-            let matches = Cli::command().try_get_matches_from(&args).unwrap();
+            let matches = Cli::try_parse_from(&args).unwrap();
             assert!(
                 matches!(
                     (parse_reset_action(&matches), expected),
@@ -1343,7 +1291,7 @@ mod tests {
         ] {
             let mut args = vec!["cloud-hypervisor", "--api-socket", "/tmp/api.sock"];
             args.extend(options);
-            let error = Cli::command().try_get_matches_from(&args).unwrap_err();
+            let error = Cli::try_parse_from(&args).unwrap_err();
             assert_eq!(error.kind(), ErrorKind::InvalidValue);
         }
     }
@@ -1359,7 +1307,7 @@ mod tests {
         ] {
             let mut args = vec!["cloud-hypervisor", "--api-socket", "/tmp/api.sock"];
             args.extend(options);
-            let matches = Cli::command().try_get_matches_from(&args).unwrap();
+            let matches = Cli::try_parse_from(&args).unwrap();
             assert_eq!(
                 matches!(
                     parse_shutdown_action(&matches),
@@ -1392,7 +1340,7 @@ mod tests {
         ] {
             let mut args = vec!["cloud-hypervisor", "--api-socket", "/tmp/api.sock"];
             args.extend(options);
-            let error = Cli::command().try_get_matches_from(&args).unwrap_err();
+            let error = Cli::try_parse_from(&args).unwrap_err();
             assert_eq!(error.kind(), expected_error, "args: {args:?}");
         }
     }
@@ -1427,15 +1375,15 @@ mod tests {
     fn test_landlock_without_payload() {
         // A VMM that receives its VM config later through vm.create can
         // still confine its own threads.
-        let cmd_arguments = Cli::command()
-            .try_get_matches_from(["cloud-hypervisor", "--api-socket", "/tmp/api", "--landlock"])
-            .unwrap();
-        assert!(cmd_arguments.get_flag("landlock"));
+        let cmd_arguments =
+            Cli::try_parse_from(["cloud-hypervisor", "--api-socket", "/tmp/api", "--landlock"])
+                .unwrap();
+        assert!(cmd_arguments.landlock);
     }
 
     fn get_vm_config_from_vec(args: &[&str]) -> VmConfig {
-        let cmd_arguments = Cli::command().get_matches_from(args);
-        let vm_params = vm_params_from_arg_matches(&cmd_arguments);
+        let cmd_arguments = Cli::parse_from(args);
+        let vm_params = VmParams::from(&cmd_arguments);
 
         // SAFETY: These CLI test cases supply no inherited descriptors.
         unsafe { VmConfig::parse(vm_params) }.unwrap()
@@ -2488,14 +2436,5 @@ mod tests {
         .for_each(|(cli, openapi, equal)| {
             compare_vm_config_cli_vs_json(cli, openapi, *equal);
         });
-    }
-
-    // TODO the check for the option list being sorted could be moved into the
-    // getter itself, when the getter becomes a const function. This however
-    // needs more support by Rust (as of March 2025).
-    #[test]
-    fn test_cli_options_sorted() {
-        let command = Cli::command();
-        assert_args_sorted(|| command.get_arguments());
     }
 }
