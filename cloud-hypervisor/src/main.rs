@@ -16,7 +16,7 @@ use std::ptr::from_ref;
 use std::sync::mpsc::channel;
 use std::{any, cmp, env, io, num, process};
 
-use clap::{ArgAction, ArgGroup, Parser};
+use clap::{ArgAction, ArgGroup, Parser, ValueEnum};
 use event_monitor::event;
 use libc::EFD_NONBLOCK;
 use log::{LevelFilter, error, info, warn};
@@ -234,6 +234,66 @@ fn default_rng() -> String {
     format!("src={}", RngConfig::DEFAULT_RNG_SOURCE)
 }
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum CliGuestResetAction {
+    /// Reset (reboot) the VM
+    ResetVm,
+    /// Exit Cloud Hypervisor
+    ExitVmm,
+    /// Shut down the VM and keep Cloud Hypervisor running
+    ShutdownVm,
+}
+
+impl From<CliGuestResetAction> for GuestResetAction {
+    fn from(action: CliGuestResetAction) -> Self {
+        match action {
+            CliGuestResetAction::ResetVm => Self::ResetVm,
+            CliGuestResetAction::ExitVmm => Self::ExitVmm,
+            CliGuestResetAction::ShutdownVm => Self::ShutdownVm,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum CliGuestShutdownAction {
+    /// Exit Cloud Hypervisor
+    ExitVmm,
+    /// Shut down the VM and keep Cloud Hypervisor running
+    ShutdownVm,
+}
+
+impl From<CliGuestShutdownAction> for GuestShutdownAction {
+    fn from(action: CliGuestShutdownAction) -> Self {
+        match action {
+            CliGuestShutdownAction::ExitVmm => Self::ExitVmm,
+            CliGuestShutdownAction::ShutdownVm => Self::ShutdownVm,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum CliSeccompAction {
+    /// Terminate Cloud Hypervisor on prohibited system calls
+    True,
+    /// Disable system call filtering
+    False,
+    /// Allow prohibited system calls but log them
+    Log,
+    /// Fail prohibited system calls with EPERM
+    Errno,
+}
+
+impl From<CliSeccompAction> for SeccompAction {
+    fn from(action: CliSeccompAction) -> Self {
+        match action {
+            CliSeccompAction::True => Self::Trap,
+            CliSeccompAction::False => Self::Allow,
+            CliSeccompAction::Log => Self::Log,
+            CliSeccompAction::Errno => Self::Errno(libc::EPERM as u32),
+        }
+    }
+}
+
 #[derive(Debug, Parser)]
 #[command(
     name = "cloud-hypervisor",
@@ -389,23 +449,19 @@ struct Cli {
     #[arg(
         value_name = "guest-reset-action",
         long,
-        help = "Action when the guest resets: reset the VM, exit the VMM, \
-                 or shut down the VM and keep the VMM running",
-        value_parser = ["reset-vm", "exit-vmm", "shutdown-vm"],
+        help = "Action when the guest resets",
         default_value = "reset-vm",
-        group = "vmm-config",
+        group = "vmm-config"
     )]
-    guest_reset_action: String,
+    guest_reset_action: CliGuestResetAction,
     #[arg(
         value_name = "guest-shutdown-action",
         long,
-        help = "Action when the guest shuts down: exit the VMM, \
-                 or shut down the VM and keep the VMM running",
-        value_parser = ["exit-vmm", "shutdown-vm"],
+        help = "Action when the guest shuts down",
         default_value = "exit-vmm",
-        group = "vmm-config",
+        group = "vmm-config"
     )]
-    guest_shutdown_action: String,
+    guest_shutdown_action: CliGuestShutdownAction,
     #[cfg(feature = "sev_snp")]
     #[arg(
         value_name = "host-data",
@@ -591,13 +647,8 @@ struct Cli {
         group = "vm-config",
     )]
     rtc: Option<String>,
-    #[arg(
-        value_name = "seccomp",
-        long,
-        value_parser = ["true", "false", "log", "errno"],
-        default_value = "true",
-    )]
-    seccomp: String,
+    #[arg(value_name = "seccomp", long, default_value = "true")]
+    seccomp: CliSeccompAction,
     #[arg(
         value_name = "serial",
         long,
@@ -647,6 +698,18 @@ struct Cli {
     vsock: Option<String>,
     #[arg(long, help = "Enable virtio-watchdog", group = "vm-config")]
     watchdog: bool,
+}
+
+impl Cli {
+    /// Combines --guest-shutdown-action with the deprecated --no-shutdown.
+    fn guest_shutdown_action(&self) -> GuestShutdownAction {
+        if self.no_shutdown {
+            warn!("--no-shutdown is deprecated: use --guest-shutdown-action=shutdown-vm instead");
+            return GuestShutdownAction::ShutdownVm;
+        }
+
+        self.guest_shutdown_action.into()
+    }
 }
 
 impl<'a> From<&'a Cli> for VmParams<'a> {
@@ -763,38 +826,6 @@ fn parse_api_socket(cmd_arguments: &Cli) -> Result<(Option<String>, Option<RawFd
     }
 }
 
-fn parse_shutdown_action(cmd_arguments: &Cli) -> GuestShutdownAction {
-    if cmd_arguments.no_shutdown {
-        warn!("--no-shutdown is deprecated: use --guest-shutdown-action=shutdown-vm instead");
-        return GuestShutdownAction::ShutdownVm;
-    }
-
-    match cmd_arguments.guest_shutdown_action.as_str() {
-        "exit-vmm" => GuestShutdownAction::ExitVmm,
-        "shutdown-vm" => GuestShutdownAction::ShutdownVm,
-        _ => unreachable!("Clap validates --guest-shutdown-action values"),
-    }
-}
-
-fn parse_reset_action(cmd_arguments: &Cli) -> GuestResetAction {
-    match cmd_arguments.guest_reset_action.as_str() {
-        "reset-vm" => GuestResetAction::ResetVm,
-        "exit-vmm" => GuestResetAction::ExitVmm,
-        "shutdown-vm" => GuestResetAction::ShutdownVm,
-        _ => unreachable!("Clap validates --guest-reset-action values"),
-    }
-}
-
-fn parse_seccomp_action(cmd_arguments: &Cli) -> SeccompAction {
-    match cmd_arguments.seccomp.as_str() {
-        "true" => SeccompAction::Trap,
-        "false" => SeccompAction::Allow,
-        "log" => SeccompAction::Log,
-        "errno" => SeccompAction::Errno(libc::EPERM as u32),
-        _ => unreachable!("Clap validates --seccomp values"),
-    }
-}
-
 fn start_vmm(
     cmd_arguments: &Cli,
     api_socket_path: &Option<String>,
@@ -850,9 +881,9 @@ fn start_vmm(
         .map(|()| log::set_max_level(log_level))
         .map_err(Error::LoggerSetup)?;
 
-    let shutdown_action = parse_shutdown_action(cmd_arguments);
-    let reset_action = parse_reset_action(cmd_arguments);
-    let seccomp_action = parse_seccomp_action(cmd_arguments);
+    let shutdown_action = cmd_arguments.guest_shutdown_action();
+    let reset_action = GuestResetAction::from(cmd_arguments.guest_reset_action);
+    let seccomp_action = SeccompAction::from(cmd_arguments.seccomp);
 
     let (api_request_sender, api_request_receiver) = channel();
     let api_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateApiEventFd)?;
@@ -1224,10 +1255,7 @@ mod tests {
     };
 
     use crate::test_util::assert_args_sorted;
-    use crate::{
-        Cli, GuestResetAction, GuestShutdownAction, SeccompSiginfo, parse_reset_action,
-        parse_shutdown_action,
-    };
+    use crate::{Cli, GuestResetAction, GuestShutdownAction, SeccompSiginfo};
 
     #[test]
     fn clap_cli_definition_is_valid() {
@@ -1270,7 +1298,7 @@ mod tests {
             let matches = Cli::try_parse_from(&args).unwrap();
             assert!(
                 matches!(
-                    (parse_reset_action(&matches), expected),
+                    (GuestResetAction::from(matches.guest_reset_action), expected),
                     (GuestResetAction::ResetVm, GuestResetAction::ResetVm)
                         | (GuestResetAction::ExitVmm, GuestResetAction::ExitVmm)
                         | (GuestResetAction::ShutdownVm, GuestResetAction::ShutdownVm)
@@ -1309,7 +1337,7 @@ mod tests {
             let matches = Cli::try_parse_from(&args).unwrap();
             assert_eq!(
                 matches!(
-                    parse_shutdown_action(&matches),
+                    matches.guest_shutdown_action(),
                     GuestShutdownAction::ShutdownVm
                 ),
                 shutdown,
