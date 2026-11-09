@@ -85,95 +85,97 @@ impl Request {
         desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<M>>,
         access_platform: Option<&dyn AccessPlatform>,
     ) -> Result<Request, Error> {
-        let hdr_desc = desc_chain
-            .next_checked(access_platform)
-            .map_err(|addr| Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(addr)))?
-            .ok_or_else(|| {
-                error!("Missing head descriptor");
-                Error::DescriptorChainTooShort
-            })?;
+        (|| -> Result<Request, Error> {
+            let hdr_desc = desc_chain
+                .next_checked(access_platform)
+                .map_err(|addr| Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(addr)))?
+                .ok_or_else(|| {
+                    error!("Missing head descriptor");
+                    Error::DescriptorChainTooShort
+                })?;
 
-        // The head contains the request type which MUST be readable.
-        if hdr_desc.is_write_only() {
-            return Err(Error::UnexpectedWriteOnlyDescriptor);
-        }
-
-        if (hdr_desc.len() as usize) < size_of::<virtio_blk_outhdr>() {
-            return Err(Error::DescriptorLengthTooSmall);
-        }
-
-        let hdr_desc_addr = hdr_desc.addr();
-
-        let mut req = Request {
-            request_type: request_type(desc_chain.memory(), hdr_desc_addr)?,
-            sector: sector(desc_chain.memory(), hdr_desc_addr)?,
-            data_descriptors: SmallVec::with_capacity(DEFAULT_DESCRIPTOR_VEC_SIZE),
-            status_addr: GuestAddress(0),
-            writeback: true,
-            start: Instant::now(),
-        };
-
-        let status_desc;
-        let mut desc = desc_chain
-            .next_checked(access_platform)
-            .map_err(|addr| Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(addr)))?
-            .ok_or_else(|| {
-                error!("Only head descriptor present: request = {req:?}");
-                Error::DescriptorChainTooShort
-            })?;
-
-        if desc.has_next() {
-            req.data_descriptors.reserve_exact(1);
-            while desc.has_next() {
-                if desc.is_write_only() && req.request_type == RequestType::Out {
-                    return Err(Error::UnexpectedWriteOnlyDescriptor);
-                }
-                if desc.is_write_only() && req.request_type == RequestType::Discard {
-                    return Err(Error::UnexpectedWriteOnlyDescriptor);
-                }
-                if desc.is_write_only() && req.request_type == RequestType::WriteZeroes {
-                    return Err(Error::UnexpectedWriteOnlyDescriptor);
-                }
-                if !desc.is_write_only() && req.request_type == RequestType::In {
-                    return Err(Error::UnexpectedReadOnlyDescriptor);
-                }
-                if !desc.is_write_only() && req.request_type == RequestType::GetDeviceId {
-                    return Err(Error::UnexpectedReadOnlyDescriptor);
-                }
-
-                req.data_descriptors.push((desc.addr(), desc.len()));
-                desc = desc_chain
-                    .next_checked(access_platform)
-                    .map_err(|addr| {
-                        Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(addr))
-                    })?
-                    .ok_or_else(|| {
-                        error!("DescriptorChain corrupted: request = {req:?}");
-                        Error::DescriptorChainTooShort
-                    })?;
+            // The head contains the request type which MUST be readable.
+            if hdr_desc.is_write_only() {
+                return Err(Error::UnexpectedWriteOnlyDescriptor);
             }
-            status_desc = desc;
-        } else {
-            status_desc = desc;
-            // Only flush requests are allowed to skip the data descriptor.
-            if req.request_type != RequestType::Flush {
-                error!("Need a data descriptor: request = {req:?}");
-                return Err(Error::DescriptorChainTooShort);
+
+            if (hdr_desc.len() as usize) < size_of::<virtio_blk_outhdr>() {
+                return Err(Error::DescriptorLengthTooSmall);
             }
-        }
 
-        // The status MUST always be writable.
-        if !status_desc.is_write_only() {
-            return Err(Error::UnexpectedReadOnlyDescriptor);
-        }
+            let hdr_desc_addr = hdr_desc.addr();
 
-        if status_desc.is_empty() {
-            return Err(Error::DescriptorLengthTooSmall);
-        }
+            let mut req = Request {
+                request_type: request_type(desc_chain.memory(), hdr_desc_addr)?,
+                sector: sector(desc_chain.memory(), hdr_desc_addr)?,
+                data_descriptors: SmallVec::with_capacity(DEFAULT_DESCRIPTOR_VEC_SIZE),
+                status_addr: GuestAddress(0),
+                writeback: true,
+                start: Instant::now(),
+            };
 
-        req.status_addr = status_desc.addr();
+            let status_desc;
+            let mut desc = desc_chain
+                .next_checked(access_platform)
+                .map_err(|addr| Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(addr)))?
+                .ok_or_else(|| {
+                    error!("Only head descriptor present: request = {req:?}");
+                    Error::DescriptorChainTooShort
+                })?;
 
-        Ok(req)
+            if desc.has_next() {
+                req.data_descriptors.reserve_exact(1);
+                while desc.has_next() {
+                    if desc.is_write_only() && req.request_type == RequestType::Out {
+                        return Err(Error::UnexpectedWriteOnlyDescriptor);
+                    }
+                    if desc.is_write_only() && req.request_type == RequestType::Discard {
+                        return Err(Error::UnexpectedWriteOnlyDescriptor);
+                    }
+                    if desc.is_write_only() && req.request_type == RequestType::WriteZeroes {
+                        return Err(Error::UnexpectedWriteOnlyDescriptor);
+                    }
+                    if !desc.is_write_only() && req.request_type == RequestType::In {
+                        return Err(Error::UnexpectedReadOnlyDescriptor);
+                    }
+                    if !desc.is_write_only() && req.request_type == RequestType::GetDeviceId {
+                        return Err(Error::UnexpectedReadOnlyDescriptor);
+                    }
+
+                    req.data_descriptors.push((desc.addr(), desc.len()));
+                    desc = desc_chain
+                        .next_checked(access_platform)
+                        .map_err(|addr| {
+                            Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(addr))
+                        })?
+                        .ok_or_else(|| {
+                            error!("DescriptorChain corrupted: request = {req:?}");
+                            Error::DescriptorChainTooShort
+                        })?;
+                }
+                status_desc = desc;
+            } else {
+                status_desc = desc;
+                // Only flush requests are allowed to skip the data descriptor.
+                if req.request_type != RequestType::Flush {
+                    error!("Need a data descriptor: request = {req:?}");
+                    return Err(Error::DescriptorChainTooShort);
+                }
+            }
+
+            // The status MUST always be writable.
+            if !status_desc.is_write_only() {
+                return Err(Error::UnexpectedReadOnlyDescriptor);
+            }
+
+            if status_desc.is_empty() {
+                return Err(Error::DescriptorLengthTooSmall);
+            }
+
+            req.status_addr = status_desc.addr();
+
+            Ok(req)
+        })()
     }
 
     pub fn execute<T: FileExt + FileSync, M: GuestMemoryBackend>(
