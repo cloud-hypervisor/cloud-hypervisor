@@ -3766,6 +3766,107 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))] // See issue #7435
+    #[cfg(target_arch = "x86_64")]
+    fn test_snapshot_restore_cpu_pause_resume() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
+        let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=4,max=4"])
+            .default_memory()
+            .default_kernel_cmdline()
+            .default_disks()
+            .default_net()
+            .args(["--api-socket", &api_socket_source])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+            assert_eq!(guest.get_cpu_count().unwrap(), 4);
+
+            // Pause before requesting removal so the guest cannot acknowledge
+            // it until after restore. All four vCPU threads must be restored
+            // even though the configured CPU count is now two.
+            assert!(remote_command(&api_socket_source, "pause", None));
+            assert!(resize_command(
+                &api_socket_source,
+                Some(2),
+                None,
+                None,
+                None,
+            ));
+            assert!(remote_command(
+                &api_socket_source,
+                "snapshot",
+                Some(&format!("file://{snapshot_dir}")),
+            ));
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
+        let event_path_restored = temp_event_monitor_path(&guest.tmp_dir);
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_restored])
+            .args(["--event-monitor", &format!("path={event_path_restored}")])
+            .args(["--restore", &format!("source_url=file://{snapshot_dir}")])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            assert!(wait_for_latest_events_exact_str(
+                Duration::from_secs(30),
+                &["restored"],
+                &event_path_restored,
+            ));
+            assert_eq!(
+                fs::read_dir(format!("/proc/{}/task", child.id()))
+                    .unwrap()
+                    .filter_map(|task| fs::read_to_string(task.unwrap().path().join("comm")).ok())
+                    .filter(|name| name.starts_with("vcpu"))
+                    .count(),
+                4,
+                "Restore must start CPUs still awaiting guest ejection",
+            );
+            assert!(remote_command(&api_socket_restored, "resume", None));
+
+            // Checking present CPUs also requires Linux to finish ejection,
+            // rather than merely taking the CPUs offline.
+            assert!(
+                wait_until(Duration::from_secs(20), || {
+                    guest
+                        .ssh_command("cat /sys/devices/system/cpu/present")
+                        .is_ok_and(|present| present.trim() == "0-1")
+                }),
+                "Pending CPU removal did not complete after restore: {:?}",
+                guest.ssh_command("cat /sys/devices/system/cpu/present"),
+            );
+            assert_eq!(guest.get_cpu_count().unwrap(), 2);
+
+            let mut vcpu_threads = fs::read_dir(format!("/proc/{}/task", child.id()))
+                .unwrap()
+                .filter_map(|task| fs::read_to_string(task.unwrap().path().join("comm")).ok())
+                .filter(|name| name.starts_with("vcpu"))
+                .map(|name| name.trim().to_string())
+                .collect::<Vec<_>>();
+            vcpu_threads.sort();
+            assert_eq!(vcpu_threads, ["vcpu0", "vcpu1"]);
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+    }
+
+    #[test]
     #[cfg_attr(target_arch = "aarch64", ignore = "See #8187")]
     fn test_memory_hotplug() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
