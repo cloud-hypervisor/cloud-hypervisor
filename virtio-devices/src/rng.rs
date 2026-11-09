@@ -202,8 +202,7 @@ impl Rng {
                 avail_features,
                 acked_features,
                 min_queues: 1,
-                pause_common: Arc::new(PauseCommon::new(paused)),
-                ..Default::default()
+                ..VirtioCommon::new(paused)?
             },
             id,
             random_file: Some(random_file),

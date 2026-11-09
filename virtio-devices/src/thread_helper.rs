@@ -7,11 +7,11 @@ use std::panic::AssertUnwindSafe;
 use std::sync::atomic::AtomicU8;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
-use std::{panic, result};
+use std::{io, panic, result};
 
 use log::error;
 use seccompiler::{SeccompAction, apply_filter};
-use vmm_sys_util::eventfd::EventFd;
+use vmm_sys_util::eventfd::{EFD_NONBLOCK, EventFd};
 
 use crate::epoll_helper::EpollHelperError;
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
@@ -23,25 +23,30 @@ struct PauseState {
     active_threads: usize,
 }
 
-#[derive(Default)]
 pub struct PauseCommon {
     state: Mutex<PauseState>,
     changed: Condvar,
+    pause_evt: EventFd,
 }
 
 impl PauseCommon {
-    pub fn new(pause_requested: bool) -> Self {
-        Self {
+    pub fn new(pause_requested: bool) -> io::Result<Self> {
+        Ok(Self {
             state: Mutex::new(PauseState {
                 pause_requested,
                 ..Default::default()
             }),
             changed: Condvar::new(),
-        }
+            pause_evt: EventFd::new(EFD_NONBLOCK)?,
+        })
     }
 
     pub fn is_pause_requested(&self) -> bool {
         self.state.lock().unwrap().pause_requested
+    }
+
+    pub(crate) fn pause_evt(&self) -> &EventFd {
+        &self.pause_evt
     }
 
     fn run<F, H>(self: &Arc<Self>, f: F, on_exit: H)
@@ -66,20 +71,26 @@ impl PauseCommon {
         on_exit(result);
     }
 
-    pub(crate) fn request_pause(&self) {
-        self.state.lock().unwrap().pause_requested = true;
-    }
-
-    pub(crate) fn wait_for_pause(&self) {
+    pub(crate) fn pause(&self) -> io::Result<()> {
         let mut state = self.state.lock().unwrap();
-        while state.active_threads != 0 {
-            state = self.changed.wait(state).unwrap();
-        }
+        state.pause_requested = true;
+        self.pause_evt.write(1)?;
+        let _state = self
+            .changed
+            .wait_while(state, |state| state.active_threads != 0)
+            .unwrap();
+        self.pause_evt.read()?;
+        Ok(())
     }
 
     pub(crate) fn resume(&self) {
         self.state.lock().unwrap().pause_requested = false;
         self.changed.notify_all();
+    }
+
+    pub(crate) fn reset(&self) {
+        let _ = self.pause_evt.read();
+        self.resume();
     }
 
     pub(crate) fn wait_if_paused(&self) {

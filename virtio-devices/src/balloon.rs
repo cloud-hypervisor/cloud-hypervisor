@@ -876,8 +876,7 @@ impl Balloon {
                 acked_features,
                 queue_sizes,
                 min_queues: MIN_NUM_QUEUES,
-                pause_common: Arc::new(PauseCommon::new(paused)),
-                ..Default::default()
+                ..VirtioCommon::new(paused)?
             },
             id,
             config,

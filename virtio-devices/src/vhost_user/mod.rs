@@ -519,7 +519,6 @@ impl<C> VhostUserState<C> {
     }
 }
 
-#[derive(Default)]
 pub struct VhostUserCommon {
     pub virtio_common: VirtioCommon,
     pub vu: Option<Arc<Mutex<VhostUserHandle>>>,
@@ -538,6 +537,24 @@ pub struct VhostUserCommon {
 }
 
 impl VhostUserCommon {
+    pub fn new(virtio_common: VirtioCommon) -> Self {
+        Self {
+            virtio_common,
+            vu: None,
+            guest_memory: None,
+            acked_protocol_features: 0,
+            socket_path: String::new(),
+            vu_num_queues: 0,
+            migration_started: false,
+            server: false,
+            vring_bases: None,
+            disconnected: Arc::new(AtomicBool::new(false)),
+            saved_dirty_log: None,
+            dirty_logging: false,
+            resume_evt: None,
+        }
+    }
+
     #[expect(clippy::too_many_arguments)]
     pub fn activate<T: VhostUserFrontendReqHandler>(
         &mut self,
@@ -649,7 +666,7 @@ impl VhostUserCommon {
         // Resume the virtio thread if it was paused. Reset must always
         // converge to fresh state, so backend resume / reset failures are
         // logged but don't skip the rest of the teardown.
-        if self.virtio_common.pause_evt.take().is_some()
+        if self.virtio_common.pause_common.is_pause_requested()
             && let Err(e) = self.virtio_common.resume()
         {
             error!("Failed to resume paused device during reset: {e:?}");
@@ -1264,7 +1281,7 @@ mod tests {
         let mut common = VhostUserCommon {
             vu: Some(Arc::new(Mutex::new(vu))),
             acked_protocol_features: VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits(),
-            ..Default::default()
+            ..VhostUserCommon::new(VirtioCommon::new(false).unwrap())
         };
         common.disconnected.store(true, Ordering::Relaxed);
 

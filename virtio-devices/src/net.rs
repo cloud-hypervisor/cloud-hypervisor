@@ -626,8 +626,7 @@ impl Net {
                 acked_features,
                 queue_sizes,
                 min_queues: 2,
-                pause_common: Arc::new(PauseCommon::new(paused)),
-                ..Default::default()
+                ..VirtioCommon::new(paused).map_err(Error::CreateEventFd)?
             },
             id,
             taps,
@@ -1255,7 +1254,7 @@ mod tests {
             common: VirtioCommon {
                 acked_features,
                 interrupt_cb,
-                ..Default::default()
+                ..VirtioCommon::new(false).unwrap()
             },
             id: "test-net".to_string(),
             taps: Vec::new(),

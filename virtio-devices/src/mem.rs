@@ -806,8 +806,7 @@ impl Mem {
                 acked_features,
                 queue_sizes: QUEUE_SIZES.to_vec(),
                 min_queues: 1,
-                pause_common: Arc::new(PauseCommon::new(paused)),
-                ..Default::default()
+                ..VirtioCommon::new(paused)?
             },
             id,
             region: Arc::clone(region),

@@ -21,7 +21,6 @@ use super::vu_common_ctrl::VhostUserHandle;
 use super::{DEFAULT_VIRTIO_FEATURES, Error, Result};
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
-use crate::thread_helper::PauseCommon;
 use crate::vhost_user::{PostcopyHandler, VhostUserCommon, VhostUserState};
 use crate::{
     ActivateResult, GuestRegion, MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon, VirtioDevice,
@@ -192,23 +191,23 @@ impl Fs {
             vu.start_postcopy(id.clone(), postcopy_handler)?;
         }
 
+        let virtio_common = VirtioCommon {
+            device_type: VirtioDeviceType::Fs as u32,
+            avail_features,
+            acked_features,
+            queue_sizes: vec![queue_size; num_queues as usize],
+            min_queues: 1,
+            ..VirtioCommon::new(paused).map_err(Error::CreateEventFd)?
+        };
+
         Ok(Fs {
             vu_common: VhostUserCommon {
-                virtio_common: VirtioCommon {
-                    device_type: VirtioDeviceType::Fs as u32,
-                    avail_features,
-                    acked_features,
-                    queue_sizes: vec![queue_size; num_queues as usize],
-                    min_queues: 1,
-                    pause_common: Arc::new(PauseCommon::new(paused)),
-                    ..Default::default()
-                },
                 vu: Some(Arc::new(Mutex::new(vu))),
                 acked_protocol_features,
                 socket_path: path.to_string(),
                 vu_num_queues,
                 vring_bases,
-                ..Default::default()
+                ..VhostUserCommon::new(virtio_common)
             },
             id,
             config,

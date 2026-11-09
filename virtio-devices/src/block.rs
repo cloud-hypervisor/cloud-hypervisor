@@ -940,8 +940,7 @@ impl Block {
                 acked_features,
                 queue_sizes: vec![queue_size; num_queues as usize],
                 min_queues: 1,
-                pause_common: Arc::new(PauseCommon::new(paused)),
-                ..Default::default()
+                ..VirtioCommon::new(paused)?
             },
             id,
             disk_image,

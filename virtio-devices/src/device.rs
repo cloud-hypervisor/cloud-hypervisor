@@ -260,12 +260,10 @@ impl Drop for WorkerThreads {
 }
 
 /// Structure to handle device state common to all devices
-#[derive(Default)]
 pub struct VirtioCommon {
     pub avail_features: u64,
     pub acked_features: u64,
     pub interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
-    pub pause_evt: Option<EventFd>,
     pub pause_common: Arc<PauseCommon>,
     pub workers: Option<WorkerThreads>,
     pub queue_sizes: Vec<u16>,
@@ -276,6 +274,21 @@ pub struct VirtioCommon {
 }
 
 impl VirtioCommon {
+    pub fn new(pause_requested: bool) -> io::Result<Self> {
+        Ok(Self {
+            avail_features: 0,
+            acked_features: 0,
+            interrupt_cb: None,
+            pause_common: Arc::new(PauseCommon::new(pause_requested)?),
+            workers: None,
+            queue_sizes: Vec::new(),
+            queue_evts: Vec::new(),
+            device_type: 0,
+            min_queues: 0,
+            access_platform: None,
+        })
+    }
+
     pub fn feature_acked(&self, feature: u64) -> bool {
         self.acked_features & (1 << feature) == 1 << feature
     }
@@ -339,12 +352,6 @@ impl VirtioCommon {
         // handlers clone it via dup_eventfds() before any worker is spawned.
         self.workers = Some(WorkerThreads::new(kill_evt, Arc::clone(&self.pause_common)));
 
-        let pause_evt = EventFd::new(EFD_NONBLOCK).map_err(|e| {
-            error!("failed creating pause EventFd: {e}");
-            ActivateError::BadActivate
-        })?;
-        self.pause_evt = Some(pause_evt);
-
         // Save the interrupt EventFD as we need to return it on reset
         // but clone it to pass into the thread.
         self.interrupt_cb = Some(interrupt_cb);
@@ -354,10 +361,8 @@ impl VirtioCommon {
 
     pub fn reset(&mut self) {
         self.queue_evts.clear();
-        self.pause_evt = None;
-
         self.workers = None;
-        self.pause_common = Arc::default();
+        self.pause_common.reset();
 
         // Drop the interrupt callback clone
         self.interrupt_cb = None;
@@ -424,9 +429,8 @@ impl VirtioCommon {
             .try_clone()
             .map_err(ActivateError::CloneEventFd)?;
         let pause_evt = self
-            .pause_evt
-            .as_ref()
-            .ok_or(ActivateError::BadActivate)?
+            .pause_common
+            .pause_evt()
             .try_clone()
             .map_err(ActivateError::CloneEventFd)?;
         Ok((kill_evt, pause_evt))
@@ -456,20 +460,9 @@ impl Pausable for VirtioCommon {
             VirtioDeviceType::from(self.device_type)
         );
 
-        self.pause_common.request_pause();
-        if let Some(pause_evt) = &self.pause_evt {
-            pause_evt
-                .write(1)
-                .map_err(|e| MigratableError::Pause(e.into()))?;
-        }
-        self.pause_common.wait_for_pause();
-        if let Some(pause_evt) = &self.pause_evt {
-            pause_evt
-                .read()
-                .map_err(|e| MigratableError::Pause(e.into()))?;
-        }
-
-        Ok(())
+        self.pause_common
+            .pause()
+            .map_err(|e| MigratableError::Pause(e.into()))
     }
 
     fn resume(&mut self) -> result::Result<(), MigratableError> {
@@ -589,7 +582,7 @@ mod tests {
     fn make_common_with_workers() -> (VirtioCommon, EventFd) {
         let kill_evt = EventFd::new(EFD_NONBLOCK).unwrap();
         let kill_evt_clone = kill_evt.try_clone().unwrap();
-        let common = VirtioCommon::default();
+        let common = VirtioCommon::new(false).unwrap();
         let workers = WorkerThreads::new(kill_evt, Arc::clone(&common.pause_common));
         let common = VirtioCommon {
             workers: Some(workers),
@@ -610,7 +603,7 @@ mod tests {
         ] {
             let mut common = VirtioCommon {
                 avail_features: if offered { access_platform } else { 0 },
-                ..Default::default()
+                ..VirtioCommon::new(false).unwrap()
             };
             if acknowledged {
                 common.ack_features(access_platform);
@@ -628,7 +621,6 @@ mod tests {
                     Err(ActivateError::AccessPlatformNotAcknowledged)
                 ));
                 assert!(common.workers.is_none());
-                assert!(common.pause_evt.is_none());
             }
         }
     }
@@ -713,7 +705,7 @@ mod tests {
                 EventFd::new(EFD_NONBLOCK).unwrap(),
             ),
         ];
-        let mut common = VirtioCommon::default();
+        let mut common = VirtioCommon::new(false).unwrap();
         let interrupt_cb = Arc::clone(&interrupt) as Arc<dyn VirtioInterrupt>;
 
         common.activate(&queues, interrupt_cb).unwrap();
@@ -728,17 +720,13 @@ mod tests {
     fn reset_clears_paused_without_workers() {
         // reset() before any worker was spawned must still clear paused, or
         // the next activation's workers would park immediately and never run.
-        let mut common = VirtioCommon {
-            pause_evt: Some(EventFd::new(EFD_NONBLOCK).unwrap()),
-            ..Default::default()
-        };
-        common.pause_common.request_pause();
+        let mut common = VirtioCommon::new(false).unwrap();
+        common.pause_common.pause().unwrap();
         assert!(common.workers.is_none());
 
         common.reset();
 
         assert!(!common.pause_common.is_pause_requested());
-        assert!(common.pause_evt.is_none());
     }
 
     #[test]
@@ -748,8 +736,7 @@ mod tests {
         let status = Arc::new(AtomicU8::new(0));
         let mut common = VirtioCommon {
             device_type: VirtioDeviceType::Block as u32,
-            pause_common: Arc::new(PauseCommon::new(true)),
-            ..Default::default()
+            ..VirtioCommon::new(true).unwrap()
         };
         common.activate(&[], Arc::new(NoopInterrupt)).unwrap();
         let pause_common = Arc::clone(&common.pause_common);
@@ -789,8 +776,8 @@ mod tests {
                 .recv_timeout(timeout)
                 .expect("Thread did not enter handler startup");
         }
-        let pause_monitor =
-            EpollHelper::new(&exit_evt, common.pause_evt.as_ref().unwrap()).unwrap();
+        let pause_evt = common.pause_common.pause_evt();
+        let pause_monitor = EpollHelper::new(&exit_evt, pause_evt).unwrap();
         let (paused, completed) = mpsc::channel();
         let pausing = thread::spawn(move || {
             common.pause().unwrap();
