@@ -847,25 +847,13 @@ fn create_data(path: &str) -> Result<String, Error> {
 )]
 #[group(skip)]
 struct Cli {
-    #[arg(
-        value_name = "api-socket",
-        long,
-        help = "HTTP API socket path (UNIX domain socket)"
-    )]
+    #[arg(long, help = "HTTP API socket path (UNIX domain socket)")]
     api_socket: Option<String>,
     #[cfg(feature = "dbus_api")]
-    #[arg(
-        value_name = "dbus-object-path",
-        long,
-        help = "Object path which the interface is being served at"
-    )]
+    #[arg(long, help = "Object path which the interface is being served at")]
     dbus_object_path: Option<String>,
     #[cfg(feature = "dbus_api")]
-    #[arg(
-        value_name = "dbus-service-name",
-        long,
-        help = "Well known name of the dbus service"
-    )]
+    #[arg(long, help = "Well known name of the dbus service")]
     dbus_service_name: Option<String>,
     #[cfg(feature = "dbus_api")]
     #[arg(long, help = "Use the system bus instead of a session bus")]
@@ -879,7 +867,6 @@ enum Command {
     #[command(about = "Add VFIO device")]
     AddDevice {
         #[arg(
-            value_name = "device_config",
             help = DeviceConfig::SYNTAX,
         )]
         device_config: String,
@@ -887,7 +874,6 @@ enum Command {
     #[command(about = "Add block device")]
     AddDisk {
         #[arg(
-            value_name = "disk_config",
             help = DiskConfig::SYNTAX,
         )]
         disk_config: String,
@@ -895,7 +881,6 @@ enum Command {
     #[command(about = "Add virtio-fs backed fs device")]
     AddFs {
         #[arg(
-            value_name = "fs_config",
             help = FsConfig::SYNTAX,
         )]
         fs_config: String,
@@ -903,7 +888,6 @@ enum Command {
     #[command(about = "Add generic vhost-user device")]
     AddGenericVhostUser {
         #[arg(
-            value_name = "generic_vhost_user_config",
             help = GenericVhostUserConfig::SYNTAX,
         )]
         generic_vhost_user_config: String,
@@ -911,7 +895,6 @@ enum Command {
     #[command(about = "Add network device")]
     AddNet {
         #[arg(
-            value_name = "net_config",
             help = NetConfig::SYNTAX,
         )]
         net_config: String,
@@ -919,7 +902,6 @@ enum Command {
     #[command(about = "Add persistent memory device")]
     AddPmem {
         #[arg(
-            value_name = "pmem_config",
             help = PmemConfig::SYNTAX,
         )]
         pmem_config: String,
@@ -927,7 +909,6 @@ enum Command {
     #[command(about = "Add userspace device")]
     AddUserDevice {
         #[arg(
-            value_name = "device_config",
             help = UserDeviceConfig::SYNTAX,
         )]
         device_config: String,
@@ -935,7 +916,6 @@ enum Command {
     #[command(about = "Add vDPA device")]
     AddVdpa {
         #[arg(
-            value_name = "vdpa_config",
             help = VdpaConfig::SYNTAX,
         )]
         vdpa_config: String,
@@ -943,7 +923,6 @@ enum Command {
     #[command(about = "Add vsock device")]
     AddVsock {
         #[arg(
-            value_name = "vsock_config",
             help = VsockConfig::SYNTAX,
         )]
         vsock_config: String,
@@ -956,10 +935,7 @@ enum Command {
     CancelMigration,
     #[command(about = "Create a coredump from VM")]
     Coredump {
-        #[arg(
-            value_name = "coredump_config",
-            help = "Destination URL of the coredump"
-        )]
+        #[arg(help = "Destination URL of the coredump")]
         coredump_config: String,
     },
     #[command(about = "Counters from the VM")]
@@ -967,7 +943,6 @@ enum Command {
     #[command(about = "Create VM from a JSON configuration")]
     Create {
         #[arg(
-            value_name = "path",
             help = "Path to the JSON configuration, or '-' for standard input",
             default_value = "-"
         )]
@@ -990,59 +965,41 @@ enum Command {
     #[command(about = "Receive a VM migration")]
     ReceiveMigration {
         #[arg(
-            value_name = "receive_migration_config",
             help = api::VmReceiveMigrationData::SYNTAX,
         )]
         receive_migration_config: String,
     },
     #[command(about = "Remove VFIO and PCI device")]
     RemoveDevice {
-        #[arg(value_name = "id", help = "Device identifier")]
+        #[arg(help = "Device identifier")]
         id: String,
     },
     #[command(about = "Resize the VM")]
     Resize {
-        #[arg(
-            value_name = "balloon",
-            long,
-            help = "New balloon size in bytes (supports K/M/G suffix)"
-        )]
+        #[arg(long, help = "New balloon size in bytes (supports K/M/G suffix)")]
         balloon: Option<ByteSized>,
-        #[arg(value_name = "cpus", long, help = "New vCPUs count")]
+        #[arg(long, help = "New vCPUs count")]
         cpus: Option<u32>,
-        #[arg(
-            value_name = "memory",
-            long,
-            help = "New memory size in bytes (supports K/M/G suffix)"
-        )]
+        #[arg(long, help = "New memory size in bytes (supports K/M/G suffix)")]
         memory: Option<ByteSized>,
     },
     #[command(about = "Resize an attached disk")]
     ResizeDisk {
-        #[arg(value_name = "disk", long, help = "Disk identifier")]
+        #[arg(long, help = "Disk identifier")]
         disk: String,
-        #[arg(
-            value_name = "size",
-            long,
-            help = "New disk size in bytes (supports K/M/G suffix)"
-        )]
+        #[arg(long, help = "New disk size in bytes (supports K/M/G suffix)")]
         size: ByteSized,
     },
     #[command(about = "Resize a memory zone")]
     ResizeZone {
-        #[arg(value_name = "id", long, help = "Memory zone identifier")]
+        #[arg(long, help = "Memory zone identifier")]
         id: String,
-        #[arg(
-            value_name = "size",
-            long,
-            help = "New memory zone size in bytes (supports K/M/G suffix)"
-        )]
+        #[arg(long, help = "New memory zone size in bytes (supports K/M/G suffix)")]
         size: ByteSized,
     },
     #[command(about = "Restore VM from a snapshot")]
     Restore {
         #[arg(
-            value_name = "restore_config",
             help = RestoreConfig::SYNTAX,
         )]
         restore_config: String,
@@ -1052,7 +1009,6 @@ enum Command {
     #[command(about = "Initiate a VM migration")]
     SendMigration {
         #[arg(
-            value_name = "send_migration_config",
             help = api::VmSendMigrationData::SYNTAX,
         )]
         send_migration_config: String,
@@ -1063,10 +1019,7 @@ enum Command {
     ShutdownVmm,
     #[command(about = "Create a snapshot from VM")]
     Snapshot {
-        #[arg(
-            value_name = "snapshot_config",
-            help = "Destination URL of the snapshot"
-        )]
+        #[arg(help = "Destination URL of the snapshot")]
         snapshot_config: String,
     },
 }

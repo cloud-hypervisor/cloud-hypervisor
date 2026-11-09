@@ -1810,28 +1810,15 @@ enum CliVmType {
 struct Cli {
     #[arg(long, help = "Continue running remaining tests after a test failure")]
     continue_on_failure: bool,
-    #[arg(
-        value_name = "image-format",
-        long,
-        help = "Override the image format used for block tests"
-    )]
+    #[arg(long, help = "Override the image format used for block tests")]
     image_format: Option<ImageFormat>,
-    #[arg(
-        value_name = "iterations",
-        long,
-        help = "Override number of test iterations"
-    )]
+    #[arg(long, help = "Override number of test iterations")]
     iterations: Option<u32>,
     #[arg(long, help = "Print the list of available metrics tests")]
     list_tests: bool,
-    #[arg(
-        value_name = "report-file",
-        long,
-        help = "Report file. Standard error is used if not specified"
-    )]
+    #[arg(long, help = "Report file. Standard error is used if not specified")]
     report_file: Option<String>,
     #[arg(
-        value_name = "test-exclude",
         long,
         help = "Exclude metrics tests matching the provided keywords (comma-separated)",
         num_args = 1,
@@ -1840,7 +1827,6 @@ struct Cli {
     )]
     test_exclude: Option<Vec<String>>,
     #[arg(
-        value_name = "test-filter",
         long,
         help = "Filter metrics tests to run based on provided keywords (comma-separated)",
         num_args = 1,
@@ -1848,18 +1834,9 @@ struct Cli {
         action = ArgAction::Set,
     )]
     test_filter: Option<Vec<String>>,
-    #[arg(
-        value_name = "timeout",
-        long,
-        help = "Override test timeout in seconds"
-    )]
+    #[arg(long, help = "Override test timeout in seconds")]
     timeout: Option<u32>,
-    #[arg(
-        value_name = "vm-type",
-        long,
-        help = "Set the VM type",
-        default_value = "regular"
-    )]
+    #[arg(long, help = "Set the VM type", default_value = "regular")]
     vm_type: CliVmType,
 }
 

@@ -309,28 +309,20 @@ impl From<CliSeccompAction> for SeccompAction {
 #[group(skip)]
 struct Cli {
     #[arg(
-        value_name = "api-socket",
         long,
         help = "HTTP API socket (UNIX domain socket): path=<path> or fd=<fd>",
         group = "vmm-config"
     )]
     api_socket: Option<String>,
     #[arg(
-        value_name = "balloon",
         long,
         help = BalloonConfig::SYNTAX,
         group = "vm-config",
     )]
     balloon: Option<String>,
-    #[arg(
-        value_name = "cmdline",
-        long,
-        help = "Kernel command line",
-        group = "vm-config"
-    )]
+    #[arg(long, help = "Kernel command line", group = "vm-config")]
     cmdline: Option<String>,
     #[arg(
-        value_name = "console",
         long,
         help = ConsoleConfig::SYNTAX,
         default_value = "tty",
@@ -338,7 +330,6 @@ struct Cli {
     )]
     console: String,
     #[arg(
-        value_name = "cpus",
         long,
         help = CpusConfig::SYNTAX,
         default_value = default_vcpus(),
@@ -347,7 +338,6 @@ struct Cli {
     cpus: String,
     #[cfg(feature = "dbus_api")]
     #[arg(
-        value_name = "dbus-object-path",
         long,
         help = "Object path to serve the dbus interface",
         group = "vmm-config"
@@ -355,7 +345,6 @@ struct Cli {
     dbus_object_path: Option<String>,
     #[cfg(feature = "dbus_api")]
     #[arg(
-        value_name = "dbus-service-name",
         long,
         help = "Well known name of the dbus service",
         group = "vmm-config"
@@ -370,7 +359,6 @@ struct Cli {
     dbus_system_bus: bool,
     #[cfg(target_arch = "x86_64")]
     #[arg(
-        value_name = "debug-console",
         long,
         help = DebugConsoleConfig::SYNTAX,
         default_value = "off,iobase=0xe9",
@@ -378,7 +366,6 @@ struct Cli {
     )]
     debug_console: String,
     #[arg(
-        value_name = "device",
         long,
         help = DeviceConfig::SYNTAX,
         num_args = 1..,
@@ -386,7 +373,6 @@ struct Cli {
     )]
     device: Option<Vec<String>>,
     #[arg(
-        value_name = "disk",
         long,
         help = DiskConfig::SYNTAX,
         num_args = 1..,
@@ -394,21 +380,18 @@ struct Cli {
     )]
     disk: Option<Vec<String>>,
     #[arg(
-        value_name = "event-monitor",
         long,
         help = "Path to report events on: path=<path> or fd=<fd>",
         group = "vmm-config"
     )]
     event_monitor: Option<String>,
     #[arg(
-        value_name = "firmware",
         long,
         help = "Path to firmware that is loaded in an architecture-specific way",
         group = "vm-payload"
     )]
     firmware: Option<String>,
     #[arg(
-        value_name = "fs",
         long,
         help = FsConfig::SYNTAX,
         num_args = 1..,
@@ -417,7 +400,6 @@ struct Cli {
     fs: Option<Vec<String>>,
     #[cfg(feature = "fw_cfg")]
     #[arg(
-        value_name = "fw-cfg-config",
         long,
         help = FwCfgConfig::SYNTAX,
         group = "vm-config",
@@ -425,14 +407,12 @@ struct Cli {
     fw_cfg_config: Option<String>,
     #[cfg(feature = "guest_debug")]
     #[arg(
-        value_name = "gdb",
         long,
         help = "GDB socket (UNIX domain socket): path=<path>",
         group = "vmm-config"
     )]
     gdb: Option<String>,
     #[arg(
-        value_name = "generic-vhost-user",
         long,
         help = GenericVhostUserConfig::SYNTAX,
         num_args = 1..,
@@ -440,7 +420,6 @@ struct Cli {
     )]
     generic_vhost_user: Option<Vec<String>>,
     #[arg(
-        value_name = "guest-reset-action",
         long,
         help = "Action when the guest resets",
         default_value = "reset-vm",
@@ -448,7 +427,6 @@ struct Cli {
     )]
     guest_reset_action: CliGuestResetAction,
     #[arg(
-        value_name = "guest-shutdown-action",
         long,
         help = "Action when the guest shuts down",
         default_value = "exit-vmm",
@@ -457,37 +435,24 @@ struct Cli {
     guest_shutdown_action: CliGuestShutdownAction,
     #[cfg(feature = "sev_snp")]
     #[arg(
-        value_name = "host-data",
         long,
         help = "Host specific data to SEV SNP guest",
         group = "vm-config"
     )]
     host_data: Option<String>,
     #[cfg(feature = "igvm")]
-    #[arg(
-        value_name = "igvm",
-        long,
-        help = "Path to IGVM file to load",
-        group = "vm-payload"
-    )]
+    #[arg(long, help = "Path to IGVM file to load", group = "vm-payload")]
     igvm: Option<String>,
-    #[arg(
-        value_name = "initramfs",
-        long,
-        help = "Path to initramfs image",
-        group = "vm-config"
-    )]
+    #[arg(long, help = "Path to initramfs image", group = "vm-config")]
     initramfs: Option<String>,
     #[cfg(feature = "ivshmem")]
     #[arg(
-        value_name = "ivshmem",
         long,
         help = IvshmemConfig::SYNTAX,
         group = "vm-config",
     )]
     ivshmem: Option<String>,
     #[arg(
-        value_name = "kernel",
         long,
         help = "Path to kernel to load. This may be a kernel or firmware that supports a PVH \
                 entry point (e.g. vmlinux) or architecture equivalent",
@@ -497,7 +462,6 @@ struct Cli {
     #[arg(long, help = "Enable Landlock", group = "vmm-config")]
     landlock: bool,
     #[arg(
-        value_name = "landlock-rules",
         long,
         help = LandlockConfig::SYNTAX,
         num_args = 1..,
@@ -505,14 +469,12 @@ struct Cli {
     )]
     landlock_rules: Option<Vec<String>>,
     #[arg(
-        value_name = "log-file",
         long,
         help = "Log file. Standard error is used if not specified",
         group = "logging"
     )]
     log_file: Option<String>,
     #[arg(
-        value_name = "log-format",
         long,
         help = "Log format. Common tokens: {boottime}, {wallclock}, {glog}, \
                  {localglog}, {thread}, {level}, {location}, {msg}. See \
@@ -523,7 +485,6 @@ struct Cli {
     )]
     log_format: String,
     #[arg(
-        value_name = "memory",
         long,
         help = MemoryConfig::SYNTAX,
         default_value = default_memory(),
@@ -531,7 +492,6 @@ struct Cli {
     )]
     memory: String,
     #[arg(
-        value_name = "memory-zone",
         long,
         help = MemoryZoneConfig::SYNTAX,
         num_args = 1..,
@@ -539,7 +499,6 @@ struct Cli {
     )]
     memory_zone: Option<Vec<String>>,
     #[arg(
-        value_name = "net",
         long,
         help = NetConfig::SYNTAX,
         num_args = 1..,
@@ -555,7 +514,6 @@ struct Cli {
     )]
     no_shutdown: bool,
     #[arg(
-        value_name = "numa",
         long,
         help = NumaConfig::SYNTAX,
         num_args = 1..,
@@ -563,7 +521,6 @@ struct Cli {
     )]
     numa: Option<Vec<String>>,
     #[arg(
-        value_name = "pci-segment",
         long,
         help = PciSegmentConfig::SYNTAX,
         num_args = 1..,
@@ -571,14 +528,12 @@ struct Cli {
     )]
     pci_segment: Option<Vec<String>>,
     #[arg(
-        value_name = "platform",
         long,
         help = PlatformConfig::SYNTAX,
         group = "vm-config",
     )]
     platform: Option<String>,
     #[arg(
-        value_name = "pmem",
         long,
         help = PmemConfig::SYNTAX,
         num_args = 1..,
@@ -591,7 +546,6 @@ struct Cli {
     #[arg(long, help = "Enable pvpanic device", group = "vm-config")]
     pvpanic: bool,
     #[arg(
-        value_name = "rate-limit-group",
         long,
         help = RateLimiterGroupConfig::SYNTAX,
         num_args = 1..,
@@ -599,14 +553,12 @@ struct Cli {
     )]
     rate_limit_group: Option<Vec<String>>,
     #[arg(
-        value_name = "restore",
         long,
         help = RestoreConfig::SYNTAX,
         group = "vmm-config",
     )]
     restore: Option<String>,
     #[arg(
-        value_name = "rng",
         long,
         help = RngConfig::SYNTAX,
         default_value = default_rng(),
@@ -614,7 +566,6 @@ struct Cli {
     )]
     rng: String,
     #[arg(
-        value_name = "rtc",
         long,
         help = RtcConfig::SYNTAX,
         num_args = 0..=1,
@@ -623,7 +574,6 @@ struct Cli {
     )]
     rtc: Option<String>,
     #[arg(
-        value_name = "seccomp",
         long,
         help = "Action on prohibited system calls",
         default_value = "true",
@@ -631,7 +581,6 @@ struct Cli {
     )]
     seccomp: CliSeccompAction,
     #[arg(
-        value_name = "serial",
         long,
         help = SerialConfig::SYNTAX,
         default_value = "null",
@@ -639,14 +588,12 @@ struct Cli {
     )]
     serial: String,
     #[arg(
-        value_name = "tpm",
         long,
         help = TpmConfig::SYNTAX,
         group = "vm-config",
     )]
     tpm: Option<String>,
     #[arg(
-        value_name = "user-device",
         long,
         help = UserDeviceConfig::SYNTAX,
         num_args = 1..,
@@ -661,7 +608,6 @@ struct Cli {
     )]
     v: u8,
     #[arg(
-        value_name = "vdpa",
         long,
         help = VdpaConfig::SYNTAX,
         num_args = 1..,
@@ -671,7 +617,6 @@ struct Cli {
     #[arg(short = 'V', long, help = "Print version")]
     version: bool,
     #[arg(
-        value_name = "vsock",
         long,
         help = VsockConfig::SYNTAX,
         group = "vm-config",

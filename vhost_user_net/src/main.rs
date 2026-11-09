@@ -16,7 +16,7 @@ use vhost_user_net::start_net_backend;
     arg_required_else_help = true
 )]
 struct Cli {
-    #[arg(long, value_name = "net-backend", help = vhost_user_net::SYNTAX)]
+    #[arg(long, help = vhost_user_net::SYNTAX)]
     net_backend: String,
 }
 
