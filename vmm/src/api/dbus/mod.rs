@@ -2,13 +2,14 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+use std::collections::BTreeSet;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Sender};
 use std::{fmt, panic, thread};
 
 use futures_lite::{StreamExt, future};
-use log::{error, warn};
+use log::error;
 use seccompiler::{SeccompAction, apply_filter};
 use vmm_sys_util::eventfd::EventFd;
 use zbus::connection::Builder;
@@ -23,11 +24,13 @@ use crate::api::{
     AddDisk, Body, VmAddDevice, VmAddFs, VmAddGenericVhostUser, VmAddNet, VmAddPmem,
     VmAddUserDevice, VmAddVdpa, VmAddVsock, VmBalloonStats, VmBoot, VmCancelMigration, VmCounters,
     VmCreate, VmDelete, VmInfo, VmNmi, VmPause, VmPowerButton, VmReboot, VmReceiveMigration,
-    VmRemoveDevice, VmResize, VmResizeDisk, VmResizeZone, VmRestore, VmResume, VmSendMigration,
-    VmShutdown, VmSnapshot, VmmPing, VmmShutdown,
+    VmReceiveMigrationData, VmRemoveDevice, VmResize, VmResizeDisk, VmResizeZone, VmRestore,
+    VmResume, VmSendMigration, VmShutdown, VmSnapshot, VmmPing, VmmShutdown,
 };
+use crate::config::RestoreConfig;
+use crate::external_fds::{ExternalFds, ScmRights, UpdateFdsComponent};
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
-use crate::{Error as VmmError, NetConfig, Result as VmmResult, VmConfig};
+use crate::{DeviceConfig, Error as VmmError, NetConfig, Result as VmmResult, VmConfig};
 
 pub type DBusApiShutdownChannels = (async_channel::Sender<()>, mpsc::Receiver<()>);
 
@@ -120,7 +123,11 @@ impl DBusApi {
     }
 
     async fn vm_add_device(&self, device_config: String) -> Result<Optional<String>> {
-        let device_config = serde_json::from_str(&device_config).map_err(api_error)?;
+        let device_config: DeviceConfig =
+            serde_json::from_str(&device_config).map_err(api_error)?;
+        device_config
+            .validate_fds(&ExternalFds::default(), &mut BTreeSet::new())
+            .map_err(api_error)?;
         self.vm_action(&VmAddDevice, device_config).await
     }
 
@@ -145,11 +152,10 @@ impl DBusApi {
     }
 
     async fn vm_add_net(&self, net_config: String) -> Result<Optional<String>> {
-        let mut net_config: NetConfig = serde_json::from_str(&net_config).map_err(api_error)?;
-        if net_config.fds.is_some() {
-            warn!("Ignoring FDs sent via the D-Bus request body");
-            net_config.fds = None;
-        }
+        let net_config: NetConfig = serde_json::from_str(&net_config).map_err(api_error)?;
+        net_config
+            .validate_fds(&ExternalFds::default(), &mut BTreeSet::new())
+            .map_err(api_error)?;
         self.vm_action(&VmAddNet, net_config).await
     }
 
@@ -216,14 +222,9 @@ impl DBusApi {
 
         let mut vm_config: Box<VmConfig> = serde_json::from_str(&vm_config).map_err(api_error)?;
 
-        if let Some(ref mut nets) = vm_config.net {
-            if nets.iter().any(|net| net.fds.is_some()) {
-                warn!("Ignoring FDs sent via the D-Bus request body");
-            }
-            for net in nets {
-                net.fds = None;
-            }
-        }
+        vm_config
+            .update_fds(ExternalFds::default())
+            .map_err(api_error)?;
 
         blocking::unblock(move || VmCreate.send(api_notifier, api_sender, vm_config))
             .await
@@ -289,7 +290,9 @@ impl DBusApi {
     }
 
     async fn vm_restore(&self, restore_config: String) -> Result<()> {
-        let restore_config = serde_json::from_str(&restore_config).map_err(api_error)?;
+        let mut restore_config: RestoreConfig =
+            serde_json::from_str(&restore_config).map_err(api_error)?;
+        restore_config.consume_fds(Vec::new()).map_err(api_error)?;
         self.vm_action(&VmRestore, restore_config).await.map(|_| ())
     }
 
@@ -298,8 +301,11 @@ impl DBusApi {
     }
 
     async fn vm_receive_migration(&self, receive_migration_data: String) -> Result<()> {
-        let receive_migration_data =
+        let mut receive_migration_data: VmReceiveMigrationData =
             serde_json::from_str(&receive_migration_data).map_err(api_error)?;
+        receive_migration_data
+            .consume_fds(Vec::new())
+            .map_err(api_error)?;
         self.vm_action(&VmReceiveMigration, receive_migration_data)
             .await
             .map(|_| ())
@@ -428,4 +434,74 @@ pub fn start_dbus_thread(
         .map_err(VmmError::DBusThreadSpawn)?;
 
     Ok((thread_join_handle, (send_shutdown, recv_done)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn disconnected_api() -> DBusApi {
+        let (api_sender, api_receiver) = mpsc::channel();
+        // Disconnect the VMM so an unexpectedly forwarded request cannot block.
+        drop(api_receiver);
+        DBusApi::new(EventFd::new(libc::EFD_NONBLOCK).unwrap(), api_sender)
+    }
+
+    #[test]
+    fn test_vm_create_rejects_required_fds() {
+        let api = disconnected_api();
+
+        for config in [
+            r#"{"net":[{"id":"net0","fds":[42]}]}"#,
+            r#"{"devices":[{"id":"vfio0","fd":42}]}"#,
+        ] {
+            let error = future::block_on(api.vm_create(config.to_owned())).unwrap_err();
+            assert!(
+                matches!(&error, fdo::Error::Failed(message) if message.contains("Missing file descriptors")),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_vm_hotplug_rejects_required_fds() {
+        let api = disconnected_api();
+        let errors = [
+            future::block_on(api.vm_add_net(r#"{"id":"net0","fds":[42]}"#.to_owned())).unwrap_err(),
+            future::block_on(api.vm_add_device(r#"{"id":"vfio0","fd":42}"#.to_owned()))
+                .unwrap_err(),
+        ];
+        for error in errors {
+            assert!(
+                matches!(&error, fdo::Error::Failed(message) if message.contains("Missing file descriptors")),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_vm_restore_and_receive_reject_required_fds() {
+        let api = disconnected_api();
+        for fd_config in [
+            r#""vfio_fds":[{"id":"vfio0"}]"#,
+            r#""external_fds":[{"target":{"Net":{"id":"net0"}},"expected_fds":1}]"#,
+        ] {
+            let errors = [
+                future::block_on(api.vm_restore(format!(
+                    r#"{{"source_url":"file:///tmp/snapshot",{fd_config}}}"#
+                )))
+                .unwrap_err(),
+                future::block_on(api.vm_receive_migration(format!(
+                    r#"{{"receiver_url":"unix:/tmp/migration",{fd_config}}}"#
+                )))
+                .unwrap_err(),
+            ];
+            for error in errors {
+                assert!(
+                    matches!(&error, fdo::Error::Failed(message) if message.contains("Less file descriptors provided than expected")),
+                    "{error}"
+                );
+            }
+        }
+    }
 }

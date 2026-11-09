@@ -1802,6 +1802,63 @@ components:
       enum: [Copy, OnDemand, CopyOnWrite]
       default: Copy
 
+    ExternalFdTarget:
+      oneOf:
+        - type: object
+          required:
+            - Net
+          properties:
+            Net:
+              type: object
+              required:
+                - id
+              properties:
+                id:
+                  type: string
+        - type: object
+          required:
+            - Vfio
+          properties:
+            Vfio:
+              type: object
+              required:
+                - id
+              properties:
+                id:
+                  type: string
+        - type: string
+          enum: [Iommu]
+
+    RestoredNetConfig:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+        num_fds:
+          type: integer
+          format: uint64
+          default: 0
+        fds:
+          type: array
+          description: Descriptor numbers in JSON are ignored; use SCM_RIGHTS.
+          items:
+            type: integer
+            format: int32
+
+    RestoredVfioConfig:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+        fd:
+          type: integer
+          format: int32
+          description: The descriptor number in JSON is ignored; use SCM_RIGHTS.
+
     RestoreConfig:
       required:
         - source_url
@@ -1813,12 +1870,50 @@ components:
           type: boolean
         memory_restore_mode:
           $ref: "#/components/schemas/MemoryRestoreMode"
+        net_fds:
+          type: array
+          deprecated: true
+          description: >
+            Deprecated: use external_fds with Net targets instead.
+          items:
+            $ref: "#/components/schemas/RestoredNetConfig"
+        vfio_fds:
+          type: array
+          deprecated: true
+          description: >
+            Deprecated: use external_fds with Vfio targets instead.
+          items:
+            $ref: "#/components/schemas/RestoredVfioConfig"
+        iommufd_fd:
+          type: integer
+          format: int32
+          deprecated: true
+          description: >
+            Deprecated: use external_fds with an Iommu target instead.
         resume:
           type: boolean
         zone_updates:
           type: array
           items:
             $ref: "#/components/schemas/VmMemoryZoneUpdateData"
+        external_fds:
+          type: array
+          description: >
+            File descriptor entries and counts. The corresponding descriptors
+            must be supplied out of band via SCM_RIGHTS on the API UNIX socket.
+            Do not combine external_fds with legacy FD fields.
+          items:
+            required:
+              - target
+              - expected_fds
+            type: object
+            properties:
+              target:
+                $ref: "#/components/schemas/ExternalFdTarget"
+              expected_fds:
+                type: integer
+                format: uint64
+                description: Number of file descriptors expected for this entry.
 
     ReceiveMigrationData:
       required:
@@ -1827,6 +1922,19 @@ components:
       properties:
         receiver_url:
           type: string
+        vfio_fds:
+          type: array
+          deprecated: true
+          description: >
+            Deprecated: use external_fds with Vfio targets instead.
+          items:
+            $ref: "#/components/schemas/RestoredVfioConfig"
+        iommufd_fd:
+          type: integer
+          format: int32
+          deprecated: true
+          description: >
+            Deprecated: use external_fds with an Iommu target instead.
         tls_dir:
           type: string
           description: >
@@ -1844,6 +1952,24 @@ components:
           type: boolean
           default: true
           description: Enable the background thread for faulting all remaining pages.
+        external_fds:
+          type: array
+          description: >
+            File descriptor entries and counts. The corresponding descriptors
+            must be supplied out of band via SCM_RIGHTS on the API UNIX socket.
+            Do not combine external_fds with legacy FD fields.
+          items:
+            required:
+              - target
+              - expected_fds
+            type: object
+            properties:
+              target:
+                $ref: "#/components/schemas/ExternalFdTarget"
+              expected_fds:
+                type: integer
+                format: uint64
+                description: Number of file descriptors expected for this entry.
 
     MigrationMode:
       type: string

@@ -26,6 +26,7 @@ use option_parser::{ByteSized, ByteSizedParseError};
 use thiserror::Error;
 use vmm::api;
 use vmm::config::{self, RestoreConfig};
+use vmm::external_fds::ScmRights;
 use vmm::vm_config::{
     DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
     UserDeviceConfig, VdpaConfig, VsockConfig,
@@ -872,10 +873,8 @@ fn add_device_config(config: &str) -> Result<FdCommand, Error> {
         // SAFETY: The CLI transfers ownership of the inherited descriptors.
         unsafe { DeviceConfig::parse(config) }.map_err(Error::AddDeviceConfig)?;
 
-    // DeviceConfig is modified on purpose here by taking the file
-    // descriptor out. Keeping it and sending it over to the server side
-    // process would not make any sense since the file descriptor may be
-    // represented with different values.
+    // DeviceConfig is modified on purpose to take out the file descriptors.
+    // These fds are passed to the server side process via SCM_RIGHTS.
     let fds = device_config
         .fd
         .take()
@@ -932,10 +931,8 @@ fn add_net_config(config: &str) -> Result<FdCommand, Error> {
     // SAFETY: The CLI transfers ownership of the inherited descriptors.
     let mut net_config = unsafe { NetConfig::parse(config) }.map_err(Error::AddNetConfig)?;
 
-    // NetConfig is modified on purpose here by taking the list of file
-    // descriptors out. Keeping the list and send it to the server side
-    // process would not make any sense since the file descriptor may be
-    // represented with different values.
+    // NetConfig is modified on purpose to take out the file descriptors.
+    // These fds are passed to the server side process via SCM_RIGHTS.
     let fds = net_config
         .fds
         .take()
@@ -973,24 +970,15 @@ fn snapshot_config(url: &str) -> String {
 fn restore_config(config: &str) -> Result<FdCommand, Error> {
     // SAFETY: The CLI transfers ownership of the inherited descriptors.
     let mut restore_config = unsafe { RestoreConfig::parse(config) }.map_err(Error::Restore)?;
+
     // RestoreConfig is modified on purpose to take out the file descriptors.
-    // These fds are passed to the server side process via SCM_RIGHTS, in the
-    // order net_fds, then vfio_fds, then the iommufd FD, matching the
-    // server's split.
-    let mut fds: Vec<Arc<OwnedFd>> = match &mut restore_config.net_fds {
-        Some(net_fds) => net_fds
-            .iter_mut()
-            .flat_map(|net| net.fds.take().unwrap_or_default())
-            .filter_map(|mut fd| fd.take())
-            .collect(),
-        None => Vec::new(),
-    };
-    if let Some(vfio_fds) = restore_config.vfio_fds.as_mut() {
-        fds.extend(vfio_fds.iter_mut().filter_map(|v| v.fd.take()));
-    }
-    if let Some(iommufd_fd) = restore_config.iommufd_fd.take() {
-        fds.push(iommufd_fd);
-    }
+    // These fds are passed to the server side process via SCM_RIGHTS.
+    let fds = restore_config
+        .take_fds()
+        .into_iter()
+        .filter_map(|mut fd| fd.take())
+        .collect();
+
     let restore_config = serde_json::to_string(&restore_config).unwrap();
 
     Ok((restore_config, fds))
@@ -1011,13 +999,11 @@ fn receive_migration_data(config: &str) -> Result<FdCommand, Error> {
 
     // The FDs are passed to the server side process via SCM_RIGHTS, in the
     // order vfio_fds then the iommufd FD, matching the server's split.
-    let mut fds: Vec<Arc<OwnedFd>> = match data.vfio_fds.as_mut() {
-        Some(vfio_fds) => vfio_fds.iter_mut().filter_map(|v| v.fd.take()).collect(),
-        None => Vec::new(),
-    };
-    if let Some(iommufd_fd) = data.iommufd_fd.take() {
-        fds.push(iommufd_fd);
-    }
+    let fds = data
+        .take_fds()
+        .into_iter()
+        .filter_map(|mut fd| fd.take())
+        .collect();
 
     Ok((serde_json::to_string(&data).unwrap(), fds))
 }
