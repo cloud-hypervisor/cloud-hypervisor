@@ -1801,81 +1801,74 @@ fn date() -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
+/// Returns all [`Arg`]s in alphabetical order.
+///
+/// This is the order used in the `--help` output.
+fn get_cli_options_sorted() -> Box<[Arg]> {
+    [
+        Arg::new("continue-on-failure")
+            .long("continue-on-failure")
+            .help("Continue running remaining tests after a test failure")
+            .num_args(0)
+            .action(ArgAction::SetTrue)
+            .required(false),
+        Arg::new("image-format")
+            .long("image-format")
+            .help(
+                "Override the image format used for block tests, supported values: qcow2, raw, vhd, vhdx. \
+                 Default is 'raw'.",
+            )
+            .num_args(1)
+            .value_parser(["raw", "qcow2", "vhd", "vhdx"]),
+        Arg::new("iterations")
+            .long("iterations")
+            .help("Override number of test iterations")
+            .num_args(1),
+        Arg::new("list-tests")
+            .long("list-tests")
+            .help("Print the list of available metrics tests")
+            .num_args(0)
+            .action(ArgAction::SetTrue)
+            .required(false),
+        Arg::new("report-file")
+            .long("report-file")
+            .help("Report file. Standard error is used if not specified")
+            .num_args(1),
+        Arg::new("test-exclude")
+            .long("test-exclude")
+            .help("Exclude metrics tests matching the provided keywords (comma-separated)")
+            .num_args(1)
+            .value_delimiter(',')
+            .required(false),
+        Arg::new("test-filter")
+            .long("test-filter")
+            .help("Filter metrics tests to run based on provided keywords (comma-separated)")
+            .num_args(1)
+            .value_delimiter(',')
+            .required(false),
+        Arg::new("timeout")
+            .long("timeout")
+            .help("Override test timeout, Ex. --timeout 5")
+            .num_args(1),
+        Arg::new("vm-type")
+            .long("vm-type")
+            .help(
+                "Set the VM type: 'regular' (default) or 'confidential' (CVM).",
+            )
+            .num_args(1)
+            .value_parser(["regular","confidential"])
+            .default_value("regular"),
+    ]
+    .to_vec()
+    .into_boxed_slice()
+}
+
 fn build_clap_cli() -> ClapCommand {
     ClapCommand::new("performance-metrics")
         .version(env!("CARGO_PKG_VERSION"))
         .author(env!("CARGO_PKG_AUTHORS"))
         .about("Generate the performance metrics data for Cloud Hypervisor")
-        .arg(
-            Arg::new("test-filter")
-                .long("test-filter")
-                .help("Filter metrics tests to run based on provided keywords (comma-separated)")
-                .num_args(1)
-                .value_delimiter(',')
-                .required(false),
-        )
-        .arg(
-            Arg::new("test-exclude")
-                .long("test-exclude")
-                .help("Exclude metrics tests matching the provided keywords (comma-separated)")
-                .num_args(1)
-                .value_delimiter(',')
-                .required(false),
-        )
-        .arg(
-            Arg::new("list-tests")
-                .long("list-tests")
-                .help("Print the list of available metrics tests")
-                .num_args(0)
-                .action(ArgAction::SetTrue)
-                .required(false),
-        )
-        .arg(
-            Arg::new("continue-on-failure")
-                .long("continue-on-failure")
-                .help("Continue running remaining tests after a test failure")
-                .num_args(0)
-                .action(ArgAction::SetTrue)
-                .required(false),
-        )
-        .arg(
-            Arg::new("report-file")
-                .long("report-file")
-                .help("Report file. Standard error is used if not specified")
-                .num_args(1),
-        )
-        .arg(
-            Arg::new("iterations")
-                .long("iterations")
-                .help("Override number of test iterations")
-                .num_args(1),
-        )
-        .arg(
-            Arg::new("timeout")
-                .long("timeout")
-                .help("Override test timeout, Ex. --timeout 5")
-                .num_args(1),
-        )
-        .arg(
-            Arg::new("image-format")
-                .long("image-format")
-                .help(
-                    "Override the image format used for block tests, supported values: qcow2, raw, vhd, vhdx. \
-                     Default is 'raw'.",
-                )
-                .num_args(1)
-                .value_parser(["raw", "qcow2", "vhd", "vhdx"]),
-        )
-        .arg(
-            Arg::new("vm-type")
-                .long("vm-type")
-                .help(
-                    "Set the VM type: 'regular' (default) or 'confidential' (CVM).",
-                )
-                .num_args(1)
-                .value_parser(["regular","confidential"])
-                .default_value("regular"),
-        )
+        .args(get_cli_options_sorted())
 }
 
 fn main() {
@@ -2015,6 +2008,16 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::build_clap_cli;
+
+    #[test]
+    fn test_cli_options_sorted() {
+        let command = build_clap_cli();
+        let names: Vec<_> = command.get_arguments().map(|arg| arg.get_id()).collect();
+        assert!(
+            names.is_sorted(),
+            "CLI options are not alphabetically sorted"
+        );
+    }
 
     #[test]
     fn clap_cli_definition_is_valid() {
