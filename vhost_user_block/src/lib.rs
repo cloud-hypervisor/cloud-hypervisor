@@ -131,7 +131,7 @@ impl VhostUserBlkThread {
         {
             debug!("got an element in the queue");
             let len = match Request::parse(&mut desc_chain, None) {
-                (Ok(mut request), _) => {
+                (Ok(mut request), Some(status_addr)) => {
                     debug!("element is a valid request");
                     request.writeback = self.writeback.load(Ordering::Acquire);
                     let (status, len) = match request.execute(
@@ -147,16 +147,17 @@ impl VhostUserBlkThread {
                         Err(e) => (e.status(), 1),
                     };
 
-                    if let Err(e) = desc_chain.memory().write_obj(status, request.status_addr()) {
+                    if let Err(e) = desc_chain.memory().write_obj(status, status_addr) {
                         warn!(
                             "vhost-user-blk: failed to write status to 0x{:x}: {e:?}",
-                            request.status_addr().0
+                            status_addr.0
                         );
                         0
                     } else {
                         len
                     }
                 }
+                (Ok(_), None) => unreachable!("parse() returns the status address with a request"),
                 (Err(err), status_addr) => {
                     error!("failed to parse available descriptor chain: {err:?}");
                     if let Some(status_addr) = status_addr
