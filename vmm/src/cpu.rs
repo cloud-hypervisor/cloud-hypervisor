@@ -1705,12 +1705,13 @@ impl CpuManager {
 
             for (id, active) in state.active_vcpus.into_iter().enumerate() {
                 if active {
+                    let inserting = self.vcpu_states.lock().unwrap()[id].inserting;
                     self.start_vcpu(
                         Arc::clone(&self.vcpus[id]),
                         id as u32,
                         Arc::clone(&barrier),
                         Arc::clone(&seccomp_filter),
-                        false,
+                        inserting,
                     )?;
                 }
             }
@@ -3406,6 +3407,21 @@ impl CpuElf64Writable for CpuManager {
     }
 }
 
+pub(crate) const ACPI_CPU_HOTPLUG_CONTROLLER_SNAPSHOT_ID: &str = "__acpi_cpu_hotplug_controller";
+
+#[derive(Serialize, Deserialize)]
+struct AcpiCpuHotplugSlotState {
+    inserting: bool,
+    removing: bool,
+    pending_removal: bool,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+pub struct AcpiCpuHotplugControllerState {
+    selected_cpu: u32,
+    hotplug_slots: Vec<AcpiCpuHotplugSlotState>,
+}
+
 /// MMIO-accessible controller for handling ACPI hotplug and unplug events.
 ///
 /// Shares state about the vCPUs with the [`CpuManager`].
@@ -3428,10 +3444,26 @@ impl AcpiCpuHotplugController {
     const CPU_STATUS_OFFSET: u64 = 4;
 
     /// Creates a new [`AcpiCpuHotplugController`].
-    pub fn new(cpu_manager: &CpuManager) -> AcpiCpuHotplugController {
+    pub fn new(
+        cpu_manager: &CpuManager,
+        state: Option<AcpiCpuHotplugControllerState>,
+    ) -> AcpiCpuHotplugController {
+        let state = state.unwrap_or_default();
+        for (vcpu, slot) in cpu_manager
+            .vcpu_states
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .zip(state.hotplug_slots)
+        {
+            vcpu.inserting = slot.inserting;
+            vcpu.removing = slot.removing;
+            vcpu.pending_removal
+                .store(slot.pending_removal, Ordering::SeqCst);
+        }
         Self {
             max_vcpus: cpu_manager.config.max_vcpus,
-            selected_cpu: 0,
+            selected_cpu: state.selected_cpu,
             vcpu_states: Arc::clone(&cpu_manager.vcpu_states),
         }
     }
@@ -3454,6 +3486,33 @@ impl AcpiCpuHotplugController {
         Ok(())
     }
 }
+
+impl Snapshottable for AcpiCpuHotplugController {
+    fn id(&self) -> String {
+        ACPI_CPU_HOTPLUG_CONTROLLER_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
+        Snapshot::new_from_state(&AcpiCpuHotplugControllerState {
+            selected_cpu: self.selected_cpu,
+            hotplug_slots: self
+                .vcpu_states
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|vcpu| AcpiCpuHotplugSlotState {
+                    inserting: vcpu.inserting,
+                    removing: vcpu.removing,
+                    pending_removal: vcpu.pending_removal.load(Ordering::SeqCst),
+                })
+                .collect(),
+        })
+    }
+}
+
+impl Pausable for AcpiCpuHotplugController {}
+impl Transportable for AcpiCpuHotplugController {}
+impl Migratable for AcpiCpuHotplugController {}
 
 impl BusDevice for AcpiCpuHotplugController {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
@@ -3575,7 +3634,7 @@ mod tests {
     use crate::cpu::parallel_map;
 
     #[test]
-    fn cpu_active_vcpus_restore() {
+    fn cpu_hotplug_controller_restore() {
         use hypervisor::HypervisorVmError;
 
         use super::*;
@@ -3645,6 +3704,71 @@ mod tests {
         )
         .unwrap();
         let mut cpu_manager = cpu_manager.lock().unwrap();
+        {
+            let mut vcpus = cpu_manager.vcpu_states.lock().unwrap();
+            vcpus[0].inserting = true;
+            vcpus[1].inserting = true;
+            vcpus[1].removing = true;
+            vcpus[1].pending_removal.store(true, Ordering::SeqCst);
+        }
+        let mut controller = AcpiCpuHotplugController::new(&cpu_manager, None);
+        controller.write(
+            0,
+            AcpiCpuHotplugController::CPU_SELECTION_OFFSET,
+            &1u32.to_le_bytes(),
+        );
+        controller.write(
+            0,
+            AcpiCpuHotplugController::CPU_STATUS_OFFSET,
+            &[1 << AcpiCpuHotplugController::CPU_INSERTING_FLAG],
+        );
+        let snapshot = controller.snapshot().unwrap();
+        drop(controller);
+        for vcpu in cpu_manager.vcpu_states.lock().unwrap().iter_mut() {
+            *vcpu = VcpuState::default();
+        }
+
+        let mut restored =
+            AcpiCpuHotplugController::new(&cpu_manager, Some(snapshot.to_state().unwrap()));
+        let mut selected = [0; 4];
+        restored.read(
+            0,
+            AcpiCpuHotplugController::CPU_SELECTION_OFFSET,
+            &mut selected,
+        );
+        assert_eq!(u32::from_le_bytes(selected), 1);
+        let mut status = [0];
+        restored.read(0, AcpiCpuHotplugController::CPU_STATUS_OFFSET, &mut status);
+        assert_eq!(status, [1 << AcpiCpuHotplugController::CPU_REMOVING_FLAG]);
+        assert!(
+            cpu_manager.vcpu_states.lock().unwrap()[1]
+                .pending_removal
+                .load(Ordering::SeqCst)
+        );
+        restored.write(
+            0,
+            AcpiCpuHotplugController::CPU_STATUS_OFFSET,
+            &[1 << AcpiCpuHotplugController::CPU_REMOVING_FLAG],
+        );
+        assert!(!cpu_manager.vcpu_states.lock().unwrap()[1].removing);
+        restored.write(
+            0,
+            AcpiCpuHotplugController::CPU_STATUS_OFFSET,
+            &[1 << AcpiCpuHotplugController::CPU_EJECT_FLAG],
+        );
+        assert!(
+            !cpu_manager.vcpu_states.lock().unwrap()[1]
+                .pending_removal
+                .load(Ordering::SeqCst)
+        );
+        restored.write(
+            0,
+            AcpiCpuHotplugController::CPU_SELECTION_OFFSET,
+            &0u32.to_le_bytes(),
+        );
+        status[0] = 0;
+        restored.read(0, AcpiCpuHotplugController::CPU_STATUS_OFFSET, &mut status);
+        assert_eq!(status, [1 << AcpiCpuHotplugController::CPU_INSERTING_FLAG]);
         let snapshot = Snapshot::new_from_state(&CpuManagerState {
             active_vcpus: vec![true, false, true],
         })
@@ -3663,6 +3787,8 @@ mod tests {
             assert!(vcpus[0].active());
             assert!(!vcpus[1].active());
             assert!(vcpus[2].active());
+            assert!(vcpus[0].inserting);
+            assert!(!vcpus[2].inserting);
             drop(vcpus);
             let saved: CpuManagerState = cpu_manager.snapshot().unwrap().to_state().unwrap();
             assert_eq!(saved.active_vcpus, [true, false, true]);
