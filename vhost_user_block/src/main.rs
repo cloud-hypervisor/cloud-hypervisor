@@ -18,7 +18,7 @@ use vhost_user_block::start_block_backend;
     arg_required_else_help = true
 )]
 struct Cli {
-    #[arg(long, value_name = "block-backend", help = vhost_user_block::SYNTAX)]
+    #[arg(long, help = vhost_user_block::SYNTAX)]
     block_backend: String,
 }
 
