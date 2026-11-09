@@ -151,7 +151,7 @@ pub enum Error {
     /// Cannot start D-Bus session
     #[cfg(feature = "dbus_api")]
     #[error("Error starting D-Bus session")]
-    CreateDBusSession(#[source] zbus::Error),
+    CreateDBusSession(#[source] Box<zbus::Error>),
 
     /// Cannot create `event-monitor` thread
     #[error("Error spawning `event-monitor` thread")]
