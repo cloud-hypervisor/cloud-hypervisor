@@ -610,6 +610,126 @@ fn build_clap_cli(default_vcpus: String, default_memory: String, default_rng: St
         .args(args)
 }
 
+fn vm_params_from_arg_matches(args: &ArgMatches) -> VmParams<'_> {
+    // These .unwrap()s cannot fail as there is a default value defined
+    let cpus = args.get_one::<String>("cpus").unwrap();
+    let memory = args.get_one::<String>("memory").unwrap();
+    let memory_zones: Option<Vec<&str>> = args
+        .get_many::<String>("memory-zone")
+        .map(|x| x.map(|y| y as &str).collect());
+    let rng = args.get_one::<String>("rng").unwrap();
+    let serial = args.get_one::<String>("serial").unwrap();
+    let firmware = args.get_one::<String>("firmware").map(|x| x as &str);
+    let kernel = args.get_one::<String>("kernel").map(|x| x as &str);
+    let initramfs = args.get_one::<String>("initramfs").map(|x| x as &str);
+    let cmdline = args.get_one::<String>("cmdline").map(|x| x as &str);
+    let rate_limit_groups: Option<Vec<&str>> = args
+        .get_many::<String>("rate-limit-group")
+        .map(|x| x.map(|y| y as &str).collect());
+    let disks: Option<Vec<&str>> = args
+        .get_many::<String>("disk")
+        .map(|x| x.map(|y| y as &str).collect());
+    let net: Option<Vec<&str>> = args
+        .get_many::<String>("net")
+        .map(|x| x.map(|y| y as &str).collect());
+    let console = args.get_one::<String>("console").unwrap();
+    #[cfg(target_arch = "x86_64")]
+    let debug_console = args.get_one::<String>("debug-console").unwrap().as_str();
+    let balloon = args.get_one::<String>("balloon").map(|x| x as &str);
+    let fs: Option<Vec<&str>> = args
+        .get_many::<String>("fs")
+        .map(|x| x.map(|y| y as &str).collect());
+    let generic_vhost_user: Option<Vec<&str>> = args
+        .get_many::<String>("generic-vhost-user")
+        .map(|x| x.map(|y| y as &str).collect());
+    let pmem: Option<Vec<&str>> = args
+        .get_many::<String>("pmem")
+        .map(|x| x.map(|y| y as &str).collect());
+    let devices: Option<Vec<&str>> = args
+        .get_many::<String>("device")
+        .map(|x| x.map(|y| y as &str).collect());
+    let user_devices: Option<Vec<&str>> = args
+        .get_many::<String>("user-device")
+        .map(|x| x.map(|y| y as &str).collect());
+    let vdpa: Option<Vec<&str>> = args
+        .get_many::<String>("vdpa")
+        .map(|x| x.map(|y| y as &str).collect());
+    let vsock: Option<&str> = args.get_one::<String>("vsock").map(|x| x as &str);
+    #[cfg(feature = "pvmemcontrol")]
+    let pvmemcontrol = args.get_flag("pvmemcontrol");
+    let pvpanic = args.get_flag("pvpanic");
+    let numa: Option<Vec<&str>> = args
+        .get_many::<String>("numa")
+        .map(|x| x.map(|y| y as &str).collect());
+    let watchdog = args.get_flag("watchdog");
+    let rtc: Option<&str> = args.get_one::<String>("rtc").map(|x| x as &str);
+    let pci_segments: Option<Vec<&str>> = args
+        .get_many::<String>("pci-segment")
+        .map(|x| x.map(|y| y as &str).collect());
+    let platform = args.get_one::<String>("platform").map(|x| x as &str);
+    #[cfg(feature = "guest_debug")]
+    let gdb = args.contains_id("gdb");
+    let tpm: Option<&str> = args.get_one::<String>("tpm").map(|x| x as &str);
+    #[cfg(feature = "igvm")]
+    let igvm = args.get_one::<String>("igvm").map(|x| x as &str);
+    #[cfg(feature = "sev_snp")]
+    let host_data = args.get_one::<String>("host-data").map(|x| x as &str);
+    let landlock_enable = args.get_flag("landlock");
+    let landlock_rules: Option<Vec<&str>> = args
+        .get_many::<String>("landlock-rules")
+        .map(|x| x.map(|y| y as &str).collect());
+    #[cfg(feature = "fw_cfg")]
+    let fw_cfg_config: Option<&str> = args.get_one::<String>("fw-cfg-config").map(|x| x as &str);
+    #[cfg(feature = "ivshmem")]
+    let ivshmem: Option<&str> = args.get_one::<String>("ivshmem").map(|x| x as &str);
+    VmParams {
+        cpus,
+        memory,
+        memory_zones,
+        firmware,
+        kernel,
+        initramfs,
+        cmdline,
+        rate_limit_groups,
+        disks,
+        net,
+        rng,
+        balloon,
+        fs,
+        generic_vhost_user,
+        pmem,
+        serial,
+        console,
+        #[cfg(target_arch = "x86_64")]
+        debug_console,
+        devices,
+        user_devices,
+        vdpa,
+        vsock,
+        #[cfg(feature = "pvmemcontrol")]
+        pvmemcontrol,
+        pvpanic,
+        numa,
+        watchdog,
+        rtc,
+        #[cfg(feature = "guest_debug")]
+        gdb,
+        pci_segments,
+        platform,
+        tpm,
+        #[cfg(feature = "igvm")]
+        igvm,
+        #[cfg(feature = "sev_snp")]
+        host_data,
+        landlock_enable,
+        landlock_rules,
+        #[cfg(feature = "fw_cfg")]
+        fw_cfg_config,
+        #[cfg(feature = "ivshmem")]
+        ivshmem,
+    }
+}
+
 fn parse_api_socket(cmd_arguments: &ArgMatches) -> Result<(Option<String>, Option<RawFd>), Error> {
     if let Some(socket_config) = cmd_arguments.get_one::<String>("api-socket") {
         let mut parser = OptionParser::new();
@@ -690,7 +810,7 @@ fn start_vmm(
         cmd_arguments.contains_id("kernel") || cmd_arguments.contains_id("firmware");
 
     let vm_config = if payload_present {
-        let vm_params = VmParams::from_arg_matches(cmd_arguments);
+        let vm_params = vm_params_from_arg_matches(cmd_arguments);
         // SAFETY: The CLI transfers inherited FDs before the VMM opens new FDs.
         Some(unsafe { VmConfig::parse(vm_params) }.map_err(Error::ParsingConfig)?)
     } else {
@@ -1096,7 +1216,6 @@ mod tests {
     use std::ptr::from_mut;
     use std::thread;
 
-    use vmm::config::VmParams;
     #[cfg(target_arch = "x86_64")]
     use vmm::vm_config::DebugConsoleConfig;
     use vmm::vm_config::{
@@ -1109,6 +1228,7 @@ mod tests {
     use crate::{
         GuestResetAction, GuestShutdownAction, SeccompSiginfo, build_clap_cli,
         get_cli_options_sorted, parse_reset_action, parse_shutdown_action, prepare_default_values,
+        vm_params_from_arg_matches,
     };
 
     #[test]
@@ -1274,7 +1394,7 @@ mod tests {
         let (default_vcpus, default_memory, default_rng) = prepare_default_values();
         let cmd_arguments =
             build_clap_cli(default_vcpus, default_memory, default_rng).get_matches_from(args);
-        let vm_params = VmParams::from_arg_matches(&cmd_arguments);
+        let vm_params = vm_params_from_arg_matches(&cmd_arguments);
 
         // SAFETY: These CLI test cases supply no inherited descriptors.
         unsafe { VmConfig::parse(vm_params) }.unwrap()
