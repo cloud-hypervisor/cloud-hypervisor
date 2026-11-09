@@ -738,8 +738,7 @@ impl Console {
                     avail_features,
                     acked_features,
                     min_queues: NUM_QUEUES,
-                    pause_common: Arc::new(PauseCommon::new(paused)),
-                    ..Default::default()
+                    ..VirtioCommon::new(paused)?
                 },
                 id,
                 config: console_config,

@@ -28,7 +28,6 @@ use vmm_sys_util::ioctl::ioctl;
 use vmm_sys_util::ioctl_io_nr;
 
 use crate::device::ActivationContext;
-use crate::thread_helper::PauseCommon;
 use crate::{
     ActivateError, ActivateResult, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK,
     DEVICE_FEATURES_OK, GuestMemory, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon, VirtioDevice,
@@ -37,6 +36,8 @@ use crate::{
 
 #[derive(Error, Debug)]
 pub enum Error {
+    #[error("Failed to create EventFd")]
+    CreateEventFd(#[source] io::Error),
     #[error("Failed to create vhost-vdpa")]
     CreateVhostVdpa(#[source] vhost::Error),
     #[error("Failed to map DMA range")]
@@ -191,8 +192,7 @@ impl Vdpa {
                 avail_features,
                 acked_features,
                 min_queues: num_queues,
-                pause_common: Arc::new(PauseCommon::new(paused)),
-                ..Default::default()
+                ..VirtioCommon::new(paused).map_err(Error::CreateEventFd)?
             },
             id,
             vhost: Some(vhost),
@@ -677,7 +677,7 @@ mod tests {
         let mut vdpa = Vdpa {
             common: VirtioCommon {
                 avail_features: 1u64 << VIRTIO_F_ACCESS_PLATFORM,
-                ..Default::default()
+                ..VirtioCommon::new(false).unwrap()
             },
             id: "test".to_string(),
             vhost: None,
@@ -709,7 +709,7 @@ mod tests {
             common: VirtioCommon {
                 avail_features: 1u64 << VIRTIO_F_ACCESS_PLATFORM,
                 acked_features: 1u64 << VIRTIO_F_ACCESS_PLATFORM,
-                ..Default::default()
+                ..VirtioCommon::new(false).unwrap()
             },
             id: "test".to_string(),
             vhost: None,

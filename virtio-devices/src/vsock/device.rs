@@ -398,8 +398,7 @@ where
                 acked_features,
                 queue_sizes: QUEUE_SIZES.to_vec(),
                 min_queues: NUM_QUEUES,
-                pause_common: Arc::new(PauseCommon::new(paused)),
-                ..Default::default()
+                ..VirtioCommon::new(paused)?
             },
             id,
             cid: cid.into(),
