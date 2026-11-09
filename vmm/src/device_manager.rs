@@ -143,7 +143,10 @@ use vmm_sys_util::errno;
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::console_devices::{ConsoleInfo, ConsoleTransport};
-use crate::cpu::{AcpiCpuHotplugController, CPU_MANAGER_ACPI_SIZE, CpuManager};
+use crate::cpu::{
+    ACPI_CPU_HOTPLUG_CONTROLLER_SNAPSHOT_ID, AcpiCpuHotplugController, CPU_MANAGER_ACPI_SIZE,
+    CpuManager,
+};
 use crate::device_tree::{DeviceNode, DeviceTree};
 use crate::interrupt::{LegacyUserspaceInterruptManager, MsiInterruptManager};
 use crate::locked_unix_listener::LockedUnixListener;
@@ -1336,9 +1339,17 @@ impl DeviceManager {
             )?);
         }
 
-        let acpi_cpu_hotplug_controller =
-            AcpiCpuHotplugController::new(&cpu_manager.lock().unwrap());
+        let acpi_cpu_hotplug_controller = AcpiCpuHotplugController::new(
+            &cpu_manager.lock().unwrap(),
+            state_from_id(snapshot, ACPI_CPU_HOTPLUG_CONTROLLER_SNAPSHOT_ID)
+                .map_err(DeviceManagerError::RestoreGetState)?,
+        );
         let acpi_cpu_hotplug_controller = Arc::new(Mutex::new(acpi_cpu_hotplug_controller));
+        let id = ACPI_CPU_HOTPLUG_CONTROLLER_SNAPSHOT_ID.to_string();
+        device_tree
+            .lock()
+            .unwrap()
+            .insert(id.clone(), device_node!(id, acpi_cpu_hotplug_controller));
 
         if dynamic {
             let acpi_address = address_manager
