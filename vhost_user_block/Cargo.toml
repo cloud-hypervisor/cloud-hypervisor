@@ -8,6 +8,7 @@ version = "0.1.0"
 block = { path = "../block" }
 clap = { workspace = true, features = [
   "color",
+  "derive",
   "error-context",
   "help",
   "std",
