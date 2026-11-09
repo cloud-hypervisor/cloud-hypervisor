@@ -15,7 +15,8 @@ use virtio_bindings::virtio_net::{
     VIRTIO_NET_CTRL_RX_ALLMULTI, VIRTIO_NET_CTRL_RX_ALLUNI, VIRTIO_NET_CTRL_RX_NOBCAST,
     VIRTIO_NET_CTRL_RX_NOMULTI, VIRTIO_NET_CTRL_RX_NOUNI, VIRTIO_NET_CTRL_RX_PROMISC,
     VIRTIO_NET_CTRL_VLAN, VIRTIO_NET_CTRL_VLAN_ADD, VIRTIO_NET_CTRL_VLAN_DEL, VIRTIO_NET_ERR,
-    VIRTIO_NET_OK,
+    VIRTIO_NET_F_GUEST_CSUM, VIRTIO_NET_F_GUEST_ECN, VIRTIO_NET_F_GUEST_TSO4,
+    VIRTIO_NET_F_GUEST_TSO6, VIRTIO_NET_F_GUEST_UFO, VIRTIO_NET_OK,
 };
 use virtio_queue::{Queue, QueueT};
 use vm_memory::{ByteValued, Bytes, GuestMemoryBackend, GuestMemoryError};
@@ -23,6 +24,12 @@ use vm_virtio::{AccessPlatform, Translatable};
 
 use super::virtio_features_to_tap_offload;
 use crate::{Tap, associate_taps};
+
+const GUEST_OFFLOAD_FEATURES: u64 = (1 << VIRTIO_NET_F_GUEST_CSUM)
+    | (1 << VIRTIO_NET_F_GUEST_TSO4)
+    | (1 << VIRTIO_NET_F_GUEST_TSO6)
+    | (1 << VIRTIO_NET_F_GUEST_ECN)
+    | (1 << VIRTIO_NET_F_GUEST_UFO);
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -88,6 +95,7 @@ pub struct CtrlQueue {
     pub announce_pending: Arc<AtomicBool>,
     pub max_virtqueue_pairs: u16,
     pub curr_queue_pairs: Arc<AtomicU16>,
+    pub acked_features: u64,
 }
 
 impl CtrlQueue {
@@ -96,12 +104,14 @@ impl CtrlQueue {
         announce_pending: Arc<AtomicBool>,
         max_virtqueue_pairs: u16,
         curr_queue_pairs: Arc<AtomicU16>,
+        acked_features: u64,
     ) -> Self {
         CtrlQueue {
             taps,
             announce_pending,
             max_virtqueue_pairs,
             curr_queue_pairs,
+            acked_features,
         }
     }
 
@@ -183,7 +193,30 @@ impl CtrlQueue {
                         .memory()
                         .read_obj::<u64>(data_desc_addr)
                         .map_err(Error::GuestMemory)?;
-                    let ok = if u32::from(ctrl_hdr.cmd) == VIRTIO_NET_CTRL_GUEST_OFFLOADS_SET {
+                    let guest_offloads = features & GUEST_OFFLOAD_FEATURES;
+                    let acked_guest_offloads = guest_offloads & self.acked_features;
+                    let unacked_guest_offloads = guest_offloads & !self.acked_features;
+                    let non_offload_bits = features & !GUEST_OFFLOAD_FEATURES;
+                    let ok = if u32::from(ctrl_hdr.cmd) != VIRTIO_NET_CTRL_GUEST_OFFLOADS_SET {
+                        // Only GUEST_OFFLOADS_SET carries a guest-offload feature bitmask.
+                        warn!("Unsupported command: {}", ctrl_hdr.cmd);
+                        false
+                    } else if non_offload_bits != 0 {
+                        // Reject malformed payloads containing non-offload feature bits.
+                        debug!(
+                            "Rejecting guest offloads set: requested {features:#x}, \
+                             non-offload bits {non_offload_bits:#x}",
+                        );
+                        false
+                    } else if unacked_guest_offloads != 0 {
+                        // Guests can only enable offloads negotiated with the host on feature setup.
+                        debug!(
+                            "Rejecting guest offloads set: requested {features:#x}, \
+                             unacked {unacked_guest_offloads:#x}, acked {acked_guest_offloads:#x}",
+                        );
+                        false
+                    } else {
+                        // Try reprogramming each TAP with the requested offloads negotiated at feature setup.
                         let mut ok = true;
                         for tap in self.taps.iter_mut() {
                             info!("Reprogramming tap offload with features: {features}");
@@ -195,9 +228,6 @@ impl CtrlQueue {
                                 .ok();
                         }
                         ok
-                    } else {
-                        warn!("Unsupported command: {}", ctrl_hdr.cmd);
-                        false
                     };
                     (ok, status_desc)
                 }
@@ -264,6 +294,7 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
+    use virtio_bindings::virtio_net::VIRTIO_NET_F_MAC;
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use vm_memory::{Bytes, GuestAddress};
     use vm_virtio::queue::testing::VirtQueue as GuestQ;
@@ -325,6 +356,7 @@ mod tests {
             Arc::clone(&announce_pending),
             1,
             Arc::new(AtomicU16::new(1)),
+            0,
         );
 
         ctrl_q.process(&mem, &mut queue, None).unwrap();
@@ -384,6 +416,7 @@ mod tests {
             Arc::new(AtomicBool::new(false)),
             max_virtqueue_pairs,
             Arc::clone(&curr_queue_pairs),
+            0,
         );
         ctrl_q.process(&mem, &mut queue, None).unwrap();
 
@@ -446,6 +479,7 @@ mod tests {
             Arc::new(AtomicBool::new(false)),
             1,
             Arc::new(AtomicU16::new(1)),
+            0,
         );
 
         assert!(matches!(
@@ -454,10 +488,12 @@ mod tests {
         ));
     }
 
-    /// Build a VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET chain whose data and status
-    /// descriptors have the given lengths and flags, process it, and return
-    /// the result together with the status byte left in guest memory.
-    fn run_mq_chain(
+    /// Build a control chain whose data and status descriptors have the given
+    /// lengths and flags, process it, and return the result and status byte.
+    fn run_ctrl_chain<T: ByteValued>(
+        ctrl_hdr: ControlHeader,
+        data: T,
+        acked_features: u64,
         data_len: u32,
         data_flags: u16,
         status_len: u32,
@@ -490,15 +526,8 @@ mod tests {
         guest_q.avail.ring[0].set(0);
         guest_q.avail.idx.set(1);
 
-        mem.write_obj(
-            ControlHeader {
-                class: VIRTIO_NET_CTRL_MQ as u8,
-                cmd: VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET as u8,
-            },
-            GuestAddress(HEADER_ADDR),
-        )
-        .unwrap();
-        mem.write_obj(1u16, GuestAddress(DATA_ADDR)).unwrap();
+        mem.write_obj(ctrl_hdr, GuestAddress(HEADER_ADDR)).unwrap();
+        mem.write_obj(data, GuestAddress(DATA_ADDR)).unwrap();
         mem.write_obj(0xff_u8, GuestAddress(STATUS_ADDR)).unwrap();
 
         let mut ctrl_q = CtrlQueue::new(
@@ -506,6 +535,7 @@ mod tests {
             Arc::new(AtomicBool::new(false)),
             1,
             Arc::new(AtomicU16::new(1)),
+            acked_features,
         );
         let result = ctrl_q.process(&mem, &mut queue, None);
 
@@ -513,6 +543,58 @@ mod tests {
             result,
             mem.read_obj::<u8>(GuestAddress(STATUS_ADDR)).unwrap(),
         )
+    }
+
+    fn run_mq_chain(
+        data_len: u32,
+        data_flags: u16,
+        status_len: u32,
+        status_flags: u16,
+    ) -> (Result<()>, u8) {
+        run_ctrl_chain(
+            ControlHeader {
+                class: VIRTIO_NET_CTRL_MQ as u8,
+                cmd: VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET as u8,
+            },
+            1u16,
+            0,
+            data_len,
+            data_flags,
+            status_len,
+            status_flags,
+        )
+    }
+
+    #[test]
+    fn test_process_guest_offloads_feature_validation() {
+        let guest_csum = 1 << VIRTIO_NET_F_GUEST_CSUM;
+        let guest_tso4 = 1 << VIRTIO_NET_F_GUEST_TSO4;
+        let mac = 1 << VIRTIO_NET_F_MAC;
+        let acked_features = guest_csum | mac;
+        let write = u16::try_from(VRING_DESC_F_WRITE).unwrap();
+
+        for (features, expected_status) in [
+            (mac, VIRTIO_NET_ERR),                     // Non-offload bit.
+            (guest_tso4, VIRTIO_NET_ERR),              // Unacknowledged offload.
+            (guest_csum, VIRTIO_NET_OK),               // Acknowledged offload.
+            (guest_csum | mac, VIRTIO_NET_ERR),        // Offload and non-offload bits.
+            (guest_csum | guest_tso4, VIRTIO_NET_ERR), // Acknowledged and unacknowledged offloads.
+        ] {
+            let (result, status) = run_ctrl_chain(
+                ControlHeader {
+                    class: VIRTIO_NET_CTRL_GUEST_OFFLOADS as u8,
+                    cmd: VIRTIO_NET_CTRL_GUEST_OFFLOADS_SET as u8,
+                },
+                features,
+                acked_features,
+                size_of::<u64>() as u32,
+                0,
+                1,
+                write,
+            );
+            result.unwrap();
+            assert_eq!(status, expected_status as u8);
+        }
     }
 
     #[test]

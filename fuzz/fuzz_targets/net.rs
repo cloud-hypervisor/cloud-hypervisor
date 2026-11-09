@@ -987,6 +987,7 @@ fn new_direct_ctrl_handler(
             Arc::new(std::sync::atomic::AtomicBool::new(true)),
             MAX_VIRTQUEUE_PAIRS,
             Arc::new(std::sync::atomic::AtomicU16::new(MAX_VIRTQUEUE_PAIRS)),
+            u64::MAX,
         ),
         queue_evt,
         queue,
