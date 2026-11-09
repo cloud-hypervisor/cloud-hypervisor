@@ -299,8 +299,7 @@ impl From<CliSeccompAction> for SeccompAction {
 #[derive(Debug, Parser)]
 #[command(
     name = "cloud-hypervisor",
-    author,
-    about = "Launch a cloud-hypervisor VMM.",
+    about = "Launch a cloud-hypervisor VMM",
     arg_required_else_help = true
 )]
 #[command(group(ArgGroup::new("vm-config").multiple(true).requires("vm-payload")))]

@@ -120,7 +120,11 @@ fn memory_slot_filename(slot: u32) -> String {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "offload_daemon")]
+#[command(
+    version,
+    about = "Offload VM snapshots between Cloud Hypervisor and a local directory",
+    arg_required_else_help = true
+)]
 struct Cli {
     #[command(subcommand)]
     mode: Mode,

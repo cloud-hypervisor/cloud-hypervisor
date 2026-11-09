@@ -1805,7 +1805,6 @@ enum CliVmType {
 #[command(
     name = "performance-metrics",
     version,
-    author,
     about = "Generate the performance metrics data for Cloud Hypervisor"
 )]
 struct Cli {

@@ -839,7 +839,12 @@ fn create_data(path: &str) -> Result<String, Error> {
 }
 
 #[derive(Debug, Parser)]
-#[command(name = "ch-remote", author, version = env!("BUILD_VERSION"), about = "Remotely control a cloud-hypervisor VMM.", arg_required_else_help = true, subcommand_required = true)]
+#[command(
+    name = "ch-remote",
+    version = env!("BUILD_VERSION"),
+    about = "Remotely control a cloud-hypervisor VMM",
+    arg_required_else_help = true
+)]
 #[group(skip)]
 struct Cli {
     #[arg(
@@ -875,7 +880,6 @@ enum Command {
     AddDevice {
         #[arg(
             value_name = "device_config",
-            index = 1,
             help = DeviceConfig::SYNTAX,
         )]
         device_config: String,
@@ -884,7 +888,6 @@ enum Command {
     AddDisk {
         #[arg(
             value_name = "disk_config",
-            index = 1,
             help = DiskConfig::SYNTAX,
         )]
         disk_config: String,
@@ -893,7 +896,6 @@ enum Command {
     AddFs {
         #[arg(
             value_name = "fs_config",
-            index = 1,
             help = FsConfig::SYNTAX,
         )]
         fs_config: String,
@@ -902,7 +904,6 @@ enum Command {
     AddGenericVhostUser {
         #[arg(
             value_name = "generic_vhost_user_config",
-            index = 1,
             help = GenericVhostUserConfig::SYNTAX,
         )]
         generic_vhost_user_config: String,
@@ -911,7 +912,6 @@ enum Command {
     AddNet {
         #[arg(
             value_name = "net_config",
-            index = 1,
             help = NetConfig::SYNTAX,
         )]
         net_config: String,
@@ -920,7 +920,6 @@ enum Command {
     AddPmem {
         #[arg(
             value_name = "pmem_config",
-            index = 1,
             help = PmemConfig::SYNTAX,
         )]
         pmem_config: String,
@@ -929,7 +928,6 @@ enum Command {
     AddUserDevice {
         #[arg(
             value_name = "device_config",
-            index = 1,
             help = UserDeviceConfig::SYNTAX,
         )]
         device_config: String,
@@ -938,7 +936,6 @@ enum Command {
     AddVdpa {
         #[arg(
             value_name = "vdpa_config",
-            index = 1,
             help = VdpaConfig::SYNTAX,
         )]
         vdpa_config: String,
@@ -947,7 +944,6 @@ enum Command {
     AddVsock {
         #[arg(
             value_name = "vsock_config",
-            index = 1,
             help = VsockConfig::SYNTAX,
         )]
         vsock_config: String,
@@ -962,7 +958,6 @@ enum Command {
     Coredump {
         #[arg(
             value_name = "coredump_config",
-            index = 1,
             help = "Destination URL of the coredump"
         )]
         coredump_config: String,
@@ -973,7 +968,6 @@ enum Command {
     Create {
         #[arg(
             value_name = "path",
-            index = 1,
             help = "Path to the JSON configuration, or '-' for standard input",
             default_value = "-"
         )]
@@ -997,14 +991,13 @@ enum Command {
     ReceiveMigration {
         #[arg(
             value_name = "receive_migration_config",
-            index = 1,
             help = api::VmReceiveMigrationData::SYNTAX,
         )]
         receive_migration_config: String,
     },
     #[command(about = "Remove VFIO and PCI device")]
     RemoveDevice {
-        #[arg(value_name = "id", index = 1, help = "Device identifier")]
+        #[arg(value_name = "id", help = "Device identifier")]
         id: String,
     },
     #[command(about = "Resize the VM")]
@@ -1050,7 +1043,6 @@ enum Command {
     Restore {
         #[arg(
             value_name = "restore_config",
-            index = 1,
             help = RestoreConfig::SYNTAX,
         )]
         restore_config: String,
@@ -1061,7 +1053,6 @@ enum Command {
     SendMigration {
         #[arg(
             value_name = "send_migration_config",
-            index = 1,
             help = api::VmSendMigrationData::SYNTAX,
         )]
         send_migration_config: String,
@@ -1074,7 +1065,6 @@ enum Command {
     Snapshot {
         #[arg(
             value_name = "snapshot_config",
-            index = 1,
             help = "Destination URL of the snapshot"
         )]
         snapshot_config: String,
