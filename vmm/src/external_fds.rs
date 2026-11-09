@@ -290,6 +290,10 @@ impl From<Vec<(Target, Vec<ExternalFd>)>> for ExternalFds {
 /// Errors that can occur when processing `SCM_RIGHTS` provided file descriptors.
 #[derive(Error, Debug, Eq, PartialEq)]
 pub enum ScmRightsError {
+    // TODO(fd): Remove after the deprecation period for the legacy FD fields.
+    /// Legacy FD fields cannot be imported alongside `external_fds`.
+    #[error("Cannot combine external_fds with legacy FD fields")]
+    MixedFdFormats,
     /// Less file descriptors provided than expected.
     #[error("Less file descriptors provided than expected")]
     TooFewFds,
@@ -353,6 +357,10 @@ impl ScmRights for DeviceConfig {
 
 impl ScmRights for VmReceiveMigrationData {
     fn consume_fds(&mut self, files: Vec<File>) -> Result<(), ScmRightsError> {
+        // TODO(fd): Remove after the deprecation period for the legacy FD fields.
+        if !self.external_fds.is_empty() && (self.vfio_fds.is_some() || self.iommufd_fd.is_some()) {
+            return Err(ScmRightsError::MixedFdFormats);
+        }
         // TODO(fd): Remove after `vfio_fds` is deprecated and removed.
         self.external_fds
             .import_restored_iommufd_fd(&mut self.iommufd_fd, self.vfio_fds.is_some());
@@ -371,6 +379,12 @@ impl ScmRights for VmReceiveMigrationData {
 
 impl ScmRights for RestoreConfig {
     fn consume_fds(&mut self, files: Vec<File>) -> Result<(), ScmRightsError> {
+        // TODO(fd): Remove after the deprecation period for the legacy FD fields.
+        if !self.external_fds.is_empty()
+            && (self.net_fds.is_some() || self.vfio_fds.is_some() || self.iommufd_fd.is_some())
+        {
+            return Err(ScmRightsError::MixedFdFormats);
+        }
         // TODO(fd): Remove after `iommufd_fd` is deprecated and removed.
         self.external_fds
             .import_restored_iommufd_fd(&mut self.iommufd_fd, self.vfio_fds.is_some());
@@ -733,9 +747,11 @@ pub(crate) mod tests {
     use option_parser::{OptionParser, TupleList};
     use serde::{Deserialize, Serialize};
 
-    use crate::api::VmReceiveMigrationData;
+    use crate::api::{VmReceiveMigrationConfigError, VmReceiveMigrationData};
     use crate::config::tests::{net_fixture, platform_fixture};
-    use crate::config::{RestoreConfig, RestoredNetConfig, RestoredVfioConfig};
+    use crate::config::{
+        Error as ConfigError, RestoreConfig, RestoredNetConfig, RestoredVfioConfig,
+    };
     use crate::external_fds::{
         Entry, ExternalFds, ParseTargetError, ScmRights, ScmRightsError, Target, UpdateFdsError,
     };
@@ -1252,6 +1268,88 @@ pub(crate) mod tests {
             let mut device_config = device_config.clone();
             device_config.consume_fds(vec![]).unwrap();
             assert!(device_config.fd.is_none());
+        }
+    }
+
+    #[test]
+    fn mixed_fd_formats_cli() {
+        for legacy_field in ["net_fds", "vfio_fds", "iommufd_fd"] {
+            for restore in [true, false] {
+                if !restore && legacy_field == "net_fds" {
+                    continue;
+                }
+                let legacy_fd = test_fd().into_raw_fd();
+                let new_fd = test_fd().into_raw_fd();
+                let legacy = match legacy_field {
+                    "net_fds" => format!("net_fds=[net0@[{legacy_fd}]]"),
+                    "vfio_fds" => format!("vfio_fds=[vfio0@{legacy_fd}]"),
+                    _ => format!("iommufd_fd={legacy_fd}"),
+                };
+                let fields = format!("{legacy},external_fds=[iommu@[{new_fd}]]");
+                if restore {
+                    // SAFETY: Each descriptor is exclusively transferred to the parser.
+                    let result = unsafe {
+                        RestoreConfig::parse(&format!("source_url=file:///tmp/snapshot,{fields}"))
+                    };
+                    assert!(matches!(result, Err(ConfigError::MixedFdFormats)));
+                } else {
+                    // SAFETY: Each descriptor is exclusively transferred to the parser.
+                    let result = unsafe {
+                        VmReceiveMigrationData::parse(&format!(
+                            "receiver_url=unix:/tmp/migration,{fields}"
+                        ))
+                    };
+                    assert!(matches!(
+                        result,
+                        Err(VmReceiveMigrationConfigError::MixedFdFormats)
+                    ));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn mixed_fd_formats_json() {
+        for legacy in [
+            r#""net_fds":[{"id":"net0","num_fds":1}]"#,
+            r#""vfio_fds":[{"id":"vfio0"}]"#,
+        ] {
+            let fields =
+                format!(r#"{legacy},"external_fds":[{{"target":"Iommu","expected_fds":1}}]"#);
+            let mut restore: RestoreConfig = serde_json::from_str(&format!(
+                r#"{{"source_url":"file:///tmp/snapshot",{fields}}}"#
+            ))
+            .unwrap();
+            assert_eq!(
+                restore.consume_fds(vec![test_fd(), test_fd()]),
+                Err(ScmRightsError::MixedFdFormats)
+            );
+        }
+        let mut receive: VmReceiveMigrationData = serde_json::from_str(
+            r#"{"receiver_url":"unix:/tmp/migration","vfio_fds":[{"id":"vfio0"}],"external_fds":[{"target":"Iommu","expected_fds":1}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            receive.consume_fds(vec![test_fd(), test_fd()]),
+            Err(ScmRightsError::MixedFdFormats)
+        );
+
+        // Legacy IOMMU numbers are discarded by deserialization; the extra
+        // descriptor is rejected by the existing descriptor count check.
+        let fields = r#""iommufd_fd":42,"external_fds":[{"target":{"Vfio":{"id":"vfio0"}},"expected_fds":1}]"#;
+        let mut restore: RestoreConfig = serde_json::from_str(&format!(
+            r#"{{"source_url":"file:///tmp/snapshot",{fields}}}"#
+        ))
+        .unwrap();
+        let mut receive: VmReceiveMigrationData = serde_json::from_str(&format!(
+            r#"{{"receiver_url":"unix:/tmp/migration",{fields}}}"#
+        ))
+        .unwrap();
+        for config in [&mut restore as &mut dyn ScmRights, &mut receive] {
+            assert_eq!(
+                config.consume_fds(vec![test_fd(), test_fd()]),
+                Err(ScmRightsError::TooManyFds)
+            );
         }
     }
 

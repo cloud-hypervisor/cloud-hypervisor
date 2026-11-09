@@ -1901,6 +1901,7 @@ components:
           description: >
             File descriptor entries and counts. The corresponding descriptors
             must be supplied out of band via SCM_RIGHTS on the API UNIX socket.
+            Do not combine external_fds with legacy FD fields.
           items:
             required:
               - target
@@ -1956,6 +1957,7 @@ components:
           description: >
             File descriptor entries and counts. The corresponding descriptors
             must be supplied out of band via SCM_RIGHTS on the API UNIX socket.
+            Do not combine external_fds with legacy FD fields.
           items:
             required:
               - target
