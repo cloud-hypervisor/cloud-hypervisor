@@ -312,7 +312,7 @@ struct Cli {
     #[arg(
         value_name = "api-socket",
         long,
-        help = "HTTP API socket (UNIX domain socket): path=<path> or fd=<fd>.",
+        help = "HTTP API socket (UNIX domain socket): path=<path> or fd=<fd>",
         group = "vmm-config"
     )]
     api_socket: Option<String>,
@@ -358,7 +358,7 @@ struct Cli {
     #[arg(
         value_name = "dbus-service-name",
         long,
-        help = "Well known name of the device",
+        help = "Well known name of the dbus service",
         group = "vmm-config"
     )]
     dbus_service_name: Option<String>,
@@ -404,7 +404,7 @@ struct Cli {
     #[arg(
         value_name = "firmware",
         long,
-        help = "Path to firmware that is loaded in an architectural specific way",
+        help = "Path to firmware that is loaded in an architecture-specific way",
         group = "vm-payload"
     )]
     firmware: Option<String>,
@@ -468,7 +468,7 @@ struct Cli {
     #[arg(
         value_name = "igvm",
         long,
-        help = "Path to IGVM file to load.",
+        help = "Path to IGVM file to load",
         group = "vm-payload"
     )]
     igvm: Option<String>,
@@ -495,12 +495,7 @@ struct Cli {
         group = "vm-payload"
     )]
     kernel: Option<String>,
-    #[arg(
-        long,
-        help = "enable/disable Landlock.",
-        default_value = "false",
-        group = "vmm-config"
-    )]
+    #[arg(long, help = "Enable Landlock", group = "vmm-config")]
     landlock: bool,
     #[arg(
         value_name = "landlock-rules",
@@ -554,8 +549,8 @@ struct Cli {
     net: Option<Vec<String>>,
     #[arg(
         long,
-        help = "Do not exit the VMM when the guest shuts down \
-                 (deprecated: use --guest-shutdown-action=shutdown-vm)",
+        help = "Do not exit Cloud Hypervisor when the guest shuts down \
+                 [deprecated: use --guest-shutdown-action=shutdown-vm]",
         conflicts_with = "guest_shutdown_action",
         group = "vmm-config"
     )]
@@ -592,7 +587,7 @@ struct Cli {
     )]
     pmem: Option<Vec<String>>,
     #[cfg(feature = "pvmemcontrol")]
-    #[arg(long, help = "Pvmemcontrol device", group = "vm-config")]
+    #[arg(long, help = "Enable pvmemcontrol device", group = "vm-config")]
     pvmemcontrol: bool,
     #[arg(long, help = "Enable pvpanic device", group = "vm-config")]
     pvpanic: bool,
@@ -628,7 +623,13 @@ struct Cli {
         group = "vm-config",
     )]
     rtc: Option<String>,
-    #[arg(value_name = "seccomp", long, default_value = "true")]
+    #[arg(
+        value_name = "seccomp",
+        long,
+        help = "Action on prohibited system calls",
+        default_value = "true",
+        group = "vmm-config"
+    )]
     seccomp: CliSeccompAction,
     #[arg(
         value_name = "serial",
@@ -656,7 +657,7 @@ struct Cli {
     #[arg(
         short = 'v',
         action = ArgAction::Count,
-        help = "Sets the level of debugging output",
+        help = "Increase log verbosity: -v for info, -vv for debug, -vvv for trace",
         group = "logging",
     )]
     v: u8,
@@ -677,7 +678,7 @@ struct Cli {
         group = "vm-config",
     )]
     vsock: Option<String>,
-    #[arg(long, help = "Enable virtio-watchdog", group = "vm-config")]
+    #[arg(long, help = "Enable virtio-watchdog device", group = "vm-config")]
     watchdog: bool,
 }
 
