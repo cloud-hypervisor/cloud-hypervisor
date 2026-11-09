@@ -183,20 +183,10 @@ impl RequestHandler for StubApiRequestHandler {
                 generic_vhost_user: None,
                 pmem: None,
                 serial: SerialConfig {
-                    common: CommonConsoleConfig {
-                        file: None,
-                        mode: ConsoleOutputMode::Tty,
-                        socket: None,
-                        tcp: None,
-                    },
+                    output: ConsoleOutput::Tty,
                 },
                 console: ConsoleConfig {
-                    common: CommonConsoleConfig {
-                        file: None,
-                        mode: ConsoleOutputMode::Tty,
-                        socket: None,
-                        tcp: None,
-                    },
+                    output: ConsoleOutput::Tty,
                     pci_common: PciDeviceCommonConfig::default(),
                 },
                 #[cfg(target_arch = "x86_64")]

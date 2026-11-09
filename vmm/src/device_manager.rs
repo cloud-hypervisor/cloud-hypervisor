@@ -156,7 +156,7 @@ use crate::util::flatten_error_chain_to_string;
 #[cfg(feature = "ivshmem")]
 use crate::vm_config::IvshmemConfig;
 use crate::vm_config::{
-    ConsoleOutputMode, DEFAULT_IOMMU_ADDRESS_WIDTH_BITS, DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT,
+    ConsoleOutput, DEFAULT_IOMMU_ADDRESS_WIDTH_BITS, DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT,
     DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, IommuType, NetConfig,
     PciDeviceCommonConfig, PmemConfig, UserDeviceConfig, VdpaConfig, VhostMode, VmConfig,
     VsockConfig,
@@ -2647,13 +2647,11 @@ impl DeviceManager {
             .insert(id.clone(), device_node!(id, virtio_console_device));
 
         // Only provide a resizer (for SIGWINCH handling) if the console is attached to the TTY
-        Ok(
-            if matches!(console_config.common.mode, ConsoleOutputMode::Tty) {
-                Some(console_resizer)
-            } else {
-                None
-            },
-        )
+        Ok(if matches!(console_config.output, ConsoleOutput::Tty) {
+            Some(console_resizer)
+        } else {
+            None
+        })
     }
 
     /// Adds all devices that behave like a console with respect to the VM
@@ -6358,8 +6356,7 @@ impl Aml for DeviceManager {
         #[cfg(target_arch = "x86_64")]
         let serial_irq = 4;
         #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
-        let serial_irq = if self.config.lock().unwrap().serial.common.mode == ConsoleOutputMode::Off
-        {
+        let serial_irq = if self.config.lock().unwrap().serial.output == ConsoleOutput::Off {
             // If serial is turned off, add a fake device with invalid irq.
             31
         } else {
@@ -6369,7 +6366,7 @@ impl Aml for DeviceManager {
                 .unwrap()
                 .irq()
         };
-        if self.config.lock().unwrap().serial.common.mode != ConsoleOutputMode::Off {
+        if self.config.lock().unwrap().serial.output != ConsoleOutput::Off {
             aml::Device::new(
                 "_SB_.COM1".into(),
                 vec![
