@@ -75,7 +75,6 @@ pub struct Request {
     request_type: RequestType,
     sector: u64,
     data_descriptors: SmallVec<[(GuestAddress, u32); DEFAULT_DESCRIPTOR_VEC_SIZE]>,
-    status_addr: GuestAddress,
     pub writeback: bool,
     start: Instant,
 }
@@ -114,7 +113,6 @@ impl Request {
                 request_type: request_type(desc_chain.memory(), hdr_desc_addr)?,
                 sector: sector(desc_chain.memory(), hdr_desc_addr)?,
                 data_descriptors: SmallVec::with_capacity(DEFAULT_DESCRIPTOR_VEC_SIZE),
-                status_addr,
                 writeback: true,
                 start: Instant::now(),
             };
@@ -626,11 +624,6 @@ impl Request {
     }
 
     #[inline]
-    pub fn status_addr(&self) -> GuestAddress {
-        self.status_addr
-    }
-
-    #[inline]
     pub fn start(&self) -> Instant {
         self.start
     }
@@ -733,7 +726,6 @@ mod tests {
                     request_type,
                     sector: 0,
                     data_descriptors: SmallVec::from_slice(&[(GuestAddress(0), len)]),
-                    status_addr: GuestAddress(8191),
                     writeback: true,
                     start: Instant::now(),
                 };
@@ -765,7 +757,6 @@ mod tests {
                     (GuestAddress(1), 512),
                     (GuestAddress(513), 3584),
                 ]),
-                status_addr: GuestAddress(8191),
                 writeback: true,
                 start: Instant::now(),
             };
@@ -798,7 +789,6 @@ mod tests {
             request_type: RequestType::WriteZeroes,
             sector: 0,
             data_descriptors: SmallVec::from_slice(&[(GuestAddress(0), DISCARD_WZ_SEG_SIZE)]),
-            status_addr: GuestAddress(0),
             writeback: true,
             start: Instant::now(),
         };
@@ -832,7 +822,6 @@ mod tests {
                 (GuestAddress(0x1000), 0x1000),
                 (GuestAddress(0x4000), 0x2000),
             ]),
-            status_addr: GuestAddress(0),
             writeback: true,
             start: Instant::now(),
         };
@@ -870,7 +859,6 @@ mod tests {
                     request_type,
                     sector,
                     data_descriptors: SmallVec::from_slice(&[(GuestAddress(0), 0)]),
-                    status_addr: GuestAddress(0),
                     writeback: true,
                     start: Instant::now(),
                 };
