@@ -367,7 +367,7 @@ struct Cli {
         value_name = "fw-cfg-config",
         long,
         help = FwCfgConfig::SYNTAX,
-        group = "vm-payload",
+        group = "vm-config",
     )]
     fw_cfg_config: Option<String>,
     #[cfg(feature = "guest_debug")]
