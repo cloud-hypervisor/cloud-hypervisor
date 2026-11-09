@@ -2684,6 +2684,14 @@ impl Vm {
         self.memory_manager.lock().unwrap().guest_memory()
     }
 
+    pub(crate) fn memory_cow_diff(&self) -> result::Result<MemoryRangeTable, MigratableError> {
+        self.memory_manager.lock().unwrap().memory_cow_diff()
+    }
+
+    pub(crate) fn is_memory_cow(&self) -> bool {
+        self.memory_manager.lock().unwrap().is_memory_cow()
+    }
+
     pub fn restoring(&self) -> bool {
         self.memory_manager.lock().unwrap().restoring()
     }

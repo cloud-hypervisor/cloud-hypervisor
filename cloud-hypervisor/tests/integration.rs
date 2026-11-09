@@ -10220,18 +10220,23 @@ mod ivshmem {
 
     #[test]
     fn test_snapshot_restore_offload() {
-        snapshot_restore_common::_test_snapshot_restore_offload(false, false);
+        snapshot_restore_common::_test_snapshot_restore_offload(false, false, false);
+    }
+
+    #[test]
+    fn test_snapshot_restore_offload_copy_on_write() {
+        snapshot_restore_common::_test_snapshot_restore_offload(false, false, true);
     }
 
     #[test]
     fn test_snapshot_restore_offload_virtio_mem() {
-        snapshot_restore_common::_test_snapshot_restore_offload(true, false);
+        snapshot_restore_common::_test_snapshot_restore_offload(true, false, false);
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_offload_ondemand() {
-        snapshot_restore_common::_test_snapshot_restore_offload(false, true);
+        snapshot_restore_common::_test_snapshot_restore_offload(false, true, false);
     }
 
     #[test]
@@ -11001,7 +11006,11 @@ mod snapshot_restore_common {
     // Round-trip via the reference offload daemon over the existing
     // `vm.send-migration memory_mode=memfds` / `vm.receive-migration`
     // endpoints, proving parity with `vm.snapshot`/`vm.restore`.
-    pub(crate) fn _test_snapshot_restore_offload(virtio_mem: bool, ondemand: bool) {
+    pub(crate) fn _test_snapshot_restore_offload(
+        virtio_mem: bool,
+        ondemand: bool,
+        copy_on_write: bool,
+    ) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
@@ -11024,9 +11033,6 @@ mod snapshot_restore_common {
                 .unwrap(),
         );
 
-        // Shared memory required: offload runs over local live migration.
-        // With virtio_mem, expose a hotpluggable zone so the test can plug
-        // RAM before the snapshot and check it survives the round-trip.
         let mem_params = if virtio_mem {
             "size=512M,hotplug_method=virtio-mem,hotplug_size=2G,shared=on"
         } else {
@@ -11089,7 +11095,7 @@ mod snapshot_restore_common {
             assert!(remote_command(
                 &api_socket_source,
                 "send-migration",
-                Some(format!("destination_url=unix:{snapshot_socket},memory_mode=memfds").as_str(),),
+                Some(format!("destination_url=unix:{snapshot_socket},memory_mode=memfds").as_str()),
             ));
 
             // The daemon should exit cleanly after persisting the snapshot.
@@ -11177,6 +11183,9 @@ mod snapshot_restore_common {
             ];
             if ondemand {
                 restore_args.push("--ondemand".to_string());
+            }
+            if copy_on_write {
+                restore_args.push("--copy-on-write".to_string());
             }
             let daemon = Command::new(clh_command("offload_daemon"))
                 .args(&restore_args)

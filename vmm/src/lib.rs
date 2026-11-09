@@ -112,6 +112,8 @@ mod userfaultfd;
 pub mod vm;
 pub mod vm_config;
 
+const MEMORY_CHUNK_SIZE: u64 = 64 << 20;
+
 /// Errors associated with VMM management
 #[derive(Debug, Error)]
 pub enum Error {
@@ -616,8 +618,16 @@ pub struct VmMigrationConfig {
 }
 
 impl VmMigrationConfig {
+    pub fn vm_config(&self) -> &Arc<Mutex<VmConfig>> {
+        &self.vm_config
+    }
+
     pub fn memory_manager_data(&self) -> &MemoryManagerSnapshotData {
         &self.memory_manager_data
+    }
+
+    pub fn memory_manager_data_mut(&mut self) -> &mut MemoryManagerSnapshotData {
+        &mut self.memory_manager_data
     }
 
     pub fn memory_mode(&self) -> MigrationMode {
@@ -1867,6 +1877,18 @@ impl Vmm {
         let (vm_snapshot, snapshot_duration) = measure_ok(|| {
             // Capture snapshot. This may have side effects, e.g. vhost-user backend inflight drain
             let snapshot = vm.snapshot()?;
+
+            if memory_mode == MigrationMode::MemFDs && vm.is_memory_cow() {
+                let table = vm.memory_cow_diff()?;
+                for chunk in table.partition(MEMORY_CHUNK_SIZE) {
+                    transport::send_memory_ranges(
+                        &vm.guest_memory(),
+                        &chunk,
+                        &mut socket,
+                        cancel_migration,
+                    )?;
+                }
+            }
 
             // One final memory iteration to handle side effects from snapshot.
             if matches!(memory_mode, MigrationMode::Precopy) {
@@ -3491,9 +3513,12 @@ impl RequestHandler for Vmm {
             if !vm_config.backed_by_shared_memory()
                 && send_data_migration.effective_memory_mode() == MigrationMode::MemFDs
             {
-                return Err(MigratableError::MigrateSend(anyhow!(
-                    "Memory FD migration requires shared memory or hugepages enabled"
-                )));
+                let vm = self.vm.as_mut().unwrap();
+                if !vm.is_memory_cow() {
+                    return Err(MigratableError::MigrateSend(anyhow!(
+                        "Memory FD migration requires shared memory, hugepages or private file backing"
+                    )));
+                }
             }
             if send_data_migration.effective_memory_mode() == MigrationMode::Postcopy {
                 vm_config
