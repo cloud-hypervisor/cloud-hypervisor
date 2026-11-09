@@ -18,9 +18,7 @@ use api_client::{
     Error as ApiClientError, simple_api_command, simple_api_command_with_fds,
     simple_api_full_command,
 };
-#[cfg(feature = "dbus_api")]
-use clap::ArgAction;
-use clap::{Arg, ArgMatches, Command};
+use clap::{Parser, Subcommand};
 use log::error;
 use option_parser::{ByteSized, ByteSizedParseError};
 use thiserror::Error;
@@ -301,28 +299,28 @@ impl<'a> DBusApi1ProxyBlocking<'a> {
 }
 
 impl TargetApi<'_> {
-    fn do_command(&mut self, matches: &ArgMatches, fd_command: Option<FdCommand>) -> ApiResult {
+    fn do_command(&mut self, command: &Command, fd_command: Option<FdCommand>) -> ApiResult {
         match self {
-            Self::HttpApi(api_socket, _) => rest_api_do_command(matches, api_socket, fd_command),
+            Self::HttpApi(api_socket, _) => rest_api_do_command(command, api_socket, fd_command),
             #[cfg(feature = "dbus_api")]
-            Self::DBusApi(proxy) => dbus_api_do_command(matches, proxy, fd_command),
+            Self::DBusApi(proxy) => dbus_api_do_command(command, proxy, fd_command),
         }
     }
 }
 
-fn prepare_fd_command(matches: &ArgMatches) -> Result<Option<FdCommand>, Error> {
-    let fd_command = match matches.subcommand() {
-        Some(("add-device", args)) => Some(add_device_config(
-            args.get_one::<String>("device_config").unwrap(),
-        )?),
-        Some(("add-net", args)) => Some(add_net_config(
-            args.get_one::<String>("net_config").unwrap(),
-        )?),
-        Some(("restore", args)) => Some(restore_config(
-            args.get_one::<String>("restore_config").unwrap(),
-        )?),
-        Some(("receive-migration", args)) => Some(receive_migration_data(
-            args.get_one::<String>("receive_migration_config").unwrap(),
+fn prepare_fd_command(command: &Command) -> Result<Option<FdCommand>, Error> {
+    let fd_command = match command {
+        Command::AddDevice { device_config } => {
+            Some(add_device_config(device_config.as_deref().unwrap())?)
+        }
+        Command::AddNet { net_config } => Some(add_net_config(net_config.as_deref().unwrap())?),
+        Command::Restore {
+            restore_config: config,
+        } => Some(restore_config(config)?),
+        Command::ReceiveMigration {
+            receive_migration_config,
+        } => Some(receive_migration_data(
+            receive_migration_config.as_deref().unwrap(),
         )?),
         _ => None,
     };
@@ -330,103 +328,83 @@ fn prepare_fd_command(matches: &ArgMatches) -> Result<Option<FdCommand>, Error> 
 }
 
 fn rest_api_do_command(
-    matches: &ArgMatches,
+    command: &Command,
     socket: &mut UnixStream,
     fd_command: Option<FdCommand>,
 ) -> ApiResult {
     let (fd_request_body, fds) = fd_command
         .map(|(body, fds)| (Some(body), fds))
         .unwrap_or_default();
-    match matches.subcommand_name() {
-        Some("boot") => {
+    match command {
+        Command::Boot => {
             simple_api_command(socket, "PUT", "boot", None).map_err(Error::HttpApiClient)
         }
-        Some("delete") => {
+        Command::Delete => {
             simple_api_command(socket, "PUT", "delete", None).map_err(Error::HttpApiClient)
         }
-        Some("shutdown-vmm") => simple_api_full_command(socket, "PUT", "vmm.shutdown", None)
+        Command::ShutdownVmm => simple_api_full_command(socket, "PUT", "vmm.shutdown", None)
             .map_err(Error::HttpApiClient),
-        Some("resume") => {
+        Command::Resume => {
             simple_api_command(socket, "PUT", "resume", None).map_err(Error::HttpApiClient)
         }
-        Some("power-button") => {
+        Command::PowerButton => {
             simple_api_command(socket, "PUT", "power-button", None).map_err(Error::HttpApiClient)
         }
-        Some("reboot") => {
+        Command::Reboot => {
             simple_api_command(socket, "PUT", "reboot", None).map_err(Error::HttpApiClient)
         }
-        Some("pause") => {
+        Command::Pause => {
             simple_api_command(socket, "PUT", "pause", None).map_err(Error::HttpApiClient)
         }
-        Some("info") => {
+        Command::Info => {
             simple_api_command(socket, "GET", "info", None).map_err(Error::HttpApiClient)
         }
-        Some("balloon-stats") => {
+        Command::BalloonStats => {
             simple_api_command(socket, "GET", "balloon-stats", None).map_err(Error::HttpApiClient)
         }
-        Some("counters") => {
+        Command::Counters => {
             simple_api_command(socket, "GET", "counters", None).map_err(Error::HttpApiClient)
         }
-        Some("ping") => {
+        Command::Ping => {
             simple_api_full_command(socket, "GET", "vmm.ping", None).map_err(Error::HttpApiClient)
         }
-        Some("shutdown") => {
+        Command::Shutdown => {
             simple_api_command(socket, "PUT", "shutdown", None).map_err(Error::HttpApiClient)
         }
-        Some("nmi") => simple_api_command(socket, "PUT", "nmi", None).map_err(Error::HttpApiClient),
-        Some("resize") => {
+        Command::Nmi => {
+            simple_api_command(socket, "PUT", "nmi", None).map_err(Error::HttpApiClient)
+        }
+        Command::Resize {
+            balloon: arg_balloon,
+            cpus: arg_cpus,
+            memory: arg_memory,
+        } => {
             let resize = resize_config(
-                matches
-                    .subcommand_matches("resize")
-                    .unwrap()
-                    .get_one::<String>("cpus")
-                    .map(|x| x as &str),
-                matches
-                    .subcommand_matches("resize")
-                    .unwrap()
-                    .get_one::<String>("memory")
-                    .map(|x| x as &str),
-                matches
-                    .subcommand_matches("resize")
-                    .unwrap()
-                    .get_one::<String>("balloon")
-                    .map(|x| x as &str),
+                arg_cpus.as_deref(),
+                arg_memory.as_deref(),
+                arg_balloon.as_deref(),
             )?;
             simple_api_command(socket, "PUT", "resize", Some(&resize)).map_err(Error::HttpApiClient)
         }
-        Some("resize-disk") => {
-            let resize_disk = resize_disk_config(
-                matches
-                    .subcommand_matches("resize-disk")
-                    .unwrap()
-                    .get_one::<String>("disk")
-                    .unwrap(),
-                matches
-                    .subcommand_matches("resize-disk")
-                    .unwrap()
-                    .get_one::<String>("size")
-                    .unwrap(),
-            )?;
+        Command::ResizeDisk {
+            disk: arg_disk,
+            size: arg_size,
+        } => {
+            let resize_disk =
+                resize_disk_config(arg_disk.as_ref().unwrap(), arg_size.as_ref().unwrap())?;
             simple_api_command(socket, "PUT", "resize-disk", Some(&resize_disk))
                 .map_err(Error::HttpApiClient)
         }
-        Some("resize-zone") => {
-            let resize_zone = resize_zone_config(
-                matches
-                    .subcommand_matches("resize-zone")
-                    .unwrap()
-                    .get_one::<String>("id")
-                    .unwrap(),
-                matches
-                    .subcommand_matches("resize-zone")
-                    .unwrap()
-                    .get_one::<String>("size")
-                    .unwrap(),
-            )?;
+        Command::ResizeZone {
+            id: arg_id,
+            size: arg_size,
+        } => {
+            let resize_zone =
+                resize_zone_config(arg_id.as_ref().unwrap(), arg_size.as_ref().unwrap())?;
             simple_api_command(socket, "PUT", "resize-zone", Some(&resize_zone))
                 .map_err(Error::HttpApiClient)
         }
-        Some("add-device") => simple_api_command_with_fds(
+        Command::AddDevice { .. } => simple_api_command_with_fds(
             socket,
             "PUT",
             "add-device",
@@ -434,47 +412,30 @@ fn rest_api_do_command(
             &fds.iter().map(|fd| fd.as_raw_fd()).collect::<Vec<_>>(),
         )
         .map_err(Error::HttpApiClient),
-        Some("remove-device") => {
-            let remove_device_data = remove_device_config(
-                matches
-                    .subcommand_matches("remove-device")
-                    .unwrap()
-                    .get_one::<String>("id")
-                    .unwrap(),
-            );
+        Command::RemoveDevice { id: arg_id } => {
+            let remove_device_data = remove_device_config(arg_id.as_ref().unwrap());
             simple_api_command(socket, "PUT", "remove-device", Some(&remove_device_data))
                 .map_err(Error::HttpApiClient)
         }
-        Some("add-disk") => {
-            let disk_config = add_disk_config(
-                matches
-                    .subcommand_matches("add-disk")
-                    .unwrap()
-                    .get_one::<String>("disk_config")
-                    .unwrap(),
-            )?;
+        Command::AddDisk {
+            disk_config: arg_disk_config,
+        } => {
+            let disk_config = add_disk_config(arg_disk_config.as_ref().unwrap())?;
             simple_api_command(socket, "PUT", "add-disk", Some(&disk_config))
                 .map_err(Error::HttpApiClient)
         }
-        Some("add-fs") => {
-            let fs_config = add_fs_config(
-                matches
-                    .subcommand_matches("add-fs")
-                    .unwrap()
-                    .get_one::<String>("fs_config")
-                    .unwrap(),
-            )?;
+        Command::AddFs {
+            fs_config: arg_fs_config,
+        } => {
+            let fs_config = add_fs_config(arg_fs_config.as_ref().unwrap())?;
             simple_api_command(socket, "PUT", "add-fs", Some(&fs_config))
                 .map_err(Error::HttpApiClient)
         }
-        Some("add-generic-vhost-user") => {
-            let device_config = add_generic_vhost_user_config(
-                matches
-                    .subcommand_matches("add-generic-vhost-user")
-                    .unwrap()
-                    .get_one::<String>("generic_vhost_user_config")
-                    .unwrap(),
-            )?;
+        Command::AddGenericVhostUser {
+            generic_vhost_user_config: arg_generic_vhost_user_config,
+        } => {
+            let device_config =
+                add_generic_vhost_user_config(arg_generic_vhost_user_config.as_ref().unwrap())?;
             simple_api_command(
                 socket,
                 "PUT",
@@ -483,18 +444,14 @@ fn rest_api_do_command(
             )
             .map_err(Error::HttpApiClient)
         }
-        Some("add-pmem") => {
-            let pmem_config = add_pmem_config(
-                matches
-                    .subcommand_matches("add-pmem")
-                    .unwrap()
-                    .get_one::<String>("pmem_config")
-                    .unwrap(),
-            )?;
+        Command::AddPmem {
+            pmem_config: arg_pmem_config,
+        } => {
+            let pmem_config = add_pmem_config(arg_pmem_config.as_ref().unwrap())?;
             simple_api_command(socket, "PUT", "add-pmem", Some(&pmem_config))
                 .map_err(Error::HttpApiClient)
         }
-        Some("add-net") => simple_api_command_with_fds(
+        Command::AddNet { .. } => simple_api_command_with_fds(
             socket,
             "PUT",
             "add-net",
@@ -502,51 +459,35 @@ fn rest_api_do_command(
             &fds.iter().map(|fd| fd.as_raw_fd()).collect::<Vec<_>>(),
         )
         .map_err(Error::HttpApiClient),
-        Some("add-user-device") => {
-            let device_config = add_user_device_config(
-                matches
-                    .subcommand_matches("add-user-device")
-                    .unwrap()
-                    .get_one::<String>("device_config")
-                    .unwrap(),
-            )?;
+        Command::AddUserDevice {
+            device_config: arg_device_config,
+        } => {
+            let device_config = add_user_device_config(arg_device_config.as_ref().unwrap())?;
             simple_api_command(socket, "PUT", "add-user-device", Some(&device_config))
                 .map_err(Error::HttpApiClient)
         }
-        Some("add-vdpa") => {
-            let vdpa_config = add_vdpa_config(
-                matches
-                    .subcommand_matches("add-vdpa")
-                    .unwrap()
-                    .get_one::<String>("vdpa_config")
-                    .unwrap(),
-            )?;
+        Command::AddVdpa {
+            vdpa_config: arg_vdpa_config,
+        } => {
+            let vdpa_config = add_vdpa_config(arg_vdpa_config.as_ref().unwrap())?;
             simple_api_command(socket, "PUT", "add-vdpa", Some(&vdpa_config))
                 .map_err(Error::HttpApiClient)
         }
-        Some("add-vsock") => {
-            let vsock_config = add_vsock_config(
-                matches
-                    .subcommand_matches("add-vsock")
-                    .unwrap()
-                    .get_one::<String>("vsock_config")
-                    .unwrap(),
-            )?;
+        Command::AddVsock {
+            vsock_config: arg_vsock_config,
+        } => {
+            let vsock_config = add_vsock_config(arg_vsock_config.as_ref().unwrap())?;
             simple_api_command(socket, "PUT", "add-vsock", Some(&vsock_config))
                 .map_err(Error::HttpApiClient)
         }
-        Some("snapshot") => {
-            let snapshot_config = snapshot_config(
-                matches
-                    .subcommand_matches("snapshot")
-                    .unwrap()
-                    .get_one::<String>("snapshot_config")
-                    .unwrap(),
-            );
+        Command::Snapshot {
+            snapshot_config: arg_snapshot_config,
+        } => {
+            let snapshot_config = snapshot_config(arg_snapshot_config);
             simple_api_command(socket, "PUT", "snapshot", Some(&snapshot_config))
                 .map_err(Error::HttpApiClient)
         }
-        Some("restore") => simple_api_command_with_fds(
+        Command::Restore { .. } => simple_api_command_with_fds(
             socket,
             "PUT",
             "restore",
@@ -554,29 +495,22 @@ fn rest_api_do_command(
             &fds.iter().map(|fd| fd.as_raw_fd()).collect::<Vec<_>>(),
         )
         .map_err(Error::HttpApiClient),
-        Some("coredump") => {
-            let coredump_config = coredump_config(
-                matches
-                    .subcommand_matches("coredump")
-                    .unwrap()
-                    .get_one::<String>("coredump_config")
-                    .unwrap(),
-            );
+        Command::Coredump {
+            coredump_config: arg_coredump_config,
+        } => {
+            let coredump_config = coredump_config(arg_coredump_config.as_ref().unwrap());
             simple_api_command(socket, "PUT", "coredump", Some(&coredump_config))
                 .map_err(Error::HttpApiClient)
         }
-        Some("send-migration") => {
-            let send_migration_data = send_migration_data(
-                matches
-                    .subcommand_matches("send-migration")
-                    .unwrap()
-                    .get_one::<String>("send_migration_config")
-                    .unwrap(),
-            )?;
+        Command::SendMigration {
+            send_migration_config: arg_send_migration_config,
+        } => {
+            let send_migration_data =
+                send_migration_data(arg_send_migration_config.as_ref().unwrap())?;
             simple_api_command(socket, "PUT", "send-migration", Some(&send_migration_data))
                 .map_err(Error::HttpApiClient)
         }
-        Some("receive-migration") => simple_api_command_with_fds(
+        Command::ReceiveMigration { .. } => simple_api_command_with_fds(
             socket,
             "PUT",
             "receive-migration",
@@ -584,223 +518,143 @@ fn rest_api_do_command(
             &fds.iter().map(|fd| fd.as_raw_fd()).collect::<Vec<_>>(),
         )
         .map_err(Error::HttpApiClient),
-        Some("create") => {
-            let data = create_data(
-                matches
-                    .subcommand_matches("create")
-                    .unwrap()
-                    .get_one::<String>("path")
-                    .unwrap(),
-            )?;
+        Command::Create { path: arg_path } => {
+            let data = create_data(arg_path)?;
             simple_api_command(socket, "PUT", "create", Some(&data)).map_err(Error::HttpApiClient)
         }
-        Some("cancel-migration") => simple_api_command(socket, "PUT", "cancel-migration", None)
+        Command::CancelMigration => simple_api_command(socket, "PUT", "cancel-migration", None)
             .map_err(Error::HttpApiClient),
-        _ => unreachable!(),
     }
 }
 
 #[cfg(feature = "dbus_api")]
 fn dbus_api_do_command(
-    matches: &ArgMatches,
+    command: &Command,
     proxy: &DBusApi1ProxyBlocking<'_>,
     fd_command: Option<FdCommand>,
 ) -> ApiResult {
     let (fd_request_body, _fds) = fd_command
         .map(|(body, fds)| (Some(body), fds))
         .unwrap_or_default();
-    match matches.subcommand_name() {
-        Some("boot") => proxy.api_vm_boot(),
-        Some("delete") => proxy.api_vm_delete(),
-        Some("shutdown-vmm") => proxy.api_vmm_shutdown(),
-        Some("resume") => proxy.api_vm_resume(),
-        Some("power-button") => proxy.api_vm_power_button(),
-        Some("reboot") => proxy.api_vm_reboot(),
-        Some("pause") => proxy.api_vm_pause(),
-        Some("info") => proxy.api_vm_info(),
-        Some("balloon-stats") => proxy.api_vm_balloon_stats(),
-        Some("counters") => proxy.api_vm_counters(),
-        Some("ping") => proxy.api_vmm_ping(),
-        Some("nmi") => proxy.api_vm_nmi(),
-        Some("shutdown") => proxy.api_vm_shutdown(),
-        Some("resize") => {
+    match command {
+        Command::Boot => proxy.api_vm_boot(),
+        Command::Delete => proxy.api_vm_delete(),
+        Command::ShutdownVmm => proxy.api_vmm_shutdown(),
+        Command::Resume => proxy.api_vm_resume(),
+        Command::PowerButton => proxy.api_vm_power_button(),
+        Command::Reboot => proxy.api_vm_reboot(),
+        Command::Pause => proxy.api_vm_pause(),
+        Command::Info => proxy.api_vm_info(),
+        Command::BalloonStats => proxy.api_vm_balloon_stats(),
+        Command::Counters => proxy.api_vm_counters(),
+        Command::Ping => proxy.api_vmm_ping(),
+        Command::Nmi => proxy.api_vm_nmi(),
+        Command::Shutdown => proxy.api_vm_shutdown(),
+        Command::Resize {
+            balloon: arg_balloon,
+            cpus: arg_cpus,
+            memory: arg_memory,
+        } => {
             let resize = resize_config(
-                matches
-                    .subcommand_matches("resize")
-                    .unwrap()
-                    .get_one::<String>("cpus")
-                    .map(|x| x as &str),
-                matches
-                    .subcommand_matches("resize")
-                    .unwrap()
-                    .get_one::<String>("memory")
-                    .map(|x| x as &str),
-                matches
-                    .subcommand_matches("resize")
-                    .unwrap()
-                    .get_one::<String>("balloon")
-                    .map(|x| x as &str),
+                arg_cpus.as_deref(),
+                arg_memory.as_deref(),
+                arg_balloon.as_deref(),
             )?;
             proxy.api_vm_resize(&resize)
         }
-        Some("resize-disk") => {
-            let resize_disk = resize_disk_config(
-                matches
-                    .subcommand_matches("resize-disk")
-                    .unwrap()
-                    .get_one::<String>("disk")
-                    .unwrap(),
-                matches
-                    .subcommand_matches("resize-disk")
-                    .unwrap()
-                    .get_one::<String>("size")
-                    .unwrap(),
-            )?;
+        Command::ResizeDisk {
+            disk: arg_disk,
+            size: arg_size,
+        } => {
+            let resize_disk =
+                resize_disk_config(arg_disk.as_ref().unwrap(), arg_size.as_ref().unwrap())?;
             proxy.api_vm_resize_disk(&resize_disk)
         }
-        Some("resize-zone") => {
-            let resize_zone = resize_zone_config(
-                matches
-                    .subcommand_matches("resize-zone")
-                    .unwrap()
-                    .get_one::<String>("id")
-                    .unwrap(),
-                matches
-                    .subcommand_matches("resize-zone")
-                    .unwrap()
-                    .get_one::<String>("size")
-                    .unwrap(),
-            )?;
+        Command::ResizeZone {
+            id: arg_id,
+            size: arg_size,
+        } => {
+            let resize_zone =
+                resize_zone_config(arg_id.as_ref().unwrap(), arg_size.as_ref().unwrap())?;
             proxy.api_vm_resize_zone(&resize_zone)
         }
-        Some("add-device") => proxy.api_vm_add_device(fd_request_body.as_deref().unwrap()),
-        Some("remove-device") => {
-            let remove_device_data = remove_device_config(
-                matches
-                    .subcommand_matches("remove-device")
-                    .unwrap()
-                    .get_one::<String>("id")
-                    .unwrap(),
-            );
+        Command::AddDevice { .. } => proxy.api_vm_add_device(fd_request_body.as_deref().unwrap()),
+        Command::RemoveDevice { id: arg_id } => {
+            let remove_device_data = remove_device_config(arg_id.as_ref().unwrap());
             proxy.api_vm_remove_device(&remove_device_data)
         }
-        Some("add-disk") => {
-            let disk_config = add_disk_config(
-                matches
-                    .subcommand_matches("add-disk")
-                    .unwrap()
-                    .get_one::<String>("disk_config")
-                    .unwrap(),
-            )?;
+        Command::AddDisk {
+            disk_config: arg_disk_config,
+        } => {
+            let disk_config = add_disk_config(arg_disk_config.as_ref().unwrap())?;
             proxy.api_vm_add_disk(&disk_config)
         }
-        Some("add-fs") => {
-            let fs_config = add_fs_config(
-                matches
-                    .subcommand_matches("add-fs")
-                    .unwrap()
-                    .get_one::<String>("fs_config")
-                    .unwrap(),
-            )?;
+        Command::AddFs {
+            fs_config: arg_fs_config,
+        } => {
+            let fs_config = add_fs_config(arg_fs_config.as_ref().unwrap())?;
             proxy.api_vm_add_fs(&fs_config)
         }
-        Some("add-generic-vhost-user") => {
-            let generic_vhost_user_config = add_generic_vhost_user_config(
-                matches
-                    .subcommand_matches("add-generic-vhost-user")
-                    .unwrap()
-                    .get_one::<String>("generic_vhost_user_config")
-                    .unwrap(),
-            )?;
+        Command::AddGenericVhostUser {
+            generic_vhost_user_config: arg_generic_vhost_user_config,
+        } => {
+            let generic_vhost_user_config =
+                add_generic_vhost_user_config(arg_generic_vhost_user_config.as_ref().unwrap())?;
             proxy.api_vm_add_generic_vhost_user(&generic_vhost_user_config)
         }
-        Some("add-pmem") => {
-            let pmem_config = add_pmem_config(
-                matches
-                    .subcommand_matches("add-pmem")
-                    .unwrap()
-                    .get_one::<String>("pmem_config")
-                    .unwrap(),
-            )?;
+        Command::AddPmem {
+            pmem_config: arg_pmem_config,
+        } => {
+            let pmem_config = add_pmem_config(arg_pmem_config.as_ref().unwrap())?;
             proxy.api_vm_add_pmem(&pmem_config)
         }
-        Some("add-net") => proxy.api_vm_add_net(fd_request_body.as_deref().unwrap()),
-        Some("add-user-device") => {
-            let device_config = add_user_device_config(
-                matches
-                    .subcommand_matches("add-user-device")
-                    .unwrap()
-                    .get_one::<String>("device_config")
-                    .unwrap(),
-            )?;
+        Command::AddNet { .. } => proxy.api_vm_add_net(fd_request_body.as_deref().unwrap()),
+        Command::AddUserDevice {
+            device_config: arg_device_config,
+        } => {
+            let device_config = add_user_device_config(arg_device_config.as_ref().unwrap())?;
             proxy.api_vm_add_user_device(&device_config)
         }
-        Some("add-vdpa") => {
-            let vdpa_config = add_vdpa_config(
-                matches
-                    .subcommand_matches("add-vdpa")
-                    .unwrap()
-                    .get_one::<String>("vdpa_config")
-                    .unwrap(),
-            )?;
+        Command::AddVdpa {
+            vdpa_config: arg_vdpa_config,
+        } => {
+            let vdpa_config = add_vdpa_config(arg_vdpa_config.as_ref().unwrap())?;
             proxy.api_vm_add_vdpa(&vdpa_config)
         }
-        Some("add-vsock") => {
-            let vsock_config = add_vsock_config(
-                matches
-                    .subcommand_matches("add-vsock")
-                    .unwrap()
-                    .get_one::<String>("vsock_config")
-                    .unwrap(),
-            )?;
+        Command::AddVsock {
+            vsock_config: arg_vsock_config,
+        } => {
+            let vsock_config = add_vsock_config(arg_vsock_config.as_ref().unwrap())?;
             proxy.api_vm_add_vsock(&vsock_config)
         }
-        Some("snapshot") => {
-            let snapshot_config = snapshot_config(
-                matches
-                    .subcommand_matches("snapshot")
-                    .unwrap()
-                    .get_one::<String>("snapshot_config")
-                    .unwrap(),
-            );
+        Command::Snapshot {
+            snapshot_config: arg_snapshot_config,
+        } => {
+            let snapshot_config = snapshot_config(arg_snapshot_config);
             proxy.api_vm_snapshot(&snapshot_config)
         }
-        Some("restore") => proxy.api_vm_restore(fd_request_body.as_deref().unwrap()),
-        Some("coredump") => {
-            let coredump_config = coredump_config(
-                matches
-                    .subcommand_matches("coredump")
-                    .unwrap()
-                    .get_one::<String>("coredump_config")
-                    .unwrap(),
-            );
+        Command::Restore { .. } => proxy.api_vm_restore(fd_request_body.as_deref().unwrap()),
+        Command::Coredump {
+            coredump_config: arg_coredump_config,
+        } => {
+            let coredump_config = coredump_config(arg_coredump_config.as_ref().unwrap());
             proxy.api_vm_coredump(&coredump_config)
         }
-        Some("cancel-migration") => proxy.api_vm_cancel_migration(),
-        Some("send-migration") => {
-            let send_migration_data = send_migration_data(
-                matches
-                    .subcommand_matches("send-migration")
-                    .unwrap()
-                    .get_one::<String>("send_migration_config")
-                    .unwrap(),
-            )?;
+        Command::CancelMigration => proxy.api_vm_cancel_migration(),
+        Command::SendMigration {
+            send_migration_config: arg_send_migration_config,
+        } => {
+            let send_migration_data =
+                send_migration_data(arg_send_migration_config.as_ref().unwrap())?;
             proxy.api_vm_send_migration(&send_migration_data)
         }
-        Some("receive-migration") => {
+        Command::ReceiveMigration { .. } => {
             proxy.api_vm_receive_migration(fd_request_body.as_deref().unwrap())
         }
-        Some("create") => {
-            let data = create_data(
-                matches
-                    .subcommand_matches("create")
-                    .unwrap()
-                    .get_one::<String>("path")
-                    .unwrap(),
-            )?;
+        Command::Create { path: arg_path } => {
+            let data = create_data(arg_path)?;
             proxy.api_vm_create(&data)
         }
-        _ => unreachable!(),
     }
 }
 
@@ -1042,212 +896,247 @@ fn create_data(path: &str) -> Result<String, Error> {
     Ok(data)
 }
 
-/// Returns all [`Arg`]s in alphabetical order.
-///
-/// This is the order used in the `--help` output.
-fn get_cli_args() -> Box<[Arg]> {
-    [
-        Arg::new("api-socket")
-            .long("api-socket")
-            .help("HTTP API socket path (UNIX domain socket).")
-            .num_args(1),
-        #[cfg(feature = "dbus_api")]
-        Arg::new("dbus-object-path")
-            .long("dbus-object-path")
-            .help("Object path which the interface is being served at")
-            .num_args(1),
-        #[cfg(feature = "dbus_api")]
-        Arg::new("dbus-service-name")
-            .long("dbus-service-name")
-            .help("Well known name of the dbus service")
-            .num_args(1),
-        #[cfg(feature = "dbus_api")]
-        Arg::new("dbus-system-bus")
-            .long("dbus-system-bus")
-            .action(ArgAction::SetTrue)
-            .num_args(0)
-            .help("Use the system bus instead of a session bus"),
-    ]
-    .to_vec()
-    .into_boxed_slice()
+#[derive(Debug, Parser)]
+#[command(name = "ch-remote", author, version = env!("BUILD_VERSION"), about = "Remotely control a cloud-hypervisor VMM.", arg_required_else_help = true, subcommand_required = true)]
+#[group(skip)]
+struct Cli {
+    #[arg(
+        value_name = "api-socket",
+        long,
+        help = "HTTP API socket path (UNIX domain socket)."
+    )]
+    api_socket: Option<String>,
+    #[cfg(feature = "dbus_api")]
+    #[arg(
+        value_name = "dbus-object-path",
+        long,
+        help = "Object path which the interface is being served at"
+    )]
+    dbus_object_path: Option<String>,
+    #[cfg(feature = "dbus_api")]
+    #[arg(
+        value_name = "dbus-service-name",
+        long,
+        help = "Well known name of the dbus service"
+    )]
+    dbus_service_name: Option<String>,
+    #[cfg(feature = "dbus_api")]
+    #[arg(long, help = "Use the system bus instead of a session bus")]
+    dbus_system_bus: bool,
+    #[command(subcommand)]
+    command: Command,
 }
 
-/// Returns all [`Command`]s in alphabetical order.
-///
-/// This is the order used in the `--help` output.
-fn get_cli_commands_sorted() -> Box<[Command]> {
-    [
-        Command::new("add-device").about("Add VFIO device").arg(
-            Arg::new("device_config")
-                .index(1)
-                .help(DeviceConfig::SYNTAX),
-        ),
-        Command::new("add-disk")
-            .about("Add block device")
-            .arg(Arg::new("disk_config").index(1).help(DiskConfig::SYNTAX)),
-        Command::new("add-fs")
-            .about("Add virtio-fs backed fs device")
-            .arg(Arg::new("fs_config").index(1).help(FsConfig::SYNTAX)),
-        Command::new("add-generic-vhost-user")
-            .about("Add generic vhost-user device")
-            .arg(
-                Arg::new("generic_vhost_user_config")
-                    .index(1)
-                    .help(GenericVhostUserConfig::SYNTAX),
-            ),
-        Command::new("add-net")
-            .about("Add network device")
-            .arg(Arg::new("net_config").index(1).help(NetConfig::SYNTAX)),
-        Command::new("add-pmem")
-            .about("Add persistent memory device")
-            .arg(Arg::new("pmem_config").index(1).help(PmemConfig::SYNTAX)),
-        Command::new("add-user-device")
-            .about("Add userspace device")
-            .arg(
-                Arg::new("device_config")
-                    .index(1)
-                    .help(UserDeviceConfig::SYNTAX),
-            ),
-        Command::new("add-vdpa")
-            .about("Add vDPA device")
-            .arg(Arg::new("vdpa_config").index(1).help(VdpaConfig::SYNTAX)),
-        Command::new("add-vsock")
-            .about("Add vsock device")
-            .arg(Arg::new("vsock_config").index(1).help(VsockConfig::SYNTAX)),
-        Command::new("balloon-stats").about("Statistics from the virtio-balloon device"),
-        Command::new("boot").about("Boot a created VM"),
-        Command::new("cancel-migration").about("Cancel any ongoing migration"),
-        Command::new("coredump")
-            .about("Create a coredump from VM")
-            .arg(Arg::new("coredump_config").index(1).help("<file_path>")),
-        Command::new("counters").about("Counters from the VM"),
-        Command::new("create")
-            .about("Create VM from a JSON configuration")
-            .arg(Arg::new("path").index(1).default_value("-")),
-        Command::new("delete").about("Delete a VM"),
-        Command::new("info").about("Info on the VM"),
-        Command::new("nmi").about("Trigger NMI"),
-        Command::new("pause").about("Pause the VM"),
-        Command::new("ping").about("Ping the VMM to check for API server availability"),
-        Command::new("power-button").about("Trigger a power button in the VM"),
-        Command::new("reboot").about("Reboot the VM"),
-        Command::new("receive-migration")
-            .about("Receive a VM migration")
-            .arg(
-                Arg::new("receive_migration_config")
-                    .index(1)
-                    .help(api::VmReceiveMigrationData::SYNTAX),
-            ),
-        Command::new("remove-device")
-            .about("Remove VFIO and PCI device")
-            .arg(Arg::new("id").index(1).help("<device_id>")),
-        Command::new("resize")
-            .about("Resize the VM")
-            .arg(
-                Arg::new("balloon")
-                    .long("balloon")
-                    .help("New balloon size in bytes (supports K/M/G suffix)")
-                    .num_args(1),
-            )
-            .arg(
-                Arg::new("cpus")
-                    .long("cpus")
-                    .help("New vCPUs count")
-                    .num_args(1),
-            )
-            .arg(
-                Arg::new("memory")
-                    .long("memory")
-                    .help("New memory size in bytes (supports K/M/G suffix)")
-                    .num_args(1),
-            ),
-        Command::new("resize-disk")
-            .about("Resize an attached disk")
-            .arg(
-                Arg::new("disk")
-                    .long("disk")
-                    .help("Disk identifier")
-                    .num_args(1),
-            )
-            .arg(
-                Arg::new("size")
-                    .long("size")
-                    .help("New disk size")
-                    .num_args(1),
-            ),
-        Command::new("resize-zone")
-            .about("Resize a memory zone")
-            .arg(
-                Arg::new("id")
-                    .long("id")
-                    .help("Memory zone identifier")
-                    .num_args(1),
-            )
-            .arg(
-                Arg::new("size")
-                    .long("size")
-                    .help("New memory zone size in bytes (supports K/M/G suffix)")
-                    .num_args(1),
-            ),
-        Command::new("restore")
-            .about("Restore VM from a snapshot")
-            .arg(
-                Arg::new("restore_config")
-                    .index(1)
-                    .required(true)
-                    .help(RestoreConfig::SYNTAX),
-            ),
-        Command::new("resume").about("Resume the VM"),
-        Command::new("send-migration")
-            .about("Initiate a VM migration")
-            .arg(
-                Arg::new("send_migration_config")
-                    .index(1)
-                    .help(api::VmSendMigrationData::SYNTAX),
-            ),
-        Command::new("shutdown").about("Shutdown the VM"),
-        Command::new("shutdown-vmm").about("Shutdown the VMM"),
-        Command::new("snapshot")
-            .about("Create a snapshot from VM")
-            .arg(
-                Arg::new("snapshot_config")
-                    .index(1)
-                    .required(true)
-                    .help("<destination_url>"),
-            ),
-    ]
-    .to_vec()
-    .into_boxed_slice()
-}
-
-fn build_clap_cli() -> Command {
-    Command::new("ch-remote")
-        .author(env!("CARGO_PKG_AUTHORS"))
-        .version(env!("BUILD_VERSION"))
-        .about("Remotely control a cloud-hypervisor VMM.")
-        .arg_required_else_help(true)
-        .subcommand_required(true)
-        .args(get_cli_args())
-        .subcommands(get_cli_commands_sorted())
+#[derive(Debug, Subcommand)]
+enum Command {
+    #[command(about = "Add VFIO device")]
+    AddDevice {
+        #[arg(
+            value_name = "device_config",
+            index = 1,
+            help = DeviceConfig::SYNTAX,
+        )]
+        device_config: Option<String>,
+    },
+    #[command(about = "Add block device")]
+    AddDisk {
+        #[arg(
+            value_name = "disk_config",
+            index = 1,
+            help = DiskConfig::SYNTAX,
+        )]
+        disk_config: Option<String>,
+    },
+    #[command(about = "Add virtio-fs backed fs device")]
+    AddFs {
+        #[arg(
+            value_name = "fs_config",
+            index = 1,
+            help = FsConfig::SYNTAX,
+        )]
+        fs_config: Option<String>,
+    },
+    #[command(about = "Add generic vhost-user device")]
+    AddGenericVhostUser {
+        #[arg(
+            value_name = "generic_vhost_user_config",
+            index = 1,
+            help = GenericVhostUserConfig::SYNTAX,
+        )]
+        generic_vhost_user_config: Option<String>,
+    },
+    #[command(about = "Add network device")]
+    AddNet {
+        #[arg(
+            value_name = "net_config",
+            index = 1,
+            help = NetConfig::SYNTAX,
+        )]
+        net_config: Option<String>,
+    },
+    #[command(about = "Add persistent memory device")]
+    AddPmem {
+        #[arg(
+            value_name = "pmem_config",
+            index = 1,
+            help = PmemConfig::SYNTAX,
+        )]
+        pmem_config: Option<String>,
+    },
+    #[command(about = "Add userspace device")]
+    AddUserDevice {
+        #[arg(
+            value_name = "device_config",
+            index = 1,
+            help = UserDeviceConfig::SYNTAX,
+        )]
+        device_config: Option<String>,
+    },
+    #[command(about = "Add vDPA device")]
+    AddVdpa {
+        #[arg(
+            value_name = "vdpa_config",
+            index = 1,
+            help = VdpaConfig::SYNTAX,
+        )]
+        vdpa_config: Option<String>,
+    },
+    #[command(about = "Add vsock device")]
+    AddVsock {
+        #[arg(
+            value_name = "vsock_config",
+            index = 1,
+            help = VsockConfig::SYNTAX,
+        )]
+        vsock_config: Option<String>,
+    },
+    #[command(about = "Statistics from the virtio-balloon device")]
+    BalloonStats,
+    #[command(about = "Boot a created VM")]
+    Boot,
+    #[command(about = "Cancel any ongoing migration")]
+    CancelMigration,
+    #[command(about = "Create a coredump from VM")]
+    Coredump {
+        #[arg(value_name = "coredump_config", index = 1, help = "<file_path>")]
+        coredump_config: Option<String>,
+    },
+    #[command(about = "Counters from the VM")]
+    Counters,
+    #[command(about = "Create VM from a JSON configuration")]
+    Create {
+        #[arg(value_name = "path", index = 1, default_value = "-")]
+        path: String,
+    },
+    #[command(about = "Delete a VM")]
+    Delete,
+    #[command(about = "Info on the VM")]
+    Info,
+    #[command(about = "Trigger NMI")]
+    Nmi,
+    #[command(about = "Pause the VM")]
+    Pause,
+    #[command(about = "Ping the VMM to check for API server availability")]
+    Ping,
+    #[command(about = "Trigger a power button in the VM")]
+    PowerButton,
+    #[command(about = "Reboot the VM")]
+    Reboot,
+    #[command(about = "Receive a VM migration")]
+    ReceiveMigration {
+        #[arg(
+            value_name = "receive_migration_config",
+            index = 1,
+            help = api::VmReceiveMigrationData::SYNTAX,
+        )]
+        receive_migration_config: Option<String>,
+    },
+    #[command(about = "Remove VFIO and PCI device")]
+    RemoveDevice {
+        #[arg(value_name = "id", index = 1, help = "<device_id>")]
+        id: Option<String>,
+    },
+    #[command(about = "Resize the VM")]
+    Resize {
+        #[arg(
+            value_name = "balloon",
+            long,
+            help = "New balloon size in bytes (supports K/M/G suffix)"
+        )]
+        balloon: Option<String>,
+        #[arg(value_name = "cpus", long, help = "New vCPUs count")]
+        cpus: Option<String>,
+        #[arg(
+            value_name = "memory",
+            long,
+            help = "New memory size in bytes (supports K/M/G suffix)"
+        )]
+        memory: Option<String>,
+    },
+    #[command(about = "Resize an attached disk")]
+    ResizeDisk {
+        #[arg(value_name = "disk", long, help = "Disk identifier")]
+        disk: Option<String>,
+        #[arg(value_name = "size", long, help = "New disk size")]
+        size: Option<String>,
+    },
+    #[command(about = "Resize a memory zone")]
+    ResizeZone {
+        #[arg(value_name = "id", long, help = "Memory zone identifier")]
+        id: Option<String>,
+        #[arg(
+            value_name = "size",
+            long,
+            help = "New memory zone size in bytes (supports K/M/G suffix)"
+        )]
+        size: Option<String>,
+    },
+    #[command(about = "Restore VM from a snapshot")]
+    Restore {
+        #[arg(
+            value_name = "restore_config",
+            index = 1,
+            help = RestoreConfig::SYNTAX,
+        )]
+        restore_config: String,
+    },
+    #[command(about = "Resume the VM")]
+    Resume,
+    #[command(about = "Initiate a VM migration")]
+    SendMigration {
+        #[arg(
+            value_name = "send_migration_config",
+            index = 1,
+            help = api::VmSendMigrationData::SYNTAX,
+        )]
+        send_migration_config: Option<String>,
+    },
+    #[command(about = "Shutdown the VM")]
+    Shutdown,
+    #[command(about = "Shutdown the VMM")]
+    ShutdownVmm,
+    #[command(about = "Create a snapshot from VM")]
+    Snapshot {
+        #[arg(value_name = "snapshot_config", index = 1, help = "<destination_url>")]
+        snapshot_config: String,
+    },
 }
 
 fn main() {
     env_logger::init();
-    let app = build_clap_cli();
+    let cli = Cli::parse();
 
-    let matches = app.get_matches();
-
-    let fd_command = prepare_fd_command(&matches).unwrap_or_else(|error| {
+    let fd_command = prepare_fd_command(&cli.command).unwrap_or_else(|error| {
         cloud_hypervisor::cli_print_error_chain(&error, "ch-remote", |_, _, _| None);
         process::exit(1);
     });
 
     let mut target_api = match (
-        matches.get_one::<String>("api-socket"),
+        cli.api_socket.as_ref(),
         #[cfg(feature = "dbus_api")]
-        matches.get_one::<String>("dbus-service-name"),
+        cli.dbus_service_name.as_ref(),
         #[cfg(feature = "dbus_api")]
-        matches.get_one::<String>("dbus-object-path"),
+        cli.dbus_object_path.as_ref(),
     ) {
         #[cfg(not(feature = "dbus_api"))]
         (Some(api_sock),) => TargetApi::HttpApi(
@@ -1267,16 +1156,12 @@ fn main() {
         ),
         #[cfg(feature = "dbus_api")]
         (None, Some(dbus_name), Some(dbus_path)) => TargetApi::DBusApi(
-            DBusApi1ProxyBlocking::new_connection(
-                dbus_name,
-                dbus_path,
-                matches.get_flag("dbus-system-bus"),
-            )
-            .map_err(Error::DBusApiClient)
-            .unwrap_or_else(|e| {
-                error!("Error creating D-Bus proxy: {e}");
-                process::exit(1)
-            }),
+            DBusApi1ProxyBlocking::new_connection(dbus_name, dbus_path, cli.dbus_system_bus)
+                .map_err(Error::DBusApiClient)
+                .unwrap_or_else(|e| {
+                    error!("Error creating D-Bus proxy: {e}");
+                    process::exit(1)
+                }),
         ),
         #[cfg(feature = "dbus_api")]
         (Some(_), Some(_) | None, Some(_) | None) => {
@@ -1293,7 +1178,7 @@ fn main() {
         }
     };
 
-    if let Err(top_error) = target_api.do_command(&matches, fd_command) {
+    if let Err(top_error) = target_api.do_command(&cli.command, fd_command) {
         // Helper to join strings with a newline.
         #[expect(clippy::needless_pass_by_value)]
         fn join_strs(mut acc: String, next: String) -> String {
@@ -1366,42 +1251,98 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use std::cmp::Ordering;
+    use clap::CommandFactory;
 
     use super::*;
     use crate::test_util::assert_args_sorted;
 
     #[test]
     fn clap_cli_definition_is_valid() {
-        build_clap_cli().debug_assert();
+        Cli::command().debug_assert();
     }
 
     #[test]
     fn test_cli_args_sorted() {
-        let args = get_cli_args();
-        assert_args_sorted(|| args.iter());
+        let command = Cli::command();
+        assert_args_sorted(|| command.get_arguments());
     }
 
     #[test]
     fn test_cli_commands_sorted() {
-        let commands = get_cli_commands_sorted();
-
-        // check commands itself are sorted
-        for pair in commands.windows(2) {
-            let command = &pair[0];
-            let next = &pair[1];
-            assert_ne!(
-                command.get_name().cmp(next.get_name()),
-                Ordering::Greater,
-                "commands not alphabetically sorted: command={}, next={}",
-                command.get_name(),
-                next.get_name()
-            );
+        let command = Cli::command();
+        assert!(
+            command
+                .get_subcommands()
+                .map(|cmd| cmd.get_name())
+                .is_sorted()
+        );
+        for subcommand in command.get_subcommands() {
+            assert_args_sorted(|| subcommand.get_arguments());
         }
+    }
 
-        // check args of commands sorted
-        for command in commands {
-            assert_args_sorted(|| command.get_arguments());
+    #[test]
+    fn test_typed_command_dispatch() {
+        use std::io::Write;
+        use std::time::Duration;
+
+        // A local socket pair provides a successful reply without a VMM.
+        for (args, request_line, body) in [
+            (vec!["boot"], "PUT /api/v1/vm.boot HTTP/1.1", None),
+            (vec!["ping"], "GET /api/v1/vmm.ping HTTP/1.1", None),
+            (
+                vec!["resize", "--cpus", "4", "--memory", "1G", "--balloon", "2M"],
+                "PUT /api/v1/vm.resize HTTP/1.1",
+                Some(
+                    serde_json::json!({"desired_vcpus": 4, "desired_ram": 1073741824u64, "desired_balloon": 2097152}),
+                ),
+            ),
+            (
+                vec!["resize-disk", "--disk", "disk0", "--size", "2G"],
+                "PUT /api/v1/vm.resize-disk HTTP/1.1",
+                Some(serde_json::json!({"id": "disk0", "desired_size": 2147483648u64})),
+            ),
+            (
+                vec!["resize-zone", "--id", "zone0", "--size", "1G"],
+                "PUT /api/v1/vm.resize-zone HTTP/1.1",
+                Some(serde_json::json!({"id": "zone0", "desired_ram": 1073741824u64})),
+            ),
+            (
+                vec!["snapshot", "file:///tmp/snapshot"],
+                "PUT /api/v1/vm.snapshot HTTP/1.1",
+                Some(serde_json::json!({"destination_url": "file:///tmp/snapshot"})),
+            ),
+        ] {
+            let cli = Cli::try_parse_from(iter::once("ch-remote").chain(args))
+                .expect("the command should parse");
+            let (mut client, mut server) =
+                UnixStream::pair().expect("the local socket pair should be created");
+            client
+                .set_read_timeout(Some(Duration::from_secs(1)))
+                .expect("the read timeout should be set");
+            server
+                .write_all(b"HTTP/1.1 204\r\n\r\n")
+                .expect("the response should fit in the socket buffer");
+
+            // Check that typed fields reach the correct HTTP endpoint and body.
+            rest_api_do_command(&cli.command, &mut client, None)
+                .expect("the command should accept the successful response");
+            drop(client);
+            let mut request = String::new();
+            server
+                .read_to_string(&mut request)
+                .expect("the request should be readable after the client closes");
+            let (headers, actual_body) = request
+                .split_once("\r\n\r\n")
+                .expect("the request should contain a header terminator");
+            assert_eq!(headers.lines().next(), Some(request_line));
+            if let Some(body) = body {
+                let actual: serde_json::Value =
+                    serde_json::from_str(actual_body).expect("the request body should be JSON");
+                assert_eq!(actual, body);
+            } else {
+                assert!(actual_body.is_empty());
+            }
         }
     }
 
