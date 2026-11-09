@@ -14,9 +14,9 @@ use std::process::{self, Command};
 use std::sync::Arc;
 use std::sync::mpsc::channel;
 use std::time::Duration;
-use std::{env, fmt, fs, io, panic, path, str, thread};
+use std::{fmt, fs, io, panic, path, str, thread};
 
-use clap::{Arg, ArgAction, Command as ClapCommand};
+use clap::{ArgAction, Parser};
 use performance_tests::*;
 use serde::{Deserialize, Serialize};
 use test_infra::{FioOps, GuestVmType, ProcessRegistry};
@@ -1801,78 +1801,74 @@ fn date() -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
-/// Returns all [`Arg`]s in alphabetical order.
-///
-/// This is the order used in the `--help` output.
-fn get_cli_options_sorted() -> Box<[Arg]> {
-    [
-        Arg::new("continue-on-failure")
-            .long("continue-on-failure")
-            .help("Continue running remaining tests after a test failure")
-            .num_args(0)
-            .action(ArgAction::SetTrue)
-            .required(false),
-        Arg::new("image-format")
-            .long("image-format")
-            .help(
-                "Override the image format used for block tests, supported values: qcow2, raw, vhd, vhdx. \
-                 Default is 'raw'.",
-            )
-            .num_args(1)
-            .value_parser(["raw", "qcow2", "vhd", "vhdx"]),
-        Arg::new("iterations")
-            .long("iterations")
-            .help("Override number of test iterations")
-            .num_args(1),
-        Arg::new("list-tests")
-            .long("list-tests")
-            .help("Print the list of available metrics tests")
-            .num_args(0)
-            .action(ArgAction::SetTrue)
-            .required(false),
-        Arg::new("report-file")
-            .long("report-file")
-            .help("Report file. Standard error is used if not specified")
-            .num_args(1),
-        Arg::new("test-exclude")
-            .long("test-exclude")
-            .help("Exclude metrics tests matching the provided keywords (comma-separated)")
-            .num_args(1)
-            .value_delimiter(',')
-            .required(false),
-        Arg::new("test-filter")
-            .long("test-filter")
-            .help("Filter metrics tests to run based on provided keywords (comma-separated)")
-            .num_args(1)
-            .value_delimiter(',')
-            .required(false),
-        Arg::new("timeout")
-            .long("timeout")
-            .help("Override test timeout, Ex. --timeout 5")
-            .num_args(1),
-        Arg::new("vm-type")
-            .long("vm-type")
-            .help(
-                "Set the VM type: 'regular' (default) or 'confidential' (CVM).",
-            )
-            .num_args(1)
-            .value_parser(["regular","confidential"])
-            .default_value("regular"),
-    ]
-    .to_vec()
-    .into_boxed_slice()
-}
-
-fn build_clap_cli() -> ClapCommand {
-    ClapCommand::new("performance-metrics")
-        .version(env!("CARGO_PKG_VERSION"))
-        .author(env!("CARGO_PKG_AUTHORS"))
-        .about("Generate the performance metrics data for Cloud Hypervisor")
-        .args(get_cli_options_sorted())
+#[derive(Parser)]
+#[command(
+    name = "performance-metrics",
+    version,
+    author,
+    about = "Generate the performance metrics data for Cloud Hypervisor"
+)]
+struct Cli {
+    #[arg(long, help = "Continue running remaining tests after a test failure")]
+    continue_on_failure: bool,
+    #[arg(
+        value_name = "image-format",
+        long,
+        help = "Override the image format used for block tests, supported values: qcow2, raw, vhd, vhdx. \
+                     Default is 'raw'.",
+        value_parser = ["raw", "qcow2", "vhd", "vhdx"],
+    )]
+    image_format: Option<String>,
+    #[arg(
+        value_name = "iterations",
+        long,
+        help = "Override number of test iterations"
+    )]
+    iterations: Option<String>,
+    #[arg(long, help = "Print the list of available metrics tests")]
+    list_tests: bool,
+    #[arg(
+        value_name = "report-file",
+        long,
+        help = "Report file. Standard error is used if not specified"
+    )]
+    report_file: Option<String>,
+    #[arg(
+        value_name = "test-exclude",
+        long,
+        help = "Exclude metrics tests matching the provided keywords (comma-separated)",
+        num_args = 1,
+        value_delimiter = ',',
+        action = ArgAction::Set,
+    )]
+    test_exclude: Option<Vec<String>>,
+    #[arg(
+        value_name = "test-filter",
+        long,
+        help = "Filter metrics tests to run based on provided keywords (comma-separated)",
+        num_args = 1,
+        value_delimiter = ',',
+        action = ArgAction::Set,
+    )]
+    test_filter: Option<Vec<String>>,
+    #[arg(
+        value_name = "timeout",
+        long,
+        help = "Override test timeout, Ex. --timeout 5"
+    )]
+    timeout: Option<String>,
+    #[arg(
+        value_name = "vm-type",
+        long,
+        help = "Set the VM type: 'regular' (default) or 'confidential' (CVM).",
+        value_parser = ["regular","confidential"],
+        default_value = "regular",
+    )]
+    vm_type: String,
 }
 
 fn main() {
-    let cmd_arguments = build_clap_cli().get_matches();
+    let cmd_arguments = Cli::parse();
 
     // It seems that the tool (ethr) used for testing the virtio-net latency
     // is not stable on AArch64, and therefore the latency test is currently
@@ -1882,24 +1878,18 @@ fn main() {
         .filter(|t| !(cfg!(target_arch = "aarch64") && t.name == "virtio_net_latency_us"))
         .collect();
 
-    let test_filter = match cmd_arguments.get_many::<String>("test-filter") {
-        Some(s) => s.collect(),
-        None => Vec::new(),
-    };
+    let test_filter = cmd_arguments.test_filter.as_deref().unwrap_or_default();
 
-    let test_exclude = match cmd_arguments.get_many::<String>("test-exclude") {
-        Some(s) => s.collect(),
-        None => Vec::new(),
-    };
+    let test_exclude = cmd_arguments.test_exclude.as_deref().unwrap_or_default();
 
     // Determine which tests will actually run.
     let tests_to_run: Vec<&PerformanceTest> = test_list
         .into_iter()
-        .filter(|t| test_filter.is_empty() || test_filter.iter().any(|&s| t.name.contains(s)))
-        .filter(|t| !test_exclude.iter().any(|&s| t.name.contains(s)))
+        .filter(|t| test_filter.is_empty() || test_filter.iter().any(|s| t.name.contains(s)))
+        .filter(|t| !test_exclude.iter().any(|s| t.name.contains(s)))
         .collect();
 
-    if cmd_arguments.get_flag("list-tests") {
+    if cmd_arguments.list_tests {
         for test in tests_to_run.iter() {
             println!("\"{}\" ({})", test.name, test.control);
         }
@@ -1912,23 +1902,24 @@ fn main() {
 
     let overrides = Arc::new(PerformanceTestOverrides {
         test_iterations: cmd_arguments
-            .get_one::<String>("iterations")
+            .iterations
+            .as_ref()
             .map(|s| s.parse())
             .transpose()
             .unwrap_or_default(),
         test_timeout: cmd_arguments
-            .get_one::<String>("timeout")
+            .timeout
+            .as_ref()
             .map(|s| s.parse())
             .transpose()
             .unwrap_or_default(),
         test_image_format: cmd_arguments
-            .get_one::<String>("image-format")
+            .image_format
+            .as_ref()
             .map(|s| s.parse())
             .transpose()
             .unwrap_or_default(),
-        vm_type: cmd_arguments
-            .get_one::<String>("vm-type")
-            .map_or_else(Default::default, |s| s.parse().unwrap_or_default()),
+        vm_type: cmd_arguments.vm_type.parse().unwrap_or_default(),
     });
 
     #[cfg(target_arch = "aarch64")]
@@ -1946,7 +1937,6 @@ fn main() {
         init_tests(&overrides);
     }
 
-    let continue_on_failure = cmd_arguments.get_flag("continue-on-failure");
     let mut has_failure = false;
 
     for test in tests_to_run {
@@ -1956,7 +1946,7 @@ fn main() {
                 metrics_report.results.push(r);
             }
             Err(e) => {
-                if continue_on_failure {
+                if cmd_arguments.continue_on_failure {
                     eprintln!("Test '{}' failed: '{e:?}'. Continuing.", test.name);
                     has_failure = true;
                     metrics_report
@@ -1975,7 +1965,7 @@ fn main() {
     }
 
     let mut report_file: Box<dyn io::Write + Send> =
-        if let Some(file) = cmd_arguments.get_one::<String>("report-file") {
+        if let Some(file) = cmd_arguments.report_file.as_ref() {
             Box::new(
                 fs::File::create(path::Path::new(file))
                     .map_err(|e| {
@@ -2007,20 +1997,46 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::build_clap_cli;
+    use clap::CommandFactory;
 
-    #[test]
-    fn test_cli_options_sorted() {
-        let command = build_clap_cli();
-        let names: Vec<_> = command.get_arguments().map(|arg| arg.get_id()).collect();
-        assert!(
-            names.is_sorted(),
-            "CLI options are not alphabetically sorted"
-        );
-    }
+    use super::*;
 
     #[test]
     fn clap_cli_definition_is_valid() {
-        build_clap_cli().debug_assert();
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn test_cli_options_sorted() {
+        let command = Cli::command();
+        assert!(command.get_arguments().map(|arg| arg.get_id()).is_sorted());
+    }
+
+    #[test]
+    fn test_cli_filters_and_defaults() {
+        let cli = Cli::try_parse_from([
+            "performance-metrics",
+            "--test-filter",
+            "boot,restore",
+            "--list-tests",
+        ])
+        .expect("comma-separated filters should parse");
+        assert_eq!(
+            cli.test_filter,
+            Some(vec!["boot".to_owned(), "restore".to_owned()])
+        );
+        assert!(cli.list_tests);
+        assert_eq!(cli.vm_type, "regular");
+        assert!(
+            Cli::try_parse_from([
+                "performance-metrics",
+                "--test-filter",
+                "boot",
+                "--test-filter",
+                "restore"
+            ])
+            .is_err()
+        );
+        assert!(Cli::try_parse_from(["performance-metrics", "--vm-type", "invalid"]).is_err());
     }
 }
