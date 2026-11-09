@@ -9,10 +9,8 @@
 use clap::{Arg, Command};
 use vhost_user_net::start_net_backend;
 
-fn main() {
-    env_logger::init();
-
-    let cmd_arguments = Command::new("vhost-user-net backend")
+fn build_clap_cli() -> Command {
+    Command::new("vhost-user-net backend")
         .version(env!("CARGO_PKG_VERSION"))
         .author(env!("CARGO_PKG_AUTHORS"))
         .about("Launch a vhost-user-net backend.")
@@ -24,8 +22,23 @@ fn main() {
                 .num_args(1)
                 .required(true),
         )
-        .get_matches();
+}
+
+fn main() {
+    env_logger::init();
+
+    let cmd_arguments = build_clap_cli().get_matches();
 
     let backend_command = cmd_arguments.get_one::<String>("net-backend").unwrap();
     start_net_backend(backend_command);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_clap_cli;
+
+    #[test]
+    fn clap_cli_definition_is_valid() {
+        build_clap_cli().debug_assert();
+    }
 }
