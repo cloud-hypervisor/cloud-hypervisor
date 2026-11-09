@@ -322,6 +322,7 @@ impl Parseable for Toggle {
 ///
 /// The suffix is binary (1K = 1024, 1M = 1048576, 1G = 1073741824).
 /// A bare integer is treated as bytes.
+#[derive(Clone, Copy, Debug)]
 pub struct ByteSized(pub u64);
 
 #[derive(Error, Debug)]
@@ -800,8 +801,11 @@ mod tests {
 
     #[test]
     fn test_byte_sized_invalid() {
-        assert!("xyzK".parse::<ByteSized>().is_err());
-        assert!("".parse::<ByteSized>().is_err());
+        "xyzK"
+            .parse::<ByteSized>()
+            .expect_err("the invalid size should be rejected");
+        "".parse::<ByteSized>()
+            .expect_err("the invalid size should be rejected");
     }
 
     #[test]
