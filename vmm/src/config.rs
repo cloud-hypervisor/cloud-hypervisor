@@ -1290,7 +1290,6 @@ impl MemoryConfig {
         let mut parser = OptionParser::new();
         parser
             .add("size")
-            .add("file")
             .add("mergeable")
             .add("hotplug_method")
             .add("hotplug_size")
@@ -4927,6 +4926,7 @@ mod tests {
     #[test]
     fn test_mem_parsing() -> Result<()> {
         assert_eq!(MemoryConfig::parse("", None)?, MemoryConfig::default());
+        MemoryConfig::parse("size=512M,file=/some/file", None).unwrap_err();
         // Default string
         assert_eq!(
             MemoryConfig::parse("size=512M", None)?,
