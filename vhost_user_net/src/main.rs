@@ -11,10 +11,8 @@ use vhost_user_net::start_net_backend;
 
 #[derive(Parser)]
 #[command(
-    name = "vhost-user-net backend",
     version,
-    author,
-    about = "Launch a vhost-user-net backend.",
+    about = "Launch a vhost-user-net backend",
     arg_required_else_help = true
 )]
 struct Cli {

@@ -13,10 +13,8 @@ use vhost_user_block::start_block_backend;
 
 #[derive(Parser)]
 #[command(
-    name = "vhost-user-blk backend",
     version,
-    author,
-    about = "Launch a vhost-user-blk backend.",
+    about = "Launch a vhost-user-blk backend",
     arg_required_else_help = true
 )]
 struct Cli {
