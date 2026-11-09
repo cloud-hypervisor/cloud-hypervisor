@@ -2593,7 +2593,6 @@ dependencies = [
  "block",
  "blocking",
  "cfg-if",
- "clap",
  "devices",
  "epoll",
  "event_monitor",
