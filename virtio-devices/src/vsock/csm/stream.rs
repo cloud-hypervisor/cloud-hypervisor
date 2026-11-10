@@ -7,7 +7,7 @@ use std::os::fd::{AsRawFd, RawFd};
 
 use vm_memory::{ReadVolatile, WriteVolatile};
 
-use super::super::defs::uapi::VSOCK_TYPE_STREAM;
+use super::super::SocketType;
 use super::super::packet::VsockPacket;
 use super::transport::{PayloadRead, RxState, SendResult, Transport, TxState};
 use super::txbuf::TxBuf;
@@ -34,8 +34,8 @@ impl<S: AsRawFd> AsRawFd for StreamTransport<S> {
 }
 
 impl<S: Read + ReadVolatile + Write + WriteVolatile + AsRawFd> Transport for StreamTransport<S> {
-    fn socket_type(&self) -> u16 {
-        VSOCK_TYPE_STREAM
+    fn socket_type(&self) -> SocketType {
+        SocketType::Stream
     }
 
     fn receive(&mut self, pkt: &mut VsockPacket, credit: usize, _: u32) -> io::Result<PayloadRead> {

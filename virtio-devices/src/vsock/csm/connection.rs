@@ -90,7 +90,9 @@ use log::{debug, error, info, warn};
 
 use super::super::defs::uapi;
 use super::super::packet::VsockPacket;
-use super::super::{Result as VsockResult, VsockChannel, VsockEpollListener, VsockError};
+use super::super::{
+    Result as VsockResult, SocketType, VsockChannel, VsockEpollListener, VsockError,
+};
 use super::transport::{RxState, Transport, TxState};
 use super::txbuf::TxBufSource;
 use super::{ConnState, Error, PendingRx, PendingRxSet, Result, defs};
@@ -223,7 +225,7 @@ where
                 return Ok(());
             }
 
-            if !pkt.has_buf() {
+            if self.stream.socket_type() == SocketType::Stream && !pkt.has_buf() {
                 return Err(VsockError::PktBufMissing);
             }
             let credit = self.peer_avail_credit();
@@ -328,7 +330,7 @@ where
             | ConnState::LocalClosed(false, _)
                 if pkt.op() == uapi::VSOCK_OP_RW =>
             {
-                if !pkt.has_buf() {
+                if !pkt.has_buf() && self.stream.socket_type() == SocketType::Stream {
                     info!(
                         "vsock: dropping empty data packet from guest (lp={}, pp={}",
                         self.local_port, self.peer_port
@@ -728,7 +730,7 @@ where
             .set_dst_cid(self.peer_cid)
             .set_src_port(self.local_port)
             .set_dst_port(self.peer_port)
-            .set_type(self.stream.socket_type())
+            .set_type(self.stream.socket_type().into())
             .set_buf_alloc(defs::CONN_TX_BUF_SIZE)
             .set_fwd_cnt(self.fwd_cnt.0)
     }
