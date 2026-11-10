@@ -34,6 +34,7 @@ List of experimental features:
 - vDPA
 - Emulated ARM SMMUv3
 - [CPU profiles](cpu.md#profile)
+- Postcopy live migration
 
 ### Security
 
@@ -77,5 +78,8 @@ E - EOL
 
 ### Major Release Stability Considerations
 
-Snapshot/restore support is not compatible across `MAJOR` versions.
-Live migration support is not compatible across `MAJOR` versions.
+Starting with `v54`, snapshot/restore and live migration from the previous two
+major releases to the current release ("n-2")  is guaranteed to work, excluding
+experimental features such as postcopy. See
+[Version Compatibility](docs/live_migration.md#version-compatibility) for
+details.

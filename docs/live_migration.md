@@ -300,13 +300,15 @@ following parameters. Unless marked otherwise, they apply to
 - `memory_mode <memfds|precopy|postcopy>`: \
   Memory transfer mode. `memfds` passes the guest memory backing file
   descriptors over a UNIX socket. It requires every guest memory region to use
-  shared memory or hugepage backing. `postcopy` resumes the destination first
-  and faults guest pages in on demand over a dedicated connection. Defaults to
-  `precopy`. `postcopy` is not supported with:
+  shared memory or hugepage backing. `postcopy` (experimental) resumes the
+  destination first and faults guest pages in on demand over a dedicated
+  connection. Defaults to `precopy`. `postcopy` is not supported with:
   - VFIO devices
   - vDPA devices
   - vfio-user devices
   - vhost-user devices
+  - memory prefault (`prefault=on`)
+  - multiple connections (`connections` greater than `1`)
 - `preserve_source <on|off>`: \
   Keep the source VM in a paused state after migration completes. This is only
   supported with `memory_mode=memfds` and defaults to `off`.
@@ -383,7 +385,8 @@ Starting with `v54`, Cloud Hypervisor guarantees migration compatibility from
 the previous two versions ("n-2"), e.g. `v54` accepts migrations from `v52` and
 `v53`. Upgrades spanning more major versions might work. It is, however,
 strongly recommended to do incremental upgrades, e.g., `v54 -> v56 -> v58`.
-Backward migrations, such as `v54 -> v52`, are **not** supported.
+Backward migrations, such as `v54 -> v52`, are **not** supported. Experimental
+features, such as `memory_mode=postcopy`, are excluded from this guarantee.
 
 New VMM functionality is designed in a way that it does not cause any
 incompatibility for VMs coming from older versions of Cloud Hypervisor. If new
