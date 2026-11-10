@@ -19,7 +19,7 @@ pub(crate) struct PayloadRead {
     pub(crate) len: usize,
     pub(crate) eof: bool,
     pub(crate) more: bool,
-    #[expect(dead_code)]
+    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) waiting_credit: bool,
 }
 
@@ -27,14 +27,12 @@ pub(crate) struct PayloadRead {
 pub(crate) enum RxState {
     WaitingForData,
     WaitingForCredit,
-    #[expect(dead_code)]
     Buffered,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TxState {
     Empty,
-    #[expect(dead_code)]
     Partial,
     Pending,
 }
