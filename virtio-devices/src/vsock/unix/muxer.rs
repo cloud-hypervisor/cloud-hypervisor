@@ -45,18 +45,20 @@ use std::fs::File;
 use std::io::{self, ErrorKind};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::Path;
 use std::str;
 
 use log::{debug, error, info, warn};
 
 use super::super::csm::ConnState;
+use super::super::csm::seqpacket::{SeqPacketSocket, SeqPacketTransport};
 use super::super::csm::stream::StreamTransport;
 use super::super::csm::transport::Transport;
 use super::super::defs::uapi;
 use super::super::packet::VsockPacket;
 use super::super::{
-    ConnectionInfo, Result as VsockResult, VsockBackend, VsockChannel, VsockEpollListener,
-    VsockError,
+    ConnectionInfo, Result as VsockResult, SocketType, VsockBackend, VsockChannel,
+    VsockEpollListener, VsockError,
 };
 use super::muxer_killq::MuxerKillQ;
 use super::muxer_rxq::MuxerRxQ;
@@ -711,6 +713,24 @@ impl VsockMuxer {
         }
     }
 
+    fn connect_to_host(
+        path: &str,
+        socket_type: SocketType,
+    ) -> io::Result<Box<dyn Transport + Send + Sync>> {
+        match socket_type {
+            SocketType::Stream => {
+                let socket = UnixStream::connect(path)?;
+                socket.set_nonblocking(true)?;
+                Ok(Box::new(StreamTransport::from(socket)))
+            }
+            SocketType::SeqPacket => {
+                let socket = SeqPacketSocket::new()?;
+                socket.connect(Path::new(path))?;
+                Ok(Box::new(SeqPacketTransport::from(socket)))
+            }
+        }
+    }
+
     /// Handle a new connection request coming from our peer (the guest vsock driver).
     ///
     /// This will attempt to connect to a host-side Unix socket, expected to be listening at
@@ -720,12 +740,11 @@ impl VsockMuxer {
     fn handle_peer_request_pkt(&mut self, pkt: &VsockPacket) {
         let port_path = format!("{}_{}", self.host_sock_path, pkt.dst_port());
 
-        UnixStream::connect(port_path)
-            .and_then(|stream| {
-                stream.set_nonblocking(true).map(|_| {
-                    Box::new(StreamTransport::from(stream)) as Box<dyn Transport + Send + Sync>
-                })
-            })
+        let Ok(socket_type) = SocketType::try_from(pkt.type_()) else {
+            self.enq_rst(pkt.dst_port(), pkt.src_port(), pkt.type_());
+            return;
+        };
+        Self::connect_to_host(&port_path, socket_type)
             .map_err(Error::UnixConnect)
             .and_then(|stream| {
                 self.add_connection(
