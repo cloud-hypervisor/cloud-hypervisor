@@ -55,7 +55,8 @@ to the `virtio-console` device through the `--console` parameter.
 
 TCP console live migration requires the listener address to be available on the
 destination. Migration on the same host cannot reuse the address bound by the source.
-Overriding the destination console address is not currently supported.
+Use the `serial_tcp` or `console_tcp` option of `receive-migration` to listen on
+another address, see [Migration Parameters](live_migration.md#migration-parameters).
 
 ### RTC/CMOS
 
