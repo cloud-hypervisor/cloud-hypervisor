@@ -1133,7 +1133,7 @@ components:
           default: false
         reserve:
           type: boolean
-          default: false
+          description: Defaults to the value of hugepages.
 
     MemoryConfig:
       required:
@@ -1169,7 +1169,7 @@ components:
           default: false
         reserve:
           type: boolean
-          default: false
+          description: Defaults to the value of hugepages.
         thp:
           type: boolean
           default: true

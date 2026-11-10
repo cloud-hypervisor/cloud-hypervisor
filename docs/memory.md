@@ -20,7 +20,7 @@ struct MemoryConfig {
     hugepages: bool,
     hugepage_size: Option<u64>,
     prefault: bool,
-    reserve: bool,
+    reserve: Option<bool>,
     thp: bool,
     zones: Option<Vec<MemoryZoneConfig>>,
 }
@@ -139,10 +139,11 @@ the guest will allocate hugepages as well. Another interesting use case is VFIO
 as it speeds up the VM's boot time since the amount of IOMMU mappings is reduced.
 
 The user is responsible for ensuring there are sufficient huge pages of the
-specified size for the VMM to use. Failure to do so may result in strange VMM
-behaviour, e.g. error with `ReadKernelImage` is common. If there is a strange
-error with `hugepages` enabled, just disable it or check whether there are enough
-huge pages.
+specified size for the VMM to use. Otherwise VM creation fails, as
+`hugepages=on` reserves the memory by default. With `reserve=off`, a shortfall
+may instead result in strange VMM behaviour, e.g. error with `ReadKernelImage`
+is common. If there is a strange error with `hugepages` enabled, just disable it
+or check whether there are enough huge pages.
 
 If `hugepages=on` then the value of `shared` is ignored as huge pages always
 requires `MAP_SHARED`.
@@ -186,19 +187,20 @@ Specifies if guest memory should be `mmap(2)`-ed _without_ the `MAP_NORESERVE`
 flag, asking the kernel to reserve the backing pages (swap space, or huge pages
 for hugepage-backed memory) for the whole region up front at `mmap` time.
 
-By default Cloud Hypervisor maps guest memory with `MAP_NORESERVE`, so VM
-creation succeeds even when the backing pool cannot satisfy the full guest size.
-The shortfall then surfaces only later, as a `SIGBUS` delivered to the guest when
-it faults a page the pool cannot back. With `reserve=on` the reservation is made
-when the memory is mapped, so an over-committed configuration fails cleanly at VM
-creation with an out-of-memory error instead of crashing the guest at run time.
-This is most useful for hugepage-backed memory, where the huge pages are reserved
-from the pool.
+With `reserve=off` Cloud Hypervisor maps guest memory with `MAP_NORESERVE`, so
+VM creation succeeds even when the backing pool cannot satisfy the full guest
+size. The shortfall then surfaces only later, as a `SIGBUS` delivered to the
+guest when it faults a page the pool cannot back. With `reserve=on` the
+reservation is made when the memory is mapped, so an over-committed
+configuration fails cleanly at VM creation with an out-of-memory error instead
+of crashing the guest at run time. This is most useful for hugepage-backed
+memory, where the huge pages are reserved from the pool.
 
 Unlike `prefault`, this does not populate or fault in the memory, so it does not
 slow down boot; it only reserves it.
 
-By default this option is turned off.
+By default this option has the same value as `hugepages`: it is on with
+`hugepages=on` and off otherwise.
 
 _Example_
 
@@ -254,7 +256,7 @@ struct MemoryZoneConfig {
     hotplug_size: Option<u64>,
     hotplugged_size: Option<u64>,
     prefault: bool,
-    reserve: bool,
+    reserve: Option<bool>,
     mergeable: bool,
 }
 ```
@@ -359,10 +361,11 @@ the guest will allocate hugepages as well. Another interesting use case is VFIO
 as it speeds up the VM's boot time since the amount of IOMMU mappings is reduced.
 
 The user is responsible for ensuring there are sufficient huge pages of the
-specified size for the VMM to use. Failure to do so may result in strange VMM
-behaviour, e.g. error with `ReadKernelImage` is common. If there is a strange
-error with `hugepages` enabled, just disable it or check whether there are enough
-huge pages.
+specified size for the VMM to use. Otherwise VM creation fails, as
+`hugepages=on` reserves the memory by default. With `reserve=off`, a shortfall
+may instead result in strange VMM behaviour, e.g. error with `ReadKernelImage`
+is common. If there is a strange error with `hugepages` enabled, just disable it
+or check whether there are enough huge pages.
 
 If `hugepages=on` then the value of `shared` is ignored as huge pages always
 require `MAP_SHARED`.
@@ -473,19 +476,20 @@ Specifies if the memory for this zone should be `mmap(2)`-ed _without_ the
 or huge pages for hugepage-backed memory) for the whole zone up front at `mmap`
 time.
 
-By default Cloud Hypervisor maps guest memory with `MAP_NORESERVE`, so VM
-creation succeeds even when the backing pool cannot satisfy the full zone size.
-The shortfall then surfaces only later, as a `SIGBUS` delivered to the guest when
-it faults a page the pool cannot back. With `reserve=on` the reservation is made
-when the memory is mapped, so an over-committed configuration fails cleanly at VM
-creation with an out-of-memory error instead of crashing the guest at run time.
-This is most useful for hugepage-backed zones, where the huge pages are reserved
-from the pool.
+With `reserve=off` Cloud Hypervisor maps guest memory with `MAP_NORESERVE`, so
+VM creation succeeds even when the backing pool cannot satisfy the full zone
+size. The shortfall then surfaces only later, as a `SIGBUS` delivered to the
+guest when it faults a page the pool cannot back. With `reserve=on` the
+reservation is made when the memory is mapped, so an over-committed
+configuration fails cleanly at VM creation with an out-of-memory error instead
+of crashing the guest at run time. This is most useful for hugepage-backed
+zones, where the huge pages are reserved from the pool.
 
 Unlike `prefault`, this does not populate or fault in the memory, so it does not
 slow down boot; it only reserves it.
 
-By default this option is turned off.
+By default this option has the same value as `hugepages`: it is on with
+`hugepages=on` and off otherwise.
 
 _Example_
 
