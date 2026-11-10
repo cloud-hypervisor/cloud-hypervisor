@@ -25,6 +25,7 @@ use serde::de::{Error as DeError, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 use virtio_devices::RateLimiterConfig;
+pub use virtio_devices::vsock::SocketType;
 
 use crate::Landlock;
 use crate::landlock::LandlockError;
@@ -975,6 +976,8 @@ pub struct VsockConfig {
     pub pci_common: PciDeviceCommonConfig,
     pub cid: u32,
     pub socket: PathBuf,
+    #[serde(default)]
+    pub socket_type: SocketType,
 }
 
 impl ApplyLandlock for VsockConfig {

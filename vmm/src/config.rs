@@ -2894,7 +2894,7 @@ impl VdpaConfig {
 
 impl VsockConfig {
     pub const SYNTAX: &'static str = "Virtio VSOCK parameters \
-        \"cid=<context_id>,socket=<socket_path>,iommu=off|virtio,id=<device_id>,\
+        \"cid=<context_id>,socket=<socket_path>,socket_type=stream|seqpacket,iommu=off|virtio,id=<device_id>,\
         pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 
     pub fn parse(vsock: &str) -> Result<Self> {
@@ -2902,6 +2902,7 @@ impl VsockConfig {
         parser
             .add("socket")
             .add("cid")
+            .add("socket_type")
             .add_all(PciDeviceCommonConfig::OPTIONS_IOMMU);
         parser.parse(vsock).map_err(Error::ParseVsock)?;
 
@@ -2919,6 +2920,10 @@ impl VsockConfig {
             pci_common,
             cid,
             socket,
+            socket_type: parser
+                .convert("socket_type")
+                .map_err(Error::ParseVsock)?
+                .unwrap_or_default(),
         })
     }
 
@@ -6805,6 +6810,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             VsockConfig::parse("socket=/tmp/sock,cid=3")?,
             VsockConfig {
+                socket_type: SocketType::Stream,
                 pci_common: PciDeviceCommonConfig::default(),
                 cid: 3,
                 socket: PathBuf::from("/tmp/sock"),
@@ -6813,6 +6819,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             VsockConfig::parse("socket=/tmp/sock,cid=3,iommu=on")?,
             VsockConfig {
+                socket_type: SocketType::Stream,
                 pci_common: PciDeviceCommonConfig {
                     iommu: IommuType::Virtio,
                     ..Default::default()
@@ -8510,6 +8517,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         still_valid_config.vsock = Some(VsockConfig {
+            socket_type: SocketType::Stream,
             pci_common: PciDeviceCommonConfig {
                 iommu: IommuType::Virtio,
                 pci_segment: 1,
@@ -8598,6 +8606,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         invalid_config.vsock = Some(VsockConfig {
+            socket_type: SocketType::Stream,
             pci_common: PciDeviceCommonConfig {
                 pci_segment: 1,
                 ..Default::default()
