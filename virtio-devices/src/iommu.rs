@@ -468,17 +468,17 @@ impl Request {
                     let bypass =
                         (req.flags & VIRTIO_IOMMU_ATTACH_F_BYPASS) == VIRTIO_IOMMU_ATTACH_F_BYPASS;
 
-                    if let Some(d) = mapping.domains.read().unwrap().get(&domain_id)
-                        && d.bypass != bypass
-                    {
-                        return Err(Error::InvalidAttachRequest);
-                    }
-
-                    // Refuse before mutating any state so a failed ATTACH
-                    // does not leave a phantom endpoint pointing at a
-                    // domain that was never created.
                     {
                         let domains = mapping.domains.read().unwrap();
+                        if let Some(d) = domains.get(&domain_id)
+                            && d.bypass != bypass
+                        {
+                            return Err(Error::InvalidAttachRequest);
+                        }
+
+                        // Refuse before mutating any state so a failed ATTACH
+                        // does not leave a phantom endpoint pointing at a
+                        // domain that was never created.
                         if !domains.contains_key(&domain_id) && domains.len() >= MAX_DOMAINS {
                             return Err(Error::DomainCountExceeded(domains.len()));
                         }
@@ -616,19 +616,20 @@ impl Request {
                         return Err(Error::InvalidMapRequestRange);
                     }
 
-                    // Going forward MAP rejects overlap, so within a domain
-                    // mappings are disjoint and the rightmost mapping with
-                    // start <= virt_end is the only candidate to overlap.
-                    if let Some(d) = mapping.domains.read().unwrap().get(&domain_id)
-                        && let Some((&start, m)) = d.mappings.range(..=req.virt_end).next_back()
-                        && let Some(end) = inclusive_end(start, m.size)
-                        && end >= req.virt_start
-                    {
-                        return Err(Error::InvalidMapRequest);
-                    }
-
                     {
                         let domains = mapping.domains.read().unwrap();
+
+                        // Going forward MAP rejects overlap, so within a domain
+                        // mappings are disjoint and the rightmost mapping with
+                        // start <= virt_end is the only candidate to overlap.
+                        if let Some(d) = domains.get(&domain_id)
+                            && let Some((&start, m)) = d.mappings.range(..=req.virt_end).next_back()
+                            && let Some(end) = inclusive_end(start, m.size)
+                            && end >= req.virt_start
+                        {
+                            return Err(Error::InvalidMapRequest);
+                        }
+
                         if let Some(d) = domains.get(&domain_id)
                             && d.mappings.len() >= MAX_MAPPINGS_PER_DOMAIN
                         {
