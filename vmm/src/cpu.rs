@@ -2804,18 +2804,6 @@ impl Pausable for CpuManager {
         self.signal_vcpus()
             .map_err(|e| MigratableError::Pause(anyhow!("Error signalling vCPUs: {e}")))?;
 
-        // Notify all guests (including Hyper-V / Windows) that the clock was
-        // paused.  KVM_KVMCLOCK_CTRL updates internal KVM state that affects
-        // both pvclock (Linux) and the Hyper-V TSC reference page, so it must
-        // be called unconditionally.
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-        for vcpu in self.vcpus.iter() {
-            let vcpu = vcpu.lock().unwrap();
-            vcpu.vcpu.notify_guest_clock_paused().map_err(|e| {
-                MigratableError::Pause(anyhow!("Could not notify guest it has been paused {e:?}"))
-            })?;
-        }
-
         // The vCPU thread will change its paused state before parking, wait here for each
         // activated vCPU change their state to ensure they have parked.
         for state in self.vcpu_states.lock().unwrap().iter() {
@@ -2832,6 +2820,19 @@ impl Pausable for CpuManager {
     }
 
     fn resume(&mut self) -> result::Result<(), MigratableError> {
+        // Notify all guests (including Hyper-V / Windows) that the clock was
+        // paused.  KVM_KVMCLOCK_CTRL updates internal KVM state that affects
+        // both pvclock (Linux) and the Hyper-V TSC reference page, so it must
+        // be called unconditionally. Doing it on resume also covers a VM
+        // restored from a snapshot, which never runs after its pause.
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+        for vcpu in self.vcpus.iter() {
+            let vcpu = vcpu.lock().unwrap();
+            vcpu.vcpu.notify_guest_clock_paused().map_err(|e| {
+                MigratableError::Resume(anyhow!("Could not notify guest it has been paused {e:?}"))
+            })?;
+        }
+
         // Ensure that vCPUs keep running after being unpark() in
         // their run vCPU loop.
         self.vcpus_pause_signalled.store(false, Ordering::SeqCst);
