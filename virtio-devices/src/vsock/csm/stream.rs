@@ -13,7 +13,6 @@ use super::transport::{PayloadRead, RxState, SendResult, Transport, TxState};
 use super::txbuf::TxBuf;
 use super::{Error, Result};
 
-#[expect(dead_code)]
 pub(crate) struct StreamTransport<S> {
     pub(super) stream: S,
     pub(super) tx_buf: TxBuf,
