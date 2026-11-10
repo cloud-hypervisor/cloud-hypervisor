@@ -167,7 +167,6 @@ https://www.qemu.org/docs/master/specs/riscv-aia.html
 
 ## Known limitations
 
-- Direct kernel boot only
 - `64-bit Linux` guest OS only
 - For more details, see
   [here](https://github.com/cloud-hypervisor/cloud-hypervisor/issues/6978).
