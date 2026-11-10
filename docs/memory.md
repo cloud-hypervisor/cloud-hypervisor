@@ -312,10 +312,11 @@ the backing file for the `mmap(2)` operation.
 
 This option can be particularly useful when trying to back a part of the guest
 RAM with a well known file. In the context of the snapshot/restore feature, and
-if the provided path is a file, the snapshot operation will not perform any
-copy of the guest RAM content for this specific memory zone since the user has
-access to it and it would duplicate data already stored on the current
-filesystem.
+if the provided path is a file and the zone uses `shared=on`, the snapshot
+operation will not perform any copy of the guest RAM content for this specific
+memory zone since the user has access to it and it would duplicate data
+already stored on the current filesystem. With `shared=off`, guest writes do
+not reach the file, so the snapshot copies the zone content.
 
 Value is a string.
 
