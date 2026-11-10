@@ -221,7 +221,9 @@ The hypervisor backend is auto-detected from the host device node:
 All integration test containers run with `--privileged` and full
 access to `/dev`. Workloads are bind-mounted from the host.
 
-Test scripts use `cargo nextest run` with the `--release` profile.
+Test scripts build Cloud Hypervisor with `cargo build --release` and
+run the tests with `cargo nextest run`, using the profiles from
+`.config/nextest.toml`.
 Tests are grouped by module name filter (e.g., `common_parallel`,
 `common_sequential`). Most groups retry a failed test up to 2
 times. The nextest configuration in `.config/nextest.toml` sets a
@@ -259,7 +261,7 @@ prepares all required workloads:
 - **Kernel:** `vmlinux-x86_64`.
 - **Firmware:** `hypervisor-fw` (rust-hypervisor-firmware).
 - **OVMF:** `CLOUDHV.fd`.
-- **Guest images:** Ubuntu Focal and Jammy cloud images in multiple
+- **Guest images:** Ubuntu Jammy cloud images in multiple
   formats (raw, qcow2, compressed, backing-file variants).
 - **Alpine:** Minirootfs and initramfs for lightweight boot tests.
 - **virtiofsd:** Built from source for virtio-fs tests.
@@ -290,7 +292,7 @@ mirrors x86_64 with aarch64-specific images:
 
 - **Kernel:** `Image-arm64`.
 - **OVMF:** `CLOUDHV_EFI.fd`.
-- **Guest images:** Focal and Jammy aarch64 cloud images.
+- **Guest images:** Ubuntu Jammy aarch64 cloud images.
 
 **Test groups executed:** `common_parallel`, `common_sequential`,
 `aarch64_acpi`, `dbus_api`, `fw_cfg`, `ivshmem`.
