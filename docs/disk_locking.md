@@ -30,20 +30,24 @@ disk image:
 
 ### `byte-range` (default)
 
-Locks the byte range `[0, physical_file_size)`. The physical file size
-is evaluated once at startup; if the file grows after the lock is
-acquired, the newly appended region is not covered by the lock.
+Locks the byte range `[0, max(logical_size, physical_size))`. The
+logical size is the disk size seen by the guest, and the physical size
+is the space that the image occupies on the host. Both are evaluated
+when the lock is acquired. If the file grows after that, the newly
+appended region is not covered by the lock.
 
 The file is protected against concurrent access by other instances of
 Cloud Hypervisor. That's the only thing we can guarantee.
 
 #### Fallback to full
 
-One caveat is that if the physical size of the disk image cannot be
-determined at startup (e.g. with certain vhost-user backends), Cloud
-Hypervisor falls back to a whole-file lock regardless of the
-`lock_granularity` setting, as a byte-range lock cannot be safely
-computed without knowing the physical file size.
+One caveat is that if neither the logical nor the physical size of the
+disk image can be determined, Cloud Hypervisor falls back to a
+whole-file lock regardless of the `lock_granularity` setting, as a
+byte-range lock cannot be safely computed without knowing the size.
+
+Cloud Hypervisor does not lock disks with a vhost-user backend, because
+it does not open their images.
 
 ### `full`
 
