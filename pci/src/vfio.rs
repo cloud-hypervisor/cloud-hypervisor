@@ -2188,7 +2188,6 @@ pub struct VfioPciDevice {
     // Whether to map VFIO device MMIO BARs into the host IOMMU address space.
     // Required for peer-to-peer DMA between VFIO devices.
     p2p_dma: bool,
-    p2p_dma_mapped: bool,
     memory_slot_allocator: Arc<MemorySlotAllocator>,
     // Guest memory layout, used to enumerate the IOVA ranges to track when
     // programming VFIO DMA logging.
@@ -2242,7 +2241,6 @@ impl VfioPciDevice {
             common,
             iommu_attached,
             p2p_dma,
-            p2p_dma_mapped: false,
             memory_slot_allocator,
             memory,
             bdf,
@@ -2524,8 +2522,6 @@ impl VfioPciDevice {
             }
         }
 
-        self.p2p_dma_mapped = self.p2p_dma;
-
         Ok(())
     }
 
@@ -2599,8 +2595,6 @@ impl VfioPciDevice {
                 }
             }
         }
-
-        self.p2p_dma_mapped = memory_space_enabled;
     }
 
     pub fn unmap_mmio_regions(&mut self) {
@@ -2653,8 +2647,6 @@ impl VfioPciDevice {
                     .free_memory_slot(user_memory_region.slot);
             }
         }
-
-        self.p2p_dma_mapped = false;
     }
 
     pub fn mmio_regions(&self) -> Vec<MmioRegion> {
@@ -2844,7 +2836,7 @@ iova 0x{:x}, size 0x{:x}: {}, ",
             if region.index as usize == bar_idx {
                 let region_index = region.index;
                 let old_base = region.start.raw_value();
-                let map_p2p = self.p2p_dma_mapped && region.is_p2p_mappable();
+                let map_p2p = self.p2p_dma && region.is_p2p_mappable();
                 region.start = GuestAddress(new_base);
 
                 for user_memory_region in region.user_memory_regions.iter_mut() {
