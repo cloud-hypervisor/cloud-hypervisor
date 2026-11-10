@@ -55,7 +55,8 @@ use super::super::csm::transport::Transport;
 use super::super::defs::uapi;
 use super::super::packet::VsockPacket;
 use super::super::{
-    Result as VsockResult, VsockBackend, VsockChannel, VsockEpollListener, VsockError,
+    ConnectionInfo, Result as VsockResult, VsockBackend, VsockChannel, VsockEpollListener,
+    VsockError,
 };
 use super::muxer_killq::MuxerKillQ;
 use super::muxer_rxq::MuxerRxQ;
@@ -65,6 +66,7 @@ use super::{Error, MuxerConnection, Result, defs};
 /// keyed by a `ConnMapKey` object.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(super) struct ConnMapKey {
+    socket_type: u16,
     local_port: u32,
     peer_port: u32,
 }
@@ -75,7 +77,11 @@ pub(super) enum MuxerRx {
     /// The packet must be fetched from the connection identified by `ConnMapKey`.
     ConnRx(ConnMapKey),
     /// The muxer must produce an RST packet.
-    RstPkt { local_port: u32, peer_port: u32 },
+    RstPkt {
+        socket_type: u16,
+        local_port: u32,
+        peer_port: u32,
+    },
 }
 
 /// An epoll listener, registered under the muxer's nested epoll FD.
@@ -161,6 +167,7 @@ impl VsockChannel for VsockMuxer {
             let res = match rx {
                 // We need to build an RST packet, going from `local_port` to `peer_port`.
                 MuxerRx::RstPkt {
+                    socket_type,
                     local_port,
                     peer_port,
                 } => {
@@ -170,7 +177,7 @@ impl VsockChannel for VsockMuxer {
                         .set_src_port(local_port)
                         .set_dst_port(peer_port)
                         .set_len(0)
-                        .set_type(uapi::VSOCK_TYPE_STREAM)
+                        .set_type(socket_type)
                         .set_flags(0)
                         .set_buf_alloc(0)
                         .set_fwd_cnt(0);
@@ -202,6 +209,7 @@ impl VsockChannel for VsockMuxer {
                 //
                 if pkt.op() == uapi::VSOCK_OP_RST {
                     self.remove_connection(ConnMapKey {
+                        socket_type: pkt.type_(),
                         local_port: pkt.src_port(),
                         peer_port: pkt.dst_port(),
                     });
@@ -223,6 +231,7 @@ impl VsockChannel for VsockMuxer {
     /// returned to the guest vsock driver.
     fn send_pkt(&mut self, pkt: &VsockPacket) -> VsockResult<()> {
         let conn_key = ConnMapKey {
+            socket_type: pkt.type_(),
             local_port: pkt.dst_port(),
             peer_port: pkt.src_port(),
         };
@@ -236,7 +245,7 @@ impl VsockChannel for VsockMuxer {
         // If this packet has an unsupported type (!=stream), we must send back an RST.
         //
         if pkt.type_() != uapi::VSOCK_TYPE_STREAM {
-            self.enq_rst(pkt.dst_port(), pkt.src_port());
+            self.enq_rst(pkt.dst_port(), pkt.src_port(), pkt.type_());
             return Ok(());
         }
 
@@ -265,7 +274,7 @@ impl VsockChannel for VsockMuxer {
                 self.handle_peer_request_pkt(pkt);
             } else {
                 // Send back an RST, to let the drive know we weren't expecting this packet.
-                self.enq_rst(pkt.dst_port(), pkt.src_port());
+                self.enq_rst(pkt.dst_port(), pkt.src_port(), pkt.type_());
             }
             return Ok(());
         }
@@ -341,19 +350,16 @@ impl VsockEpollListener for VsockMuxer {
 }
 
 impl VsockBackend for VsockMuxer {
-    fn connections(&self) -> Vec<(u32, u32)> {
+    fn connections(&self) -> Vec<ConnectionInfo> {
         self.conn_map
             .keys()
-            .map(|k| (k.local_port, k.peer_port))
+            .map(|key| (key.local_port, key.peer_port, key.socket_type))
             .collect()
     }
 
-    fn queue_rst_for_connections(&mut self, conns: Vec<(u32, u32)>) {
-        for (local_port, peer_port) in conns {
-            self.rxq.push(MuxerRx::RstPkt {
-                local_port,
-                peer_port,
-            });
+    fn queue_rst_for_connections(&mut self, conns: Vec<ConnectionInfo>) {
+        for (local_port, peer_port, socket_type) in conns {
+            self.enq_rst(local_port, peer_port, socket_type);
         }
     }
 
@@ -484,6 +490,7 @@ impl VsockMuxer {
 
                         self.add_connection(
                             ConnMapKey {
+                                socket_type: uapi::VSOCK_TYPE_STREAM,
                                 local_port,
                                 peer_port,
                             },
@@ -723,6 +730,7 @@ impl VsockMuxer {
             .and_then(|stream| {
                 self.add_connection(
                     ConnMapKey {
+                        socket_type: pkt.type_(),
                         local_port: pkt.dst_port(),
                         peer_port: pkt.src_port(),
                     },
@@ -736,7 +744,7 @@ impl VsockMuxer {
                     ),
                 )
             })
-            .unwrap_or_else(|_| self.enq_rst(pkt.dst_port(), pkt.src_port()));
+            .unwrap_or_else(|_| self.enq_rst(pkt.dst_port(), pkt.src_port(), pkt.type_()));
     }
 
     /// Perform an action that might mutate a connection's state.
@@ -873,8 +881,9 @@ impl VsockMuxer {
     /// Enqueue errors aren't propagated up the call chain, since there is nothing we can do to
     /// handle them. We do, however, log a warning, since not being able to enqueue an RST
     /// packet means we have to drop it, which is not normal operation.
-    fn enq_rst(&mut self, local_port: u32, peer_port: u32) {
+    fn enq_rst(&mut self, local_port: u32, peer_port: u32, socket_type: u16) {
         let pushed = self.rxq.push(MuxerRx::RstPkt {
+            socket_type,
             local_port,
             peer_port,
         });
@@ -1046,6 +1055,7 @@ mod tests {
             // local port should also have been allocated for the new LocalInit connection.
             let local_port = self.muxer.local_port_last;
             let key = ConnMapKey {
+                socket_type: uapi::VSOCK_TYPE_STREAM,
                 local_port,
                 peer_port,
             };
@@ -1165,6 +1175,7 @@ mod tests {
         let mut ctx = MuxerTestContext::new("orphan_rst_reused_port_pair");
         let mut listener = ctx.create_local_listener(LOCAL_PORT);
         let key = ConnMapKey {
+            socket_type: uapi::VSOCK_TYPE_STREAM,
             local_port: LOCAL_PORT,
             peer_port: PEER_PORT,
         };
@@ -1232,6 +1243,7 @@ mod tests {
         assert_eq!(ctx.pkt.src_port(), LOCAL_PORT);
         assert_eq!(ctx.pkt.dst_port(), PEER_PORT);
         let key = ConnMapKey {
+            socket_type: uapi::VSOCK_TYPE_STREAM,
             local_port: LOCAL_PORT,
             peer_port: PEER_PORT,
         };
@@ -1330,6 +1342,7 @@ mod tests {
             );
             assert!(conn.has_pending_rx());
             let key = ConnMapKey {
+                socket_type: uapi::VSOCK_TYPE_STREAM,
                 local_port: port,
                 peer_port: port,
             };
@@ -1374,6 +1387,7 @@ mod tests {
         // Overflow the RX queue with entries for connections that no longer exist.
         for port in 0..=defs::MUXER_RXQ_SIZE as u32 {
             ctx.muxer.rxq.push(MuxerRx::ConnRx(ConnMapKey {
+                socket_type: uapi::VSOCK_TYPE_STREAM,
                 local_port: 5000 + port,
                 peer_port: 5000 + port,
             }));
@@ -1412,6 +1426,7 @@ mod tests {
         ctx.init_pkt(local_port, peer_port, uapi::VSOCK_OP_RST);
         ctx.send();
         let key = ConnMapKey {
+            socket_type: uapi::VSOCK_TYPE_STREAM,
             local_port,
             peer_port,
         };
@@ -1431,6 +1446,7 @@ mod tests {
         // Establish and take note of the local port allocated to it
         let (_host_stream, local_port) = ctx.local_connect(host_peer_port);
         let host_key = ConnMapKey {
+            socket_type: uapi::VSOCK_TYPE_STREAM,
             local_port,
             peer_port: host_peer_port,
         };
@@ -1447,6 +1463,7 @@ mod tests {
         ctx.init_pkt(local_port, guest_src_port, uapi::VSOCK_OP_REQUEST);
         ctx.send();
         let guest_key = ConnMapKey {
+            socket_type: uapi::VSOCK_TYPE_STREAM,
             local_port,
             peer_port: guest_src_port,
         };
@@ -1489,6 +1506,7 @@ mod tests {
         assert_eq!(buf.as_slice(), &data);
 
         let key = ConnMapKey {
+            socket_type: uapi::VSOCK_TYPE_STREAM,
             local_port,
             peer_port,
         };
@@ -1512,6 +1530,7 @@ mod tests {
         assert_eq!(ctx.pkt.src_port(), local_port);
         assert_eq!(ctx.pkt.dst_port(), peer_port);
         let key = ConnMapKey {
+            socket_type: uapi::VSOCK_TYPE_STREAM,
             local_port,
             peer_port,
         };
@@ -1530,6 +1549,7 @@ mod tests {
         assert_eq!(ctx.pkt.src_port(), local_port);
         assert_eq!(ctx.pkt.dst_port(), peer_port);
         let key = ConnMapKey {
+            socket_type: uapi::VSOCK_TYPE_STREAM,
             local_port,
             peer_port,
         };
@@ -1574,6 +1594,7 @@ mod tests {
         assert_eq!(&buf[..data.len()], data);
         assert_eq!(stream.read(buf.as_mut_slice()).unwrap(), 0);
         let key = ConnMapKey {
+            socket_type: uapi::VSOCK_TYPE_STREAM,
             local_port,
             peer_port,
         };
@@ -1728,6 +1749,7 @@ mod tests {
 
         // Get the connection from the connection map.
         let key = ConnMapKey {
+            socket_type: uapi::VSOCK_TYPE_STREAM,
             local_port,
             peer_port,
         };
@@ -1754,6 +1776,7 @@ mod tests {
 
         // Get the connection from the connection map.
         let key = ConnMapKey {
+            socket_type: uapi::VSOCK_TYPE_STREAM,
             local_port,
             peer_port,
         };

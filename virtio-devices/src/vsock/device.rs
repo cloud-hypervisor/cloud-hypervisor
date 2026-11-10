@@ -44,7 +44,7 @@ use vmm_sys_util::eventfd::EventFd;
 /// - a TX queue FD;
 /// - an event queue FD; and
 /// - a backend FD.
-use super::{VsockBackend, VsockPacket};
+use super::{ConnectionInfo, VsockBackend, VsockPacket};
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::{
@@ -354,7 +354,7 @@ pub struct VsockState {
     pub avail_features: u64,
     pub acked_features: u64,
     #[serde(default)]
-    pub connections: Vec<(u32, u32)>,
+    pub connections: Vec<ConnectionInfo>,
     #[serde(default)]
     pub local_port_last: Option<u32>,
 }
