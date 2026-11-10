@@ -114,12 +114,13 @@ sudo make install
 
 ### Download Ubuntu Server Image
 
-At the time of writing, the best results have been seen with 
-the Ubuntu 24.10 (Oracular) server image. Ex:
+Download the latest Ubuntu 24.04 LTS (Noble) preinstalled server
+image for riscv64 from https://cdimage.ubuntu.com/releases/noble/release/.
+Ex:
 
 ```console
-wget https://cdimage.ubuntu.com/releases/oracular/release/ubuntu-24.10-preinstalled-server-riscv64.img.xz
-xz -dk ubuntu-24.10-preinstalled-server-riscv64.img.xz
+wget https://cdimage.ubuntu.com/releases/noble/release/ubuntu-24.04.5-preinstalled-server-riscv64.img.xz
+xz -dk ubuntu-24.04.5-preinstalled-server-riscv64.img.xz
 ```
 
 ### (Optional) Resize Disk
