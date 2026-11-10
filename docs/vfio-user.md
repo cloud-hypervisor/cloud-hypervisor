@@ -5,7 +5,9 @@ VFIO-user is an *experimental* protocol for allowing devices to be implemented i
 The protocol is documented here:
 https://www.qemu.org/docs/master/interop/vfio-user.html
 
-The Cloud Hypervisor support for such devices is *experimental*. Not all Cloud Hypervisor functionality is supported in particular: virtio-mem and iommu are not supported.
+The Cloud Hypervisor support for such devices is *experimental*. Not all Cloud
+Hypervisor functionality is supported. In particular, attaching the device to a
+virtual IOMMU is not supported.
 
 ## Usage
 
