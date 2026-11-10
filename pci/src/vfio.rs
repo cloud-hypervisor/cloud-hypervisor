@@ -1723,8 +1723,7 @@ impl VfioCommon {
                 info!(
                     "MSE bit is disabled. No BAR reprogramming parameter is returned: {ret_param:x?}"
                 );
-
-                ret_param = Vec::new();
+                ret_param.clear();
             }
         }
 
