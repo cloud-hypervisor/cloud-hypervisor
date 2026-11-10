@@ -513,7 +513,9 @@ For KSM to have any effect, the host kernel must have KSM enabled:
 echo 1 > /sys/kernel/mm/ksm/run
 ```
 
-By default this option is turned off.
+On the command line, a zone without `mergeable` inherits the value of
+`--memory`, which is off by default. In the REST API, a zone without
+`mergeable` is always off, independent of the top-level `memory.mergeable`.
 
 _Example_
 
