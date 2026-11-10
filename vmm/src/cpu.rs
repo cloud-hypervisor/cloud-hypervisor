@@ -2259,24 +2259,20 @@ impl CpuManager {
         cpu_id: u8,
         gva: u64,
     ) -> Result<u64> {
-        let tcr_el1: u64 = self.vcpus[usize::from(cpu_id)]
-            .lock()
-            .unwrap()
-            .vcpu
-            .get_sys_reg(TCR_EL1)
-            .map_err(|e| Error::TranslateVirtualAddress(e.into()))?;
-        let ttbr1_el1: u64 = self.vcpus[usize::from(cpu_id)]
-            .lock()
-            .unwrap()
-            .vcpu
-            .get_sys_reg(TTBR1_EL1)
-            .map_err(|e| Error::TranslateVirtualAddress(e.into()))?;
-        let id_aa64mmfr0_el1: u64 = self.vcpus[usize::from(cpu_id)]
-            .lock()
-            .unwrap()
-            .vcpu
-            .get_sys_reg(ID_AA64MMFR0_EL1)
-            .map_err(|e| Error::TranslateVirtualAddress(e.into()))?;
+        let (tcr_el1, ttbr1_el1, id_aa64mmfr0_el1): (u64, u64, u64) = {
+            let vcpu = self.vcpus[usize::from(cpu_id)].lock().unwrap();
+            (
+                vcpu.vcpu
+                    .get_sys_reg(TCR_EL1)
+                    .map_err(|e| Error::TranslateVirtualAddress(e.into()))?,
+                vcpu.vcpu
+                    .get_sys_reg(TTBR1_EL1)
+                    .map_err(|e| Error::TranslateVirtualAddress(e.into()))?,
+                vcpu.vcpu
+                    .get_sys_reg(ID_AA64MMFR0_EL1)
+                    .map_err(|e| Error::TranslateVirtualAddress(e.into()))?,
+            )
+        };
 
         // Bit 55 of the VA determines the range, high (0xFFFxxx...)
         // or low (0x000xxx...).
