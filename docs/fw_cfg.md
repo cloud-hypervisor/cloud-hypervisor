@@ -57,7 +57,8 @@ This option allows the kernel to expose `fw_cfg` entries under `/sys/firmware/qe
 The `fw_cfg` device is configured using the `--fw-cfg-config` command-line option.
 
 **Parameters:**
-*   `e820=on|off`: (Default: `on`) Whether to add an E820 memory map entry to `fw_cfg`.
+*   `e820=on|off`: (Default: `on` on x86-64) Whether to add the E820 memory map
+    to `fw_cfg` as `etc/e820`. AArch64 has no E820 map and ignores this option.
 *   `kernel=on|off`: (Default: `on`) Whether to add the kernel image (specified by `--kernel`) to `fw_cfg`.
 *   `cmdline=on|off`: (Default: `on`) Whether to add the kernel command line (specified by `--cmdline`) to `fw_cfg`.
 *   `initramfs=on|off`: (Default: `on`) Whether to add the initramfs image (specified by `--initramfs`) to `fw_cfg`.
@@ -110,4 +111,7 @@ For example, an item added with `name=opt/org.example/my-data` will be available
 
 The `raw` file contains the binary content of the host file provided.
 
-Standard items like kernel, initramfs, cmdline, and ACPI tables also have predefined names (e.g., `etc/kernel`, `etc/cmdline`) if they are enabled to be passed via `fw_cfg`.
+The kernel, initramfs, and command line use fixed `fw_cfg` selectors without
+file names, so they do not appear under `by_name`. Other standard items have
+predefined names: `etc/e820` for the E820 memory map, and `acpi/tables`,
+`acpi/rsdp`, and `etc/table-loader` for the ACPI tables.
