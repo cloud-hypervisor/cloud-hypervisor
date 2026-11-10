@@ -3137,7 +3137,9 @@ impl RestoreConfig {
         memory_restore_mode=copy|ondemand|copyonwrite,\
         net_fds=<list_of_net_ids_with_their_associated_fds>,\
         vfio_fds=<list_of_vfio_ids_with_their_associated_fd>,iommufd_fd=<fd>,resume=true|false,\
-        zone_updates=<list_of_updates>\"\n\
+        zone_updates=<list_of_updates>,\
+        serial_file=<path>|serial_socket=<path>|serial_tcp=<ip>:<port>,\
+        console_file=<path>|console_socket=<path>|console_tcp=<ip>:<port>\"\n\
         \n`source_url` should be a valid URL (e.g file:///foo/bar or tcp://192.168.1.10/foo)\
         \n`prefault` controls eager prefaulting for the copy-based restore path \
         (disabled by default)\
@@ -3170,7 +3172,8 @@ impl RestoreConfig {
             .add("vfio_fds")
             .add("iommufd_fd")
             .add("resume")
-            .add("zone_updates");
+            .add("zone_updates")
+            .add_all(ConsoleOutput::UPDATE_OPTIONS);
         parser.parse(restore).map_err(Error::ParseRestore)?;
 
         let source_url = parser
@@ -3245,6 +3248,9 @@ impl RestoreConfig {
                     .collect()
             });
 
+        let serial = ConsoleOutput::parse_update(&parser, "serial")?;
+        let console = ConsoleOutput::parse_update(&parser, "console")?;
+
         Ok(RestoreConfig {
             source_url,
             prefault,
@@ -3254,8 +3260,8 @@ impl RestoreConfig {
             iommufd_fd,
             resume,
             zone_updates,
-            serial: None,
-            console: None,
+            serial,
+            console,
         })
     }
 
@@ -6966,6 +6972,38 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 ..Default::default()
             }
         );
+        assert_eq!(
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe {
+                RestoreConfig::parse(
+                    "source_url=/path/to/snapshot,serial_file=/tmp/s,console_socket=/tmp/c",
+                )
+            }?,
+            RestoreConfig {
+                source_url: PathBuf::from("/path/to/snapshot"),
+                serial: Some(ConsoleOutput::File {
+                    file: PathBuf::from("/tmp/s"),
+                }),
+                console: Some(ConsoleOutput::Socket {
+                    socket: PathBuf::from("/tmp/c"),
+                }),
+                ..Default::default()
+            }
+        );
+        assert!(matches!(
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe {
+                RestoreConfig::parse("source_url=/path/to/snapshot,serial_file=/a,serial_socket=/b")
+            },
+            Err(Error::Validation(
+                ValidationError::ConsoleOutputUpdateAmbiguous(_)
+            ))
+        ));
+        assert!(matches!(
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe { RestoreConfig::parse("source_url=/path/to/snapshot,console_tcp=localhost:1") },
+            Err(Error::ResolveConsoleTcpAddress { .. })
+        ));
         let files: [File; 6] = array::from_fn(|_| test_fd());
         let [fd0, fd1, fd2, fd3, fd4, fd5] = files.map(IntoRawFd::into_raw_fd);
         // SAFETY: The files transferred exclusive ownership to us.
