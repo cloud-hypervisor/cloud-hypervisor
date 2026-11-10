@@ -53,9 +53,10 @@ Start to send migration for the source VM (on the host machine):
 $ target/release/ch-remote --api-socket=/tmp/api1 send-migration destination_url=unix:/tmp/sock,memory_mode=memfds
 ```
 
-When the above commands completed, the source VM should be successfully
-migrated to the destination VM. Now the destination VM is running while
-the source VM is terminated gracefully.
+`send-migration` only starts the migration and returns immediately, so its exit
+status does not tell whether the migration succeeded. Use the [events](#events)
+to observe the result. Once the migration has finished, the destination VM is
+running while the source VM is terminated gracefully.
 
 ## TCP/TLS Migration
 
@@ -147,12 +148,13 @@ src $ ch-remote --api-socket=/tmp/api send-migration destination_url=tcp:{dst}:{
 > Replace {dst}:{port} with the actual host name or IP address and port of
 > your destination host. For a same-host migration, use `localhost`.
 
-After completing the above commands, the source VM will be migrated to
-the destination host and continue running there. The source VM instance
-will terminate normally. All ongoing processes and connections within
-the VM should remain intact after the migration.
-See [Network Announcements After Resume](#network-announcements-after-resume)
-for the announcement behavior after a VM resumes.
+`send-migration` only starts the migration, see [Events](#events) for observing
+the result. After the migration has finished, the VM continues running on the
+destination host and the source VM instance terminates normally. All ongoing
+processes and connections within the VM should remain intact after the
+migration. See
+[Network Announcements After Resume](#network-announcements-after-resume) for
+the announcement behavior after a VM resumes.
 
 #### Encryption
 

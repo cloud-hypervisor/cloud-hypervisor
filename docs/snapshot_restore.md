@@ -316,7 +316,8 @@ with `memory_mode=memfds`) to the `send-migration` command:
 ./ch-remote --api-socket /tmp/cloud-hypervisor.sock pause
 ./ch-remote --api-socket /tmp/cloud-hypervisor.sock \
     send-migration destination_url=unix:/tmp/offload.sock,memory_mode=memfds,preserve_source=on
-# The source VMM keeps running, the VM is left paused. Resume it when ready:
+# send-migration only starts the transfer. The source VMM keeps running and
+# the VM is left paused. Resume it after the vm.migration-finished event:
 ./ch-remote --api-socket /tmp/cloud-hypervisor.sock resume
 ```
 
