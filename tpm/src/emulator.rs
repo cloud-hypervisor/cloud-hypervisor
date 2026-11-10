@@ -232,10 +232,7 @@ impl Emulator {
             | PTM_CAP_STOP
             | PTM_CAP_SET_BUFFERSIZE;
 
-        if (self.caps & caps) != caps {
-            return false;
-        }
-        true
+        (self.caps & caps) == caps
     }
 
     ///
