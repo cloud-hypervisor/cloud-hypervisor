@@ -49,6 +49,7 @@ mod common_parallel {
     use std::io::{self, SeekFrom};
     use std::net::TcpStream;
     use std::num::NonZeroU32;
+    use std::os::unix::net::UnixStream;
     use std::process::Command;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -7702,6 +7703,7 @@ mod common_parallel {
         downtime_ms: Option<u64>,
         timeout_s: Option<u64>,
         timeout_strategy: Option<TimeoutStrategy>,
+        dest_console_update: Option<String>,
     }
 
     fn start_live_migration_tcp_with_flags(
@@ -7762,6 +7764,9 @@ mod common_parallel {
         let mut receive_arg = format!("receiver_url=tcp:0.0.0.0:{migration_port}");
         if options.tls {
             receive_arg.push_str(&format!(",tls_dir={TLS_DIR}"));
+        }
+        if let Some(console_update) = &options.dest_console_update {
+            receive_arg.push_str(&format!(",{console_update}"));
         }
 
         // Start the 'receive-migration' command on the destination
@@ -9189,6 +9194,178 @@ mod common_parallel {
     #[test]
     fn test_live_migration_tcp_tls_only_receiver() {
         _test_live_migration_tcp_tls_one_sided(TlsOnlyOn::Receiver);
+    }
+
+    const CONSOLE_MARKER: &str = "new-console-output-marker";
+    const SERIAL_DEVICE: &str = if cfg!(target_arch = "x86_64") {
+        "/dev/ttyS0"
+    } else {
+        "/dev/ttyAMA0"
+    };
+
+    fn write_console_marker(guest: &Guest, devices: &[&str]) {
+        guest
+            .ssh_command(&format!(
+                "echo {CONSOLE_MARKER} | sudo tee {}",
+                devices.join(" ")
+            ))
+            .unwrap();
+    }
+
+    /// Reads `stream` until the console marker arrives. The read timeout of
+    /// `stream` bounds the wait.
+    fn assert_stream_has_console_marker(stream: impl Read) {
+        assert!(
+            BufReader::new(stream).split(b'\n').any(|line| {
+                let line = line.expect("should receive the console marker in time");
+                String::from_utf8_lossy(&line).contains(CONSOLE_MARKER)
+            }),
+            "console stream should contain the console marker"
+        );
+    }
+
+    fn assert_file_has_console_marker(path: &Path) {
+        assert!(
+            wait_until(Duration::from_secs(30), || {
+                fs::read(path)
+                    .is_ok_and(|data| String::from_utf8_lossy(&data).contains(CONSOLE_MARKER))
+            }),
+            "{} should contain the console marker",
+            path.display()
+        );
+    }
+
+    /// Migrates `guest` over TCP with `console_update` and runs `check` on the
+    /// destination. Both VMMs run on one host, so a destination that ignores a
+    /// new TCP or socket output cannot bind the one that the source holds.
+    fn _test_live_migration_console_update(
+        guest: &Guest,
+        (serial, console): (String, String),
+        extra_args: &[&str],
+        console_update: String,
+        check: impl FnOnce() -> thread::Result<()>,
+    ) {
+        let dest_event_path = temp_event_monitor_path(&guest.tmp_dir);
+        let src_api_socket = temp_api_path(&guest.tmp_dir);
+        let dest_api_socket = format!("{src_api_socket}.dest");
+
+        let mut src_child = GuestCommand::new(guest)
+            .default_cpus()
+            .default_memory()
+            .default_kernel_cmdline()
+            .default_disks()
+            .default_net()
+            .args(["--serial", &serial])
+            .args(["--console", &console])
+            .args(["--api-socket", &src_api_socket])
+            .args(extra_args)
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let mut dest_child = GuestCommand::new(guest)
+            .args(["--api-socket", &dest_api_socket])
+            .args(["--event-monitor", &format!("path={dest_event_path}")])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+            assert!(
+                start_live_migration_tcp_with_flags(
+                    &src_api_socket,
+                    &dest_api_socket,
+                    &dest_event_path,
+                    NonZeroU32::new(1).unwrap(),
+                    &SendMigrationOptions {
+                        dest_console_update: Some(console_update),
+                        ..Default::default()
+                    },
+                ),
+                "Unsuccessful command: 'send-migration' or 'receive-migration'."
+            );
+        });
+        if r.is_err() {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Error occurred during live-migration",
+            );
+        }
+        let _ = src_child.kill();
+        let _ = src_child.wait();
+
+        let r = check();
+
+        let _ = dest_child.kill();
+        let dest_output = dest_child.wait_with_output().unwrap();
+        handle_child_output(r, &dest_output);
+    }
+
+    /// Moves a TCP serial console and a socket virtio console to new
+    /// addresses.
+    #[test]
+    fn test_live_migration_console_new_outputs() {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let old_socket = guest.tmp_dir.as_path().join("old.sock");
+        let new_socket = guest.tmp_dir.as_path().join("new.sock");
+        let new_port = get_available_port();
+
+        _test_live_migration_console_update(
+            &guest,
+            (
+                format!("tcp=127.0.0.1:{},server=on", get_available_port()),
+                format!("socket={}", old_socket.display()),
+            ),
+            &[],
+            format!(
+                "serial_tcp=127.0.0.1:{new_port},console_socket={}",
+                new_socket.display()
+            ),
+            || {
+                panic::catch_unwind(|| {
+                    let timeout = Some(Duration::from_secs(30));
+                    let tcp = TcpStream::connect(("127.0.0.1", new_port)).unwrap();
+                    tcp.set_read_timeout(timeout).unwrap();
+                    let socket = UnixStream::connect(&new_socket).unwrap();
+                    socket.set_read_timeout(timeout).unwrap();
+
+                    write_console_marker(&guest, &[SERIAL_DEVICE, "/dev/hvc0"]);
+                    assert_stream_has_console_marker(tcp);
+                    assert_stream_has_console_marker(socket);
+                })
+            },
+        );
+    }
+
+    /// A reboot creates the file output again, which under Landlock needs a
+    /// rule for the new path. The update must therefore happen before Landlock.
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_live_migration_new_file_landlock_reboot() {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        // Outside of the --landlock-rules path, so that only a rule for the
+        // updated output can allow the file.
+        let new_dir = TempDir::new_with_prefix("/tmp/ch-console").unwrap();
+        let new_file = new_dir.as_path().join("serial.log");
+        let old_file = guest.tmp_dir.as_path().join("serial.log");
+        let landlock_rules = format!("path={:?},access=rw", guest.tmp_dir.as_path());
+
+        _test_live_migration_console_update(
+            &guest,
+            (format!("file={}", old_file.display()), "null".to_string()),
+            &["--landlock", "--landlock-rules", &landlock_rules],
+            format!("serial_file={}", new_file.display()),
+            || {
+                panic::catch_unwind(|| {
+                    guest.reboot_linux(0);
+                    write_console_marker(&guest, &[SERIAL_DEVICE]);
+                    assert_file_has_console_marker(&new_file);
+                })
+            },
+        );
     }
 
     #[test]
