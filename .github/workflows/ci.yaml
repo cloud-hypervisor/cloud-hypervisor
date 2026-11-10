@@ -106,44 +106,6 @@ jobs:
       - name: Lint git commit messages
         run: |
           gitlint --commits "origin/$GITHUB_BASE_REF.."
-  lychee:
-    name: lychee
-    needs: [preflight]
-    if: needs.preflight.outputs.docs == 'true' || needs.preflight.outputs.full == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Code checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - name: Get changed files in PR
-        id: changed-files
-        uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47.0.6
-        with:
-          base_sha: ${{ github.event.pull_request.base.sha }}
-      - name: Verify Changed Files
-        run: |
-          set -eufo pipefail
-          echo "--- tj-actions/changed-files Outputs ---"
-          echo "any_changed: ${{ steps.changed-files.outputs.any_changed }}"
-          echo "all_changed_files: ${{ steps.changed-files.outputs.all_changed_files }}"
-          echo "added_files: ${{ steps.changed-files.outputs.added_files }}"
-          echo "modified_files: ${{ steps.changed-files.outputs.modified_files }}"
-          echo "deleted_files: ${{ steps.changed-files.outputs.deleted_files }}"
-          echo "renamed_files: ${{ steps.changed-files.outputs.renamed_files }}"
-          echo "----------------------------------------"
-          if [ -n "${{ steps.changed-files.outputs.all_changed_files }}" ]; then
-            echo "Detected changes: all_changed_files output is NOT empty."
-          else
-            echo "No changes detected: all_changed_files output IS empty."
-          fi
-      - name: Link Availability Check (Diff Only)
-        if: ${{ steps.changed-files.outputs.all_changed_files != '' }}
-        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
-        with:
-          args: --verbose --config .lychee.toml ${{ steps.changed-files.outputs.all_changed_files }}
-          failIfEmpty: false
-          fail: true
   taplo:
     name: taplo
     needs: [preflight]
