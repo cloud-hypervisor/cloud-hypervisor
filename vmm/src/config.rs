@@ -3120,6 +3120,12 @@ pub struct RestoreConfig {
     pub resume: bool,
     #[serde(default)]
     pub zone_updates: Vec<VmMemoryZoneUpdateData>,
+    /// New output of the serial console, in the mode of the snapshot.
+    #[serde(default)]
+    pub serial: Option<ConsoleOutput>,
+    /// New output of the virtio console, in the mode of the snapshot.
+    #[serde(default)]
+    pub console: Option<ConsoleOutput>,
 }
 
 impl RestoreConfig {
@@ -3128,7 +3134,10 @@ impl RestoreConfig {
         memory_restore_mode=copy|ondemand|copyonwrite,\
         net_fds=<list_of_net_ids_with_their_associated_fds>,\
         vfio_fds=<list_of_vfio_ids_with_their_associated_fd>,iommufd_fd=<fd>,resume=true|false,\
-        zone_updates=<list_of_updates>\"\n\
+        zone_updates=<list_of_updates>,\
+        serial_file=<path>|serial_socket=<path>|serial_tcp=<ip>:<port>,\
+        console_file=<path>|console_socket=<path>|console_tcp=<ip>:<port>\"
+        \"\n\
         \n`source_url` should be a valid URL (e.g file:///foo/bar or tcp://192.168.1.10/foo)\
         \n`prefault` controls eager prefaulting for the copy-based restore path \
         (disabled by default)\
@@ -3145,7 +3154,8 @@ impl RestoreConfig {
         The one saved in the snapshot does not survive serialization.\
         \n`resume` controls whether the VM will be directly resumed after restore\
         \n`zone_updates` can be used to update NUMA memory zones. \
-        Expects a list of elements in the form `id@host_numa_node`";
+        Expects a list of elements in the form `id@host_numa_node` \
+        \n`serial_*` and `console_*` set a new output for the respective console and must use the mode of the snapshot";
 
     /// # Safety
     /// Live FDs named in the input must be exclusively owned by the caller.
@@ -3161,7 +3171,8 @@ impl RestoreConfig {
             .add("vfio_fds")
             .add("iommufd_fd")
             .add("resume")
-            .add("zone_updates");
+            .add("zone_updates")
+            .add_all(ConsoleOutput::UPDATE_OPTIONS);
         parser.parse(restore).map_err(Error::ParseRestore)?;
 
         let source_url = parser
@@ -3236,6 +3247,9 @@ impl RestoreConfig {
                     .collect()
             });
 
+        let serial = ConsoleOutput::parse_update(&parser, "serial")?;
+        let console = ConsoleOutput::parse_update(&parser, "console")?;
+
         Ok(RestoreConfig {
             source_url,
             prefault,
@@ -3245,6 +3259,8 @@ impl RestoreConfig {
             iommufd_fd,
             resume,
             zone_updates,
+            serial,
+            console,
         })
     }
 
@@ -6954,6 +6970,38 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 ..Default::default()
             }
         );
+        assert_eq!(
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe {
+                RestoreConfig::parse(
+                    "source_url=/path/to/snapshot,serial_file=/tmp/s,console_socket=/tmp/c",
+                )
+            }?,
+            RestoreConfig {
+                source_url: PathBuf::from("/path/to/snapshot"),
+                serial: Some(ConsoleOutput::File {
+                    file: PathBuf::from("/tmp/s"),
+                }),
+                console: Some(ConsoleOutput::Socket {
+                    socket: PathBuf::from("/tmp/c"),
+                }),
+                ..Default::default()
+            }
+        );
+        assert!(matches!(
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe {
+                RestoreConfig::parse("source_url=/path/to/snapshot,serial_file=/a,serial_socket=/b")
+            },
+            Err(Error::Validation(
+                ValidationError::ConsoleOutputUpdateAmbiguous(_)
+            ))
+        ));
+        assert!(matches!(
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe { RestoreConfig::parse("source_url=/path/to/snapshot,console_tcp=localhost:1") },
+            Err(Error::ResolveConsoleTcpAddress { .. })
+        ));
         let files: [File; 6] = array::from_fn(|_| test_fd());
         let [fd0, fd1, fd2, fd3, fd4, fd5] = files.map(IntoRawFd::into_raw_fd);
         // SAFETY: The files transferred exclusive ownership to us.
@@ -7111,6 +7159,34 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                     host_numa_node: 1,
                     id: "zone1".to_string(),
                 }],
+        );
+
+        let config = serde_json::from_str::<RestoreConfig>(
+            r#"{"source_url":"/path/to/snapshot",
+                "serial":{"mode":"Tcp","tcp":{"address":"127.0.0.1:4444"}},
+                "console":{"mode":"File","file":"/tmp/console.log"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            config.serial,
+            Some(ConsoleOutput::Tcp {
+                tcp: TcpConsoleConfig {
+                    address: "127.0.0.1:4444".parse().unwrap(),
+                    server: true,
+                },
+            })
+        );
+        assert_eq!(
+            config.console,
+            Some(ConsoleOutput::File {
+                file: PathBuf::from("/tmp/console.log"),
+            })
+        );
+        // ch-remote serializes the config and the VMM deserializes it again.
+        assert_eq!(
+            serde_json::from_str::<RestoreConfig>(&serde_json::to_string(&config).unwrap())
+                .unwrap(),
+            config
         );
     }
 

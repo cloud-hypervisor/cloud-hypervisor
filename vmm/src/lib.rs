@@ -2645,6 +2645,15 @@ impl RequestHandler for Vmm {
                     .validate(&vm_config.lock().unwrap().clone())
                     .map_err(VmError::ConfigValidation)?;
 
+                vm_config
+                    .lock()
+                    .unwrap()
+                    .update_console_outputs(
+                        restore_cfg.serial.as_ref(),
+                        restore_cfg.console.as_ref(),
+                    )
+                    .map_err(VmError::ConfigValidation)?;
+
                 // Update VM's net configurations with new fds received for restore operation
                 if let (Some(restored_nets), Some(vm_net_configs)) =
                     (restore_cfg.net_fds, &mut vm_config.lock().unwrap().net)
