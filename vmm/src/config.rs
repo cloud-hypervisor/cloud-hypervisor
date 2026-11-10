@@ -3125,6 +3125,10 @@ pub struct RestoreConfig {
     pub resume: bool,
     #[serde(default)]
     pub zone_updates: Vec<VmMemoryZoneUpdateData>,
+    #[serde(default)]
+    pub serial: Option<ConsoleOutput>,
+    #[serde(default)]
+    pub console: Option<ConsoleOutput>,
 }
 
 impl RestoreConfig {
@@ -3250,6 +3254,8 @@ impl RestoreConfig {
             iommufd_fd,
             resume,
             zone_updates,
+            serial: None,
+            console: None,
         })
     }
 
@@ -7117,6 +7123,28 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                     host_numa_node: 1,
                     id: "zone1".to_string(),
                 }],
+        );
+
+        let config = serde_json::from_str::<RestoreConfig>(
+            r#"{"source_url":"/path/to/snapshot",
+                "serial":{"mode":"Tcp","tcp":{"address":"127.0.0.1:4444"}},
+                "console":{"mode":"File","file":"/tmp/console.log"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            config.serial,
+            Some(ConsoleOutput::Tcp {
+                tcp: TcpConsoleConfig {
+                    address: "127.0.0.1:4444".parse().unwrap(),
+                    server: true,
+                },
+            })
+        );
+        assert_eq!(
+            config.console,
+            Some(ConsoleOutput::File {
+                file: PathBuf::from("/tmp/console.log"),
+            })
         );
     }
 
