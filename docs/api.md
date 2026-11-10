@@ -99,9 +99,9 @@ The Cloud Hypervisor API exposes the following actions through its endpoints:
 | Remove device from the VM               | `/vm.remove-device`          | `/schemas/VmRemoveDevice`         | N/A                             | The VM is booted                                         |
 | Add/remove CPUs to/from the VM          | `/vm.resize`                 | `/schemas/VmResize`               | N/A                             | The VM is booted                                         |
 | Add/remove memory from the VM           | `/vm.resize`                 | `/schemas/VmResize`               | N/A                             | The VM is booted                                         |
-| Resize a disk attached to the VM        | `/vm.resize-disk`            | `/schemas/VmResizeDisk`           | N/A                             | The VM is created                                        |
+| Resize a disk attached to the VM        | `/vm.resize-disk`            | `/schemas/VmResizeDisk`           | N/A                             | The VM is booted                                         |
 | Add/remove memory from a zone           | `/vm.resize-zone`            | `/schemas/VmResizeZone`           | N/A                             | The VM is booted                                         |
-| Restore the VM from a snapshot          | `/vm.restore`                | `/schemas/RestoreConfig`          | N/A                             | The VM is created but not booted                         |
+| Restore the VM from a snapshot          | `/vm.restore`                | `/schemas/RestoreConfig`          | N/A                             | The VM is not created yet                                |
 | Resume the VM                           | `/vm.resume`                 | N/A                               | N/A                             | The VM is paused                                         |
 | Start to send migration to target       | `/vm.send-migration`         | `/schemas/SendMigrationData`      | N/A                             | The VM is booted and (shared mem or hugepages enabled)   |
 | Shut the VM down                        | `/vm.shutdown`               | N/A                               | N/A                             | The VM is booted                                         |
