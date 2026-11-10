@@ -42,7 +42,7 @@ use std::cmp::max;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::fs::File;
-use std::io::{self, ErrorKind, Read};
+use std::io::{self, ErrorKind};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::str;
@@ -50,6 +50,8 @@ use std::str;
 use log::{debug, error, info, warn};
 
 use super::super::csm::ConnState;
+use super::super::csm::stream::StreamTransport;
+use super::super::csm::transport::Transport;
 use super::super::defs::uapi;
 use super::super::packet::VsockPacket;
 use super::super::{
@@ -89,7 +91,7 @@ enum EpollListener {
     HostSock,
     /// A listener interested in reading host "connect \<port>" commands from a freshly
     /// connected host socket.
-    LocalStream(UnixStream),
+    LocalStream(Box<dyn Transport + Send + Sync>),
 }
 
 const PARTIALLY_READ_COMMAND_BUF_SIZE: usize = 32;
@@ -433,7 +435,10 @@ impl VsockMuxer {
                     .and_then(|(stream, _)| {
                         stream
                             .set_nonblocking(true)
-                            .map(|_| stream)
+                            .map(|_| {
+                                Box::new(StreamTransport::from(stream))
+                                    as Box<dyn Transport + Send + Sync>
+                            })
                             .map_err(Error::UnixAccept)
                     })
                     .and_then(|stream| {
@@ -456,7 +461,7 @@ impl VsockMuxer {
                         .partial_command_map
                         .entry(stream.as_raw_fd())
                         .or_default();
-                    let port = Self::read_local_stream_port(command, stream);
+                    let port = Self::read_local_stream_port(command, stream.as_mut());
 
                     if let Err(Error::UnixRead(ref e)) = port
                         && e.kind() == ErrorKind::WouldBlock
@@ -544,7 +549,7 @@ impl VsockMuxer {
     /// Parse a host "connect" command, and extract the destination vsock port.
     fn read_local_stream_port(
         command: &mut PartiallyReadCommand,
-        stream: &mut UnixStream,
+        stream: &mut dyn Transport,
     ) -> Result<u32> {
         // the minimum connect statement that is still valid
         let connect_min_statement: &str = "connect 0\n";
@@ -560,7 +565,9 @@ impl VsockMuxer {
         // data without removing it from the queue.
         // Issue: https://github.com/rust-lang/rust/issues/76923
         let read_bytes = stream
-            .read(&mut command.buf[command.len..max(connect_min_statement.len(), command.len + 1)])
+            .read_control(
+                &mut command.buf[command.len..max(connect_min_statement.len(), command.len + 1)],
+            )
             .map_err(Error::UnixRead)?;
 
         if read_bytes == 0 {
@@ -707,7 +714,11 @@ impl VsockMuxer {
         let port_path = format!("{}_{}", self.host_sock_path, pkt.dst_port());
 
         UnixStream::connect(port_path)
-            .and_then(|stream| stream.set_nonblocking(true).map(|_| stream))
+            .and_then(|stream| {
+                stream.set_nonblocking(true).map(|_| {
+                    Box::new(StreamTransport::from(stream)) as Box<dyn Transport + Send + Sync>
+                })
+            })
             .map_err(Error::UnixConnect)
             .and_then(|stream| {
                 self.add_connection(
@@ -876,7 +887,7 @@ impl VsockMuxer {
 #[cfg(test)]
 mod tests {
     use std::cmp::min;
-    use std::io::Write;
+    use std::io::{Read, Write};
     use std::net::Shutdown;
     use std::path::{Path, PathBuf};
     use std::time::Duration;
@@ -1310,7 +1321,7 @@ mod tests {
         for port in 0..=size as u32 {
             let (stream, _peer) = UnixStream::pair().unwrap();
             let conn = MuxerConnection::new_peer_init(
-                stream,
+                Box::new(StreamTransport::from(stream)),
                 uapi::VSOCK_HOST_CID,
                 PEER_CID.into(),
                 port,

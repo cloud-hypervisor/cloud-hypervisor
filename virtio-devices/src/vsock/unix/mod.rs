@@ -13,12 +13,14 @@ mod muxer;
 mod muxer_killq;
 mod muxer_rxq;
 
-use std::os::unix::net::UnixStream;
 use std::{io, result};
 
 pub use Error as VsockUnixError;
 pub use muxer::VsockMuxer as VsockUnixBackend;
 use thiserror::Error;
+
+use super::csm::VsockConnection;
+use super::csm::transport::Transport;
 
 mod defs {
     /// Maximum number of established connections that we can handle.
@@ -60,4 +62,4 @@ pub enum Error {
 }
 
 type Result<T> = result::Result<T, Error>;
-type MuxerConnection = super::csm::VsockConnection<UnixStream>;
+type MuxerConnection = VsockConnection<dyn Transport + Send + Sync>;
