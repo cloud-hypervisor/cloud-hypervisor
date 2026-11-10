@@ -98,8 +98,7 @@ target.
         --disk path=images/focal-server-cloudimg-amd64.raw,image_type=raw \
                 vhost_user=true,socket=/var/tmp/vhost.1,num_queues=4,queue_size=128 \
         --console off \
-        --serial tty \
-        --rng
+        --serial tty
 ```
 
 ```bash

@@ -26,7 +26,6 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--cpus boot=4,max=8 \
 	--memory size=1024M \
 	--net "tap=,mac=,ip=,mask=" \
-	--rng \
 	--api-socket=/tmp/ch-socket
 $ popd
 ```
@@ -84,7 +83,6 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--cpus boot=4,max=8 \
 	--memory size=1024M,hotplug_size=8192M \
 	--net "tap=,mac=,ip=,mask=" \
-	--rng \
 	--api-socket=/tmp/ch-socket
 $ popd
 ```
