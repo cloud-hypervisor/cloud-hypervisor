@@ -1844,6 +1844,12 @@ components:
           type: boolean
           default: true
           description: Enable the background thread for faulting all remaining pages.
+        serial:
+          $ref: "#/components/schemas/SerialConfig"
+          description: New output of the serial console, in the mode of the source VM.
+        console:
+          $ref: "#/components/schemas/SerialConfig"
+          description: New output of the virtio console, in the mode of the source VM.
 
     MigrationMode:
       type: string
