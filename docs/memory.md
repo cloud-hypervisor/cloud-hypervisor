@@ -513,8 +513,9 @@ It allows KSM to be enabled selectively — for example, enabling it only on a
 hotplug zone while leaving boot memory unaffected:
 
 ```
---memory size=2G,mergeable=off
---memory-zone id=hotplug,size=0,hotplug_size=8G,mergeable=on
+--memory size=0,hotplug_method=virtio-mem
+--memory-zone id=boot,size=2G,mergeable=off \
+    id=hotplug,size=1G,hotplug_size=8G,mergeable=on
 ```
 
 For KSM to have any effect, the host kernel must have KSM enabled:
@@ -738,6 +739,7 @@ _Example_
 
 ```
 --platform num_pci_segments=2
+--memory size=0
 --memory-zone size=16G,host_numa_node=0,id=mem0
 --memory-zone size=16G,host_numa_node=1,id=mem1
 --numa guest_numa_id=0,memory_zones=mem0,pci_segments=[0]
