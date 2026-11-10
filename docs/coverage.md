@@ -34,7 +34,8 @@ Raw data files can be combined with `llvm-profdata`.
 ```shell
 rustup component add llvm-tools-preview
 # Assuming profraw files reside in the current directory and its children directories
-find . -name '*.profraw' -exec llvm-profdata merge -sparse {} -o coverage.profdata \;
+find . -name '*.profraw' \
+    -exec llvm-profdata merge -sparse -o coverage.profdata {} +
 ```
 
 A file named `coverage.profdata` will be generated.
