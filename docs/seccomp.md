@@ -73,13 +73,11 @@ regression caused by an unknown syscall can be observed without an immediate
 crash, at the cost of turning the violation into a soft failure visible only as
 a syscall error.
 
-By default the kernel does not log `errno` actions. To audit them, ensure
-`errno` is included in the host's `kernel.seccomp.actions_logged` sysctl, for
-example:
-
-```
-# sysctl -w kernel.seccomp.actions_logged='kill_process kill_thread trap errno log'
-```
+The kernel does not log `errno` actions for Cloud Hypervisor, even if `errno`
+is included in the host's `kernel.seccomp.actions_logged` sysctl, because
+Cloud Hypervisor installs its filters without the `SECCOMP_FILTER_FLAG_LOG`
+flag. To find the prohibited system calls, use `--seccomp log` or `strace`
+instead.
 
 ### Further debug with `strace`
 
