@@ -13,9 +13,8 @@ be used simultaneously.
 
 ### `0x80` I/O port
 
-Whenever the guest writes one byte between `0x0` and `0xF` on this particular
-I/O port, `cloud-hypervisor` will log and timestamp that event at the `debug`
-log level.
+Whenever the guest writes a byte on this particular I/O port,
+`cloud-hypervisor` will log and timestamp that event at the `warn` log level.
 
 It is up to the guest stack to decide when and what to write to the 0x80 port
 in order to signal the host about specific events and have `cloud-hypervisor`
@@ -45,9 +44,9 @@ boot time but all intermediate steps as well.
 Assuming parts of the guest software stack have been instrumented to use the
 `cloud-hypervisor` debug I/O port, we may want to gather the related logs.
 
-To do so we need to start `cloud-hypervisor` with the right debug level
-(`-vvv`). It is also recommended to have it log into a dedicated file in order
-to easily grep for the tracing logs (e.g.
+The events are logged at the default log level, so no `-v` option is needed.
+It is recommended to have `cloud-hypervisor` log into a dedicated file in
+order to easily grep for the tracing logs (e.g.
 `--log-file /tmp/cloud-hypervisor.log`):
 
 ```
@@ -56,8 +55,7 @@ to easily grep for the tracing logs (e.g.
     --disk path=~/hypervisor/images/focal-server-cloudimg-amd64.raw,image_type=raw \
     --cpus boot=4 \
     --memory size=1024M \
-    --log-file /tmp/ch-fw.log \
-    -vvv
+    --log-file /tmp/ch-fw.log
 ```
 
 After booting the guest, we then have to grep for the debug I/O port traces in
@@ -65,8 +63,8 @@ the log file:
 
 ```Shell
 $ grep "Debug I/O port" /tmp/ch-fw.log
-cloud-hypervisor: 19.762449ms: DEBUG:vmm/src/vm.rs:510 -- [Debug I/O port: Firmware code 0x0] 0.019004 seconds
-cloud-hypervisor: 403.499628ms: DEBUG:vmm/src/vm.rs:510 -- [Debug I/O port: Firmware code 0x1] 0.402744 seconds
+cloud-hypervisor:   0.019762s: <vcpu0> WARN:devices/src/legacy/debug_port.rs:74 -- [Debug I/O port: Firmware code 0x0] 0.019004 seconds
+cloud-hypervisor:   0.403500s: <vcpu0> WARN:devices/src/legacy/debug_port.rs:74 -- [Debug I/O port: Firmware code 0x1] 0.402744 seconds
 ```
 
 ### Debug console port
