@@ -1691,6 +1691,11 @@ components:
         socket:
           type: string
           description: Path to UNIX domain socket, used to proxy vsock connections.
+        sock_type:
+          type: string
+          enum: [stream, seqpacket]
+          default: stream
+          description: UNIX listener socket type for host initiated connections.
         iommu:
           $ref: "#/components/schemas/IommuType"
         pci_segment:

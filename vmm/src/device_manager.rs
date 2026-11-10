@@ -3738,7 +3738,7 @@ impl DeviceManager {
         let backend = vsock::VsockUnixBackend::new(
             vsock_cfg.cid,
             socket_path.to_string(),
-            vsock::SocketType::Stream,
+            vsock_cfg.sock_type,
         )
         .map_err(DeviceManagerError::CreateVsockBackend)?;
 

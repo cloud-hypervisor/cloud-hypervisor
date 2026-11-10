@@ -15,6 +15,7 @@ mod unix;
 
 use std::os::unix::io::RawFd;
 use std::result;
+use std::str::FromStr;
 
 use packet::VsockPacket;
 use thiserror::Error;
@@ -72,11 +73,25 @@ pub type ConnectionInfo = (
     u16, /* socket type */
 );
 
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(
+    Clone, Copy, Debug, Default, Eq, Hash, PartialEq, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
 pub enum SocketType {
     #[default]
     Stream,
     SeqPacket,
+}
+
+impl FromStr for SocketType {
+    type Err = &'static str;
+    fn from_str(value: &str) -> result::Result<Self, Self::Err> {
+        match value {
+            "stream" => Ok(Self::Stream),
+            "seqpacket" => Ok(Self::SeqPacket),
+            _ => Err("Socket type must be stream or seqpacket"),
+        }
+    }
 }
 
 impl From<SocketType> for u16 {
