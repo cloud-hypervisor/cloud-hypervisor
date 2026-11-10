@@ -1,3 +1,4 @@
+- [v53.1](#v531)
 - [v53.0](#v530)
     - [Snapshot/Restore and Live Migration Improvements](#snapshotrestore-and-live-migration-improvements)
     - [Nested Hyper-V (Windows Guest) Support](#nested-hyper-v-windows-guest-support)
@@ -444,6 +445,12 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+
+# v53.1
+
+This is a point release containing security fixes to a use-after-free
+vulnerability in virtio-pmem during VM shutdown. Details can be found in
+GHSA-3r3x-6hgg-2m38.
 
 # v53.0
 
