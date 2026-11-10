@@ -56,7 +56,6 @@ to easily grep for the tracing logs (e.g.
     --disk path=~/hypervisor/images/focal-server-cloudimg-amd64.raw,image_type=raw \
     --cpus boot=4 \
     --memory size=1024M \
-    --rng \
     --log-file /tmp/ch-fw.log \
     -vvv
 ```

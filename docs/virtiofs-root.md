@@ -73,7 +73,6 @@ sudo cloud-hypervisor \
     --memory size=2G,shared=on \
     --cmdline "console=hvc0 rootfstype=virtiofs root=/dev/root ro debug" \
     --api-socket $PWD/ch.sock \
-    --rng \
     --net ...
 ```
 
