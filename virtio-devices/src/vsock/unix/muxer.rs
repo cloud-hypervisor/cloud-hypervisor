@@ -102,6 +102,49 @@ enum EpollListener {
     LocalStream(Box<dyn Transport + Send + Sync>),
 }
 
+enum HostSocket {
+    Stream(UnixListener),
+    SeqPacket(SeqPacketSocket),
+}
+
+impl HostSocket {
+    fn bind(path: &str, socket_type: SocketType) -> io::Result<Self> {
+        match socket_type {
+            SocketType::Stream => {
+                let socket = UnixListener::bind(path)?;
+                socket.set_nonblocking(true)?;
+                Ok(Self::Stream(socket))
+            }
+            SocketType::SeqPacket => {
+                let socket = SeqPacketSocket::new()?;
+                socket.bind(Path::new(path))?;
+                socket.listen()?;
+                Ok(Self::SeqPacket(socket))
+            }
+        }
+    }
+
+    fn accept(&self) -> io::Result<Box<dyn Transport + Send + Sync>> {
+        match self {
+            Self::Stream(socket) => {
+                let (stream, _) = socket.accept()?;
+                stream.set_nonblocking(true)?;
+                Ok(Box::new(StreamTransport::from(stream)))
+            }
+            Self::SeqPacket(socket) => Ok(Box::new(SeqPacketTransport::from(socket.accept()?))),
+        }
+    }
+}
+
+impl AsRawFd for HostSocket {
+    fn as_raw_fd(&self) -> RawFd {
+        match self {
+            Self::Stream(socket) => socket.as_raw_fd(),
+            Self::SeqPacket(socket) => socket.as_raw_fd(),
+        }
+    }
+}
+
 const PARTIALLY_READ_COMMAND_BUF_SIZE: usize = 32;
 
 /// A partially read "CONNECT" command.
@@ -133,7 +176,7 @@ pub struct VsockMuxer {
     /// A queue used for terminating connections that are taking too long to shut down.
     killq: MuxerKillQ,
     /// The Unix socket, through which host-initiated connections are accepted.
-    host_sock: UnixListener,
+    host_sock: HostSocket,
     /// The file system path of the host-side Unix socket. This is used to figure out the path
     /// to Unix sockets listening on specific ports. I.e. "\<this path>_\<port number>".
     host_sock_path: String,
@@ -376,7 +419,7 @@ impl VsockBackend for VsockMuxer {
 
 impl VsockMuxer {
     /// Muxer constructor.
-    pub fn new(cid: u32, host_sock_path: String) -> Result<Self> {
+    pub fn new(cid: u32, host_sock_path: String, socket_type: SocketType) -> Result<Self> {
         // Create the nested epoll FD. This FD will be added to the VMM `EpollContext`, at
         // device activation time.
         let epoll_fd = epoll::create(true).map_err(Error::EpollFdCreate)?;
@@ -386,9 +429,7 @@ impl VsockMuxer {
 
         // Open/bind/listen on the host Unix socket, so we can accept host-initiated
         // connections.
-        let host_sock = UnixListener::bind(&host_sock_path)
-            .and_then(|sock| sock.set_nonblocking(true).map(|_| sock))
-            .map_err(Error::UnixBind)?;
+        let host_sock = HostSocket::bind(&host_sock_path, socket_type).map_err(Error::UnixBind)?;
 
         let mut muxer = Self {
             cid: cid.into(),
@@ -440,15 +481,6 @@ impl VsockMuxer {
                 self.host_sock
                     .accept()
                     .map_err(Error::UnixAccept)
-                    .and_then(|(stream, _)| {
-                        stream
-                            .set_nonblocking(true)
-                            .map(|_| {
-                                Box::new(StreamTransport::from(stream))
-                                    as Box<dyn Transport + Send + Sync>
-                            })
-                            .map_err(Error::UnixAccept)
-                    })
                     .and_then(|stream| {
                         // Before forwarding this connection to a listening AF_VSOCK socket on
                         // the guest side, we need to know the destination port. We'll read
@@ -469,7 +501,15 @@ impl VsockMuxer {
                         .partial_command_map
                         .entry(stream.as_raw_fd())
                         .or_default();
-                    let port = Self::read_local_stream_port(command, stream.as_mut());
+                    let socket_type = stream.socket_type();
+                    let port = match socket_type {
+                        SocketType::Stream => {
+                            Self::read_local_stream_port(command, stream.as_mut())
+                        }
+                        SocketType::SeqPacket => {
+                            Self::read_local_seqpacket_port(command, stream.as_mut())
+                        }
+                    };
 
                     if let Err(Error::UnixRead(ref e)) = port
                         && e.kind() == ErrorKind::WouldBlock
@@ -492,7 +532,7 @@ impl VsockMuxer {
 
                         self.add_connection(
                             ConnMapKey {
-                                socket_type: uapi::VSOCK_TYPE_STREAM,
+                                socket_type: socket_type.into(),
                                 local_port,
                                 peer_port,
                             },
@@ -584,6 +624,22 @@ impl VsockMuxer {
         }
 
         command.len += read_bytes;
+        Self::parse_port_from_read_command(command)
+    }
+
+    fn read_local_seqpacket_port(
+        command: &mut PartiallyReadCommand,
+        socket: &mut dyn Transport,
+    ) -> Result<u32> {
+        command.len = socket
+            .read_control(&mut command.buf)
+            .map_err(Error::UnixRead)?;
+        if command.len == 0
+            || command.buf[command.len - 1] != b'\n'
+            || command.buf[..command.len - 1].contains(&b'\n')
+        {
+            return Err(Error::InvalidPortRequest);
+        }
         Self::parse_port_from_read_command(command)
     }
 
@@ -970,7 +1026,7 @@ mod tests {
             let uds_path = format!("test_vsock_{name}.sock");
             // Clear in case it is still there from a previous run
             let _ = fs::remove_file(&uds_path);
-            let muxer = VsockMuxer::new(PEER_CID, uds_path).unwrap();
+            let muxer = VsockMuxer::new(PEER_CID, uds_path, SocketType::Stream).unwrap();
 
             Self {
                 _vsock_test_ctx: vsock_test_ctx,

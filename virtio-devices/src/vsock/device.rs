@@ -136,7 +136,27 @@ where
                 self.access_platform.as_deref(),
             ) {
                 Ok(mut pkt) => {
-                    if self.backend.write().unwrap().recv_pkt(&mut pkt).is_ok() {
+                    let received = self.backend.write().unwrap().recv_pkt(&mut pkt);
+                    if received.is_ok() {
+                        if pkt.type_() == uapi::VSOCK_TYPE_SEQPACKET && !self.seqpacket_negotiated {
+                            let (src_cid, dst_cid, src_port, dst_port) =
+                                (pkt.src_cid(), pkt.dst_cid(), pkt.src_port(), pkt.dst_port());
+                            pkt.set_src_cid(dst_cid)
+                                .set_dst_cid(src_cid)
+                                .set_src_port(dst_port)
+                                .set_dst_port(src_port)
+                                .set_op(uapi::VSOCK_OP_RST)
+                                .set_len(0)
+                                .set_flags(0);
+                            if let Err(error) = self.backend.write().unwrap().send_pkt(&pkt) {
+                                warn!(
+                                    "vsock: failed to reset unnegotiated SEQPACKET connection: {error:?}"
+                                );
+                            }
+                            self.queues[0].go_to_previous_position();
+                            continue;
+                        }
+
                         match pkt.commit_hdr(desc_chain.memory()) {
                             Ok(()) => pkt.hdr().len() as u32 + pkt.len(),
                             Err(err) => {

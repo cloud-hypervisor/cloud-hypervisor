@@ -104,7 +104,6 @@ impl SeqPacketSocket {
         Ok(())
     }
 
-    #[expect(dead_code)]
     pub(crate) fn bind(&self, path: &Path) -> io::Result<()> {
         let (address, length) = Self::path_to_sock_addr(path)?;
         // SAFETY: address is initialized and length covers its family and terminated path.
@@ -121,7 +120,6 @@ impl SeqPacketSocket {
         Ok(())
     }
 
-    #[expect(dead_code)]
     pub(crate) fn listen(&self) -> io::Result<()> {
         // SAFETY: self owns a bound socket descriptor. Listen does not access process memory.
         if unsafe { libc::listen(self.as_raw_fd(), 128) } < 0 {
@@ -130,7 +128,6 @@ impl SeqPacketSocket {
         Ok(())
     }
 
-    #[expect(dead_code)]
     pub(crate) fn accept(&self) -> io::Result<Self> {
         // SAFETY: socket owns the listening descriptor. Null pointers omit the peer address.
         let fd = unsafe {
