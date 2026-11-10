@@ -74,7 +74,6 @@ scripts/dev_cli.sh tests --unit --libc gnu
 
 # Run integration tests
 scripts/dev_cli.sh tests --integration --libc gnu
-scripts/dev_cli.sh tests --integration-live-migration --libc gnu
 
 # Export code coverage report
 scripts/dev_cli.sh tests --coverage -- -- html
