@@ -59,6 +59,7 @@ mod defs {
         /// Defined in `/include/uapi/linux/virtio_vsock.h`.
         pub(crate) const VSOCK_TYPE_STREAM: u16 = 1;
         pub(crate) const VSOCK_TYPE_SEQPACKET: u16 = 2;
+        pub(crate) const VIRTIO_VSOCK_F_SEQPACKET: u32 = 1;
         pub(crate) const VSOCK_FLAGS_SEQ_EOM: u32 = 1;
 
         pub(crate) const VSOCK_HOST_CID: u64 = 2;
@@ -401,6 +402,7 @@ pub mod tests {
                     backend: Arc::new(RwLock::new(TestBackend::new())),
                     access_platform: None,
                     backend_parked: false,
+                    seqpacket_negotiated: false,
                 },
             }
         }

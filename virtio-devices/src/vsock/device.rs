@@ -44,7 +44,10 @@ use vmm_sys_util::eventfd::EventFd;
 /// - a TX queue FD;
 /// - an event queue FD; and
 /// - a backend FD.
-use super::{ConnectionInfo, SocketType, VsockBackend, VsockPacket};
+use super::{
+    ConnectionInfo, SocketType, VsockBackend, VsockPacket,
+    defs::uapi::{self, VIRTIO_VSOCK_F_SEQPACKET},
+};
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::{
@@ -100,6 +103,7 @@ pub(crate) struct VsockEpollHandler<B: VsockBackend> {
     pub backend: Arc<RwLock<B>>,
     pub access_platform: Option<Arc<dyn AccessPlatform>>,
     pub backend_parked: bool,
+    pub seqpacket_negotiated: bool,
 }
 
 impl<B> VsockEpollHandler<B>
@@ -215,6 +219,15 @@ where
                     continue;
                 }
             };
+
+            if pkt.type_() == uapi::VSOCK_TYPE_SEQPACKET && !self.seqpacket_negotiated {
+                error!("vsock: dropping SEQPACKET packet without feature negotiation");
+                self.queues[1]
+                    .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
+                    .map_err(Error::QueueAddUsed)?;
+                used_descs = true;
+                continue;
+            }
 
             if self.backend.write().unwrap().send_pkt(&pkt).is_err() {
                 self.queues[1].go_to_previous_position();
@@ -410,7 +423,9 @@ where
             }
             (state.avail_features, state.acked_features, true)
         } else {
-            let mut avail_features = (1u64 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_F_IN_ORDER);
+            let mut avail_features = (1u64 << VIRTIO_F_VERSION_1)
+                | (1u64 << VIRTIO_F_IN_ORDER)
+                | (1u64 << VIRTIO_VSOCK_F_SEQPACKET);
 
             if access_platform_enabled {
                 avail_features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
@@ -518,6 +533,7 @@ where
             backend: Arc::clone(&self.backend),
             access_platform: self.common.access_platform(),
             backend_parked: false,
+            seqpacket_negotiated: self.common.acked_features & (1 << VIRTIO_VSOCK_F_SEQPACKET) != 0,
         };
 
         let paused = Arc::clone(&self.common.paused);
@@ -539,6 +555,7 @@ where
 
     fn reset(&mut self) {
         self.common.reset();
+        self.common.acked_features = 0;
         event!("virtio-device", "reset", "id", &self.id);
     }
 
@@ -597,7 +614,9 @@ mod tests {
     #[test]
     fn test_virtio_device() {
         let mut ctx = TestContext::new();
-        let avail_features = (1u64 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_F_IN_ORDER);
+        let avail_features = (1u64 << VIRTIO_F_VERSION_1)
+            | (1u64 << VIRTIO_F_IN_ORDER)
+            | (1u64 << VIRTIO_VSOCK_F_SEQPACKET);
         let device_features = avail_features;
         let driver_features: u64 = avail_features | 1 | (1 << 32);
         let device_pages = [

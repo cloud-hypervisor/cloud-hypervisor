@@ -244,9 +244,9 @@ impl VsockChannel for VsockMuxer {
             pkt.hdr()
         );
 
-        // If this packet has an unsupported type (!=stream), we must send back an RST.
+        // If this packet has an unsupported type, we must send back an RST.
         //
-        if pkt.type_() != uapi::VSOCK_TYPE_STREAM {
+        if SocketType::try_from(pkt.type_()).is_err() {
             self.enq_rst(pkt.dst_port(), pkt.src_port(), pkt.type_());
             return Ok(());
         }
