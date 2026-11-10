@@ -96,6 +96,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
         SeccompAction::Allow,
         EventFd::new(EFD_NONBLOCK).unwrap(),
         None,
+        false,
     )
     .unwrap();
     balloon.set_access_platform(Arc::new(IdentityAccessPlatform {}));
@@ -115,6 +116,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
                 SeccompAction::Allow,
                 EventFd::new(EFD_NONBLOCK).unwrap(),
                 Some(state),
+                false,
             );
         }
     }
@@ -197,6 +199,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
             SeccompAction::Allow,
             EventFd::new(EFD_NONBLOCK).unwrap(),
             None,
+            false,
         )
         .unwrap();
         balloon_no_reporting.set_access_platform(Arc::new(IdentityAccessPlatform {}));
@@ -244,6 +247,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
             SeccompAction::Allow,
             EventFd::new(EFD_NONBLOCK).unwrap(),
             None,
+            false,
         )
         .unwrap();
         balloon_reporting_empty.ack_features(1u64 << VIRTIO_BALLOON_F_REPORTING);
@@ -454,6 +458,7 @@ fn exercise_stats_queue(bytes: &[u8], queue_data: &[u8]) {
         SeccompAction::Allow,
         EventFd::new(EFD_NONBLOCK).unwrap(),
         None,
+        false,
     ) {
         Ok(balloon) => balloon,
         Err(_) => return,
@@ -589,6 +594,7 @@ fn run_failing_interrupt_case(
         SeccompAction::Allow,
         EventFd::new(EFD_NONBLOCK).unwrap(),
         None,
+        false,
     )
     .unwrap();
     balloon.ack_features(1u64 << VIRTIO_BALLOON_F_REPORTING);
@@ -649,6 +655,7 @@ fn activate_with_too_few_queues(queue_data: &[u8]) {
         SeccompAction::Allow,
         EventFd::new(EFD_NONBLOCK).unwrap(),
         None,
+        false,
     )
     .unwrap();
 
@@ -695,6 +702,7 @@ fn activate_reporting_acked_without_reporting_queue(queue_data: &[u8]) {
         SeccompAction::Allow,
         EventFd::new(EFD_NONBLOCK).unwrap(),
         None,
+        false,
     )
     .unwrap();
     balloon.ack_features(1u64 << VIRTIO_BALLOON_F_REPORTING);
@@ -750,6 +758,7 @@ fn activate_reporting_available_unacked(queue_data: &[u8]) {
         SeccompAction::Allow,
         EventFd::new(EFD_NONBLOCK).unwrap(),
         None,
+        false,
     )
     .unwrap();
 

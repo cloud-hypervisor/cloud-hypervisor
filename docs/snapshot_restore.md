@@ -179,11 +179,9 @@ Current constraints for `memory_restore_mode=copyonwrite`:
   copy-on-write region stays file-backed forever, so truncating it delivers a
   synchronous `SIGBUS` and any in-place edit corrupts the guest. The length
   check only rejects a file that is already short at restore time.
-- `virtio-balloon` operates normally. Balloon inflation uses `MADV_DONTNEED`,
-  which is valid on the private file mapping: the kernel releases the private
-  page copies and the host reclaims the memory. A released page reads from the
-  snapshot file again on the next access. The guest must not expect specific
-  content in a page that returns from the balloon, so this is correct.
+- `virtio-balloon` operates normally. Released memory is replaced with
+  anonymous memory in 2 MiB-aligned chunks, so a reused page is zero-filled
+  instead of read from the snapshot file again.
   (`pvmemcontrol` differs: it issues operations that are only valid on
   anonymous memory, which is why it is on the fallback list above.)
 - A snapshot of a VM restored this way copies the restore source with a
