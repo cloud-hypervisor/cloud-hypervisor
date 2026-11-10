@@ -321,7 +321,7 @@ Limitations:
     --api-socket=/tmp/api \
     --cpus boot=8 \
     --memory size=16G \
-    --disk path=focal-server-cloudimg-arm64.raw \
+    --disk path=focal-server-cloudimg-arm64.raw,image_type=raw \
     --kernel CLOUDHV_EFI.fd \
     --platform iommufd=on \
     --device path=/sys/bus/pci/devices/0009:01:00.0/,iommu=smmuv3

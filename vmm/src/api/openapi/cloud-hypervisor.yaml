@@ -1280,6 +1280,7 @@ components:
 
     DiskConfig:
       type: object
+      description: image_type is required unless vhost_user is true.
       properties:
         path:
           type: string
