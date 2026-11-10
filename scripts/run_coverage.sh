@@ -25,7 +25,8 @@ rustup component add llvm-tools-preview
 export_lcov() {
     rm "coverage.info"
 
-    ./grcov "$(find . -name 'ch-*.profraw' -print)" -s . \
+    mapfile -t profraw_files < <(find . -name 'ch-*.profraw' -print)
+    ./grcov "${profraw_files[@]}" -s . \
         --ignore "tests/*" \
         --ignore "test_infra/*" \
         --ignore "performance-metrics/*" \
@@ -40,7 +41,8 @@ export_lcov() {
 export_html() {
     OUTPUT_DIR="$TARGET_DIR/coverage"
     rm -rf $OUTPUT_DIR
-    ./grcov "$(find . -name 'ch-*.profraw' -print)" -s . \
+    mapfile -t profraw_files < <(find . -name 'ch-*.profraw' -print)
+    ./grcov "${profraw_files[@]}" -s . \
         --ignore "tests/*" \
         --ignore "test_infra/*" \
         --ignore "performance-metrics/*" \
