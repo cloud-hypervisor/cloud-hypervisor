@@ -1,6 +1,6 @@
 # VSOCK support
 
-VSOCK provides a way for guest and host to communicate through a socket. `cloud-hypervisor` only supports stream VSOCK sockets.
+VSOCK provides a way for guest and host to communicate through a socket. `cloud-hypervisor` supports STREAM and SEQPACKET VSOCK sockets.
 
 The `virtio-vsock` is based on the [Firecracker](https://github.com/firecracker-microvm/firecracker/blob/main/docs/vsock.md) implementation, where additional details can be found.
 
@@ -76,6 +76,24 @@ Listening on the host side:
 From the guest:
 
 `$ echo -e "Hello from guest!" | socat - VSOCK-CONNECT:2:1234`
+
+### SEQPACKET support
+
+A guest initiated `SOCK_SEQPACKET` connection requires a UNIX `SOCK_SEQPACKET`
+listener at `<socket>_<port>`.
+
+SEQPACKET requires guest virtio-vsock feature negotiation. Messages are limited
+to 64 KiB and the receiver's total credit capacity. UNIX message boundaries are
+preserved, including empty records. VSOCK `MSG_EOR` metadata is not represented
+on UNIX sockets. Live connections are reset on snapshot restore.
+
+Select SEQPACKET for host initiated connections with `--vsock cid=3,socket=/tmp/ch.vsock,sock_type=seqpacket`.
+The same `sock_type` field is accepted by JSON configuration and vsock hotplug.
+
+For a SEQPACKET host connection, send `CONNECT <guest-port>\n` as the first
+UNIX record, with no application payload. After the guest accepts, Cloud
+Hypervisor sends `OK <allocated-host-port>\n` as a separate record. Application
+records can then flow in both directions.
 
 ## Links
 
