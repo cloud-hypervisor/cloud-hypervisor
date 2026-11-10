@@ -36,10 +36,10 @@ _Run virtiofsd_
     --thread-pool-size=$N
 ```
 
-The `cache=never` option is the default when using `virtiofsd` with
-Cloud Hypervisor. This prevents from using the host page cache, reducing the
-overall footprint on host memory. This increases the maximum density of virtual
-machines that can be launched on a single host.
+The example uses the `cache=never` option, which prevents the use of the host
+page cache, reducing the overall footprint on host memory. This increases the
+maximum density of virtual machines that can be launched on a single host.
+Without the option, `virtiofsd` defaults to `cache=auto`.
 
 The `cache=always` option will allow the host page cache to be used, which can
 result in better performance for the guest's workload at the cost of increasing
