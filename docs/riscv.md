@@ -73,7 +73,7 @@ popd
 ```console
 pushd $CLOUDH
 sudo $CLOUDH/cloud-hypervisor/target/debug/cloud-hypervisor \
-           --kernel $CLOUDH/linux/arch/riscv64/boot/Image \
+           --kernel $CLOUDH/linux/arch/riscv/boot/Image \
            --disk path=jammy-server-cloudimg-riscv64.raw,image_type=raw \
            --cmdline "console=hvc0 root=/dev/vda rw" \
            --cpus boot=1 \
