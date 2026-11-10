@@ -2,7 +2,8 @@
 
 VFIO-user is an *experimental* protocol for allowing devices to be implemented in another process and communicate over a socket; ie.e VFIO-user is to VFIO as virtio is to vhost-user.
 
-The protocol is documented here: https://github.com/nutanix/libvfio-user/blob/master/docs/vfio-user.rst
+The protocol is documented here:
+https://www.qemu.org/docs/master/interop/vfio-user.html
 
 The Cloud Hypervisor support for such devices is *experimental*. Not all Cloud Hypervisor functionality is supported in particular: virtio-mem and iommu are not supported.
 
@@ -12,13 +13,15 @@ The `--user-device socket=<path>` parameter is used to create a vfio-user device
 
 ## Example (GPIO device)
 
-There is a simple GPIO device included in the libvfio-user repository: https://github.com/nutanix/libvfio-user#gpio
+There is a simple GPIO device included in the libvfio-user repository:
+https://github.com/nutanix/libvfio-user/blob/master/samples/gpio-pci-idio-16.c
 
-Run the example from the libvfio-user repository:
+Build libvfio-user with `meson build && ninja -C build` and run the example from
+the libvfio-user repository:
 
 ```sh
 rm /tmp/vfio-user.sock
-./build/dbg/samples/gpio-pci-idio-16 -v /tmp/vfio-user.sock &
+./build/samples/gpio-pci-idio-16 -v /tmp/vfio-user.sock &
 ```
 
 Start Cloud Hypervisor:
