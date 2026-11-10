@@ -1819,6 +1819,12 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/VmMemoryZoneUpdateData"
+        serial:
+          $ref: "#/components/schemas/SerialConfig"
+          description: New output of the serial console, in the mode of the snapshot.
+        console:
+          $ref: "#/components/schemas/SerialConfig"
+          description: New output of the virtio console, in the mode of the snapshot.
 
     ReceiveMigrationData:
       required:
