@@ -21,7 +21,8 @@ The table below depicts the well known CID values:
 
 ### Kernel Requirements
 
-Host kernel: CONFIG_VHOST_VSOCK
+Host kernel: no VSOCK support is required, because the device is emulated in
+userspace and exposed on the host through UNIX sockets.
 
 Guest kernel: CONFIG_VIRTIO_VSOCKETS
 
