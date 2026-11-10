@@ -167,8 +167,15 @@ Current constraints for `memory_restore_mode=copyonwrite`:
   `id`+`size` zone is fine), resizable RAM (`hotplug_size`, virtio-mem), KSM
   (`mergeable=on`), `--pvmemcontrol`, device passthrough
   (`--device`/`--user-device`/`--vdpa`), and snapshot ranges that are not
-  page-aligned single-region extents. Each region's `reserve` policy and the
-  THP policy are re-applied to the mapped region.
+  page-aligned single-region extents. Each region's `reserve` policy is
+  re-applied to the mapped region. THP is not. A page the guest writes becomes
+  a private anonymous copy of one host base page (4 KiB on x86_64) either way.
+  On a filesystem with large folios, `MADV_HUGEPAGE` lets read faults map
+  PMD-sized file folios (2 MiB on x86_64), which speeds up random reads of
+  read-mostly guest memory (by about 3.5% in one measurement). But a read fault
+  that misses the page cache can then request readahead of two PMD-sized
+  folios, about 4 MiB, which made the restore about 1.5 times slower on an idle
+  host and about 5 times slower with 16 VMs restoring at once.
 - A snapshot memory file shorter than the saved ranges is rejected up front (it
   would otherwise fault `SIGBUS` at run time).
 - `prefault` is rejected.

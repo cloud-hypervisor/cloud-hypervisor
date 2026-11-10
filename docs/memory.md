@@ -221,6 +221,9 @@ there will be fewer virtualisation related page faults. Unlike using
 `hugepages=on` a specific number of huge pages do not need to be allocated by
 the kernel.
 
+A restore with `memory_restore_mode=copyonwrite` does not apply this option to
+the restored memory.
+
 By default this option is turned on.
 
 _Example_
