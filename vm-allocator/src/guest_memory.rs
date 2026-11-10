@@ -173,6 +173,11 @@ impl GuestRegion {
         self.slot
     }
 
+    /// Return a clone of the inner `MmapRegion` handle.
+    pub fn get_mmap(&self) -> Arc<MmapRegion<AtomicBitmap>> {
+        self.region.get_mmap()
+    }
+
     /// Whether the region is registered or registration is in progress.
     pub fn is_registered(&self) -> bool {
         self.registered.load(Ordering::Acquire)
