@@ -607,11 +607,11 @@ paths:
         required: true
       responses:
         204:
-          description: The VM migration was successfully sent.
+          description: The VM migration was started. The result is reported through events.
         409:
           description: The operation conflicts with the current state of the VMM.
         500:
-          description: The VM migration could not be sent.
+          description: The VM migration could not be started.
 
   /vm.cancel-migration:
     put:
