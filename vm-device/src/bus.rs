@@ -161,21 +161,17 @@ impl Bus {
             return Err(Error::Overlap);
         }
 
+        let mut devices = self.devices.write().unwrap();
+
         // Reject all cases where the new device's range overlaps with an existing device.
-        if self
-            .devices
-            .read()
-            .unwrap()
+        if devices
             .iter()
             .any(|(range, _dev)| range.overlaps(base, len))
         {
             return Err(Error::Overlap);
         }
 
-        if self
-            .devices
-            .write()
-            .unwrap()
+        if devices
             .insert(BusRange { base, len }, Arc::downgrade(&device))
             .is_some()
         {
