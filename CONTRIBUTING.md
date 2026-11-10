@@ -117,8 +117,8 @@ We require patches to:
 
 
 Valid components are listed in `TitleStartsWithComponent.py`. In short, each
-cargo workspace member is a valid component as well as `build`, `ci`, `docs` and
-`misc`.
+cargo workspace member except `cloud-hypervisor`, which uses `main`, is a valid
+component as well as `build`, `ci`, `docs`, and `misc`.
 
 Example patch:
 
