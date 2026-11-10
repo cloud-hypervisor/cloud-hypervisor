@@ -1265,8 +1265,10 @@ impl DeviceManager {
             }
         }
 
-        let start_of_mmio64_area = memory_manager.lock().unwrap().start_of_device_area().0;
-        let end_of_mmio64_area = memory_manager.lock().unwrap().end_of_device_area().0;
+        let (start_of_mmio64_area, end_of_mmio64_area) = {
+            let mm = memory_manager.lock().unwrap();
+            (mm.start_of_device_area().0, mm.end_of_device_area().0)
+        };
         let pci_mmio64_allocators = create_mmio_allocators(
             start_of_mmio64_area,
             end_of_mmio64_area,
@@ -4191,27 +4193,14 @@ impl DeviceManager {
         let index = self.smmuv3s.len();
         let smmuv3_id = format!("{SMMUV3_DEVICE_NAME}_{index}");
 
-        let event_irq = self
-            .address_manager
-            .allocator
-            .lock()
-            .unwrap()
-            .allocate_irq()
-            .unwrap();
-        let gerror_irq = self
-            .address_manager
-            .allocator
-            .lock()
-            .unwrap()
-            .allocate_irq()
-            .unwrap();
-        let sync_irq = self
-            .address_manager
-            .allocator
-            .lock()
-            .unwrap()
-            .allocate_irq()
-            .unwrap();
+        let (event_irq, gerror_irq, sync_irq) = {
+            let mut allocator = self.address_manager.allocator.lock().unwrap();
+            (
+                allocator.allocate_irq().unwrap(),
+                allocator.allocate_irq().unwrap(),
+                allocator.allocate_irq().unwrap(),
+            )
+        };
 
         let interrupts = Smmuv3Interrupts {
             event: interrupt_manager
@@ -4638,14 +4627,15 @@ impl DeviceManager {
             resources,
         )?;
 
-        vfio_pci_device
-            .lock()
-            .unwrap()
-            .map_mmio_regions()
-            .map_err(DeviceManagerError::VfioMapRegion)?;
+        {
+            let mut vfio_pci_device = vfio_pci_device.lock().unwrap();
+            vfio_pci_device
+                .map_mmio_regions()
+                .map_err(DeviceManagerError::VfioMapRegion)?;
 
-        for mmio_region in vfio_pci_device.lock().unwrap().mmio_regions() {
-            self.mmio_regions.lock().unwrap().push(mmio_region);
+            for mmio_region in vfio_pci_device.mmio_regions() {
+                self.mmio_regions.lock().unwrap().push(mmio_region);
+            }
         }
 
         let mut node = device_node!(vfio_name, vfio_pci_device);
