@@ -2588,7 +2588,6 @@ impl ConsoleOutput {
         Ok(())
     }
 
-    #[cfg_attr(not(test), expect(dead_code, reason = "next commit uses them"))]
     pub(crate) const UPDATE_OPTIONS: &[&str] = &[
         "console_file",
         "console_socket",
@@ -2598,7 +2597,6 @@ impl ConsoleOutput {
         "serial_tcp",
     ];
 
-    #[cfg_attr(not(test), expect(dead_code, reason = "next commit uses them"))]
     pub(crate) fn parse_update(parser: &OptionParser, component: &str) -> Result<Option<Self>> {
         let get_if_set = |mode: &str, missing: ValidationError| -> Result<Option<String>> {
             let option = format!("{component}_{mode}");
