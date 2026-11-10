@@ -191,7 +191,7 @@ to load a payload/bootitem(s):
 - Provide kernel \[+ cmdline\]\ [+ initrd\]
 
 Please note that our Cloud Hypervisor firmware (`hypervisor-fw`) has a Xen PVH
-boot entry, therefore it can also be booted via the `--kernel` parameter, as 
+boot entry, therefore it can also be booted via the `--kernel` parameter, as
 seen in some examples.
 
 ### Custom Kernel and Disk Image
@@ -310,12 +310,17 @@ guarantees are currently made:
   substantial bug fixes or security issues that need to be fixed. These point
   releases will only include bug fixes.
 
-Currently the following items are **not** guaranteed across updates:
+* Starting with `v54`, snapshot/restore and live migration from the previous
+  two major releases to the current release ("n-2")  is guaranteed to work,
+  excluding experimental features listed below. See
+  [Version Compatibility](docs/live_migration.md#version-compatibility) for
+  details.
 
-* Snapshot/restore is not supported across different versions
-* Live migration is not supported across different versions
-* The following features are considered experimental and may change
-  substantially between releases: vfio-user, vDPA, CPU profiles.
+Currently the following items and experimental features are **not** guaranteed
+across updates because:
+
+* Devices: vfio-user, vDPA
+* Snapshot/Restore or migration: CPU profiles, postcopy.
 
 Further details can be found in the [release documentation](docs/releases.md).
 
