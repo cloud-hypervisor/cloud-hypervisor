@@ -35,8 +35,12 @@ flag.
 
 Test workloads (guest images, kernels, firmware) are stored on the host
 under `$HOME/workloads` and bind-mounted into the container at
-`/root/workloads`. Most test scripts download missing workloads
-automatically on first run.
+`/root/workloads`. Before it starts the container, `dev_cli.sh tests`
+runs `scripts/fetch_workloads.py` on the host. It downloads the
+workloads listed in `scripts/test_assets.yaml` that are missing or
+have a wrong checksum. `dev_cli.sh fetch-workloads` runs only this
+step. The test scripts do not download anything: run directly, they
+exit with a `Missing:` error if a workload is absent.
 
 ## Prerequisites
 
@@ -50,7 +54,8 @@ ls -l /dev/kvm
 ```
 
 The container image bundles all build dependencies. No Rust toolchain
-is needed on the host.
+is needed on the host, but `dev_cli.sh tests` needs `python3` on the
+host to fetch the workloads.
 
 ## The dev_cli.sh entry point
 
@@ -249,7 +254,7 @@ scripts/dev_cli.sh tests --integration [--libc musl|gnu]
 ```
 
 Runs `scripts/run_integration_tests_x86_64.sh`. The script
-automatically downloads and prepares all required workloads:
+prepares all required workloads:
 
 - **Kernel:** `vmlinux-x86_64`.
 - **Firmware:** `hypervisor-fw` (rust-hypervisor-firmware).
@@ -335,8 +340,8 @@ concurrent test runs without corrupting the base image.
 scripts/dev_cli.sh tests --integration-rate-limiter
 ```
 
-Runs `scripts/run_integration_tests_rate_limiter.sh`. Downloads Jammy
-guest images and a prebuilt kernel.
+Runs `scripts/run_integration_tests_rate_limiter.sh`. Uses the Jammy
+guest image and the prebuilt kernel.
 
 **Test group:** `rate_limiter` (single-threaded, no retries).
 
