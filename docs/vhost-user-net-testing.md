@@ -83,7 +83,8 @@ ovs-vsctl set Interface vhost-user2 options:n_rxq=2
 
 _Launch the VMs_
 
-VMs run in client mode. They connect to the socket created by the `dpdkvhostuser` backend.
+VMs run in server mode (`vhost_mode=server`). Cloud Hypervisor creates the
+sockets, and the `dpdkvhostuserclient` ports of OVS connect to them.
 ```bash
 # From one terminal. We need to give the cloud-hypervisor binary the NET_ADMIN capabilities for it to set TAP interfaces up on the host.
 ./cloud-hypervisor \

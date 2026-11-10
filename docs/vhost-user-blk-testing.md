@@ -86,7 +86,8 @@ sudo scripts/rpc.py vhost_create_blk_controller --cpumask 0x1 vhost.1 Malloc0
 
 ### Launch the VM
 
-VMs run in client mode. They connect to the socket created by the `dpdkvhostuser` in the SPDK backend.
+VMs run in client mode. They connect to the socket created by the SPDK vhost
+target.
 ```bash
 # From the test terminal. We need to create one vhost-user-blk device for the --disk.
 ./cloud-hypervisor \
