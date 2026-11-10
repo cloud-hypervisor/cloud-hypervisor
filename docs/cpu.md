@@ -194,12 +194,12 @@ Multiple values can be provided to define each list. Each value is a
 platform-native unsigned integer (`usize`).
 
 For instance, if one needs to run vCPU 0 on host CPUs from 0 to 4, the syntax
-using `-` will help define a contiguous range with `affinity=0@[0-4]`. The
-same example could also be described with `affinity=0@[0,1,2,3,4]`.
+using `-` will help define a contiguous range with `affinity=[0@[0-4]]`. The
+same example could also be described with `affinity=[0@[0,1,2,3,4]]`.
 
 A combination of both `-` and `,` separators is useful when one might need to
 describe a list containing host CPUs from 0 to 99 and the host CPU 255, as it
-could simply be described with `affinity=0@[0-99,255]`.
+could simply be described with `affinity=[0@[0-99,255]]`.
 
 As soon as one tries to describe a list of values, `[` and `]` must be used to
 demarcate the list.
