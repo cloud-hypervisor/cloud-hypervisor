@@ -638,10 +638,14 @@ _Example_
 
 ```
 # Explicit bidirectional distances
---numa guest_numa_id=0,distances=[1@15,2@25] guest_numa_id=1,distances=[0@15,2@20] guest_numa_id=2,distances=[0@25,1@20]
+--numa guest_numa_id=0,cpus=[0],distances=[1@15,2@25] \
+    guest_numa_id=1,cpus=[1],distances=[0@15,2@20] \
+    guest_numa_id=2,cpus=[2],distances=[0@25,1@20]
 
 # Simplified with symmetry - only specify in one direction
---numa guest_numa_id=0,distances=[1@15,2@25] guest_numa_id=1,distances=[2@20]
+--numa guest_numa_id=0,cpus=[0],distances=[1@15,2@25] \
+    guest_numa_id=1,cpus=[1],distances=[2@20] \
+    guest_numa_id=2,cpus=[2]
 # Results in the same topology: 0↔1=15, 0↔2=25, 1↔2=20
 
 # Using defaults - only specify non-default distances
