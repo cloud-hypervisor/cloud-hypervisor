@@ -45,7 +45,7 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: ${{ matrix.platform.args  }}
           strip: true
-          toolchain: "1.89.0"
+          toolchain: "1.96.0"
           # Tag and merge queue refs are unique, so no run could restore it.
           use-rust-cache: false
       - name: Copy Release Binaries

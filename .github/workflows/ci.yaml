@@ -558,7 +558,7 @@ jobs:
       matrix:
         rust:
           - nightly
-          - "1.89.0" # MSRV — keep quoted.
+          - "1.96.0" # MSRV — keep quoted.
         target:
           - x86_64-unknown-linux-gnu
           - x86_64-unknown-linux-musl
@@ -730,7 +730,7 @@ jobs:
     # format() because `${{ matrix.runner }}-16` is not valid in runs-on.
     runs-on: ${{ format('{0}-16', matrix.runner) }}
     steps: *integration-x86-64-steps
-# Disabled for maintenance  
+# Disabled for maintenance
 #  integration-arm64:
 #    name: integration-arm64
 #    needs: [preflight]
