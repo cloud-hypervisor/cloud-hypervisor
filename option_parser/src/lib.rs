@@ -29,8 +29,8 @@
 use std::collections::HashMap;
 use std::fmt::{self, Display, Write};
 use std::num::ParseIntError;
-use std::result;
 use std::str::FromStr;
+use std::{mem, result};
 
 use thiserror::Error;
 
@@ -107,8 +107,7 @@ pub fn split_commas(s: &str) -> OptionParserResult<Vec<String>> {
                 opened_brackets -= 1;
             }
             ',' if opened_brackets == 0 => {
-                list.push(current);
-                current = String::new();
+                list.push(mem::take(&mut current));
                 continue;
             }
             _ => {}
