@@ -92,13 +92,11 @@ impl VfioUserPciDevice {
         memory_slot_allocator: Arc<MemorySlotAllocator>,
         snapshot: Option<&Snapshot>,
     ) -> Result<Self, VfioUserPciDeviceError> {
-        let resettable = client.lock().unwrap().resettable();
-        if resettable {
-            client
-                .lock()
-                .unwrap()
-                .reset()
-                .map_err(VfioUserPciDeviceError::Client)?;
+        {
+            let mut client = client.lock().unwrap();
+            if client.resettable() {
+                client.reset().map_err(VfioUserPciDeviceError::Client)?;
+            }
         }
 
         let vfio_wrapper = VfioUserClientWrapper {
@@ -129,30 +127,17 @@ impl VfioUserPciDevice {
     /// Map all of the MMIO regions.
     pub fn map_mmio_regions(&mut self) -> Result<(), VfioUserPciDeviceError> {
         for mmio_region in &mut self.common.mmio_regions {
-            let region_flags = self
-                .client
-                .lock()
-                .unwrap()
-                .region(mmio_region.index)
-                .ok_or(VfioUserPciDeviceError::MissingRegion(mmio_region.index))?
-                .flags;
-            let file_offset = self
-                .client
-                .lock()
-                .unwrap()
-                .region(mmio_region.index)
-                .ok_or(VfioUserPciDeviceError::MissingRegion(mmio_region.index))?
-                .file_offset
-                .clone();
-
-            let sparse_areas = self
-                .client
-                .lock()
-                .unwrap()
-                .region(mmio_region.index)
-                .ok_or(VfioUserPciDeviceError::MissingRegion(mmio_region.index))?
-                .sparse_areas
-                .clone();
+            let (region_flags, file_offset, sparse_areas) = {
+                let client = self.client.lock().unwrap();
+                let region = client
+                    .region(mmio_region.index)
+                    .ok_or(VfioUserPciDeviceError::MissingRegion(mmio_region.index))?;
+                (
+                    region.flags,
+                    region.file_offset.clone(),
+                    region.sparse_areas.clone(),
+                )
+            };
 
             if region_flags & VFIO_REGION_INFO_FLAG_MMAP != 0 {
                 let mut prot = 0;
