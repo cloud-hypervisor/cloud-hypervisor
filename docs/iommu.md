@@ -65,7 +65,7 @@ As of Kernel 5.14, virtio-iommu is available for both X86-64 and Aarch64.
 ## Usage
 
 In order to expose a virtual IOMMU to the guest, it is required to create a
-virtio-iommu device and expose it through the ACPI IORT table. This can be
+virtio-iommu device and expose it through the ACPI VIOT table. This can be
 simply achieved by attaching at least one device to the virtual IOMMU.
 
 The way to expose to the guest a specific device as sitting behind this IOMMU
