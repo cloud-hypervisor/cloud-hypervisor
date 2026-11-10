@@ -49,6 +49,7 @@ mod common_parallel {
     use std::io::{self, SeekFrom};
     use std::net::TcpStream;
     use std::num::NonZeroU32;
+    use std::os::unix::net::UnixStream;
     use std::process::Command;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -7621,6 +7622,8 @@ mod common_parallel {
         downtime_ms: Option<u64>,
         timeout_s: Option<u64>,
         timeout_strategy: Option<TimeoutStrategy>,
+        /// Option of `receive-migration` that sets a new console output.
+        dest_console_update: Option<String>,
     }
 
     fn start_live_migration_tcp_with_flags(
@@ -7681,6 +7684,9 @@ mod common_parallel {
         let mut receive_arg = format!("receiver_url=tcp:0.0.0.0:{migration_port}");
         if options.tls {
             receive_arg.push_str(&format!(",tls_dir={TLS_DIR}"));
+        }
+        if let Some(console_update) = &options.dest_console_update {
+            receive_arg.push_str(&format!(",{console_update}"));
         }
 
         // Start the 'receive-migration' command on the destination
@@ -8981,6 +8987,363 @@ mod common_parallel {
     #[test]
     fn test_live_migration_tcp_tls_only_receiver() {
         _test_live_migration_tcp_tls_one_sided(TlsOnlyOn::Receiver);
+    }
+
+    /// Guest with its login prompt on the console of the given kind.
+    fn tcp_console_guest(kind: ConsoleKind) -> Guest {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let mut guest = Guest::new(Box::new(disk_config));
+        if let ConsoleKind::Serial = kind {
+            let serial_option = if cfg!(target_arch = "x86_64") {
+                " console=ttyS0"
+            } else {
+                " console=ttyAMA0"
+            };
+            guest.kernel_cmdline = Some(DIRECT_KERNEL_BOOT_CMDLINE.to_owned() + serial_option);
+        }
+        guest
+    }
+
+    /// Values of `--serial` and `--console` with `kind` listening on `port`.
+    fn tcp_console_args(kind: ConsoleKind, port: u16) -> (String, String) {
+        let tcp_arg = format!("tcp=127.0.0.1:{port},server=on");
+        match kind {
+            ConsoleKind::Serial => (tcp_arg, "null".to_string()),
+            ConsoleKind::Console => ("null".to_string(), tcp_arg),
+        }
+    }
+
+    /// Option of `receive-migration` and restore to move `kind` to `port`.
+    fn tcp_console_update(kind: ConsoleKind, port: u16) -> String {
+        let device = match kind {
+            ConsoleKind::Serial => "serial",
+            ConsoleKind::Console => "console",
+        };
+        format!("{device}_tcp=127.0.0.1:{port}")
+    }
+
+    /// Logs in to the guest through the TCP console listening on `port`.
+    fn tcp_console_login(guest: &Guest, port: u16) -> thread::Result<()> {
+        let pty = guest.tmp_dir.as_path().join("tcp.pty");
+        let mut socat_child = Command::new("socat")
+            .args([
+                &format!("pty,link={},raw,echo=0", pty.display()),
+                &format!("TCP-CONNECT:127.0.0.1:{port}"),
+            ])
+            .spawn()
+            .unwrap();
+        thread::sleep(Duration::new(1, 0));
+
+        let r = panic::catch_unwind(|| {
+            _test_pty_interaction(pty);
+        });
+
+        let _ = socat_child.kill();
+        let _ = socat_child.wait();
+        r
+    }
+
+    const CONSOLE_MARKER: &str = "new-console-output-marker";
+    const SERIAL_DEVICE: &str = if cfg!(target_arch = "x86_64") {
+        "/dev/ttyS0"
+    } else {
+        "/dev/ttyAMA0"
+    };
+    const VIRTIO_CONSOLE_DEVICE: &str = "/dev/hvc0";
+
+    fn write_console_marker(guest: &Guest, devices: &[&str]) {
+        guest
+            .ssh_command(&format!(
+                "echo {CONSOLE_MARKER} | sudo tee {}",
+                devices.join(" ")
+            ))
+            .unwrap();
+    }
+
+    fn assert_file_has_console_marker(path: &Path) {
+        assert!(
+            wait_until(Duration::from_secs(30), || {
+                fs::read(path)
+                    .is_ok_and(|data| String::from_utf8_lossy(&data).contains(CONSOLE_MARKER))
+            }),
+            "{} should contain the console marker",
+            path.display()
+        );
+    }
+
+    /// A socket on one console and a file on the other, each with the path
+    /// before and after the update.
+    struct SocketFileOutputs {
+        socket_kind: ConsoleKind,
+        old_socket: PathBuf,
+        new_socket: PathBuf,
+        old_file: PathBuf,
+        new_file: PathBuf,
+    }
+
+    impl SocketFileOutputs {
+        fn new(guest: &Guest, socket_kind: ConsoleKind) -> Self {
+            let tmp_dir = guest.tmp_dir.as_path();
+            Self {
+                socket_kind,
+                old_socket: tmp_dir.join("old.sock"),
+                new_socket: tmp_dir.join("new.sock"),
+                old_file: tmp_dir.join("old.log"),
+                new_file: tmp_dir.join("new.log"),
+            }
+        }
+
+        /// Values of `--serial` and `--console`.
+        fn args(&self) -> (String, String) {
+            let socket = format!("socket={}", self.old_socket.display());
+            let file = format!("file={}", self.old_file.display());
+            match self.socket_kind {
+                ConsoleKind::Serial => (socket, file),
+                ConsoleKind::Console => (file, socket),
+            }
+        }
+
+        /// Options of `receive-migration` and restore for the new outputs.
+        fn update(&self) -> String {
+            let (socket_device, file_device) = match self.socket_kind {
+                ConsoleKind::Serial => ("serial", "console"),
+                ConsoleKind::Console => ("console", "serial"),
+            };
+            format!(
+                "{socket_device}_socket={},{file_device}_file={}",
+                self.new_socket.display(),
+                self.new_file.display()
+            )
+        }
+
+        /// Checks that guest output reaches both new outputs.
+        fn check(&self, guest: &Guest) {
+            let mut stream = UnixStream::connect(&self.new_socket).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(1)))
+                .unwrap();
+
+            write_console_marker(guest, &[SERIAL_DEVICE, VIRTIO_CONSOLE_DEVICE]);
+
+            let mut output = Vec::new();
+            assert!(
+                wait_until(Duration::from_secs(30), || {
+                    let mut buffer = [0; 4096];
+                    if let Ok(read) = stream.read(&mut buffer) {
+                        output.extend_from_slice(&buffer[..read]);
+                    }
+                    String::from_utf8_lossy(&output).contains(CONSOLE_MARKER)
+                }),
+                "new console socket should receive the console marker"
+            );
+            assert_file_has_console_marker(&self.new_file);
+        }
+    }
+
+    /// Migrates `guest` over TCP with `console_update` and runs `check` on the
+    /// destination. Both VMMs run on one host, so a destination that ignores a
+    /// new TCP or socket output cannot bind the one that the source holds.
+    fn _test_live_migration_console_update(
+        guest: &Guest,
+        (serial, console): (String, String),
+        extra_args: &[&str],
+        console_update: String,
+        check: impl FnOnce() -> thread::Result<()>,
+    ) {
+        let dest_event_path = temp_event_monitor_path(&guest.tmp_dir);
+        let src_api_socket = temp_api_path(&guest.tmp_dir);
+        let dest_api_socket = format!("{src_api_socket}.dest");
+
+        let mut src_child = GuestCommand::new(guest)
+            .default_cpus()
+            .default_memory()
+            .default_kernel_cmdline()
+            .default_disks()
+            .default_net()
+            .args(["--serial", &serial])
+            .args(["--console", &console])
+            .args(["--api-socket", &src_api_socket])
+            .args(extra_args)
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let mut dest_child = GuestCommand::new(guest)
+            .args(["--api-socket", &dest_api_socket])
+            .args(["--event-monitor", &format!("path={dest_event_path}")])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+            assert!(
+                start_live_migration_tcp_with_flags(
+                    &src_api_socket,
+                    &dest_api_socket,
+                    &dest_event_path,
+                    NonZeroU32::new(1).unwrap(),
+                    &SendMigrationOptions {
+                        dest_console_update: Some(console_update),
+                        ..Default::default()
+                    },
+                ),
+                "Unsuccessful command: 'send-migration' or 'receive-migration'."
+            );
+        });
+        if r.is_err() {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Error occurred during live-migration",
+            );
+        }
+        let _ = src_child.kill();
+        let _ = src_child.wait();
+
+        let r = check();
+
+        let _ = dest_child.kill();
+        let dest_output = dest_child.wait_with_output().unwrap();
+        handle_child_output(r, &dest_output);
+    }
+
+    fn _test_live_migration_tcp_new_address(kind: ConsoleKind) {
+        let guest = tcp_console_guest(kind);
+        let new_port = get_available_port();
+        _test_live_migration_console_update(
+            &guest,
+            tcp_console_args(kind, get_available_port()),
+            &[],
+            tcp_console_update(kind, new_port),
+            || tcp_console_login(&guest, new_port),
+        );
+    }
+
+    #[test]
+    fn test_live_migration_tcp_serial_new_address() {
+        _test_live_migration_tcp_new_address(ConsoleKind::Serial);
+    }
+
+    #[test]
+    fn test_live_migration_tcp_console_new_address() {
+        _test_live_migration_tcp_new_address(ConsoleKind::Console);
+    }
+
+    #[test]
+    fn test_live_migration_socket_file_new_outputs() {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let outputs = SocketFileOutputs::new(&guest, ConsoleKind::Serial);
+        _test_live_migration_console_update(&guest, outputs.args(), &[], outputs.update(), || {
+            panic::catch_unwind(|| outputs.check(&guest))
+        });
+    }
+
+    /// A reboot creates the file output again, which under Landlock needs a
+    /// rule for the new path. The update must therefore happen before Landlock.
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_live_migration_new_file_landlock_reboot() {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        // Outside of the --landlock-rules path, so that only a rule for the
+        // updated output can allow the file.
+        let new_dir = TempDir::new_with_prefix("/tmp/ch-console").unwrap();
+        let new_file = new_dir.as_path().join("serial.log");
+        let old_file = guest.tmp_dir.as_path().join("serial.log");
+        let landlock_rules = format!("path={:?},access=rw", guest.tmp_dir.as_path());
+
+        _test_live_migration_console_update(
+            &guest,
+            (format!("file={}", old_file.display()), "null".to_string()),
+            &["--landlock", "--landlock-rules", &landlock_rules],
+            format!("serial_file={}", new_file.display()),
+            || {
+                panic::catch_unwind(|| {
+                    guest.reboot_linux(0);
+                    write_console_marker(&guest, &[SERIAL_DEVICE]);
+                    assert_file_has_console_marker(&new_file);
+                })
+            },
+        );
+    }
+
+    /// A new output in another mode must fail the migration on the
+    /// destination, while the source VM keeps running.
+    #[test]
+    fn test_live_migration_console_mode_mismatch() {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let (serial, console) = tcp_console_args(ConsoleKind::Serial, get_available_port());
+        let new_file = guest.tmp_dir.as_path().join("serial.log");
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
+        let src_event_path = format!("{event_path}.src");
+        let dest_event_path = format!("{event_path}.dst");
+        let src_api_socket = temp_api_path(&guest.tmp_dir);
+        let dest_api_socket = format!("{src_api_socket}.dest");
+
+        let mut src_child = GuestCommand::new(&guest)
+            .default_cpus()
+            .default_memory()
+            .default_kernel_cmdline()
+            .default_disks()
+            .default_net()
+            .args(["--serial", &serial])
+            .args(["--console", &console])
+            .args(["--api-socket", &src_api_socket])
+            .args(["--event-monitor", &format!("path={src_event_path}")])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let mut dest_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &dest_api_socket])
+            .args(["--event-monitor", &format!("path={dest_event_path}")])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+            assert!(!start_live_migration_tcp_with_flags(
+                &src_api_socket,
+                &dest_api_socket,
+                &dest_event_path,
+                NonZeroU32::new(1).unwrap(),
+                &SendMigrationOptions {
+                    dest_console_update: Some(format!("serial_file={}", new_file.display())),
+                    ..Default::default()
+                },
+            ));
+            assert!(wait_for_sequential_events_str(
+                Duration::from_secs(30),
+                &["migration-failed"],
+                &src_event_path
+            ));
+            assert_eq!(vm_state(&src_api_socket), "Running");
+            guest.ssh_command("true").unwrap();
+        });
+        if r.is_err() {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Error occurred during the mismatching live-migration",
+            );
+        }
+
+        let _ = src_child.kill();
+        let _ = src_child.wait();
+        let _ = dest_child.kill();
+        let dest_output = dest_child.wait_with_output().unwrap();
+
+        // The migration must fail because of the mode, not for another reason.
+        let r = panic::catch_unwind(|| {
+            assert!(
+                String::from_utf8_lossy(&dest_output.stderr)
+                    .contains("Error updating console outputs")
+            );
+        });
+        handle_child_output(r, &dest_output);
     }
 
     #[test]
