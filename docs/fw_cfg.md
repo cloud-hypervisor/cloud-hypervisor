@@ -90,18 +90,15 @@ The `fw_cfg` device is configured using the `--fw-cfg-config` command-line optio
         --firmware /path/to/OVMF.fd \
         --disk path=/path/to/rootfs.img,image_type=raw \
         --device path=/sys/bus/pci/devices/0000:41:00.0 \
-        --fw-cfg-config items=[name=opt/ovmf/X-PciMmio64Mb,string=262144] \
+        --fw-cfg-config kernel=off,cmdline=off,initramfs=off,items=[name=opt/ovmf/X-PciMmio64Mb,string=262144] \
         ...
     ```
     The string `262144` is passed directly to the guest as the content of `opt/ovmf/X-PciMmio64Mb`.
 
-3.  **Disabling `fw_cfg` explicitly:**
+3.  **Disabling `fw_cfg`:**
 
-    ```bash
-    cloud-hypervisor \
-        --fw-cfg-config disable \
-        ...
-    ```
+    Omit `--fw-cfg-config`. The device is only created when this option is
+    passed.
 
 ## Accessing `fw_cfg` Items in the Guest
 
