@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::ffi::{CString, OsStr};
 use std::fmt::{Display, Formatter};
 use std::fs::OpenOptions;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
@@ -1639,28 +1639,84 @@ impl Guest {
         Ok(false)
     }
 
-    pub fn check_vsock(&self, socket: &str) {
+    pub fn check_vsock(&self, socket: &str, socket_type: libc::c_int) {
         // Listen from guest on vsock CID=3 PORT=16
         // SOCKET-LISTEN:<domain>:<protocol>:<local-address>
         let guest_ip = self.network.guest_ip0.clone();
         let listen_socat = thread::spawn(move || {
-            ssh_command_ip("sudo socat - SOCKET-LISTEN:40:0:x00x00x10x00x00x00x03x00x00x00x00x00x00x00 > vsock_log", &guest_ip, DEFAULT_SSH_RETRIES, DEFAULT_SSH_TIMEOUT).unwrap();
+            ssh_command_ip(
+                &format!("sudo socat -u SOCKET-LISTEN:40:0:x00x00x10x00x00x00x03x00x00x00x00x00x00x00,socktype={socket_type} - > vsock_log"),
+                &guest_ip,
+                DEFAULT_SSH_RETRIES,
+                DEFAULT_SSH_TIMEOUT,
+            )
+            .unwrap();
         });
 
         // Make sure socat is listening, which might take a few second on slow systems
         thread::sleep(Duration::new(10, 0));
 
-        // Write something to vsock from the host
-        assert!(
-            exec_host_command_status(&format!(
-                "echo -e \"CONNECT 16\\nHelloWorld!\" | socat - UNIX-CONNECT:{socket}"
-            ))
-            .success()
-        );
+        // Wait for OK to keep SEQPACKET records separate.
+        let mut socat = Command::new("socat")
+            .args([
+                "-T",
+                "30",
+                "-",
+                &format!("UNIX-CONNECT:{socket},socktype={socket_type}"),
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut input = socat.stdin.take().unwrap();
+        let mut output = BufReader::new(socat.stdout.take().unwrap());
+        input.write_all(b"CONNECT 16\n").unwrap();
+        let mut response = String::new();
+        output.read_line(&mut response).unwrap();
+        response
+            .strip_prefix("OK ")
+            .unwrap()
+            .trim()
+            .parse::<u32>()
+            .unwrap();
+        input.write_all(b"HelloWorld!\n").unwrap();
+        drop(input);
+        assert!(socat.wait().unwrap().success());
 
         // Wait for the thread to terminate.
         listen_socat.join().unwrap();
 
+        assert_eq!(
+            self.ssh_command("cat vsock_log").unwrap().trim(),
+            "HelloWorld!"
+        );
+
+        // Check guest initiated connections.
+        let path = format!("{socket}_16");
+        let _ = fs::remove_file(&path);
+        let mut socat = Command::new("socat")
+            .args([
+                "-T",
+                "30",
+                "-u",
+                "-",
+                &format!("UNIX-LISTEN:{path},socktype={socket_type}"),
+            ])
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        socat
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"HelloWorld!\n")
+            .unwrap();
+        assert!(wait_until(Duration::from_secs(10), || Path::new(&path).exists()));
+        self.ssh_command(&format!(
+            "sudo socat -u SOCKET-CONNECT:40:0:x00x00x10x00x00x00x02x00x00x00x00x00x00x00,socktype={socket_type} - > vsock_log"
+        ))
+        .unwrap();
+        assert!(socat.wait().unwrap().success());
         assert_eq!(
             self.ssh_command("cat vsock_log").unwrap().trim(),
             "HelloWorld!"
@@ -1734,7 +1790,7 @@ impl Guest {
             .unwrap();
         // Check vsock
         if let Some(socket) = socket {
-            self.check_vsock(socket.as_str());
+            self.check_vsock(socket.as_str(), libc::SOCK_STREAM);
         }
         // Check if the console is usable
         if let Some(console_text) = console_text {
