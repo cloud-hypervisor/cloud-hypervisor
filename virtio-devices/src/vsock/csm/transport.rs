@@ -5,6 +5,7 @@
 use std::os::fd::AsRawFd;
 use std::{io, result};
 
+use super::super::SocketType;
 use super::super::packet::VsockPacket;
 use super::{Error, Result};
 
@@ -42,7 +43,7 @@ pub(crate) enum TxState {
 /// interface. This allows VsockConnection to become agnostic
 /// of the socket type.
 pub(crate) trait Transport: AsRawFd {
-    fn socket_type(&self) -> u16;
+    fn socket_type(&self) -> SocketType;
     fn receive(
         &mut self,
         pkt: &mut VsockPacket,
