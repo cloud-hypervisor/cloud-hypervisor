@@ -79,11 +79,15 @@ impl PciSegment {
             )
             .map_err(DeviceManagerError::BusError)?;
 
-        let start_of_mem32_area = mem32_allocator.lock().unwrap().base().0;
-        let end_of_mem32_area = mem32_allocator.lock().unwrap().end().0;
+        let (start_of_mem32_area, end_of_mem32_area) = {
+            let allocator = mem32_allocator.lock().unwrap();
+            (allocator.base().0, allocator.end().0)
+        };
 
-        let start_of_mem64_area = mem64_allocator.lock().unwrap().base().0;
-        let end_of_mem64_area = mem64_allocator.lock().unwrap().end().0;
+        let (start_of_mem64_area, end_of_mem64_area) = {
+            let allocator = mem64_allocator.lock().unwrap();
+            (allocator.base().0, allocator.end().0)
+        };
 
         let segment = PciSegment {
             id,
@@ -243,11 +247,15 @@ impl PciSegment {
         let mmio_config_address =
             layout::PCI_MMCONFIG_START.0 + layout::PCI_MMIO_CONFIG_SIZE_PER_SEGMENT * id as u64;
 
-        let start_of_mem32_area = mem32_allocator.lock().unwrap().base().0;
-        let end_of_mem32_area = mem32_allocator.lock().unwrap().end().0;
+        let (start_of_mem32_area, end_of_mem32_area) = {
+            let allocator = mem32_allocator.lock().unwrap();
+            (allocator.base().0, allocator.end().0)
+        };
 
-        let start_of_mem64_area = mem64_allocator.lock().unwrap().base().0;
-        let end_of_mem64_area = mem64_allocator.lock().unwrap().end().0;
+        let (start_of_mem64_area, end_of_mem64_area) = {
+            let allocator = mem64_allocator.lock().unwrap();
+            (allocator.base().0, allocator.end().0)
+        };
 
         let segment = PciSegment {
             id,
