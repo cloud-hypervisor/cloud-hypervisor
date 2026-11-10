@@ -73,7 +73,7 @@ pub type ConnectionInfo = (
 );
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
-pub(crate) enum SocketType {
+pub enum SocketType {
     #[default]
     Stream,
     SeqPacket,
