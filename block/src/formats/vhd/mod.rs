@@ -153,15 +153,32 @@ impl disk_file::AsyncDiskFile for VhdDisk {
 
 #[cfg(test)]
 mod tests {
-    use std::fs::File;
+    use std::fs::{self, File};
     use std::io::{Seek, SeekFrom, Write};
+    use std::os::unix::fs::FileExt;
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::{Duration, Instant};
 
+    use virtio_bindings::virtio_blk::{VIRTIO_BLK_T_FLUSH, VIRTIO_BLK_T_IN, VIRTIO_BLK_T_OUT};
+    use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
+    use virtio_queue::QueueT;
+    use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
+    use vm_virtio::queue::testing::VirtQueue;
     use vmm_sys_util::tempfile::TempFile;
 
-    use super::footer::checksummed_footer;
+    use super::footer::{VHD_FOOTER_LEN, checksummed_footer};
     use super::*;
-    use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoOperation, OwnedIoBuffer};
+    use crate::async_io::{
+        AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, OwnedIoBuffer,
+    };
     use crate::disk_file::{AsyncDiskFile, DiskSize, PhysicalSize, Resizable};
+    use crate::factory::{DiskOpenOptions, open_disk};
+    use crate::test_util::require_direct_io;
+    use crate::test_util::shared::QemuImgCommand;
+    use crate::{ImageType, Request, SECTOR_SIZE};
+
+    const VHD_REQUEST_DATA: GuestAddress = GuestAddress(0x10000);
 
     /// Minimal fixed VHD footer (disk type = 2, current_size = 0x11223344).
     fn fixed_vhd_footer() -> &'static [u8] {
@@ -192,6 +209,258 @@ mod tests {
         file.write_all(&checksummed_footer(fixed_vhd_footer()))
             .unwrap();
         file
+    }
+
+    fn wait_for_vhd_completion(io: &mut dyn AsyncIo) -> AsyncIoCompletion {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(completion) = io.next_completed_request() {
+                return completion;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "Timed out waiting for VHD completion"
+            );
+            thread::yield_now();
+        }
+    }
+
+    fn execute_vhd_request(
+        io: &mut dyn AsyncIo,
+        mem: &Arc<GuestMemoryMmap<()>>,
+        request_type: u32,
+        offset: u64,
+        (data_address, len): (GuestAddress, usize),
+        disk_size: u64,
+        user_data: u64,
+    ) {
+        assert!(offset.is_multiple_of(SECTOR_SIZE));
+        mem.write_obj(request_type.to_le(), GuestAddress(0x8000))
+            .unwrap();
+        mem.write_obj((offset / SECTOR_SIZE).to_le(), GuestAddress(0x8008))
+            .unwrap();
+        let guest_queue = VirtQueue::new(GuestAddress(0x1000), mem.as_ref(), 4);
+        guest_queue.dtable[0].set(
+            0x8000,
+            16,
+            VRING_DESC_F_NEXT as u16,
+            if request_type == VIRTIO_BLK_T_FLUSH {
+                2
+            } else {
+                1
+            },
+        );
+        let data_flags = if request_type == VIRTIO_BLK_T_IN {
+            VRING_DESC_F_NEXT | VRING_DESC_F_WRITE
+        } else {
+            VRING_DESC_F_NEXT
+        };
+        guest_queue.dtable[1].set(
+            data_address.0,
+            len.try_into().unwrap(),
+            data_flags as u16,
+            2,
+        );
+        guest_queue.dtable[2].set(0x9000, 1, VRING_DESC_F_WRITE as u16, 0);
+        guest_queue.avail.ring[0].set(0);
+        guest_queue.avail.idx.set(1);
+
+        let mem_atomic = GuestMemoryAtomic::new(mem.as_ref().clone());
+        let mut queue = guest_queue.create_queue();
+        let mut chain = queue.pop_descriptor_chain(mem_atomic.memory()).unwrap();
+        let (request, status_addr) = Request::parse(&mut chain, None);
+        assert_eq!(status_addr, Some(GuestAddress(0x9000)));
+        let mut request = request.unwrap();
+        let result = request
+            .execute_async(Arc::clone(mem), disk_size / SECTOR_SIZE, io, &[], user_data)
+            .unwrap();
+        assert!(result.async_complete);
+        if let Some(operation) = result.batch_request {
+            io.submit_batch_requests(vec![operation]).unwrap();
+        }
+        let mut completion = wait_for_vhd_completion(io);
+        assert_eq!(completion.user_data, user_data);
+        assert_eq!(completion.result, len as i32);
+        request
+            .complete_async(mem.as_ref(), &mut completion)
+            .unwrap();
+    }
+
+    fn read_vhd_data(
+        io: &mut dyn AsyncIo,
+        mem: &Arc<GuestMemoryMmap<()>>,
+        data_address: GuestAddress,
+        len: usize,
+    ) -> Vec<u8> {
+        let mut data = vec![0x5a; len];
+        mem.write_slice(&data, data_address).unwrap();
+        execute_vhd_request(
+            io,
+            mem,
+            VIRTIO_BLK_T_IN,
+            0,
+            (data_address, len),
+            len as u64,
+            1,
+        );
+        mem.read_slice(&mut data, data_address).unwrap();
+        data
+    }
+
+    fn assert_qemu_img_data_round_trip(use_io_uring: bool, direct: bool) {
+        let data_size = 4 * 17 * 512 * 64;
+        let mut data: Vec<u8> = (0..data_size).map(|offset| (offset % 251) as u8).collect();
+        let raw_file = TempFile::new().unwrap();
+        fs::write(raw_file.as_path(), &data).unwrap();
+        let vhd_file = TempFile::new().unwrap();
+        QemuImgCommand::new()
+            .convert("raw", "vpc", "subformat=fixed")
+            .args(&[
+                raw_file.as_path().to_str().unwrap(),
+                vhd_file.as_path().to_str().unwrap(),
+            ])
+            .run("Failed to create fixed VHD fixture");
+
+        let footer = fs::read(vhd_file.as_path()).unwrap()[data_size..].to_vec();
+        assert_eq!(footer.len() as u64, VHD_FOOTER_LEN);
+        let options = DiskOpenOptions {
+            path: vhd_file.as_path(),
+            readonly: false,
+            direct,
+            sparse: false,
+            backing_files: false,
+            disable_io_uring: !use_io_uring,
+            disable_aio: true,
+        };
+        let error = open_disk(&options, ImageType::Qcow2)
+            .map(|_| ())
+            .expect_err("A fixed VHD must not open as QCOW2");
+        assert_eq!(
+            error.kind(),
+            BlockErrorKind::ImageTypeMismatch {
+                specified: ImageType::Qcow2,
+            }
+        );
+        let disk = open_disk(&options, ImageType::FixedVhd).unwrap();
+        assert_eq!(disk.logical_size().unwrap(), data_size as u64);
+        assert_eq!(
+            disk.physical_size().unwrap(),
+            data_size as u64 + VHD_FOOTER_LEN
+        );
+        let mut io = disk.create_async_io(16).unwrap();
+        assert_eq!(io.batch_requests_enabled(), use_io_uring);
+        let mem = Arc::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), data_size + 0x20000)]).unwrap(),
+        );
+        assert_eq!(
+            read_vhd_data(io.as_mut(), &mem, VHD_REQUEST_DATA, data_size),
+            data
+        );
+
+        let write_size = 4096;
+        for (index, offset) in [0, data_size / 2, data_size - write_size]
+            .into_iter()
+            .enumerate()
+        {
+            let value = 0xa0 + index as u8;
+            let data_address = GuestAddress(VHD_REQUEST_DATA.0 + index as u64 % 2);
+            mem.write_slice(&vec![value; write_size], data_address)
+                .unwrap();
+            let user_data = index as u64 + 2;
+            execute_vhd_request(
+                io.as_mut(),
+                &mem,
+                VIRTIO_BLK_T_OUT,
+                offset as u64,
+                (data_address, write_size),
+                data_size as u64,
+                user_data,
+            );
+            data[offset..offset + write_size].fill(value);
+        }
+
+        execute_vhd_request(
+            io.as_mut(),
+            &mem,
+            VIRTIO_BLK_T_FLUSH,
+            0,
+            (VHD_REQUEST_DATA, 0),
+            data_size as u64,
+            5,
+        );
+        assert_eq!(
+            read_vhd_data(
+                io.as_mut(),
+                &mem,
+                GuestAddress(VHD_REQUEST_DATA.0 + 1),
+                data_size
+            ),
+            data
+        );
+        drop(io);
+        drop(disk);
+
+        let disk = open_disk(&options, ImageType::FixedVhd).unwrap();
+        assert_eq!(disk.logical_size().unwrap(), data_size as u64);
+        let mut io = disk.create_async_io(16).unwrap();
+        assert_eq!(io.batch_requests_enabled(), use_io_uring);
+        assert_eq!(
+            read_vhd_data(io.as_mut(), &mem, VHD_REQUEST_DATA, data_size),
+            data
+        );
+        drop(io);
+        drop(disk);
+        assert_eq!(&fs::read(vhd_file.as_path()).unwrap()[data_size..], footer);
+
+        let round_trip_file = TempFile::new().unwrap();
+        QemuImgCommand::new()
+            .convert("vpc", "raw", "")
+            .args(&[
+                vhd_file.as_path().to_str().unwrap(),
+                round_trip_file.as_path().to_str().unwrap(),
+            ])
+            .run("Failed to read fixed VHD fixture with qemu-img");
+        assert_eq!(fs::read(round_trip_file.as_path()).unwrap(), data);
+
+        let mut invalid_footer = footer;
+        invalid_footer[64] ^= 1;
+        vhd_file
+            .as_file()
+            .write_all_at(&invalid_footer, data_size as u64)
+            .unwrap();
+        let error = open_disk(&options, ImageType::FixedVhd)
+            .map(|_| ())
+            .expect_err("A fixed VHD with a damaged checksum must be rejected");
+        assert_eq!(
+            error.kind(),
+            BlockErrorKind::ImageTypeMismatch {
+                specified: ImageType::FixedVhd,
+            }
+        );
+    }
+
+    #[test]
+    fn sync_data_round_trip() {
+        assert_qemu_img_data_round_trip(false, false);
+    }
+
+    #[test]
+    fn sync_direct_io_data_round_trip() {
+        require_direct_io!();
+        assert_qemu_img_data_round_trip(false, true);
+    }
+
+    #[cfg(feature = "io_uring")]
+    #[test]
+    fn io_uring_data_round_trip() {
+        assert_qemu_img_data_round_trip(true, false);
+    }
+
+    #[cfg(feature = "io_uring")]
+    #[test]
+    fn io_uring_direct_io_data_round_trip() {
+        require_direct_io!();
+        assert_qemu_img_data_round_trip(true, true);
     }
 
     #[test]
