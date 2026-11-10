@@ -9,6 +9,7 @@ use std::{io, result};
 use thiserror::Error;
 
 mod connection;
+pub(crate) mod stream;
 #[expect(dead_code)]
 pub(crate) mod transport;
 mod txbuf;
