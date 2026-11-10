@@ -102,6 +102,17 @@ after restore completes:
 At this point, the VM is fully restored and is identical to the VM which was
 snapshot earlier.
 
+The restored VM uses the console outputs from the snapshot. If an output is not
+available on the new host, the options `serial_file`, `serial_socket`,
+`serial_tcp`, `console_file`, `console_socket`, and `console_tcp` select a new
+one in the same mode:
+
+```bash
+./cloud-hypervisor \
+    --api-socket /tmp/cloud-hypervisor.sock \
+    --restore source_url=file:///home/foo/snapshot,serial_tcp=127.0.0.1:4444
+```
+
 See [Network Announcements After Resume](live_migration.md#network-announcements-after-resume)
 for the announcement behavior after restore/resume.
 
