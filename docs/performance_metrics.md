@@ -16,8 +16,13 @@ boot time, block I/O throughput, and network throughput & latency) and
 output the result into a json file:
 
 ```
-$ ./scripts/dev_cli.sh tests --metrics -- -- --report-file /tmp/metrics.json
+$ ./scripts/dev_cli.sh tests --metrics -- -- \
+    --report-file /root/workloads/metrics.json
 ```
+
+The report file must be in a directory that is mounted from the host.
+`/root/workloads` in the container is `$HOME/workloads` on the host.
+Files in the container's `/tmp` are lost when the container exits.
 
 To get a list of available performance tests:
 
@@ -28,7 +33,8 @@ $ ./scripts/dev_cli.sh tests --metrics -- -- --list-tests
 To generate metrics data for selected performance tests, e.g. boot time only:
 
 ```
-$ ./scripts/dev_cli.sh tests --metrics -- -- --report-file /tmp/metrics.json --test-filter boot_time
+$ ./scripts/dev_cli.sh tests --metrics -- -- \
+    --report-file /root/workloads/metrics.json --test-filter boot_time
 ```
 
 To set custom timeout or test iterations for all performance tests:
