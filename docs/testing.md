@@ -136,11 +136,11 @@ dev_cli.sh tests <flags> -- <script args> -- <binary args>
 The test scripts accept the following common arguments via
 `process_common_args()` in `scripts/test-util.sh`:
 
-| Argument              | Description                                  |
-|-----------------------|----------------------------------------------|
+| Argument                 | Description                                                                                                |
+|--------------------------|------------------------------------------------------------------------------------------------------------|
 | `--hypervisor kvm\|mshv` | Override the hypervisor (auto-detected from the host device node when omitted; also passed by dev_cli.sh). |
-| `--test-filter <name>`| Run only tests matching the filter.           |
-| `--test-exclude <name>`| Exclude tests matching the pattern.          |
+| `--test-filter <name>`   | Run only tests matching the filter.                                                                        |
+| `--test-exclude <name>`  | Exclude tests matching the pattern. Only the metrics script uses it. The integration scripts ignore it.    |
 
 **Example — run a single integration test:**
 
