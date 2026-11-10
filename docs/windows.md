@@ -7,7 +7,9 @@ __Requirements__
 - Host with KVM enabled
 - [UEFI](uefi.md) capable Windows guest image with Virtio drivers integrated
 
-Any modern Windows Server version is compatible, as well as Windows 11. Cloud Hypervisor has been successfully tested with Windows Server 2019, Windows Server Core 2004 and Windows 11 IoT Enterprise LTSC 2024.
+Any modern Windows Server version is compatible, as well as Windows 11. Cloud
+Hypervisor has been successfully tested with Windows Server 2019, Windows Server
+Core 2004, Windows Server 2025, and Windows 11 IoT Enterprise LTSC 2024.
 
 At the current stage, only UEFI capable Windows images are supported. This implies the presence of the OVMF firmware during the Windows installation and in any subsequent usage. BIOS boot is not supported.
 

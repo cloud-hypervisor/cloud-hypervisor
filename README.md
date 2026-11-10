@@ -69,7 +69,9 @@ documentation](docs/riscv.md).
 
 ### Guest OS
 
-Cloud Hypervisor supports `64-bit Linux` and Windows 10/Windows Server 2019.
+Cloud Hypervisor supports `64-bit Linux` and Windows guests, such as Windows
+Server 2025 and Windows 11. See the [Windows documentation](docs/windows.md)
+for the tested versions.
 
 # 2. Getting Started
 
