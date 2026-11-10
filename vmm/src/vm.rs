@@ -1311,56 +1311,54 @@ impl Vm {
             Self::create_hypervisor_vm(hypervisor.as_ref(), hv_config)?
         };
 
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-        if vm_config.lock().unwrap().max_apic_id() > arch::x86_64::MAX_SUPPORTED_CPUS_LEGACY {
-            vm.enable_x2apic_api().unwrap();
-        }
+        let memory_manager = {
+            let config = vm_config.lock().unwrap();
 
-        let phys_bits = physical_bits(
-            hypervisor.as_ref(),
-            vm_config.lock().unwrap().cpus.max_phys_bits,
-        );
+            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+            if config.max_apic_id() > arch::x86_64::MAX_SUPPORTED_CPUS_LEGACY {
+                vm.enable_x2apic_api().unwrap();
+            }
 
-        let mut memory_restore_mode = memory_restore_mode.unwrap_or_default();
-        if memory_restore_mode == MemoryRestoreMode::CopyOnWrite
-            && !is_restore_cow_supported(&vm_config.lock().unwrap())
-        {
-            warn!(
-                "Restore (mode=copyonwrite): requires non-resizable private RAM without passthrough, NUMA binding or KSM, falling back to copy"
-            );
-            memory_restore_mode = MemoryRestoreMode::Copy;
-        }
+            let phys_bits = physical_bits(hypervisor.as_ref(), config.cpus.max_phys_bits);
 
-        let memory_manager =
+            let mut memory_restore_mode = memory_restore_mode.unwrap_or_default();
+            if memory_restore_mode == MemoryRestoreMode::CopyOnWrite
+                && !is_restore_cow_supported(&config)
+            {
+                warn!(
+                    "Restore (mode=copyonwrite): requires non-resizable private RAM without passthrough, NUMA binding or KSM, falling back to copy"
+                );
+                memory_restore_mode = MemoryRestoreMode::Copy;
+            }
+
             if let Some(snapshot) = snapshot_from_id(snapshot, MEMORY_MANAGER_SNAPSHOT_ID) {
-                let vm_config = vm_config.lock().unwrap();
                 MemoryManager::new_from_snapshot(
                     snapshot,
                     Arc::clone(&vm),
-                    &vm_config.memory.clone(),
+                    &config.memory.clone(),
                     source_url,
                     prefault.unwrap_or(false),
                     memory_restore_mode,
                     phys_bits,
                     &exit_evt,
                     #[cfg(feature = "sev_snp")]
-                    vm_config.is_sev_snp_enabled(),
+                    config.is_sev_snp_enabled(),
                 )
                 .map_err(Error::MemoryManager)?
             } else {
-                let vm_config = vm_config.lock().unwrap();
                 MemoryManager::new(
                     Arc::clone(&vm),
-                    &vm_config.memory.clone(),
+                    &config.memory.clone(),
                     None,
                     phys_bits,
                     #[cfg(feature = "sev_snp")]
-                    vm_config.is_sev_snp_enabled(),
+                    config.is_sev_snp_enabled(),
                     None,
                     Default::default(),
                 )
                 .map_err(Error::MemoryManager)?
-            };
+            }
+        };
 
         Vm::new_from_memory_manager(
             vm_config,
@@ -1796,8 +1794,10 @@ impl Vm {
             self.config.lock().unwrap().payload.as_ref().unwrap(),
             &self.device_manager,
         )?;
-        let vcpu_mpidrs = self.cpu_manager.lock().unwrap().get_mpidrs();
-        let vcpu_topology = self.cpu_manager.lock().unwrap().get_vcpu_topology();
+        let (vcpu_mpidrs, vcpu_topology) = {
+            let cpu_manager = self.cpu_manager.lock().unwrap();
+            (cpu_manager.get_mpidrs(), cpu_manager.get_vcpu_topology())
+        };
         let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
         let mut pci_space_info: Vec<PciSpaceInfo> = Vec::new();
         let initramfs_config = match self.initramfs {
@@ -2033,17 +2033,14 @@ impl Vm {
             let hotplug_method = self.config.lock().unwrap().memory.hotplug_method;
 
             if let Some(new_region) = &new_region {
-                self.device_manager
-                    .lock()
-                    .unwrap()
+                let device_manager = self.device_manager.lock().unwrap();
+                device_manager
                     .update_memory(new_region)
                     .map_err(Error::DeviceManager)?;
 
                 match hotplug_method {
                     HotplugMethod::Acpi => {
-                        self.device_manager
-                            .lock()
-                            .unwrap()
+                        device_manager
                             .notify_hotplug(AcpiNotificationFlags::MEMORY_DEVICES_CHANGED)
                             .map_err(Error::DeviceManager)?;
                     }
@@ -2183,15 +2180,12 @@ impl Vm {
     }
 
     pub fn remove_device(&mut self, id: &str) -> Result<()> {
-        self.device_manager
-            .lock()
-            .unwrap()
+        let mut device_manager = self.device_manager.lock().unwrap();
+        device_manager
             .remove_device(id)
             .map_err(Error::DeviceManager)?;
 
-        self.device_manager
-            .lock()
-            .unwrap()
+        device_manager
             .notify_hotplug(AcpiNotificationFlags::PCI_DEVICES_CHANGED)
             .map_err(Error::DeviceManager)?;
         Ok(())
@@ -3205,12 +3199,13 @@ impl Debuggable for Vm {
     }
 
     fn active_vcpus(&self) -> usize {
-        let active_vcpus = self.cpu_manager.lock().unwrap().active_vcpus();
+        let cpu_manager = self.cpu_manager.lock().unwrap();
+        let active_vcpus = cpu_manager.active_vcpus();
         if active_vcpus > 0 {
             active_vcpus
         } else {
             // The VM is not booted yet. Report boot_vcpus() instead.
-            self.cpu_manager.lock().unwrap().boot_vcpus() as usize
+            cpu_manager.boot_vcpus() as usize
         }
     }
 }
@@ -3247,14 +3242,11 @@ impl GuestDebuggable for Vm {
         self.write_note(&coredump_state)?;
         self.write_loads(&coredump_state)?;
 
-        self.cpu_manager
-            .lock()
-            .unwrap()
-            .cpu_write_elf64_note(&coredump_state)?;
-        self.cpu_manager
-            .lock()
-            .unwrap()
-            .cpu_write_vmm_note(&coredump_state)?;
+        {
+            let mut cpu_manager = self.cpu_manager.lock().unwrap();
+            cpu_manager.cpu_write_elf64_note(&coredump_state)?;
+            cpu_manager.cpu_write_vmm_note(&coredump_state)?;
+        }
 
         self.memory_manager
             .lock()
