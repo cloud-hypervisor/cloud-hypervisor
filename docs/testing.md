@@ -223,8 +223,8 @@ access to `/dev`. Workloads are bind-mounted from the host.
 
 Test scripts use `cargo nextest run` with the `--release` profile.
 Tests are grouped by module name filter (e.g., `common_parallel`,
-`common_sequential`). Most groups support automatic retries (default
-3). The nextest configuration in `.config/nextest.toml` sets a
+`common_sequential`). Most groups retry a failed test up to 2
+times. The nextest configuration in `.config/nextest.toml` sets a
 slow-timeout of 60 seconds per period with automatic termination
 after 10 periods (i.e., any single test running longer than 10
 minutes is terminated).
@@ -332,7 +332,7 @@ concurrent test runs without corrupting the base image.
 | x86_64       | `windows-server-2025-amd64-1.raw`            | `CLOUDHV.fd`     |
 | aarch64      | `windows-11-iot-enterprise-aarch64.raw`       | `CLOUDHV_EFI.fd` |
 
-**Test group:** `windows` (single-threaded, retries 3).
+**Test group:** `windows` (up to 4 tests in parallel, retries 2).
 
 ### Rate limiter
 
@@ -354,7 +354,7 @@ scripts/dev_cli.sh tests --integration-cvm
 Runs `scripts/run_integration_tests_cvm.sh`. MSHV requires prebuilt
 IGVM files in `/usr/share/cloud-hypervisor/cvm` on the host.
 
-**Test group:** `common_cvm` (`nproc / 4` threads, retries 3).
+**Test group:** `common_cvm` (`nproc / 4` threads, retries 2).
 
 #### KVM SEV-SNP
 
