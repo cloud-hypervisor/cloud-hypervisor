@@ -528,11 +528,12 @@ fn create_chosen_node(
 }
 
 fn create_gic_node(fdt: &mut FdtWriter, gic_device: &Arc<Mutex<dyn Vgic>>) -> FdtWriterResult<()> {
-    let gic_reg_prop = gic_device.lock().unwrap().device_properties();
+    let gic_device = gic_device.lock().unwrap();
+    let gic_reg_prop = gic_device.device_properties();
 
     let intc_node = fdt.begin_node("intc")?;
 
-    fdt.property_string("compatible", gic_device.lock().unwrap().fdt_compatibility())?;
+    fdt.property_string("compatible", gic_device.fdt_compatibility())?;
     fdt.property_null("interrupt-controller")?;
     // "interrupt-cells" field specifies the number of cells needed to encode an
     // interrupt source. The type shall be a <u32> and the value shall be 3 if no PPI affinity description
@@ -546,19 +547,19 @@ fn create_gic_node(fdt: &mut FdtWriter, gic_device: &Arc<Mutex<dyn Vgic>>) -> Fd
 
     let gic_intr_prop = [
         GIC_FDT_IRQ_TYPE_PPI,
-        gic_device.lock().unwrap().fdt_maint_irq(),
+        gic_device.fdt_maint_irq(),
         IRQ_TYPE_LEVEL_HI,
     ];
     fdt.property_array_u32("interrupts", &gic_intr_prop)?;
 
-    if gic_device.lock().unwrap().msi_compatible() {
+    if gic_device.msi_compatible() {
         let msic_node = fdt.begin_node("msic")?;
-        let msi_compatibility = gic_device.lock().unwrap().msi_compatibility().to_string();
+        let msi_compatibility = gic_device.msi_compatibility().to_string();
 
         fdt.property_string("compatible", msi_compatibility.as_str())?;
         fdt.property_null("msi-controller")?;
         fdt.property_u32("phandle", MSI_PHANDLE)?;
-        let msi_reg_prop = gic_device.lock().unwrap().msi_properties();
+        let msi_reg_prop = gic_device.msi_properties();
         fdt.property_array_u64("reg", &msi_reg_prop)?;
 
         if msi_compatibility == GIC_V2M_COMPATIBLE {
