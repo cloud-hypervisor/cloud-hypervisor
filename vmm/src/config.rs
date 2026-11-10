@@ -6,6 +6,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 #[cfg(feature = "ivshmem")]
 use std::fs;
+use std::mem::discriminant;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -235,6 +236,9 @@ pub enum ValidationError {
     ConsoleTcpClientUnsupported,
     #[error("TCP console port must not be zero")]
     ConsoleTcpPortZero,
+    /// A new console output must keep the mode of the current one
+    #[error("Cannot change console output {0:?} to {1:?} with a different mode")]
+    ConsoleOutputUpdateModeMismatch(ConsoleOutput, ConsoleOutput),
     /// Boot has no vCPUs
     #[error("Number of boot vCPUs must be greater than 0")]
     CpusBootZero,
@@ -2580,6 +2584,20 @@ impl ConsoleOutput {
         }
         Ok(())
     }
+
+    /// Replaces the output with `new`. The mode must stay the same because it
+    /// affects the devices of the VM: for example, `Off` creates no device.
+    fn update(&mut self, new: &Self) -> ValidationResult<()> {
+        if discriminant(self) != discriminant(new) {
+            return Err(ValidationError::ConsoleOutputUpdateModeMismatch(
+                self.clone(),
+                new.clone(),
+            ));
+        }
+        new.validate()?;
+        self.clone_from(new);
+        Ok(())
+    }
 }
 
 impl ConsoleConfig {
@@ -3406,6 +3424,21 @@ impl IvshmemConfig {
 }
 
 impl VmConfig {
+    /// Applies the new console outputs of a restore or migration.
+    pub(crate) fn update_console_outputs(
+        &mut self,
+        serial: Option<&ConsoleOutput>,
+        console: Option<&ConsoleOutput>,
+    ) -> ValidationResult<()> {
+        if let Some(serial) = serial {
+            self.serial.output.update(serial)?;
+        }
+        if let Some(console) = console {
+            self.console.output.update(console)?;
+        }
+        Ok(())
+    }
+
     fn validate_identifier(
         id_list: &mut BTreeSet<String>,
         id: &Option<String>,
@@ -6188,6 +6221,79 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ))
         ));
         Ok(())
+    }
+
+    #[test]
+    fn test_console_output_update() {
+        let tcp = |address: &str| ConsoleOutput::Tcp {
+            tcp: TcpConsoleConfig {
+                address: address.parse().unwrap(),
+                server: true,
+            },
+        };
+        let file = ConsoleOutput::File {
+            file: PathBuf::from("/tmp/console.log"),
+        };
+
+        let mut output = tcp("127.0.0.1:4444");
+        output
+            .update(&tcp("127.0.0.1:5555"))
+            .expect("should accept a new address in the same mode");
+        assert_eq!(output, tcp("127.0.0.1:5555"));
+
+        // Rejected updates must leave the output unchanged.
+        assert_eq!(
+            output.update(&file),
+            Err(ValidationError::ConsoleOutputUpdateModeMismatch(
+                tcp("127.0.0.1:5555"),
+                file.clone()
+            ))
+        );
+        assert_eq!(
+            output.update(&tcp("127.0.0.1:0")),
+            Err(ValidationError::ConsoleTcpPortZero)
+        );
+        assert_eq!(output, tcp("127.0.0.1:5555"));
+    }
+
+    #[test]
+    fn test_console_output_update_requires_same_mode() {
+        let outputs = [
+            ConsoleOutput::Off,
+            ConsoleOutput::Pty { file: None },
+            ConsoleOutput::Tty,
+            ConsoleOutput::File {
+                file: PathBuf::from("/tmp/console.log"),
+            },
+            ConsoleOutput::Socket {
+                socket: PathBuf::from("/tmp/console.sock"),
+            },
+            ConsoleOutput::Tcp {
+                tcp: TcpConsoleConfig {
+                    address: "127.0.0.1:4444".parse().unwrap(),
+                    server: true,
+                },
+            },
+            ConsoleOutput::Null,
+        ];
+
+        for (current_index, current) in outputs.iter().enumerate() {
+            for (new_index, new) in outputs.iter().enumerate() {
+                let mut output = current.clone();
+                if current_index == new_index {
+                    assert_eq!(output.update(new), Ok(()));
+                } else {
+                    assert_eq!(
+                        output.update(new),
+                        Err(ValidationError::ConsoleOutputUpdateModeMismatch(
+                            current.clone(),
+                            new.clone()
+                        ))
+                    );
+                    assert_eq!(output, *current);
+                }
+            }
+        }
     }
 
     #[test]
