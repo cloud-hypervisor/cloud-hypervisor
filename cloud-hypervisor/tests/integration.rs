@@ -9346,6 +9346,134 @@ mod common_parallel {
         handle_child_output(r, &dest_output);
     }
 
+    /// Restores a snapshot of `guest` with `console_update` and runs `check`.
+    /// A `rejected_update` must make a first restore attempt fail.
+    fn _test_snapshot_restore_console_update(
+        guest: &Guest,
+        (serial, console): (String, String),
+        rejected_update: Option<String>,
+        console_update: &str,
+        check: impl FnOnce() -> thread::Result<()>,
+    ) {
+        let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
+        let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
+
+        let mut child = GuestCommand::new(guest)
+            .default_cpus()
+            .default_memory()
+            .default_kernel_cmdline()
+            .default_disks()
+            .default_net()
+            .args(["--serial", &serial])
+            .args(["--console", &console])
+            .args(["--api-socket", &api_socket_source])
+            .args(["--event-monitor", &format!("path={event_path}")])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+            snapshot_restore_common::snapshot_and_check_events(
+                &api_socket_source,
+                &snapshot_dir,
+                &event_path,
+            );
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        if let Some(rejected_update) = rejected_update {
+            let mut child = GuestCommand::new(guest)
+                .args([
+                    "--restore",
+                    &format!("source_url=file://{snapshot_dir},{rejected_update}"),
+                ])
+                .capture_output()
+                .spawn()
+                .unwrap();
+            let status = child.wait_timeout(Duration::from_secs(30)).unwrap();
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                status.is_some_and(|status| !status.success())
+                    && stderr.contains("with a different mode"),
+                "restore should fail because of the mode: {status:?}\n{stderr}"
+            );
+        }
+
+        let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
+        let event_path_restored = format!("{}.2", temp_event_monitor_path(&guest.tmp_dir));
+
+        let mut child = GuestCommand::new(guest)
+            .args(["--api-socket", &api_socket_restored])
+            .args(["--event-monitor", &format!("path={event_path_restored}")])
+            .args([
+                "--restore",
+                &format!("source_url=file://{snapshot_dir},{console_update}"),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            assert!(wait_for_latest_events_exact_str(
+                Duration::from_secs(30),
+                &["restored"],
+                &event_path_restored
+            ));
+            assert!(wait_until(Duration::from_secs(30), || remote_command(
+                &api_socket_restored,
+                "info",
+                None
+            )));
+            assert!(remote_command(&api_socket_restored, "resume", None));
+            assert!(wait_for_latest_events_exact_str(
+                Duration::from_secs(30),
+                &["resuming", "resumed"],
+                &event_path_restored
+            ));
+        })
+        .and_then(|()| check());
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+    }
+
+    /// The first restore attempt uses a new output in another mode, which must
+    /// fail. The login only works when the VM listens on the new port.
+    #[test]
+    fn test_snapshot_restore_tcp_serial_new_address() {
+        let guest = tcp_console_guest(ConsoleKind::Serial);
+        let new_port = get_available_port();
+        let rejected_file = guest.tmp_dir.as_path().join("rejected.log");
+        _test_snapshot_restore_console_update(
+            &guest,
+            tcp_console_args(ConsoleKind::Serial, get_available_port()),
+            Some(format!("serial_file={}", rejected_file.display())),
+            &tcp_console_update(ConsoleKind::Serial, new_port),
+            || tcp_console_login(&guest, new_port),
+        );
+    }
+
+    #[test]
+    fn test_snapshot_restore_socket_file_new_outputs() {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let outputs = SocketFileOutputs::new(&guest, ConsoleKind::Console);
+        _test_snapshot_restore_console_update(
+            &guest,
+            outputs.args(),
+            None,
+            &outputs.update(),
+            || panic::catch_unwind(|| outputs.check(&guest)),
+        );
+    }
+
     #[test]
     fn test_live_migration_tcp_integrity_net() {
         _test_live_migration_tcp_integrity::<NetIntegrityStream>();
