@@ -3005,16 +3005,15 @@ where
                     )));
                 }
             }
-        } else if self.mmio_regions.lock().unwrap().check_range(gpa, size) {
-            Err(self
-                .mmio_regions
-                .lock()
-                .unwrap()
-                .find_user_address(gpa, size)?)
         } else {
-            return Err(io::Error::other(format!(
-                "failed to locate guest address 0x{gpa:x} in guest memory"
-            )));
+            let mmio_regions = self.mmio_regions.lock().unwrap();
+            if mmio_regions.check_range(gpa, size) {
+                Err(mmio_regions.find_user_address(gpa, size)?)
+            } else {
+                return Err(io::Error::other(format!(
+                    "failed to locate guest address 0x{gpa:x} in guest memory"
+                )));
+            }
         };
         let user_addr = match user_addr {
             Ok(p) => p.as_ptr(),
