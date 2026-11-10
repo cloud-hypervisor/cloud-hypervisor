@@ -19,7 +19,6 @@ pub(crate) struct PayloadRead {
     pub(crate) len: usize,
     pub(crate) eof: bool,
     pub(crate) more: bool,
-    #[expect(dead_code)]
     pub(crate) waiting_credit: bool,
 }
 
@@ -52,7 +51,6 @@ pub(crate) trait Transport: AsRawFd {
     fn flush(&mut self) -> Result<usize>;
     fn rx_state(&self, credit: usize) -> RxState;
     fn tx_state(&self) -> TxState;
-    #[expect(dead_code)]
     fn finish_send(&mut self) {}
     fn read_control(&mut self, data: &mut [u8]) -> io::Result<usize>;
     fn write_control(&mut self, data: &[u8]) -> io::Result<usize>;

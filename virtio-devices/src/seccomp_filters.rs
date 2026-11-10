@@ -327,6 +327,17 @@ fn virtio_vsock_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_connect, vec![]),
         (libc::SYS_fcntl, vec![]),
         (libc::SYS_ioctl, create_vsock_ioctl_seccomp_rule()),
+        (libc::SYS_recvmsg, vec![]),
+        (
+            libc::SYS_setsockopt,
+            vec![
+                SeccompRule::new(vec![
+                    Cond::new(1, ArgLen::Dword, Eq, libc::SOL_SOCKET as u64).unwrap(),
+                    Cond::new(2, ArgLen::Dword, Eq, libc::SO_PASSCRED as u64).unwrap(),
+                ])
+                .unwrap(),
+            ],
+        ),
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_sendto, vec![]),
         (libc::SYS_shutdown, vec![]),

@@ -231,6 +231,11 @@ where
             let credit = self.peer_avail_credit();
             match self.stream.receive(pkt, credit, self.peer_buf_alloc) {
                 Ok(read) => {
+                    if read.waiting_credit {
+                        pkt.set_op(uapi::VSOCK_OP_CREDIT_REQUEST);
+                        return Ok(());
+                    }
+
                     let read_cnt = read.len;
                     if read.eof {
                         if self.host_hung_up {
@@ -320,6 +325,11 @@ where
         // Update the peer credit information.
         self.peer_buf_alloc = pkt.buf_alloc();
         self.peer_fwd_cnt = Wrapping(pkt.fwd_cnt());
+
+        if pkt.op() == uapi::VSOCK_OP_SHUTDOWN && pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_SEND != 0
+        {
+            self.stream.finish_send();
+        }
 
         match self.state {
             // Most frequent case: this is an established connection that needs to forward some
@@ -451,6 +461,15 @@ where
             self.pending_rx.remove(PendingRx::Rw);
         }
 
+        if self.stream.rx_state(self.peer_avail_credit()) == RxState::Buffered
+            && matches!(
+                self.state,
+                ConnState::Established | ConnState::PeerClosed(false, _)
+            )
+        {
+            self.pending_rx.insert(PendingRx::Rw);
+        }
+
         Ok(())
     }
 
@@ -498,6 +517,7 @@ where
                     evset.insert(epoll::Events::EPOLLHUP);
                 }
             }
+            ConnState::LocalInit | ConnState::PeerInit => (),
             _ if self.need_credit_update_from_peer() => (),
             _ => evset.insert(epoll::Events::EPOLLIN),
         }
@@ -682,7 +702,9 @@ where
     /// This is deferred while the TX buffer still holds guest data, since shutting down the write
     /// half now would drop those not-yet-flushed bytes; `notify()` retries once the buffer drains.
     fn shutdown_host_write_side(&mut self) {
-        if self.host_write_shutdown || self.stream.tx_state() != TxState::Empty {
+        let tx_state = self.stream.tx_state();
+        if self.host_write_shutdown || tx_state == TxState::Partial || tx_state == TxState::Pending
+        {
             return;
         }
         // SAFETY: the stream owns the socket fd by construction and `shutdown` doesn't touch process
