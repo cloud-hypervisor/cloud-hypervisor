@@ -450,16 +450,19 @@ pub fn start_net_backend(backend_command: &str) {
     };
 
     let epoll_handlers = net_daemon.get_epoll_handlers();
-    if epoll_handlers.len() != net_backend.read().unwrap().threads.len() {
-        error!("Number of vring workers must be identical to the number of backend threads");
-        process::exit(1);
-    }
+    {
+        let net_backend = net_backend.read().unwrap();
+        if epoll_handlers.len() != net_backend.threads.len() {
+            error!("Number of vring workers must be identical to the number of backend threads");
+            process::exit(1);
+        }
 
-    for (index, thread) in net_backend.read().unwrap().threads.iter().enumerate() {
-        thread
-            .lock()
-            .unwrap()
-            .set_epoll_fd(epoll_handlers[index].as_raw_fd());
+        for (index, thread) in net_backend.threads.iter().enumerate() {
+            thread
+                .lock()
+                .unwrap()
+                .set_epoll_fd(epoll_handlers[index].as_raw_fd());
+        }
     }
 
     if let Err(e) = if backend_config.client {
