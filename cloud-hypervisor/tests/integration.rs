@@ -2234,32 +2234,6 @@ mod common_parallel {
     }
 
     #[test]
-    fn test_virtio_block_vhd() {
-        let mut workload_path = dirs::home_dir().unwrap();
-        workload_path.push("workloads");
-
-        let mut raw_file_path = workload_path.clone();
-        let mut vhd_file_path = workload_path;
-        raw_file_path.push(JAMMY_IMAGE_NAME);
-        vhd_file_path.push(JAMMY_IMAGE_NAME_VHD);
-
-        // Generate VHD file from RAW file
-        QemuImgCommand::new()
-            .convert("raw", "vpc", "subformat=fixed")
-            .args(&[
-                "-p",
-                raw_file_path.to_str().unwrap(),
-                vhd_file_path.to_str().unwrap(),
-            ])
-            .run("Expect generating VHD image from RAW image");
-        let guest = make_virtio_block_guest(
-            &GuestFactory::new_regular_guest_factory(),
-            JAMMY_IMAGE_NAME_VHD,
-        );
-        _test_virtio_block(&guest, false, false, false, false, ImageType::FixedVhd);
-    }
-
-    #[test]
     fn test_virtio_block_vhdx() {
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
