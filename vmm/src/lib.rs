@@ -1238,24 +1238,19 @@ impl Vmm {
                         "Timed out waiting for postcopy fault connection: {e}"
                     ))
                 })?;
-            let mm = Arc::clone(&config_data.memory_manager);
-            let saved_regions = mm
-                .lock()
-                .unwrap()
-                .memory_range_table(MemoryRangePolicy::Full)?;
-            mm.lock()
-                .unwrap()
-                .start_postcopy_serving(
-                    &saved_regions,
-                    shared_backing,
-                    config_data.background_fetch_pages,
-                    fault_stream,
-                    &self.exit_evt,
-                )
-                .map_err(|e| {
-                    config_data.connections.cleanup().ok();
-                    MigratableError::MigrateReceive(anyhow!("start_postcopy_serving: {e:?}"))
-                })?;
+            let mut mm = config_data.memory_manager.lock().unwrap();
+            let saved_regions = mm.memory_range_table(MemoryRangePolicy::Full)?;
+            mm.start_postcopy_serving(
+                &saved_regions,
+                shared_backing,
+                config_data.background_fetch_pages,
+                fault_stream,
+                &self.exit_evt,
+            )
+            .map_err(|e| {
+                config_data.connections.cleanup().ok();
+                MigratableError::MigrateReceive(anyhow!("start_postcopy_serving: {e:?}"))
+            })?;
         }
 
         // The fault connection is in hand, so stop the accept thread.
@@ -1347,41 +1342,29 @@ impl Vmm {
                 .map_err(MigratableError::MigrateReceive)?,
         );
 
-        if self
-            .vm_config
-            .as_ref()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .landlock_enable
-        {
-            let mut config = self.vm_config.as_ref().unwrap().lock().unwrap();
-            apply_landlock(&mut config)
+        let mut vm_config = config.lock().unwrap();
+
+        if vm_config.landlock_enable {
+            apply_landlock(&mut vm_config)
                 .context("Error applying landlock")
                 .map_err(MigratableError::MigrateReceive)?;
         }
 
-        let vm = Vm::create_hypervisor_vm(
-            self.hypervisor.as_ref(),
-            (&*self.vm_config.as_ref().unwrap().lock().unwrap()).into(),
-        )
-        .map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!(
-                "Error creating hypervisor VM from snapshot: {e:?}"
-            ))
-        })?;
+        let vm = Vm::create_hypervisor_vm(self.hypervisor.as_ref(), (&*vm_config).into()).map_err(
+            |e| {
+                MigratableError::MigrateReceive(anyhow!(
+                    "Error creating hypervisor VM from snapshot: {e:?}"
+                ))
+            },
+        )?;
 
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-        if config.lock().unwrap().max_apic_id() > arch::x86_64::MAX_SUPPORTED_CPUS_LEGACY {
+        if vm_config.max_apic_id() > arch::x86_64::MAX_SUPPORTED_CPUS_LEGACY {
             vm.enable_x2apic_api().unwrap();
         }
 
-        let phys_bits = vm::physical_bits(
-            self.hypervisor.as_ref(),
-            config.lock().unwrap().cpus.max_phys_bits,
-        );
+        let phys_bits = vm::physical_bits(self.hypervisor.as_ref(), vm_config.cpus.max_phys_bits);
 
-        let vm_config = config.lock().unwrap();
         let memory_manager = MemoryManager::new(
             vm,
             &vm_config.memory.clone(),
@@ -2119,16 +2102,11 @@ impl Vmm {
                     Some(memory_restore_mode),
                 )?;
 
-                if self
-                    .vm_config
-                    .as_ref()
-                    .unwrap()
-                    .lock()
-                    .unwrap()
-                    .landlock_enable
                 {
                     let mut config = self.vm_config.as_ref().unwrap().lock().unwrap();
-                    apply_landlock(&mut config).map_err(VmError::ApplyLandlock)?;
+                    if config.landlock_enable {
+                        apply_landlock(&mut config).map_err(VmError::ApplyLandlock)?;
+                    }
                 }
 
                 // Now we can restore the rest of the VM.
