@@ -71,6 +71,6 @@ guest drivers do not validate these and will crash if they are wrong.
 Notably, at least some versions of Linux will crash if one creates a
 virtio-fs device (id 26) with only one queue.
 
-If any access to configuration space fails, Cloud Hypervisor will panic
-instead of injecting an exception into the guest. It is unclear what
-correct behavior is in this case.
+If an access to the configuration space fails, Cloud Hypervisor logs an
+error instead of injecting an exception into the guest. Failed reads
+return all ones, and failed writes are dropped.
