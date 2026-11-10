@@ -100,13 +100,14 @@ impl WatchdogEpollHandler {
                 .map_err(Error::GuestMemoryWrite)?;
 
             // If this is the first "ping" then setup the timer
-            if self.last_ping_time.lock().unwrap().is_none() {
+            let mut last_ping_time = self.last_ping_time.lock().unwrap();
+            if last_ping_time.is_none() {
                 info!(
                     "First ping received. Starting timer (every {WATCHDOG_TIMER_INTERVAL} seconds)"
                 );
                 timerfd_setup(&self.timer, WATCHDOG_TIMER_INTERVAL).map_err(Error::TimerfdSetup)?;
             }
-            self.last_ping_time.lock().unwrap().replace(Instant::now());
+            last_ping_time.replace(Instant::now());
 
             queue
                 .add_used(desc_chain.memory(), desc_chain.head_index(), desc.len())
@@ -433,9 +434,9 @@ impl Pausable for Watchdog {
 
     fn resume(&mut self) -> result::Result<(), MigratableError> {
         // Reset the timer on pause if it was previously used
-        if self.last_ping_time.lock().unwrap().is_some() {
+        if let Some(last_ping_time) = self.last_ping_time.lock().unwrap().as_mut() {
             info!("Watchdog resumed - enabling timer (every {WATCHDOG_TIMER_INTERVAL} seconds)");
-            self.last_ping_time.lock().unwrap().replace(Instant::now());
+            *last_ping_time = Instant::now();
             #[cfg(fuzzing)]
             let setup = if self.fuzz_one_shot {
                 timerfd_setup_one_shot(&self.timer, 0, 1)
