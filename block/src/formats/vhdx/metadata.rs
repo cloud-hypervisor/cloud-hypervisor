@@ -14,6 +14,7 @@ use crate::aligned_file::AlignedFile;
 const METADATA_SIGN: u64 = 0x6174_6164_6174_656D;
 const METADATA_ENTRY_SIZE: usize = 32;
 const METADATA_MAX_ENTRIES: u16 = 2047;
+pub(super) const VHDX_MAX_IMAGE_SIZE: u64 = 64 << 40;
 // The size including the table header and entries
 const METADATA_TABLE_MAX_SIZE: usize = METADATA_ENTRY_SIZE * (METADATA_MAX_ENTRIES as usize + 1);
 
@@ -209,6 +210,11 @@ impl DiskSpec {
         if (metadata_presence & METADATA_VIRTUAL_DISK_SIZE_PRESENT != 0)
             && disk_spec.virtual_disk_size == 0
         {
+            return Err(VhdxMetadataError::InvalidDiskSize(
+                disk_spec.virtual_disk_size,
+            ));
+        }
+        if disk_spec.virtual_disk_size > VHDX_MAX_IMAGE_SIZE {
             return Err(VhdxMetadataError::InvalidDiskSize(
                 disk_spec.virtual_disk_size,
             ));
