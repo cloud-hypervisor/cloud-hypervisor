@@ -219,27 +219,26 @@ fn create_chosen_node(
 }
 
 fn create_aia_node(fdt: &mut FdtWriter, aia_device: &Arc<Mutex<dyn Vaia>>) -> FdtWriterResult<()> {
+    let aia_device = aia_device.lock().unwrap();
+
     // IMSIC
-    if aia_device.lock().unwrap().msi_compatible() {
+    if aia_device.msi_compatible() {
         use super::layout::IMSIC_START;
         let imsic_name = format!("imsics@{:x}", IMSIC_START.0);
         let imsic_node = fdt.begin_node(&imsic_name)?;
 
-        fdt.property_string(
-            "compatible",
-            aia_device.lock().unwrap().imsic_compatibility(),
-        )?;
-        let imsic_reg_prop = aia_device.lock().unwrap().imsic_properties();
+        fdt.property_string("compatible", aia_device.imsic_compatibility())?;
+        let imsic_reg_prop = aia_device.imsic_properties();
         fdt.property_array_u32("reg", &imsic_reg_prop)?;
         fdt.property_u32("#interrupt-cells", 0u32)?;
         fdt.property_null("interrupt-controller")?;
         fdt.property_null("msi-controller")?;
-        let imsic_num_ids = aia_device.lock().unwrap().imsic_num_ids();
+        let imsic_num_ids = aia_device.imsic_num_ids();
         fdt.property_u32("riscv,num-ids", imsic_num_ids)?;
         fdt.property_u32("phandle", AIA_IMSIC_PHANDLE)?;
 
         let mut irq_cells = Vec::new();
-        let num_cpus = aia_device.lock().unwrap().vcpu_count();
+        let num_cpus = aia_device.vcpu_count();
         for i in 0..num_cpus {
             irq_cells.push(CPU_INTC_BASE_PHANDLE + i);
             irq_cells.push(S_MODE_EXT_IRQ);
@@ -254,11 +253,8 @@ fn create_aia_node(fdt: &mut FdtWriter, aia_device: &Arc<Mutex<dyn Vaia>>) -> Fd
     let aplic_name = format!("aplic@{:x}", APLIC_START.0);
     let aplic_node = fdt.begin_node(&aplic_name)?;
 
-    fdt.property_string(
-        "compatible",
-        aia_device.lock().unwrap().aplic_compatibility(),
-    )?;
-    let reg_cells = aia_device.lock().unwrap().aplic_properties();
+    fdt.property_string("compatible", aia_device.aplic_compatibility())?;
+    let reg_cells = aia_device.aplic_properties();
     fdt.property_array_u32("reg", &reg_cells)?;
     fdt.property_u32("#interrupt-cells", 2u32)?;
     fdt.property_null("interrupt-controller")?;
