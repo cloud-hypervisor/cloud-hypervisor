@@ -35,8 +35,8 @@ boot through an IGVM stage0 image.
 
 AMD's [Secure Encrypted Virtualization (SEV)](https://www.amd.com/en/developer/sev.html) and extensions such as Secure Nested Paging (SEV-SNP) encrypt memory and restrict access to a guest VM's memory and registers, securing it against a compromised hypervisor or VMM. They utilize the Platform Security Processor (PSP) to store keys and encrypt/decrypt the data. Microsoft has been continuously adding/improving support for SEV-SNP on Microsoft Hyper-V.
 
-Cloud Hypervisor's default `sev_snp` feature enables the `mshv` and `igvm`
-features needed for the MSHV SEV-SNP path.
+Cloud Hypervisor's `sev_snp` feature enables the `igvm` feature. The MSHV
+SEV-SNP path also needs the `mshv` feature, which must be enabled separately.
 
 ## Use Cases
 
@@ -46,8 +46,15 @@ Cloud Hypervisor can be built to run on an MSHV root partition by enabling the m
 
 Cloud Hypervisor on MSHV can boot Linux guests using an IGVM file. IGVM feature depends on mshv for running legacy VMs.e.g.:
 
-```cargo build --locked --all --all-targets --no-default-features --tests --examples --features igvm```
+```shell
+cargo build --locked --all --all-targets --no-default-features --tests \
+    --examples --features mshv,igvm
+```
 
-For running confidential VMs on mshv, you will only need to enable sev_snp, it requires and enables mshv and igvm automatically, eg.:
+For running confidential VMs on mshv, you need to enable mshv and sev_snp, the
+latter enables igvm automatically, e.g.:
 
-```cargo build --locked --all --all-targets --no-default-features --tests --examples --features sev_snp```
+```shell
+cargo build --locked --all --all-targets --no-default-features --tests \
+    --examples --features mshv,sev_snp
+```
