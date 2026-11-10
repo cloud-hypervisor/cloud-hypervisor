@@ -132,7 +132,7 @@ paths:
       operationId: resumeVM
       responses:
         204:
-          description: The VM instance successfully paused.
+          description: The VM instance successfully resumed.
         404:
           description: The VM instance could not resume because it is not booted yet
         405:
