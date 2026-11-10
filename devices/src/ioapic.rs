@@ -402,8 +402,7 @@ impl InterruptController for Ioapic {
     // The ioapic must be informed about EOIs in order to deassert interrupts
     // already sent.
     fn end_of_interrupt(&mut self, vec: u8) {
-        for i in 0..NUM_IOAPIC_PINS {
-            let entry = &mut self.reg_entries[i];
+        for entry in &mut self.reg_entries {
             // Clear Remote IRR bit
             if vector(*entry) == vec && trigger_mode(*entry) == 1 {
                 set_remote_irr(entry, 0);
