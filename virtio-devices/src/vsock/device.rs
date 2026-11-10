@@ -44,7 +44,7 @@ use vmm_sys_util::eventfd::EventFd;
 /// - a TX queue FD;
 /// - an event queue FD; and
 /// - a backend FD.
-use super::{ConnectionInfo, VsockBackend, VsockPacket};
+use super::{ConnectionInfo, SocketType, VsockBackend, VsockPacket};
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::{
@@ -353,10 +353,33 @@ pub struct Vsock<B: VsockBackend> {
 pub struct VsockState {
     pub avail_features: u64,
     pub acked_features: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_connections")]
     pub connections: Vec<ConnectionInfo>,
     #[serde(default)]
     pub local_port_last: Option<u32>,
+}
+
+fn deserialize_connections<'de, D>(deserializer: D) -> result::Result<Vec<ConnectionInfo>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Connection {
+        Typed(ConnectionInfo),
+        Stream((u32, u32)),
+    }
+    Vec::<Connection>::deserialize(deserializer).map(|connections| {
+        connections
+            .into_iter()
+            .map(|connection| match connection {
+                Connection::Typed(connection) => connection,
+                Connection::Stream((local_port, peer_port)) => {
+                    (local_port, peer_port, SocketType::Stream.into())
+                }
+            })
+            .collect()
+    })
 }
 
 impl<B> Vsock<B>
