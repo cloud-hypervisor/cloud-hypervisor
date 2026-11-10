@@ -9,6 +9,8 @@ use std::{io, result};
 use thiserror::Error;
 
 mod connection;
+#[expect(dead_code)]
+pub(crate) mod transport;
 mod txbuf;
 
 pub(super) use connection::VsockConnection;
