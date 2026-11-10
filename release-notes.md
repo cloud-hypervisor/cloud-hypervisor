@@ -1,3 +1,4 @@
+- [v54.1](#v541)
 - [v54.0](#v540)
     - [Live Migration Version Compatibility](#live-migration-version-compatibility)
     - [VFIO Device Live Migration](#vfio-device-live-migration)
@@ -464,6 +465,12 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+
+# v54.1
+
+This is a point release containing security fixes to a use-after-free
+vulnerability in virtio-pmem during VM shutdown. Details can be found in
+GHSA-3r3x-6hgg-2m38.
 
 # v54.0
 
