@@ -13,10 +13,9 @@ To use the `--gdb` option, specify the Unix Domain Socket with `path` that Cloud
 ```bash
 ./cloud-hypervisor \
     --kernel hypervisor-fw \
-    --disk path=bionic-server-cloudimg-amd64.raw,image_type=raw \
+    --disk path=jammy-server-cloudimg-amd64.raw,image_type=raw \
     --cpus boot=1 \
     --memory size=1024M \
-    --net "tap=,mac=,ip=,mask=" \
     --console off \
     --serial tty \
     --gdb path=/tmp/ch-gdb-sock
