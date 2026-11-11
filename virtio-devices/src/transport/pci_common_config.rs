@@ -232,19 +232,19 @@ impl VirtioPciCommonConfig {
             1 => self.write_common_config_byte(offset, data[0]),
             2 => self.write_common_config_word(
                 offset,
-                u16::from_le_bytes(data.try_into().expect("data should be 2 bytes")),
+                u16::from_le_bytes(*data.as_array().expect("data should be 2 bytes")),
                 queues,
             ),
             4 => {
                 self.write_common_config_dword(
                     offset,
-                    u32::from_le_bytes(data.try_into().expect("data should be 4 bytes")),
+                    u32::from_le_bytes(*data.as_array().expect("data should be 4 bytes")),
                     queues,
                 );
             }
             8 => self.write_common_config_qword(
                 offset,
-                u64::from_le_bytes(data.try_into().expect("data should be 8 bytes")),
+                u64::from_le_bytes(*data.as_array().expect("data should be 8 bytes")),
                 queues,
             ),
             _ => debug!("invalid data length for virtio write: len {}", data.len()),

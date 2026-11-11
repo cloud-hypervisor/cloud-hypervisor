@@ -978,10 +978,10 @@ mod tests {
         let mut header = [0u8; 12];
         stream.read_exact(&mut header).unwrap();
         assert_eq!(
-            u32::from_ne_bytes(header[0..4].try_into().unwrap()),
+            u32::from_ne_bytes(*header[0..4].as_array().unwrap()),
             u32::from(expected_request)
         );
-        let size = u32::from_ne_bytes(header[8..12].try_into().unwrap()) as usize;
+        let size = u32::from_ne_bytes(*header[8..12].as_array().unwrap()) as usize;
         let mut payload = vec![0; size];
         stream.read_exact(&mut payload).unwrap();
         payload
