@@ -15,7 +15,6 @@ is not limited to:
 
 - The CPU, including (if present) its microcode and privileged firmware.
 - The Linux kernel.
-- Any hypervisor or emulation environment the kernel is running on.
 - Any hypervisor or emulator Linux is running on. This includes both
   using KVM under nested virtualization and using MSHV.
 
