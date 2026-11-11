@@ -321,7 +321,6 @@ name = "block"
 version = "0.1.0"
 dependencies = [
  "bitflags 2.13.2",
- "cfg-if",
  "crc-any",
  "flate2",
  "io-uring",
@@ -949,7 +948,6 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "bitfield-struct",
- "cfg-if",
  "concat-idents",
  "env_logger",
  "iced-x86",
@@ -2605,7 +2603,6 @@ dependencies = [
  "bitflags 2.13.2",
  "block",
  "blocking",
- "cfg-if",
  "devices",
  "epoll",
  "event_monitor",
