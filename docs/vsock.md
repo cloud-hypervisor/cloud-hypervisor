@@ -10,12 +10,14 @@ CID is a 32-bit context identifier describing the source or destination. In comb
 
 The table below depicts the well known CID values:
 
-| CID | Description |
-|-----|-------------|
-| -1  | Random CID | 
-|  0  | Hypervisor | 
-|  1  | Loopback | 
-|  2  | Host | 
+| CID | Description                |
+|-----|----------------------------|
+| -1  | Any CID (`VMADDR_CID_ANY`) |
+|  0  | Hypervisor                 |
+|  1  | Loopback                   |
+|  2  | Host                       |
+
+These values cannot be used as the guest CID in `--vsock cid=<cid>`.
 
 ## Prerequisites
 
