@@ -137,7 +137,8 @@ In cases where the host processor supports address space > 39 bits, it might be 
 
 To daemonize the Cloud Hypervisor process, `nohup` can be used. Some STDIO redirections might need to be done. In a simple case it is sufficient to just redirect all the output to `/dev/null`.
 
-Be aware, currently, running the Windows 11 VM on Cloud Hypervisor with TPM 2.0 was not proven successful: `thread 'vcpu0' panicked`. Running the VM without TPM is a valid option though. Therefore the command as shown above is also valid for a Windows 11 VM.
+To give the guest a TPM 2.0 device, add the `--tpm` option as described in the
+[TPM documentation](tpm.md).
 
 ## Image Configuration
 
