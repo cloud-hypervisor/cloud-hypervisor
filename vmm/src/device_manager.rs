@@ -2137,6 +2137,11 @@ impl DeviceManager {
             .push(Arc::clone(&ged_device) as Arc<dyn BusDeviceSync>);
 
         let pm_timer_device = Arc::new(Mutex::new(devices::AcpiPmTimerDevice::new()));
+        let id = acpi::ACPI_PM_TIMER_SNAPSHOT_ID.to_string();
+        self.device_tree
+            .lock()
+            .unwrap()
+            .insert(id.clone(), device_node!(id, pm_timer_device));
 
         self.bus_devices
             .push(Arc::clone(&pm_timer_device) as Arc<dyn BusDeviceSync>);
