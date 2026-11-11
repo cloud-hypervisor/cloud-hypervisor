@@ -29,7 +29,8 @@ The `size` value must be 2^n.
 
 ## Example
 
-Create a file with a size bigger than passed to `cloud-hypervisor`:
+Create a file that is at least as large as the `size` passed to
+`cloud-hypervisor`:
 
 ```
 truncate -s 1M /tmp/ivshmem.data
