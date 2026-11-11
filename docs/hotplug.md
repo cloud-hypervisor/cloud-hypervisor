@@ -155,6 +155,17 @@ Swap:          32Mi          0B        32Mi
 
 The same API can also be used to reduce the desired RAM for a VM. It is important to note that reducing RAM size might only partially work, as the guest might be using some of it.
 
+If the guest memory is made of memory zones (`--memory size=0` with
+`--memory-zone`), the `resize` API is rejected. Instead, each zone with a
+`hotplug_size` is resized on its own with the `resize-zone` API. It takes the
+new total size of the zone, which must be between the zone's `size` and its
+`size` plus `hotplug_size`. See
+[the memory documentation](memory.md#advanced-parameters).
+
+```shell
+./ch-remote --api-socket=/tmp/ch-socket resize-zone --id mem0 --size 3G
+```
+
 ## PCI Device Hot Plug
 
 Extra PCI devices can be added and removed from a running `cloud-hypervisor` instance. This is controlled by making a HTTP API request to the VMM to ask for the additional device to be added, or for the existing device to be removed.
