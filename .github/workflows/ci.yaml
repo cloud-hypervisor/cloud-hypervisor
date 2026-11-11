@@ -376,6 +376,11 @@ jobs:
           target: ${{ matrix.target }}
           override: true
           components: clippy
+      # One cache for the whole job, so the Clippy steps below disable theirs.
+      - name: Rust cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: ${{ matrix.target }}
       - name: Bisectability Check (default features)
         if: ${{ github.event_name == 'pull_request' && matrix.target == 'x86_64-unknown-linux-gnu' }}
         run: |
@@ -387,6 +392,7 @@ jobs:
         uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
+          use-rust-cache: false
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --no-default-features --tests --examples --features "kvm" -- -D warnings
@@ -394,6 +400,7 @@ jobs:
         uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
+          use-rust-cache: false
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --no-default-features --tests --examples --features "mshv" -- -D warnings
@@ -401,6 +408,7 @@ jobs:
         uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
+          use-rust-cache: false
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --no-default-features --tests --examples --features "mshv,kvm" -- -D warnings
@@ -408,6 +416,7 @@ jobs:
         uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
+          use-rust-cache: false
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --tests --examples -- -D warnings
@@ -415,6 +424,7 @@ jobs:
         uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
+          use-rust-cache: false
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --tests --examples --features "dbus_api" -- -D warnings
@@ -422,6 +432,7 @@ jobs:
         uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
+          use-rust-cache: false
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --tests --examples --features "guest_debug" -- -D warnings
@@ -429,6 +440,7 @@ jobs:
         uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
+          use-rust-cache: false
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --tests --examples --features "pvmemcontrol" -- -D warnings
@@ -436,6 +448,7 @@ jobs:
         uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
+          use-rust-cache: false
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --tests --examples --features "tracing" -- -D warnings
@@ -443,6 +456,7 @@ jobs:
         uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
+          use-rust-cache: false
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --target=${{ matrix.target }} --locked --all --all-targets --tests --examples --features "fw_cfg" -- -D warnings
@@ -450,6 +464,7 @@ jobs:
         uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
+          use-rust-cache: false
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --tests --examples --features "ivshmem" -- -D warnings
@@ -458,6 +473,7 @@ jobs:
         uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
+          use-rust-cache: false
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --no-default-features --tests --examples --features "kvm,sev_snp" -- -D warnings
@@ -466,6 +482,7 @@ jobs:
         uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
+          use-rust-cache: false
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --no-default-features --tests --examples --features "mshv,sev_snp" -- -D warnings
@@ -474,6 +491,7 @@ jobs:
         uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
+          use-rust-cache: false
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --no-default-features --tests --examples --features "mshv,igvm,sev_snp" -- -D warnings
@@ -482,6 +500,7 @@ jobs:
         uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
+          use-rust-cache: false
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --no-default-features --tests --examples --features "kvm,igvm" -- -D warnings
@@ -490,6 +509,7 @@ jobs:
         uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
+          use-rust-cache: false
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --no-default-features --tests --examples --features "mshv,igvm" -- -D warnings
@@ -498,6 +518,7 @@ jobs:
         uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
+          use-rust-cache: false
           cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
@@ -507,6 +528,7 @@ jobs:
         uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
+          use-rust-cache: false
           cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
