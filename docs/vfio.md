@@ -204,8 +204,6 @@ the same protocol and is covered in
 
 ### Requirements
 
-- **Kernel.** Linux 5.18 or newer for the migration v2 ioctls. 6.0 or newer is
-  recommended for the broadest set of state transitions.
 - **Driver.** The device must be bound to a VFIO variant driver that implements
   migration v2, for example `mlx5_vfio_pci` on Mellanox NICs. The generic
   `vfio_pci` driver does not implement migration and is treated as non
