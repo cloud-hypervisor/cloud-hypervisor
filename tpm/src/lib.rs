@@ -83,7 +83,7 @@ impl Ptm for PtmResult {
             )));
         }
 
-        *self = u32::from_be_bytes(buf[..].try_into().unwrap());
+        *self = u32::from_be_bytes(*buf[..].as_array().unwrap());
         Ok(())
     }
 
@@ -113,7 +113,7 @@ impl Ptm for PtmCap {
                 "Response for GetCapability cmd is of incorrect length. Got {len} expected {expected_len}."
             )));
         }
-        *self = u64::from_be_bytes(buf[..].try_into().unwrap());
+        *self = u64::from_be_bytes(*buf[..].as_array().unwrap());
         Ok(())
     }
 
@@ -166,7 +166,7 @@ impl Ptm for PtmEst {
                 "Response for GetTpmEstablished cmd is of incorrect length. Got {len} expected {expected_len}."
             )));
         }
-        self.set_result_code(u32::from_be_bytes(buf[..4].try_into().unwrap()));
+        self.set_result_code(u32::from_be_bytes(*buf[..4].as_array().unwrap()));
         self.resp.bit = buf[4];
         Ok(())
     }
@@ -220,7 +220,7 @@ impl Ptm for PtmInit {
                 "Response for Init cmd is of incorrect length. Got {len} expected {expected_len}."
             )));
         }
-        self.set_result_code(u32::from_be_bytes(buf[..].try_into().unwrap()));
+        self.set_result_code(u32::from_be_bytes(*buf[..].as_array().unwrap()));
         Ok(())
     }
 
@@ -298,16 +298,16 @@ impl Ptm for PtmSetBufferSize {
                 "Response for CmdSetBufferSize cmd is of incorrect length. Got {len} expected {expected_len}."
             )));
         }
-        self.set_result_code(u32::from_be_bytes(buf[0..4].try_into().unwrap()));
+        self.set_result_code(u32::from_be_bytes(*buf[0..4].as_array().unwrap()));
 
         let bufsize = &buf[4..8];
-        self.resp.bufsize = u32::from_be_bytes(bufsize.try_into().unwrap());
+        self.resp.bufsize = u32::from_be_bytes(*bufsize.as_array().unwrap());
 
         let minsize = &buf[8..12];
-        self.resp.minsize = u32::from_be_bytes(minsize.try_into().unwrap());
+        self.resp.minsize = u32::from_be_bytes(*minsize.as_array().unwrap());
 
         let maxsize = &buf[12..16];
-        self.resp.maxsize = u32::from_be_bytes(maxsize.try_into().unwrap());
+        self.resp.maxsize = u32::from_be_bytes(*maxsize.as_array().unwrap());
 
         Ok(())
     }
