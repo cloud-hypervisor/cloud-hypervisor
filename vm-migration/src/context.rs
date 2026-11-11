@@ -458,6 +458,8 @@ mod tests {
 
     /// Tests for [`CompletedMigrationContext`] and [`OngoingMigrationContext`].
     mod migration_ctx_tests {
+        use std::assert_matches;
+
         use super::*;
 
         #[test]
@@ -471,13 +473,13 @@ mod tests {
             ctx.set_vm_paused(downtime_begin, memory_ctx)
                 .expect("migration context should transition to VmPaused after memory migration");
 
-            assert!(matches!(
+            assert_matches!(
                 ctx,
                 OngoingMigrationContext::VmPaused {
                     downtime_begin: recorded_downtime_begin,
                     ..
                 } if recorded_downtime_begin == downtime_begin
-            ));
+            );
         }
 
         #[test]
@@ -525,6 +527,7 @@ mod tests {
 
     /// Tests for [`MemoryMigrationContext`].
     mod memory_migration_ctx_tests {
+        use std::assert_matches;
         use std::time::{Duration, Instant};
 
         use super::*;
@@ -634,7 +637,7 @@ mod tests {
             // Check finalize() sets migration duration
             assert_eq!(ctx.migration_duration, None);
             ctx.finalize();
-            assert!(matches!(ctx.migration_duration, Some(d) if d >= Scenario::FIXPOINT_PAST));
+            assert_matches!(ctx.migration_duration, Some(d) if d >= Scenario::FIXPOINT_PAST);
         }
 
         #[test]
@@ -657,7 +660,7 @@ mod tests {
             // Check finalize() sets migration duration
             assert_eq!(ctx.migration_duration, None);
             ctx.finalize();
-            assert!(matches!(ctx.migration_duration, Some(d) if d >= Scenario::FIXPOINT_PAST));
+            assert_matches!(ctx.migration_duration, Some(d) if d >= Scenario::FIXPOINT_PAST);
         }
 
         #[test]
