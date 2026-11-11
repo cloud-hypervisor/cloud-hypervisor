@@ -40,9 +40,7 @@ struct SocketLock {
 
 impl SocketLock {
     fn acquire(socket_path: &Path) -> Result<Self, LockedUnixListenerError> {
-        let mut path = socket_path.to_path_buf().into_os_string();
-        path.push(".lock");
-        let path = PathBuf::from(path);
+        let path = socket_path.with_added_extension("lock");
         // Retry, as the previous owner may unlink the file between open() and lock.
         loop {
             let file = OpenOptions::new()
@@ -213,9 +211,7 @@ mod tests {
     fn test_drop_unlinks_the_socket_and_lock() {
         let tmp_dir = TempDir::new_with_prefix("/tmp/locked-socket").unwrap();
         let path = tmp_dir.as_path().join("test.sock");
-        let mut lock_path = path.clone().into_os_string();
-        lock_path.push(".lock");
-        let lock_path = PathBuf::from(lock_path);
+        let lock_path = path.with_added_extension("lock");
 
         {
             let _socket = LockedUnixListener::bind(&path).unwrap();
@@ -230,9 +226,7 @@ mod tests {
     fn test_failed_bind_unlinks_the_lock() {
         let tmp_dir = TempDir::new_with_prefix("/tmp/locked-socket").unwrap();
         let path = tmp_dir.as_path().join("test.sock");
-        let mut lock_path = path.clone().into_os_string();
-        lock_path.push(".lock");
-        let lock_path = PathBuf::from(lock_path);
+        let lock_path = path.with_added_extension("lock");
         fs::write(&path, "not a socket").unwrap();
 
         LockedUnixListener::bind(&path).unwrap_err();
