@@ -455,7 +455,7 @@ pub enum ValidationError {
     #[error("Invalid host data format")]
     InvalidHostData,
     #[cfg(feature = "sev_snp")]
-    #[error("SEV-SNP requires an IGVM payload (--payload igvm=<path>)")]
+    #[error("SEV-SNP requires an IGVM payload (--igvm <path>)")]
     SevSnpRequiresIgvm,
     #[cfg(all(feature = "kvm", feature = "sev_snp"))]
     #[error("SEV-SNP on KVM requires ACPI tables supplied through fw_cfg")]
