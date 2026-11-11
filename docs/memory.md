@@ -54,6 +54,8 @@ KSM daemon.
 This option can be used when trying to reach a higher density of VMs running
 on a single host, as it will reduce the amount of memory consumed by each VM.
 
+This option cannot be combined with `shared=on`.
+
 By default this option is turned off.
 
 _Example_
@@ -133,6 +135,7 @@ _Example_
 Specifies if the memory must be created and `mmap(2)` with `MAP_HUGETLB` and size
 flags. This performs a memory mapping relying on the specified huge page size.
 If no huge page size is supplied the system's default huge page size is used.
+Setting `hugepage_size` without `hugepages=on` is rejected.
 
 By using hugepages, one can improve the overall performance of the VM, assuming
 the guest will allocate hugepages as well. Another interesting use case is VFIO
@@ -384,6 +387,7 @@ pick a specific NUMA node from which the memory must be allocated. After the
 memory zone is `mmap(2)`, the NUMA policy for this memory mapping will be
 applied through `mbind(2)`, relying on the provided node identifier. If the
 node does not exist on the host, the call to `mbind(2)` will fail.
+This option cannot be combined with a `file` mapped with `shared=on`.
 
 This option is useful when trying to back a VM memory with a specific type of
 memory from the host. Assuming a host has two types of memory, with one slower
