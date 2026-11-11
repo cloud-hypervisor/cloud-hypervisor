@@ -87,22 +87,22 @@ impl VhdFooter {
         aligned.read_exact_at(&mut sector, footer_offset)?;
 
         Ok(VhdFooter {
-            cookie: u64::from_be_bytes(sector[0..8].try_into().unwrap()),
-            features: u32::from_be_bytes(sector[8..12].try_into().unwrap()),
-            file_format_version: u32::from_be_bytes(sector[12..16].try_into().unwrap()),
-            data_offset: u64::from_be_bytes(sector[16..24].try_into().unwrap()),
-            time_stamp: u32::from_be_bytes(sector[24..28].try_into().unwrap()),
-            creator_application: u32::from_be_bytes(sector[28..32].try_into().unwrap()),
-            creator_version: u32::from_be_bytes(sector[32..36].try_into().unwrap()),
-            creator_host_os: u32::from_be_bytes(sector[36..40].try_into().unwrap()),
-            original_size: u64::from_be_bytes(sector[40..48].try_into().unwrap()),
-            current_size: u64::from_be_bytes(sector[48..56].try_into().unwrap()),
-            disk_geometry: u32::from_be_bytes(sector[56..60].try_into().unwrap()),
-            disk_type: u32::from_be_bytes(sector[60..64].try_into().unwrap()),
-            checksum: u32::from_be_bytes(sector[64..68].try_into().unwrap()),
+            cookie: u64::from_be_bytes(*sector[0..8].as_array().unwrap()),
+            features: u32::from_be_bytes(*sector[8..12].as_array().unwrap()),
+            file_format_version: u32::from_be_bytes(*sector[12..16].as_array().unwrap()),
+            data_offset: u64::from_be_bytes(*sector[16..24].as_array().unwrap()),
+            time_stamp: u32::from_be_bytes(*sector[24..28].as_array().unwrap()),
+            creator_application: u32::from_be_bytes(*sector[28..32].as_array().unwrap()),
+            creator_version: u32::from_be_bytes(*sector[32..36].as_array().unwrap()),
+            creator_host_os: u32::from_be_bytes(*sector[36..40].as_array().unwrap()),
+            original_size: u64::from_be_bytes(*sector[40..48].as_array().unwrap()),
+            current_size: u64::from_be_bytes(*sector[48..56].as_array().unwrap()),
+            disk_geometry: u32::from_be_bytes(*sector[56..60].as_array().unwrap()),
+            disk_type: u32::from_be_bytes(*sector[60..64].as_array().unwrap()),
+            checksum: u32::from_be_bytes(*sector[64..68].as_array().unwrap()),
             computed_checksum: footer_checksum(&sector),
-            unique_id: u128::from_be_bytes(sector[68..84].try_into().unwrap()),
-            saved_state: u8::from_be_bytes(sector[84..85].try_into().unwrap()),
+            unique_id: u128::from_be_bytes(*sector[68..84].as_array().unwrap()),
+            saved_state: u8::from_be_bytes(*sector[84..85].as_array().unwrap()),
         })
     }
 
@@ -322,7 +322,7 @@ mod tests {
     #[test]
     fn test_is_fixed_vhd_rejects_a_bad_checksum() {
         let mut footer = checksummed_footer(&valid_fixed_vhd_footer());
-        let stored = u32::from_be_bytes(footer[64..68].try_into().unwrap());
+        let stored = u32::from_be_bytes(*footer[64..68].as_array().unwrap());
         footer[64..68].copy_from_slice(&stored.wrapping_add(1).to_be_bytes());
 
         with_file(&footer, |mut file: File| {

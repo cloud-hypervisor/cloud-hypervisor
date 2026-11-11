@@ -133,7 +133,7 @@ impl DiskSpec {
 
             let presence = if metadata_entry.item_id == METADATA_FILE_PARAMETER {
                 let item = metadata_entry.read_item::<8>(f, metadata_region.file_offset)?;
-                disk_spec.block_size = u32::from_le_bytes(item[0..4].try_into().unwrap());
+                disk_spec.block_size = u32::from_le_bytes(*item[0..4].as_array().unwrap());
 
                 // MUST be at least 1 MiB and not greater than 256 MiB
                 if disk_spec.block_size < BLOCK_SIZE_MIN || disk_spec.block_size > BLOCK_SIZE_MAX {
@@ -145,7 +145,7 @@ impl DiskSpec {
                     return Err(VhdxMetadataError::InvalidBlockSize);
                 }
 
-                let bits = u32::from_le_bytes(item[4..8].try_into().unwrap());
+                let bits = u32::from_le_bytes(*item[4..8].as_array().unwrap());
                 disk_spec.has_parent = bits & BLOCK_HAS_PARENT != 0;
 
                 METADATA_FILE_PARAMETER_PRESENT
