@@ -611,8 +611,8 @@ impl Aml for PciSegment {
 
 #[cfg(test)]
 mod tests {
-    use std::io;
     use std::result::Result;
+    use std::{assert_matches, io};
 
     use vm_memory::GuestAddress;
 
@@ -723,20 +723,20 @@ mod tests {
         let overflow_device_id = 0xff_u8;
         let segment = setup();
         let bdf_res = segment.reserve_device_id(already_taken_device_id);
-        assert!(matches!(
+        assert_matches!(
             bdf_res,
             Err(DeviceManagerError::ReservePciDeviceId(e)) if matches!(
                 e,
                 pci::PciRootError::AlreadyInUsePciDeviceSlot(0x0)
             )
-        ));
+        );
         let bdf_res = segment.allocate_device_id(Some(overflow_device_id));
-        assert!(matches!(
+        assert_matches!(
             bdf_res,
             Err(DeviceManagerError::AllocatePciDeviceId(e)) if matches!(
                 e,
                 pci::PciRootError::InvalidPciDeviceSlot(0xff)
             )
-        ));
+        );
     }
 }

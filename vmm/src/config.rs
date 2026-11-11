@@ -4437,6 +4437,7 @@ pub(crate) fn validate_inherited_fds<'a>(configs: impl IntoIterator<Item = &'a s
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::assert_matches;
     use std::fs::File;
     use std::os::unix::io::AsRawFd;
     #[cfg(target_arch = "x86_64")]
@@ -4498,10 +4499,10 @@ pub(crate) mod tests {
             vec!["net_fds=[net0@[3,4]],vfio_fds=[vfio0@4]"],
             vec!["fd= [3,3]"],
         ] {
-            assert!(matches!(
+            assert_matches!(
                 validate_inherited_fds(input),
                 Err(Error::DuplicateInheritedFd(_))
-            ));
+            );
         }
         validate_inherited_fds(["fd=[3,4]", "fd=5", "iommufd_fd=6"]).unwrap();
     }
@@ -4521,10 +4522,10 @@ pub(crate) mod tests {
                 "external_fds=[net(net1)@[3]]",
             ],
         ] {
-            assert!(matches!(
+            assert_matches!(
                 validate_inherited_fds(input),
                 Err(Error::DuplicateInheritedFd(3))
-            ));
+            );
         }
         validate_inherited_fds([
             "fd=3",
@@ -6104,11 +6105,11 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             "virtio_id=26,socket=/tmp/sock,queue_sizes=[1024]",
             "device_type=26,virtio_id=26,socket=/tmp/sock,queue_sizes=[1024]",
         ] {
-            assert!(matches!(
+            assert_matches!(
                 GenericVhostUserConfig::parse(config),
                 Err(Error::ParseGenericVhostUser(OptionParserError::UnknownOption(key)))
                     if key == "virtio_id"
-            ));
+            );
         }
         Ok(())
     }
@@ -6238,12 +6239,12 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             let serial = SerialConfig::parse(options)?;
             let console = ConsoleConfig::parse(options)?;
             assert_eq!(serial.output, console.output);
-            assert!(matches!(
+            assert_matches!(
                 serial.output,
                 ConsoleOutput::Tcp {
                     tcp: TcpConsoleConfig { server: true, .. }
                 }
-            ));
+            );
             serial.validate().unwrap();
             console.output.validate().unwrap();
         }
@@ -6251,18 +6252,18 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ConsoleConfig::parse(options).unwrap_err();
             SerialConfig::parse(options).unwrap_err();
         }
-        assert!(matches!(
+        assert_matches!(
             SerialConfig::parse("tcp=127.0.0.1:4444,server=off"),
             Err(Error::Validation(
                 ValidationError::ConsoleTcpClientUnsupported
             ))
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             ConsoleConfig::parse("tcp=127.0.0.1:4444,server=off"),
             Err(Error::Validation(
                 ValidationError::ConsoleTcpClientUnsupported
             ))
-        ));
+        );
         Ok(())
     }
 
@@ -6302,30 +6303,30 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(parse("console_tcp=127.0.0.1:4444", "serial").unwrap(), None);
         // Two outputs for different consoles are fine, two for one are not.
         parse("serial_file=/tmp/a,console_file=/tmp/b", "serial").unwrap();
-        assert!(matches!(
+        assert_matches!(
             parse("serial_file=/tmp/a,serial_tcp=127.0.0.1:4444", "serial"),
             Err(Error::Validation(
                 ValidationError::ConsoleOutputUpdateAmbiguous(_)
             ))
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             parse("serial_tcp=localhost:4444", "serial"),
             Err(Error::ResolveConsoleTcpAddress { .. })
-        ));
+        );
 
         // An option without a value must be rejected.
-        assert!(matches!(
+        assert_matches!(
             parse("serial_file=", "serial"),
             Err(Error::Validation(ValidationError::ConsoleFileMissing))
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             parse("console_socket=", "console"),
             Err(Error::Validation(ValidationError::ConsoleSocketPathMissing))
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             parse("serial_tcp=", "serial"),
             Err(Error::Validation(ValidationError::ConsoleTcpAddressMissing))
-        ));
+        );
     }
 
     #[test]
@@ -6754,12 +6755,12 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
         for key in ["serial_number", "uuid"] {
             for prefix in ["", "system_serial_number=serial,system_uuid=uuid,"] {
-                assert!(matches!(
+                assert_matches!(
                     // SAFETY: This test input contains no inherited descriptors.
                     unsafe { PlatformConfig::parse(&format!("{prefix}{key}=legacy")) },
                     Err(Error::ParsePlatform(OptionParserError::UnknownOption(option)))
                         if option == key
-                ));
+                );
             }
         }
 
@@ -6991,7 +6992,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 ..Default::default()
             }
         );
-        assert!(matches!(
+        assert_matches!(
             // SAFETY: This input contains no inherited descriptors.
             unsafe {
                 RestoreConfig::parse("source_url=/path/to/snapshot,serial_file=/a,serial_socket=/b")
@@ -6999,12 +7000,12 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             Err(Error::Validation(
                 ValidationError::ConsoleOutputUpdateAmbiguous(_)
             ))
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             // SAFETY: This input contains no inherited descriptors.
             unsafe { RestoreConfig::parse("source_url=/path/to/snapshot,console_tcp=localhost:1") },
             Err(Error::ResolveConsoleTcpAddress { .. })
-        ));
+        );
         let files: [File; 6] = array::from_fn(|_| test_fd());
         let [fd0, fd1, fd2, fd3, fd4, fd5] = files.map(IntoRawFd::into_raw_fd);
         // SAFETY: The files transferred exclusive ownership to us.
@@ -8853,10 +8854,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             iommufd_fd: Default::default(),
             ..platform_fixture()
         });
-        assert!(matches!(
+        assert_matches!(
             fd_without_iommufd_fd.validate(),
-            Err(ValidationError::VfioFdRequiresIommufdFd),
-        ));
+            Err(ValidationError::VfioFdRequiresIommufdFd)
+        );
 
         // iommufd_fd without iommufd=on is rejected at PlatformConfig::validate.
         let mut iommufd_fd_without_iommufd = valid_config.clone();
@@ -8865,10 +8866,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             iommufd_fd: fd.clone(),
             ..platform_fixture()
         });
-        assert!(matches!(
+        assert_matches!(
             iommufd_fd_without_iommufd.validate(),
-            Err(ValidationError::IommufdFdRequiresIommufd),
-        ));
+            Err(ValidationError::IommufdFdRequiresIommufd)
+        );
 
         // Exactly one of path and fd must be set.
         let mut both_path_and_fd = fd_valid_config.clone();
@@ -8877,10 +8878,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             fd: fd.clone(),
             ..device_fixture()
         }]);
-        assert!(matches!(
+        assert_matches!(
             both_path_and_fd.validate(),
-            Err(ValidationError::VfioDeviceBothPathAndFd),
-        ));
+            Err(ValidationError::VfioDeviceBothPathAndFd)
+        );
 
         let mut neither_path_nor_fd = fd_valid_config.clone();
         neither_path_nor_fd.devices = Some(vec![DeviceConfig {
@@ -8888,10 +8889,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             fd: Default::default(),
             ..device_fixture()
         }]);
-        assert!(matches!(
+        assert_matches!(
             neither_path_nor_fd.validate(),
-            Err(ValidationError::VfioDeviceNeitherPathNorFd),
-        ));
+            Err(ValidationError::VfioDeviceNeitherPathNorFd)
+        );
         #[cfg(all(feature = "sev_snp", any(not(feature = "kvm"), feature = "fw_cfg")))]
         {
             let mut sev_snp_config = valid_config.clone();

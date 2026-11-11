@@ -1,6 +1,7 @@
 // Copyright 2021, 2023 Alyssa Ross <hi@alyssa.is>
 // SPDX-License-Identifier: Apache-2.0
 
+use std::assert_matches;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::fs::{File, read_dir};
@@ -195,8 +196,9 @@ fn sigwinch_listener_main(seccomp_filter: BpfProgramRef, tx: File, tty: File) ->
         // SAFETY: FFI call with valid arguments
         while unsafe { poll(&mut pollfd, 1, -1) } == -1 {
             let e = io::Error::last_os_error();
-            assert!(
-                matches!(e.kind(), ErrorKind::Interrupted | ErrorKind::WouldBlock),
+            assert_matches!(
+                e.kind(),
+                ErrorKind::Interrupted | ErrorKind::WouldBlock,
                 "poll: {e}"
             );
         }

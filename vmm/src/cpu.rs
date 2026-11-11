@@ -3562,6 +3562,7 @@ impl BusDevice for AcpiCpuHotplugController {
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::convert::Infallible;
 
     use anyhow::anyhow;
@@ -3759,7 +3760,7 @@ mod tests {
             10,
             7,
         );
-        assert!(matches!(result, Err(MigratableError::Snapshot(e)) if e.to_string() == "29"));
+        assert_matches!(result, Err(MigratableError::Snapshot(e)) if e.to_string() == "29");
         assert!(
             parallel_map::<_, _, Infallible>(&[], |&i: &u32| Ok(i), 10, 7)
                 .unwrap()

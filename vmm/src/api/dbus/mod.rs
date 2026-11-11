@@ -438,6 +438,8 @@ pub fn start_dbus_thread(
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
 
     fn disconnected_api() -> DBusApi {
@@ -456,8 +458,9 @@ mod tests {
             r#"{"devices":[{"id":"vfio0","fd":42}]}"#,
         ] {
             let error = future::block_on(api.vm_create(config.to_owned())).unwrap_err();
-            assert!(
-                matches!(&error, fdo::Error::Failed(message) if message.contains("Missing file descriptors")),
+            assert_matches!(
+                &error,
+                fdo::Error::Failed(message) if message.contains("Missing file descriptors"),
                 "{error}"
             );
         }
@@ -472,8 +475,9 @@ mod tests {
                 .unwrap_err(),
         ];
         for error in errors {
-            assert!(
-                matches!(&error, fdo::Error::Failed(message) if message.contains("Missing file descriptors")),
+            assert_matches!(
+                &error,
+                fdo::Error::Failed(message) if message.contains("Missing file descriptors"),
                 "{error}"
             );
         }
@@ -497,8 +501,9 @@ mod tests {
                 .unwrap_err(),
             ];
             for error in errors {
-                assert!(
-                    matches!(&error, fdo::Error::Failed(message) if message.contains("Less file descriptors provided than expected")),
+                assert_matches!(
+                    &error,
+                    fdo::Error::Failed(message) if message.contains("Less file descriptors provided than expected"),
                     "{error}"
                 );
             }

@@ -173,7 +173,7 @@ mod tests {
     use std::io::Write;
     use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd};
     use std::os::unix::fs::FileExt;
-    use std::{fs, io};
+    use std::{assert_matches, fs, io};
 
     use vm_allocator::page_size::get_page_size;
 
@@ -446,11 +446,9 @@ mod tests {
                 dst.read_exact_at(&mut got, 0).unwrap();
                 assert_eq!(got, [0xab; 4096]);
             }
-            Err(e) => assert!(
-                matches!(
-                    e.raw_os_error(),
-                    Some(libc::EOPNOTSUPP | libc::EXDEV | libc::EINVAL)
-                ),
+            Err(e) => assert_matches!(
+                e.raw_os_error(),
+                Some(libc::EOPNOTSUPP | libc::EXDEV | libc::EINVAL),
                 "unexpected clone error: {e}"
             ),
         }
