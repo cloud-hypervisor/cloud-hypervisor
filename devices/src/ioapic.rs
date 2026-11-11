@@ -166,7 +166,7 @@ impl BusDevice for Ioapic {
     }
 
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
-        let Ok(data) = <[u8; size_of::<u32>()]>::try_from(data) else {
+        let Some(&data) = data.as_array::<{ size_of::<u32>() }>() else {
             debug!("Invalid write size on IOAPIC: {}", data.len());
             return None;
         };

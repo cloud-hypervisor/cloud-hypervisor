@@ -1043,7 +1043,7 @@ mod tests {
             dev.read_transport(0, &mut data);
 
             assert_eq!(
-                u32::from_ne_bytes(data[8..12].try_into().unwrap()),
+                u32::from_ne_bytes(*data[8..12].as_array().unwrap()),
                 dev.transport.command as u32
             );
             assert!(data[..8].iter().all(|&b| b == 0), "payload: {data:02x?}");

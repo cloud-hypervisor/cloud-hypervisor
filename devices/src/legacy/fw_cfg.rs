@@ -907,8 +907,8 @@ mod tests {
                 .0
                 .iter()
                 .any(|entry| {
-                    u64::from_le_bytes(entry[0..8].try_into().unwrap()) == STAGE0_START_ADDRESS.0
-                        && u64::from_le_bytes(entry[8..16].try_into().unwrap())
+                    u64::from_le_bytes(*entry[0..8].as_array().unwrap()) == STAGE0_START_ADDRESS.0
+                        && u64::from_le_bytes(*entry[8..16].as_array().unwrap())
                             == STAGE0_SIZE as u64
                 });
             assert_eq!(has_stage0, sev_snp);
@@ -946,9 +946,9 @@ mod tests {
                 .iter()
                 .map(|entry| {
                     (
-                        u64::from_le_bytes(entry[0..8].try_into().unwrap()),
-                        u64::from_le_bytes(entry[8..16].try_into().unwrap()),
-                        u32::from_le_bytes(entry[16..20].try_into().unwrap()),
+                        u64::from_le_bytes(*entry[0..8].as_array().unwrap()),
+                        u64::from_le_bytes(*entry[8..16].as_array().unwrap()),
+                        u32::from_le_bytes(*entry[16..20].as_array().unwrap()),
                     )
                 })
                 .collect();
@@ -1112,9 +1112,9 @@ mod tests {
         let address_bytes = access_address.0.to_be_bytes();
         #[cfg(target_arch = "x86_64")]
         // Note: address is big endian.
-        let dma_hi: [u8; 4] = address_bytes[0..4].try_into().unwrap();
+        let dma_hi: [u8; 4] = *address_bytes[0..4].as_array().unwrap();
         #[cfg(target_arch = "x86_64")]
-        let dma_lo: [u8; 4] = address_bytes[4..8].try_into().unwrap();
+        let dma_lo: [u8; 4] = *address_bytes[4..8].as_array().unwrap();
 
         // writing the FwCfgDmaAccess to mem (this would just be self.dma_access.as_ref() in guest)
         let _ = mem.memory().write(access.as_mut_bytes(), access_address);
