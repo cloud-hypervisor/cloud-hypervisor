@@ -4,7 +4,8 @@ Cloud Hypervisor provides a [performance metrics](https://github.com/cloud-hyper
 binary for users to generate metrics data from their own
 environment. This document describes how to generate metrics data
 quickly by using Cloud Hypervisor's development script,
-e.g. `dev_cli.sh`. The only prerequisite is [Docker installation](https://docs.docker.com/engine/install/).
+e.g. `dev_cli.sh`. See [testing.md](testing.md#prerequisites) for the
+prerequisites.
 Please note that upon its first invocation, this script will pull a
 fairly large container image.
 
@@ -109,7 +110,8 @@ Here is a sample output:
       "mean": 105.9461,
       "std_dev": 7.140993312558129,
       "max": 120.01499999999999,
-      "min": 92.37600000000002
+      "min": 92.37600000000002,
+      "status": "PASSED"
     }
   ]
 }
