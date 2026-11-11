@@ -247,6 +247,8 @@ impl DeviceInfoForFdt for MmioDeviceInfo {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::{CpuProfileConfig, ParseCpuProfileError};
 
     #[test]
@@ -278,16 +280,16 @@ mod tests {
             "internal:intel-skylake",
             "unknown:profile",
         ] {
-            assert!(matches!(
+            assert_matches!(
                 invalid.parse::<CpuProfileConfig>(),
                 Err(ParseCpuProfileError::InvalidValue(value)) if value == invalid
-            ));
+            );
         }
 
         #[cfg(not(target_arch = "x86_64"))]
-        assert!(matches!(
+        assert_matches!(
             "path:cpu_profile.json".parse::<CpuProfileConfig>(),
             Err(ParseCpuProfileError::UnsupportedArchitecture)
-        ));
+        );
     }
 }

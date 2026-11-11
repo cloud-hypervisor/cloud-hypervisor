@@ -1088,6 +1088,7 @@ fn print_node(node: FdtNode<'_, '_>, n_spaces: usize) {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::collections::BTreeMap;
 
     use vm_allocator::GuestMemory;
@@ -1105,10 +1106,10 @@ mod tests {
             .memory();
 
         write_fdt_to_memory(&vec![0; max], &*mem).unwrap();
-        assert!(matches!(
+        assert_matches!(
             write_fdt_to_memory(&vec![0; max + 1], &*mem),
             Err(Error::FdtTooLarge(n, m)) if n == max + 1 && m == layout::FDT_MAX_SIZE
-        ));
+        );
     }
 
     #[test]
