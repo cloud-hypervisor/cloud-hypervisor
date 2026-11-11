@@ -323,6 +323,41 @@ pub(crate) struct UserMemoryRegion {
 }
 
 impl UserMemoryRegion {
+    pub(crate) fn move_region(
+        &mut self,
+        vm: &dyn hypervisor::Vm,
+        new_address: u64,
+    ) -> io::Result<()> {
+        let len = self.mapping.len();
+        let host_addr = self.mapping.addr();
+        // Remove old region
+        // SAFETY: MmapRegion invariants guarantee that
+        // host_addr points to len bytes of
+        // valid memory that will only be unmapped with munmap().
+        unsafe { vm.remove_user_memory_region(self.slot, self.start, len, host_addr, false) }
+            .map_err(io::Error::other)?;
+
+        self.start = new_address;
+
+        // Insert new region
+        // SAFETY: MmapRegion invariants guarantee that
+        // host_addr points to len bytes of
+        // valid memory that will only be unmapped with munmap().
+        unsafe {
+            vm.create_user_memory_region(
+                self.slot,
+                self.start,
+                len,
+                host_addr,
+                false,
+                false,
+                hypervisor::MemoryVisibility::Shared,
+            )
+        }
+        .map_err(io::Error::other)?;
+        Ok(())
+    }
+
     #[cfg_attr(not(feature = "kvm"), expect(unused_variables))]
     fn map_for_p2p(
         &mut self,
@@ -2781,7 +2816,6 @@ impl PciDevice for VfioPciDevice {
 
                 for user_memory_region in region.user_memory_regions.iter_mut() {
                     let len = user_memory_region.mapping.len();
-                    let host_addr = user_memory_region.mapping.addr();
                     let offset = user_memory_region.start - old_base;
                     // Unmap the old MMIO region from the host IOMMU address space via VfioOps
                     // Only needed if p2p_dma is enabled.
@@ -2799,44 +2833,7 @@ iova 0x{:x}, size 0x{:x}: {}, ",
                             user_memory_region.start, len, e
                         );
                     }
-                    // Remove old region
-                    // SAFETY: MmapRegion invariants guarantee that
-                    // host_addr points to len bytes of
-                    // valid memory that will only be unmapped with munmap().
-                    unsafe {
-                        self.vm.remove_user_memory_region(
-                            user_memory_region.slot,
-                            user_memory_region.start,
-                            len,
-                            host_addr,
-                            false,
-                        )
-                    }
-                    .map_err(io::Error::other)?;
-
-                    // Update the user memory region with the correct start address.
-                    if new_base > old_base {
-                        user_memory_region.start += new_base - old_base;
-                    } else {
-                        user_memory_region.start -= old_base - new_base;
-                    }
-
-                    // Insert new region
-                    // SAFETY: MmapRegion invariants guarantee that
-                    // host_addr points to len bytes of
-                    // valid memory that will only be unmapped with munmap().
-                    unsafe {
-                        self.vm.create_user_memory_region(
-                            user_memory_region.slot,
-                            user_memory_region.start,
-                            len,
-                            host_addr,
-                            false,
-                            false,
-                            hypervisor::MemoryVisibility::Shared,
-                        )
-                    }
-                    .map_err(io::Error::other)?;
+                    user_memory_region.move_region(self.vm.as_ref(), new_base + offset)?;
 
                     // Map the moved MMIO region into the host IOMMU address space via VfioOps
                     // Only needed if p2p_dma is enabled.

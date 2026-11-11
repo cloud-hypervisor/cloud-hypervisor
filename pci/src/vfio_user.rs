@@ -444,40 +444,8 @@ impl PciDevice for VfioUserPciDevice {
                 mmio_region.start = GuestAddress(new_base);
 
                 for user_memory_region in mmio_region.user_memory_regions.iter_mut() {
-                    // Remove old region
-                    // SAFETY: only valid regions are in user_memory_regions
-                    unsafe {
-                        self.vm.remove_user_memory_region(
-                            user_memory_region.slot,
-                            user_memory_region.start,
-                            user_memory_region.mapping.len(),
-                            user_memory_region.mapping.addr(),
-                            false,
-                        )
-                    }
-                    .map_err(io::Error::other)?;
-
-                    // Update the user memory region with the correct start address.
-                    if new_base > old_base {
-                        user_memory_region.start += new_base - old_base;
-                    } else {
-                        user_memory_region.start -= old_base - new_base;
-                    }
-
-                    // Insert new region
-                    // SAFETY: only valid regions are in user_memory_regions
-                    unsafe {
-                        self.vm.create_user_memory_region(
-                            user_memory_region.slot,
-                            user_memory_region.start,
-                            user_memory_region.mapping.len(),
-                            user_memory_region.mapping.addr(),
-                            false,
-                            false,
-                            hypervisor::MemoryVisibility::Shared,
-                        )
-                    }
-                    .map_err(io::Error::other)?;
+                    let offset = user_memory_region.start - old_base;
+                    user_memory_region.move_region(self.vm.as_ref(), new_base + offset)?;
                 }
                 info!("Moved bar 0x{old_base:x} -> 0x{new_base:x}");
             }
