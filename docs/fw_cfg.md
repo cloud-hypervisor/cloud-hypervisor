@@ -15,7 +15,8 @@ The `fw_cfg` device serves as a generic information channel between the VMM and 
 
 ## Enabling `fw_cfg`
 
-The `fw_cfg` device is enabled via the `fw_cfg` feature flag when building Cloud Hypervisor:
+The `fw_cfg` device requires the `fw_cfg` feature at build time. It is not
+enabled by default or in the release binaries:
 
 ```bash
 cargo build --features fw_cfg
@@ -109,7 +110,7 @@ If `CONFIG_FW_CFG_SYSFS` is enabled in the guest kernel, items added to `fw_cfg`
 For example, an item added with `name=opt/org.example/my-data` will be available at:
 `/sys/firmware/qemu_fw_cfg/by_name/opt/org.example/my-data/raw`
 
-The `raw` file contains the binary content of the host file provided.
+The `raw` file contains the content of the host file or the inline string.
 
 The kernel, initramfs, and command line use fixed `fw_cfg` selectors without
 file names, so they do not appear under `by_name`. Other standard items have
