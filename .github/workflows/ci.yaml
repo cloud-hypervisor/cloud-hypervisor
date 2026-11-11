@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - 'dev/*/*'
+  # Only this run saves Rust caches. It runs after the rustc nightly release.
+  schedule:
+    - cron: '0 3 * * *'
 permissions:
   contents: read
   pull-requests: read
@@ -30,7 +33,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      # Scheduled runs only run the jobs that save Rust caches.
       - id: changes
+        if: github.event_name != 'schedule'
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           predicate-quantifier: some-with-excludes
@@ -290,7 +295,7 @@ jobs:
   fuzz-build:
     name: fuzz-build
     needs: [preflight]
-    if: needs.preflight.outputs.full == 'true' || needs.preflight.outputs.fuzz == 'true'
+    if: needs.preflight.outputs.full == 'true' || needs.preflight.outputs.fuzz == 'true' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -313,6 +318,7 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: fuzz
+          save-if: ${{ github.event_name == 'schedule' }}
       - name: Install Cargo fuzz
         run: cargo install cargo-fuzz
       - name: Check fuzz lockfile
@@ -349,7 +355,7 @@ jobs:
   quality:
     name: quality
     needs: [preflight]
-    if: needs.preflight.outputs.full == 'true'
+    if: needs.preflight.outputs.full == 'true' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Beta clippy is non-blocking; continue-on-error below keeps the
@@ -386,6 +392,7 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: ${{ matrix.target }}
+          save-if: ${{ github.event_name == 'schedule' }}
       - name: Bisectability Check (default features)
         if: ${{ github.event_name == 'pull_request' && matrix.target == 'x86_64-unknown-linux-gnu' }}
         run: |
@@ -543,7 +550,7 @@ jobs:
   build:
     name: build
     needs: [preflight]
-    if: needs.preflight.outputs.full == 'true'
+    if: needs.preflight.outputs.full == 'true' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -572,6 +579,7 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: ${{ matrix.target }}
+          save-if: ${{ github.event_name == 'schedule' }}
       - name: Build (default features)
         run: cargo build --locked --bin cloud-hypervisor --target=${{ matrix.target }}
       - name: Build (kvm)
