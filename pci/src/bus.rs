@@ -548,8 +548,8 @@ fn parse_io_config_address(config_address: u32) -> (usize, usize, usize, usize) 
 #[cfg(test)]
 mod tests {
     use std::error::Error;
-    use std::io;
     use std::result::Result;
+    use std::{assert_matches, io};
 
     use super::*;
     use crate::configuration::PciBarRegionType;
@@ -621,10 +621,10 @@ mod tests {
     #[test]
     fn allocate_device_id_zero_is_taken_by_the_host_bridge() {
         let mut bus = setup_bus();
-        assert!(matches!(
+        assert_matches!(
             bus.allocate_device_id(Some(PCI_ROOT_DEVICE_ID)),
             Err(PciRootError::AlreadyInUsePciDeviceSlot(0))
-        ));
+        );
     }
 
     #[test]
@@ -636,10 +636,10 @@ mod tests {
             PCI_ROOT_DEVICE_ID,
             bus.allocate_device_id(Some(PCI_ROOT_DEVICE_ID))?
         );
-        assert!(matches!(
+        assert_matches!(
             bus.allocate_device_id(Some(PCI_ROOT_DEVICE_ID)),
             Err(PciRootError::AlreadyInUsePciDeviceSlot(0))
-        ));
+        );
         Ok(())
     }
 
@@ -673,10 +673,10 @@ mod tests {
         let max_id = NUM_DEVICE_IDS - 1;
         bus.reserve_device_id(max_id)?;
         let result = bus.reserve_device_id(max_id);
-        assert!(matches!(
+        assert_matches!(
             result,
-            Err(PciRootError::AlreadyInUsePciDeviceSlot(x)) if x == usize::from(max_id),
-        ));
+            Err(PciRootError::AlreadyInUsePciDeviceSlot(x)) if x == usize::from(max_id)
+        );
         Ok(())
     }
 
@@ -695,10 +695,10 @@ mod tests {
         let mut bus = setup_bus();
         let max_id = NUM_DEVICE_IDS + 1;
         let result = bus.allocate_device_id(Some(max_id));
-        assert!(matches!(
+        assert_matches!(
             result,
-            Err(PciRootError::InvalidPciDeviceSlot(x)) if x == usize::from(max_id),
-        ));
+            Err(PciRootError::InvalidPciDeviceSlot(x)) if x == usize::from(max_id)
+        );
         Ok(())
     }
 
@@ -711,9 +711,6 @@ mod tests {
             assert_eq!(expected_id, bus.allocate_device_id(None).unwrap());
         }
         let result = bus.allocate_device_id(None);
-        assert!(matches!(
-            result,
-            Err(PciRootError::NoPciDeviceSlotAvailable),
-        ));
+        assert_matches!(result, Err(PciRootError::NoPciDeviceSlotAvailable));
     }
 }
