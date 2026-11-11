@@ -167,7 +167,7 @@ fn allocate_aligned_mapping(
 /// cause SIGSEGV or SIGBUS.  Non-atomic access will generally cause data
 /// races and thus Undefined Behavior.
 #[derive(Debug)]
-pub struct AlignedMapping {
+pub(crate) struct AlignedMapping {
     addr: *mut u8,
     len: size_t,
 }
@@ -188,21 +188,12 @@ unsafe impl Sync for AlignedMapping {}
 impl AlignedMapping {
     /// Return the host address of the mapping.
     #[inline]
-    pub fn addr(&self) -> *mut u8 {
+    pub(crate) fn addr(&self) -> *mut u8 {
         self.addr
     }
 
-    /// Return the length of the region.
-    /// This function promises that the return value fits in [`libc::size_t`]
-    /// and in [`isize`] and `unsafe` code can rely on this.
-    #[inline]
-    #[expect(clippy::len_without_is_empty)]
-    pub fn len(&self) -> usize {
-        self.len
-    }
-
     /// Create an [`AlignedMapping`] using `mmap` of a file descriptor.
-    pub fn mmap(
+    pub(crate) fn mmap(
         len: u64,
         alignment: usize,
         prot: c_int,
