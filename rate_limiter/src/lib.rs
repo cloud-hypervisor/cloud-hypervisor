@@ -833,7 +833,7 @@ impl Default for RateLimiter {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::thread;
+    use std::{assert_matches, thread};
 
     use super::*;
 
@@ -1414,10 +1414,10 @@ pub(crate) mod tests {
                 let mut bucket =
                     TokenBucket::new_with_burst(size, refill, rate, seconds, recharge).unwrap();
                 assert_eq!(bucket.capacity(), rate.saturating_mul(seconds));
-                assert!(matches!(
+                assert_matches!(
                     burst_reduce(&mut bucket, u64::MAX, 0),
                     BucketReduction::Success | BucketReduction::OverConsumption(_)
-                ));
+                );
                 bucket.burst.as_mut().unwrap().refill(u64::MAX);
                 bucket.replenish(u64::MAX);
             }
