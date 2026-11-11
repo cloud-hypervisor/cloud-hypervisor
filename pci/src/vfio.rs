@@ -3327,6 +3327,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::env::temp_dir;
     use std::sync::Mutex;
     #[cfg(feature = "kvm")]
@@ -3670,15 +3671,15 @@ mod tests {
 
     #[test]
     fn default_migration_flags_returns_none() {
-        assert!(matches!(DefaultVfio.migration_flags(), Ok(None)));
+        assert_matches!(DefaultVfio.migration_flags(), Ok(None));
     }
 
     #[test]
     fn default_set_migration_state_errors() {
-        assert!(matches!(
+        assert_matches!(
             DefaultVfio.set_migration_state(VfioMigrationState::Stop),
             Err(VfioError::NoMigrationSupport)
-        ));
+        );
     }
 
     #[test]
@@ -3687,18 +3688,18 @@ mod tests {
             iova: 0,
             length: 0x1000,
         };
-        assert!(matches!(
+        assert_matches!(
             DefaultVfio.start_dma_logging(0x1000, &[range]),
             Err(VfioError::NoMigrationSupport)
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             DefaultVfio.stop_dma_logging(),
             Err(VfioError::NoMigrationSupport)
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             DefaultVfio.report_dma_logging(range, 0x1000),
             Err(VfioError::NoMigrationSupport)
-        ));
+        );
     }
 
     // Save and load state machine flows, driven through a mock Vfio wrapper
@@ -4166,7 +4167,7 @@ mod tests {
         let mock = MockVfio::failing_at(&[VfioMigrationState::StopCopy]);
         let common = test_vfio_common(Arc::clone(&mock), Some(1));
         let err = common.save_migration_data().unwrap_err();
-        assert!(matches!(err, MigratableError::Snapshot(_)));
+        assert_matches!(err, MigratableError::Snapshot(_));
         // Entering STOP_COPY failed, so STOP is attempted as recovery.
         assert_eq!(
             mock.transitions(),
@@ -4180,7 +4181,7 @@ mod tests {
         let mock = MockVfio::failing_at(&[VfioMigrationState::StopCopy, VfioMigrationState::Stop]);
         let common = test_vfio_common(Arc::clone(&mock), Some(1));
         let err = common.save_migration_data().unwrap_err();
-        assert!(matches!(err, MigratableError::Snapshot(_)));
+        assert_matches!(err, MigratableError::Snapshot(_));
         // The recovery STOP failed too, so the device is reset.
         assert_eq!(
             mock.transitions(),
@@ -4194,7 +4195,7 @@ mod tests {
         let mock = MockVfio::failing_read();
         let common = test_vfio_common(Arc::clone(&mock), Some(1));
         let err = common.save_migration_data().unwrap_err();
-        assert!(matches!(err, MigratableError::Snapshot(_)));
+        assert_matches!(err, MigratableError::Snapshot(_));
         // STOP_COPY was entered, so the device is returned to STOP.
         assert_eq!(
             mock.transitions(),
@@ -4212,7 +4213,7 @@ mod tests {
         });
         let common = test_vfio_common(Arc::clone(&mock), Some(1));
         let err = common.save_migration_data().unwrap_err();
-        assert!(matches!(err, MigratableError::Snapshot(_)));
+        assert_matches!(err, MigratableError::Snapshot(_));
         // The return to STOP after the failed read has no recovery state,
         // so its failure resets the device directly.
         assert_eq!(
@@ -4238,7 +4239,7 @@ mod tests {
         let mock = MockVfio::failing_at(&[VfioMigrationState::Resuming]);
         let common = test_vfio_common(Arc::clone(&mock), Some(1));
         let err = common.load_migration_data(b"ignored").unwrap_err();
-        assert!(matches!(err, MigratableError::Restore(_)));
+        assert_matches!(err, MigratableError::Restore(_));
         assert_eq!(
             mock.transitions(),
             vec![VfioMigrationState::Resuming, VfioMigrationState::Stop]
@@ -4251,7 +4252,7 @@ mod tests {
         let mock = MockVfio::failing_at(&[VfioMigrationState::Resuming, VfioMigrationState::Stop]);
         let common = test_vfio_common(Arc::clone(&mock), Some(1));
         let err = common.load_migration_data(b"ignored").unwrap_err();
-        assert!(matches!(err, MigratableError::Restore(_)));
+        assert_matches!(err, MigratableError::Restore(_));
         assert_eq!(
             mock.transitions(),
             vec![VfioMigrationState::Resuming, VfioMigrationState::Stop]
@@ -4267,7 +4268,7 @@ mod tests {
         });
         let common = test_vfio_common(Arc::clone(&mock), Some(1));
         let err = common.load_migration_data(b"ignored").unwrap_err();
-        assert!(matches!(err, MigratableError::Restore(_)));
+        assert_matches!(err, MigratableError::Restore(_));
         // A RESUMING session can only be aborted by a reset, so a failed write
         // resets directly rather than attempting STOP.
         assert_eq!(mock.transitions(), vec![VfioMigrationState::Resuming]);
@@ -4387,7 +4388,7 @@ mod tests {
             blob: String::new(),
         };
         let err = common.set_state(&state, None, None, Some(mig)).unwrap_err();
-        assert!(matches!(err, VfioPciError::RestoreMigration(_)));
+        assert_matches!(err, VfioPciError::RestoreMigration(_));
     }
 
     // A guest write to a non BAR, non MSI config register must mirror into
@@ -4559,10 +4560,10 @@ mod tests {
             (0xff8, PciExpressCapabilityId::SingleRootIoVirtualization, 0),
         ]);
         let mut common = test_vfio_common_with_pasid(mock);
-        assert!(matches!(
+        assert_matches!(
             common.parse_extended_capabilities(),
             Err(VfioPciError::ExtendedCapNoSpace(_))
-        ));
+        );
 
         // No space is left behind the last capability of the device's chain.
         let mock = MockConfigSpace::new(&[
@@ -4570,10 +4571,10 @@ mod tests {
             (0xffc, PciExpressCapabilityId::AdvancedErrorReporting, 0),
         ]);
         let mut common = test_vfio_common_with_pasid(mock);
-        assert!(matches!(
+        assert_matches!(
             common.parse_extended_capabilities(),
             Err(VfioPciError::ExtendedCapNoSpace(_))
-        ));
+        );
     }
 
     #[test]
