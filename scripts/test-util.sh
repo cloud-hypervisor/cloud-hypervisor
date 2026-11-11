@@ -26,10 +26,11 @@ cmd_help() {
     echo ""
     echo "Available arguments:"
     echo ""
-    echo "    --hypervisor  Underlying hypervisor. Options kvm, mshv. Auto-detected from the host device node when omitted."
-    echo "    --test-filter Tests to run"
+    echo "    --hypervisor   Underlying hypervisor. Options kvm, mshv. Auto-detected from the host device node when omitted."
+    echo "    --test-filter  Tests to run"
+    echo "    --test-exclude Tests to skip (only for the metrics tests)"
     echo ""
-    echo "    --help        Display this help message."
+    echo "    --help         Display this help message."
     echo ""
 }
 
