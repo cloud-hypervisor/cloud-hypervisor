@@ -136,12 +136,12 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     // Setup the virt queues with the input bytes
     let (mut queues, queue_layouts) = setup_virt_queues(
         &[
-            &queue_data[..QUEUE_DATA_SIZE].try_into().unwrap(),
-            &queue_data[QUEUE_DATA_SIZE..QUEUE_DATA_SIZE * 2]
-                .try_into()
+            queue_data[..QUEUE_DATA_SIZE].as_array().unwrap(),
+            queue_data[QUEUE_DATA_SIZE..QUEUE_DATA_SIZE * 2]
+                .as_array()
                 .unwrap(),
-            &queue_data[QUEUE_DATA_SIZE * 2..QUEUE_DATA_SIZE * 3]
-                .try_into()
+            queue_data[QUEUE_DATA_SIZE * 2..QUEUE_DATA_SIZE * 3]
+                .as_array()
                 .unwrap(),
         ],
         QUEUE_REGION_BASE,
@@ -203,9 +203,9 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
 
         let (mut no_reporting_queues, _) = setup_virt_queues(
             &[
-                &queue_data[..QUEUE_DATA_SIZE].try_into().unwrap(),
-                &queue_data[QUEUE_DATA_SIZE..QUEUE_DATA_SIZE * 2]
-                    .try_into()
+                queue_data[..QUEUE_DATA_SIZE].as_array().unwrap(),
+                queue_data[QUEUE_DATA_SIZE..QUEUE_DATA_SIZE * 2]
+                    .as_array()
                     .unwrap(),
             ],
             QUEUE_REGION_BASE,
@@ -250,12 +250,12 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
 
         let (mut reporting_empty_queues, _) = setup_virt_queues(
             &[
-                &queue_data[..QUEUE_DATA_SIZE].try_into().unwrap(),
-                &queue_data[QUEUE_DATA_SIZE..QUEUE_DATA_SIZE * 2]
-                    .try_into()
+                queue_data[..QUEUE_DATA_SIZE].as_array().unwrap(),
+                queue_data[QUEUE_DATA_SIZE..QUEUE_DATA_SIZE * 2]
+                    .as_array()
                     .unwrap(),
-                &queue_data[QUEUE_DATA_SIZE * 2..QUEUE_DATA_SIZE * 3]
-                    .try_into()
+                queue_data[QUEUE_DATA_SIZE * 2..QUEUE_DATA_SIZE * 3]
+                    .as_array()
                     .unwrap(),
             ],
             QUEUE_REGION_BASE,
@@ -428,12 +428,12 @@ fn exercise_stats_queue(bytes: &[u8], queue_data: &[u8]) {
     };
     let (mut queues, layouts) = setup_virt_queues(
         &[
-            &queue_data[..QUEUE_DATA_SIZE].try_into().unwrap(),
-            &queue_data[QUEUE_DATA_SIZE..QUEUE_DATA_SIZE * 2]
-                .try_into()
+            queue_data[..QUEUE_DATA_SIZE].as_array().unwrap(),
+            queue_data[QUEUE_DATA_SIZE..QUEUE_DATA_SIZE * 2]
+                .as_array()
                 .unwrap(),
-            &queue_data[QUEUE_DATA_SIZE * 2..QUEUE_DATA_SIZE * 3]
-                .try_into()
+            queue_data[QUEUE_DATA_SIZE * 2..QUEUE_DATA_SIZE * 3]
+                .as_array()
                 .unwrap(),
         ],
         QUEUE_REGION_BASE,
@@ -562,12 +562,12 @@ fn run_failing_interrupt_case(
 
     let (mut queues, queue_layouts) = setup_virt_queues(
         &[
-            &queue_data[..QUEUE_DATA_SIZE].try_into().unwrap(),
-            &queue_data[QUEUE_DATA_SIZE..QUEUE_DATA_SIZE * 2]
-                .try_into()
+            queue_data[..QUEUE_DATA_SIZE].as_array().unwrap(),
+            queue_data[QUEUE_DATA_SIZE..QUEUE_DATA_SIZE * 2]
+                .as_array()
                 .unwrap(),
-            &queue_data[QUEUE_DATA_SIZE * 2..QUEUE_DATA_SIZE * 3]
-                .try_into()
+            queue_data[QUEUE_DATA_SIZE * 2..QUEUE_DATA_SIZE * 3]
+                .as_array()
                 .unwrap(),
         ],
         QUEUE_REGION_BASE,
@@ -640,7 +640,7 @@ fn activate_with_too_few_queues(queue_data: &[u8]) {
         return;
     };
     let (mut queues, _) = setup_virt_queues(
-        &[&queue_data[..QUEUE_DATA_SIZE].try_into().unwrap()],
+        &[queue_data[..QUEUE_DATA_SIZE].as_array().unwrap()],
         QUEUE_REGION_BASE,
     );
     let inflate_q = queues.remove(0);
@@ -675,9 +675,9 @@ fn activate_reporting_acked_without_reporting_queue(queue_data: &[u8]) {
     };
     let (mut queues, _) = setup_virt_queues(
         &[
-            &queue_data[..QUEUE_DATA_SIZE].try_into().unwrap(),
-            &queue_data[QUEUE_DATA_SIZE..QUEUE_DATA_SIZE * 2]
-                .try_into()
+            queue_data[..QUEUE_DATA_SIZE].as_array().unwrap(),
+            queue_data[QUEUE_DATA_SIZE..QUEUE_DATA_SIZE * 2]
+                .as_array()
                 .unwrap(),
         ],
         QUEUE_REGION_BASE,
@@ -723,12 +723,12 @@ fn activate_reporting_available_unacked(queue_data: &[u8]) {
     };
     let (mut queues, _) = setup_virt_queues(
         &[
-            &queue_data[..QUEUE_DATA_SIZE].try_into().unwrap(),
-            &queue_data[QUEUE_DATA_SIZE..QUEUE_DATA_SIZE * 2]
-                .try_into()
+            queue_data[..QUEUE_DATA_SIZE].as_array().unwrap(),
+            queue_data[QUEUE_DATA_SIZE..QUEUE_DATA_SIZE * 2]
+                .as_array()
                 .unwrap(),
-            &queue_data[QUEUE_DATA_SIZE * 2..QUEUE_DATA_SIZE * 3]
-                .try_into()
+            queue_data[QUEUE_DATA_SIZE * 2..QUEUE_DATA_SIZE * 3]
+                .as_array()
                 .unwrap(),
         ],
         QUEUE_REGION_BASE,
