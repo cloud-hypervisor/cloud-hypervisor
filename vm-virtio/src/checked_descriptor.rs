@@ -184,7 +184,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::io;
+    use std::{assert_matches, io};
 
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::{Queue, QueueT};
@@ -330,7 +330,7 @@ mod tests {
         let _ = chain.next_checked(None).unwrap().unwrap();
         // The chain is now exhausted; expect Ok(None).
         let res = chain.next_checked(None);
-        assert!(matches!(res, Ok(None)));
+        assert_matches!(res, Ok(None));
     }
 
     #[test]
