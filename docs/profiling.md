@@ -46,7 +46,8 @@ with custom `RUSTFLAGS` however debug symbols should still be included:
 e.g.
 
 ```
-$ perf record --call-graph lbr --all-user --user-callchains -g target/release/cloud-hypervisor \
+$ perf record --call-graph lbr --all-user --user-callchains -g \
+        target/profiling/cloud-hypervisor \
         --kernel ~/src/linux/vmlinux \
         --pmem file=~/workloads/focal.raw \
         --cpus boot=1 --memory size=1G \
