@@ -3555,7 +3555,7 @@ impl BusDevice for AcpiCpuHotplugController {
                     );
                     return None;
                 }
-                self.selected_cpu = u32::from_le_bytes(data.try_into().unwrap());
+                self.selected_cpu = u32::from_le_bytes(*data.as_array().unwrap());
             }
             Self::CPU_STATUS_OFFSET => {
                 if data.len() != 1 {
