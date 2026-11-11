@@ -569,10 +569,11 @@ impl Vcpu {
             // (currently KVM-specific; MSHV handles this through its own import path).
             // igvm_enabled is kept as an explicit flag rather than derived from sev_snp
             // state because IGVM could theoretically be used independently of SEV-SNP.
-            cfg_if::cfg_if! {
-                if #[cfg(feature = "igvm")] {
+            cfg_select! {
+                feature = "igvm" => {
                     let setup_registers = !igvm_enabled;
-                } else {
+                }
+                _ => {
                     let setup_registers = true;
                 }
             }

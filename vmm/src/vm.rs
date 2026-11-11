@@ -1598,15 +1598,25 @@ impl Vm {
         )
         .map_err(Error::IgvmLoad)?;
 
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "sev_snp")] {
+        cfg_select! {
+            feature = "sev_snp" => {
                 let entry_point = if cpu_manager.lock().unwrap().sev_snp_enabled() {
-                    EntryPoint { entry_addr: vm_memory::GuestAddress(res.vmsa_gpa), setup_header: None }
+                    EntryPoint {
+                        entry_addr: vm_memory::GuestAddress(res.vmsa_gpa),
+                        setup_header: None,
+                    }
                 } else {
-                    EntryPoint {entry_addr: vm_memory::GuestAddress(res.vmsa.rip), setup_header: None }
+                    EntryPoint {
+                        entry_addr: vm_memory::GuestAddress(res.vmsa.rip),
+                        setup_header: None,
+                    }
                 };
-            } else {
-               let entry_point = EntryPoint { entry_addr: vm_memory::GuestAddress(res.vmsa.rip), setup_header: None };
+            }
+            _ => {
+                let entry_point = EntryPoint {
+                    entry_addr: vm_memory::GuestAddress(res.vmsa.rip),
+                    setup_header: None,
+                };
             }
         };
         Ok(entry_point)
@@ -2485,8 +2495,8 @@ impl Vm {
 
         // Do earlier to parallelise with loading kernel
         #[cfg(target_arch = "x86_64")]
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "sev_snp")] {
+        cfg_select! {
+            feature = "sev_snp" => {
                 let sev_snp_enabled = self.config.lock().unwrap().is_sev_snp_enabled();
                 let rsdp_addr = if sev_snp_enabled {
                     // In case of SEV-SNP guest ACPI tables are provided via
@@ -2496,7 +2506,8 @@ impl Vm {
                 } else {
                     self.create_acpi_tables()?
                 };
-            } else {
+            }
+            _ => {
                 let rsdp_addr = self.create_acpi_tables()?;
             }
         }
