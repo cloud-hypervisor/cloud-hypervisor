@@ -241,7 +241,7 @@ mod tests {
         len: size_t,
         alignment: usize,
     ) -> (usize, size_t) {
-        let reserve = len.checked_add(alignment).unwrap();
+        let reserve = len.strict_add(alignment);
         let aligned_addr = base_addr.next_multiple_of(alignment);
 
         tail_trim_range(base_addr, reserve, aligned_addr, len)
