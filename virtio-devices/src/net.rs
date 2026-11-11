@@ -1273,8 +1273,8 @@ mod tests {
         device.read_config(0, &mut data);
 
         u16::from_le_bytes(
-            data[STATUS_OFFSET..STATUS_OFFSET + size_of::<u16>()]
-                .try_into()
+            *data[STATUS_OFFSET..STATUS_OFFSET + size_of::<u16>()]
+                .as_array()
                 .unwrap(),
         )
     }
