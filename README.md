@@ -60,11 +60,9 @@ based on the [Rust VMM](https://github.com/rust-vmm) crates.
 ### Architectures
 
 Cloud Hypervisor's main supported architectures are `x86-64` and `AArch64`,
-with functionality varying across these platforms. The functionality
-differences between `x86-64` and `AArch64` are documented in
-[#1125](https://github.com/cloud-hypervisor/cloud-hypervisor/issues/1125).
-The `riscv64` architecture support is experimental and offers limited
-functionality. For more details and instructions, please refer to [riscv
+with functionality varying across these platforms. The `riscv64`
+architecture support is experimental and offers limited functionality. For
+more details and instructions, please refer to [riscv
 documentation](docs/riscv.md).
 
 ### Guest OS
