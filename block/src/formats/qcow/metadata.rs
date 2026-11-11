@@ -1504,6 +1504,8 @@ impl QcowState {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::super::test_util::{
         TestImage, WritebackPath, compressed_l2_entry, dirty_table_cache, header_field, read_u64_at,
     };
@@ -1707,10 +1709,10 @@ mod tests {
         // L1 alone fits, but 64-bit refcounts push the combined tables over the limit.
         let err = state.resize(1_126_400_000_000).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidInput);
-        assert!(matches!(
+        assert_matches!(
             err.get_ref().unwrap().downcast_ref::<super::super::Error>(),
             Some(super::super::Error::TooManyRefcounts(_))
-        ));
+        );
         assert_eq!(state.header.size, header.size);
         before.assert_unchanged(&image);
     }
@@ -1788,11 +1790,11 @@ mod tests {
                     Some(&UnreadableBacking),
                 )
                 .unwrap();
-            assert!(matches!(
+            assert_matches!(
                 actions.as_slice(),
                 [super::DeallocAction::WriteZeroes { length, .. }]
                     if *length == cluster_size as usize
-            ));
+            );
         }
     }
 

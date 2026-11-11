@@ -892,6 +892,7 @@ fn detect_image_type(file: &mut AlignedFile) -> BlockResult<ImageType> {
 }
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::error::Error as StdError;
     use std::fs::{File, OpenOptions};
     use std::io::Write;
@@ -1009,10 +1010,10 @@ mod tests {
             assert_eq!(header.refcount_table_offset, (1 << 26) + 4096);
             assert_eq!(header.refcount_table_clusters, 4107);
         }
-        assert!(matches!(
+        assert_matches!(
             QcowHeader::create_for_size_path_and_cluster_bits(3, u64::MAX, None, 9),
-            Err(Error::TooManyL1Entries(_)),
-        ));
+            Err(Error::TooManyL1Entries(_))
+        );
     }
 
     #[test]
@@ -1029,10 +1030,10 @@ mod tests {
             let before = temp.snapshot();
             let err = temp.open().unwrap_err();
             assert_eq!(err.kind(), BlockErrorKind::CorruptImage);
-            assert!(matches!(
+            assert_matches!(
                 StdError::source(&err).and_then(|source| source.downcast_ref::<Error>()),
-                Some(Error::InvalidL1TableSize(value)) if *value == l1_size,
-            ));
+                Some(Error::InvalidL1TableSize(value)) if *value == l1_size
+            );
             before.assert_unchanged(&temp);
         }
     }
@@ -1064,10 +1065,10 @@ mod tests {
 
             let err = image.open().unwrap_err();
             assert_eq!(err.kind(), BlockErrorKind::CorruptImage);
-            assert!(matches!(
+            assert_matches!(
                 StdError::source(&err).and_then(|source| source.downcast_ref::<Error>()),
-                Some(Error::RefcountTableTooLarge),
-            ));
+                Some(Error::RefcountTableTooLarge)
+            );
             before.assert_unchanged(&image);
         }
     }
@@ -1107,10 +1108,10 @@ mod tests {
             let err = temp
                 .open()
                 .expect_err("overlapping or overflowing metadata must be rejected");
-            assert!(matches!(
+            assert_matches!(
                 StdError::source(&err).and_then(|source| source.downcast_ref::<Error>()),
-                Some(Error::OverlappingMetadata),
-            ));
+                Some(Error::OverlappingMetadata)
+            );
             before.assert_unchanged(&temp);
         }
     }
@@ -1148,7 +1149,7 @@ mod tests {
         for mut header in [valid_header_v2(), valid_header_v3()] {
             patch_u32(&mut header, header_field::CRYPT_METHOD, 1);
             let err = QcowHeader::new(&basic_file(&header)).unwrap_err();
-            assert!(matches!(err, Error::UnsupportedCryptMethod(1)), "{err:?}");
+            assert_matches!(err, Error::UnsupportedCryptMethod(1), "{err:?}");
         }
     }
 
@@ -1158,7 +1159,7 @@ mod tests {
             let mut header = valid_header_v3();
             patch_u32(&mut header, header_field::HEADER_LENGTH, bad);
             let err = QcowHeader::new(&basic_file(&header)).unwrap_err();
-            assert!(matches!(err, Error::InvalidHeaderLength(_)), "{err:?}");
+            assert_matches!(err, Error::InvalidHeaderLength(_), "{err:?}");
         }
     }
 
@@ -1181,7 +1182,7 @@ mod tests {
             if valid {
                 result.unwrap();
             } else {
-                assert!(matches!(result, Err(Error::InvalidCompressionFeature)));
+                assert_matches!(result, Err(Error::InvalidCompressionFeature));
             }
         }
     }
@@ -1345,48 +1346,39 @@ mod tests {
     fn backing_file_offset_at_cluster_boundary() {
         let cluster_size = 1u64 << DEFAULT_CLUSTER_BITS;
         let err = read_header_with_patched_backing(cluster_size, 1).unwrap_err();
-        assert!(matches!(
-            err,
-            Error::BackingFileOutsideFirstCluster(_, _, _)
-        ));
+        assert_matches!(err, Error::BackingFileOutsideFirstCluster(_, _, _));
     }
 
     #[test]
     fn backing_file_offset_past_cluster() {
         let cluster_size = 1u64 << DEFAULT_CLUSTER_BITS;
         let err = read_header_with_patched_backing(cluster_size + 4096, 16).unwrap_err();
-        assert!(matches!(
-            err,
-            Error::BackingFileOutsideFirstCluster(_, _, _)
-        ));
+        assert_matches!(err, Error::BackingFileOutsideFirstCluster(_, _, _));
     }
 
     #[test]
     fn backing_file_end_past_cluster() {
         let cluster_size = 1u64 << DEFAULT_CLUSTER_BITS;
         let err = read_header_with_patched_backing(cluster_size - 4, 16).unwrap_err();
-        assert!(matches!(
-            err,
-            Error::BackingFileOutsideFirstCluster(_, _, _)
-        ));
+        assert_matches!(err, Error::BackingFileOutsideFirstCluster(_, _, _));
     }
 
     #[test]
     fn backing_file_offset_inside_header() {
         let err = read_header_with_patched_backing(64, 16).unwrap_err();
-        assert!(matches!(err, Error::BackingFileOverlapsHeader(_, _, _)));
+        assert_matches!(err, Error::BackingFileOverlapsHeader(_, _, _));
     }
 
     #[test]
     fn backing_file_size_without_offset() {
         let err = read_header_with_patched_backing(0, 16).unwrap_err();
-        assert!(matches!(err, Error::BackingFileSizeWithoutOffset(16)));
+        assert_matches!(err, Error::BackingFileSizeWithoutOffset(16));
     }
 
     #[test]
     fn backing_file_offset_without_size() {
         let err = read_header_with_patched_backing(1024, 0).unwrap_err();
-        assert!(matches!(err, Error::BackingFileOffsetWithoutSize(1024)));
+        assert_matches!(err, Error::BackingFileOffsetWithoutSize(1024));
     }
 
     #[test]
@@ -1466,8 +1458,9 @@ mod tests {
 
             let err = QcowHeader::new(&disk_file)
                 .expect_err("a cluster size outside the limits must be rejected");
-            assert!(
-                matches!(err, Error::InvalidClusterSize),
+            assert_matches!(
+                err,
+                Error::InvalidClusterSize,
                 "cluster_bits {cluster_bits}: unexpected error {err:?}"
             );
         }
@@ -1504,8 +1497,9 @@ mod tests {
 
         let err = QcowHeader::read_header_extensions(&disk_file, &mut header, None)
             .expect_err("an extension past the extension area must be rejected");
-        assert!(
-            matches!(err, Error::HeaderExtensionTooLong(..)),
+        assert_matches!(
+            err,
+            Error::HeaderExtensionTooLong(..),
             "unexpected error: {err:?}"
         );
     }
@@ -1572,10 +1566,7 @@ mod tests {
         });
 
         let result = QcowHeader::read_header_extensions(&disk_file, &mut header, None);
-        assert!(matches!(
-            result.unwrap_err(),
-            Error::UnsupportedBackingFileFormat(_)
-        ));
+        assert_matches!(result.unwrap_err(), Error::UnsupportedBackingFileFormat(_));
     }
 
     #[test]
@@ -1587,10 +1578,7 @@ mod tests {
 
         let result = QcowHeader::read_header_extensions(&disk_file, &mut header, None);
         // Should fail with InvalidBackingFileName error
-        assert!(matches!(
-            result.unwrap_err(),
-            Error::InvalidBackingFileName(_)
-        ));
+        assert_matches!(result.unwrap_err(), Error::InvalidBackingFileName(_));
     }
 
     #[test]
@@ -1601,10 +1589,10 @@ mod tests {
             QcowHeader::create_for_size_and_path(3, 0x10_0000, Some("/path/to/backing/file"))
                 .expect("Failed to create header.");
         let err = try_open_qcow_header(&header, false).unwrap_err();
-        assert!(matches!(err.kind(), BlockErrorKind::UnsupportedFeature));
+        assert_matches!(err.kind(), BlockErrorKind::UnsupportedFeature);
         let source = StdError::source(&err).unwrap();
         let qcow_err = source.downcast_ref::<Error>().unwrap();
-        assert!(matches!(qcow_err, Error::MaxNestingDepthExceeded));
+        assert_matches!(qcow_err, Error::MaxNestingDepthExceeded);
     }
 
     /// Create a qcow2 file with itself as its backing file.
@@ -1868,10 +1856,10 @@ mod tests {
 
             let err = super::rebuild_refcounts(&mut raw, header.clone()).unwrap_err();
             assert_eq!(err.kind(), BlockErrorKind::CorruptImage);
-            assert!(matches!(
+            assert_matches!(
                 err.source().unwrap().downcast_ref::<Error>(),
                 Some(Error::InvalidOffset(_) | Error::InvalidClusterIndex)
-            ));
+            );
             before.assert_unchanged(&image);
         }
     }
@@ -2113,8 +2101,9 @@ mod tests {
 
             // Overflow should fail
             let result = refcount.set_cluster_refcount(&mut qcow_raw, 0, max_val + 1, None, layout);
-            assert!(
-                matches!(result, Err(RefcountError::RefcountOverflow { .. })),
+            assert_matches!(
+                result,
+                Err(RefcountError::RefcountOverflow { .. }),
                 "{refcount_bits}-bit: expected overflow error"
             );
 
@@ -2190,11 +2179,12 @@ mod tests {
         // Bit 2: external data file
         let header = header_v3_with_incompat_features(1 << 2);
         let err = try_open_header(&header).unwrap_err();
-        assert!(matches!(err.kind(), BlockErrorKind::UnsupportedFeature));
+        assert_matches!(err.kind(), BlockErrorKind::UnsupportedFeature);
         let source = StdError::source(&err).unwrap();
         let qcow_err = source.downcast_ref::<Error>().unwrap();
-        assert!(
-            matches!(qcow_err, Error::UnsupportedFeature(v) if v.to_string().contains("external")),
+        assert_matches!(
+            qcow_err,
+            Error::UnsupportedFeature(v) if v.to_string().contains("external"),
             "Expected UnsupportedFeature error mentioning external, got: {err:?}"
         );
     }
@@ -2204,11 +2194,12 @@ mod tests {
         // Bit 4: extended L2 entries
         let header = header_v3_with_incompat_features(1 << 4);
         let err = try_open_header(&header).unwrap_err();
-        assert!(matches!(err.kind(), BlockErrorKind::UnsupportedFeature));
+        assert_matches!(err.kind(), BlockErrorKind::UnsupportedFeature);
         let source = StdError::source(&err).unwrap();
         let qcow_err = source.downcast_ref::<Error>().unwrap();
-        assert!(
-            matches!(qcow_err, Error::UnsupportedFeature(v) if v.to_string().contains("extended")),
+        assert_matches!(
+            qcow_err,
+            Error::UnsupportedFeature(v) if v.to_string().contains("extended"),
             "Expected UnsupportedFeature error mentioning extended, got: {err:?}"
         );
     }
@@ -2218,7 +2209,7 @@ mod tests {
         // Multiple unsupported bits: external data (2) + extended L2 (4)
         let header = header_v3_with_incompat_features((1 << 2) | (1 << 4));
         let err = try_open_header(&header).unwrap_err();
-        assert!(matches!(err.kind(), BlockErrorKind::UnsupportedFeature));
+        assert_matches!(err.kind(), BlockErrorKind::UnsupportedFeature);
     }
 
     #[test]
@@ -2226,11 +2217,12 @@ mod tests {
         // Unknown bit 5 (not defined in spec)
         let header = header_v3_with_incompat_features(1 << 5);
         let err = try_open_header(&header).unwrap_err();
-        assert!(matches!(err.kind(), BlockErrorKind::UnsupportedFeature));
+        assert_matches!(err.kind(), BlockErrorKind::UnsupportedFeature);
         let source = StdError::source(&err).unwrap();
         let qcow_err = source.downcast_ref::<Error>().unwrap();
-        assert!(
-            matches!(qcow_err, Error::UnsupportedFeature(v) if v.to_string().contains("unknown")),
+        assert_matches!(
+            qcow_err,
+            Error::UnsupportedFeature(v) if v.to_string().contains("unknown"),
             "Expected UnsupportedFeature error mentioning unknown, got: {err:?}"
         );
     }
@@ -2359,8 +2351,9 @@ mod tests {
         // Test that a corrupt image cannot be opened for writing
         let header = header_v3_with_incompat_features(IncompatFeatures::CORRUPT.bits());
         let err = try_open_header(&header).unwrap_err();
-        assert!(
-            matches!(err.kind(), BlockErrorKind::CorruptImage),
+        assert_matches!(
+            err.kind(),
+            BlockErrorKind::CorruptImage,
             "Expected CorruptImage error, got: {err:?}"
         );
     }
@@ -2511,10 +2504,7 @@ mod tests {
 
         let err = QcowDisk::new(file.try_clone().unwrap(), false, false, true, false)
             .expect_err("a file larger than the refcount table covers must be rejected");
-        assert!(
-            matches!(err.kind(), BlockErrorKind::CorruptImage),
-            "{err:?}"
-        );
+        assert_matches!(err.kind(), BlockErrorKind::CorruptImage, "{err:?}");
     }
 
     #[test]
@@ -2661,9 +2651,10 @@ mod tests {
             .source_ref()
             .and_then(|s| s.downcast_ref::<DiskFileError>())
             .expect("expected DiskFileError source");
-        assert!(
-            matches!(inner, DiskFileError::ResizeError(io_err) if io_err.to_string().contains("shrinking")),
-            "expected ResizeError describing shrink, got {inner:?}",
+        assert_matches!(
+            inner,
+            DiskFileError::ResizeError(io_err) if io_err.to_string().contains("shrinking"),
+            "expected ResizeError describing shrink, got {inner:?}"
         );
         assert_eq!(disk.logical_size().unwrap(), original_size);
     }
@@ -2696,7 +2687,7 @@ mod tests {
         assert_eq!(disk.logical_size().unwrap(), backing_size);
 
         let err = disk.resize(backing_size * 2).unwrap_err();
-        assert!(matches!(err.kind(), BlockErrorKind::UnsupportedFeature));
+        assert_matches!(err.kind(), BlockErrorKind::UnsupportedFeature);
         assert_eq!(disk.logical_size().unwrap(), backing_size);
     }
 }

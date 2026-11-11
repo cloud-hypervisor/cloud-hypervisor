@@ -270,6 +270,8 @@ impl AsyncIoOperation {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
 
     fn read_op(offset: libc::off_t, len: usize) -> AsyncIoOperation {
@@ -287,18 +289,18 @@ mod tests {
 
     #[test]
     fn rejects_read_straddling_size() {
-        assert!(matches!(
+        assert_matches!(
             read_op(256, 512).validate_bounds(512),
             Err(AsyncIoError::ReadVectored(_))
-        ));
+        );
     }
 
     #[test]
     fn rejects_write_straddling_size() {
-        assert!(matches!(
+        assert_matches!(
             write_op(256, 512).validate_bounds(512),
             Err(AsyncIoError::WriteVectored(_))
-        ));
+        );
     }
 
     #[test]
