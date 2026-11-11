@@ -26,6 +26,10 @@ than the VMM thread's filter.
 By default, Cloud Hypervisor enables seccomp filtering as the project believes
 that security should not be an option.
 
+In this default mode, Cloud Hypervisor prints the prohibited system call
+number and the thread name to stderr before it terminates, for example
+`Probable seccomp violation: si_syscall=47 si_arch=0xc000003e thread=vcpu0`.
+
 For development and debugging purposes, one might want to disable this feature
 or log the faulty system call.
 
