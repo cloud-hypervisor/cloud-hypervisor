@@ -24,7 +24,7 @@ reach the WinDbg host, and boot with the Hyper-V enlightenments Windows needs:
 
 ```bash
 cloud-hypervisor \
-    --kernel /path/to/CLOUDHV.fd \
+    --firmware /path/to/CLOUDHV.fd \
     --disk path=/path/to/windows.raw,image_type=raw \
     --cpus boot=2,kvm_hyperv=on \
     --memory size=4G \

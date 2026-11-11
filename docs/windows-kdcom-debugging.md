@@ -65,7 +65,7 @@ Run the Windows guest under Cloud Hypervisor and expose the guest serial port on
 sudo ./target/release/cloud-hypervisor \
 	--cpus boot=4,kvm_hyperv=on \
 	--memory size=8192M \
-	--kernel ./$OVMF_DIR/CLOUDHV.fd \
+	--firmware ./$OVMF_DIR/CLOUDHV.fd \
 	--disk path=./$IMG_FILE,image_type=raw \
 	--console off \
 	--serial socket=/tmp/serial.sock \
