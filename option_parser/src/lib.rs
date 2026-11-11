@@ -612,6 +612,8 @@ impl Parseable for StringList {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
 
     #[test]
@@ -891,34 +893,35 @@ mod tests {
     #[test]
     fn test_tuple_whitespace_surrounding_delimiter_fails() {
         let e = Tuple::<String, u64>::from_str("foo@ 42").unwrap_err();
-        assert!(
-            matches!(e, TupleError::InvalidInteger(_)),
-            "Expected \"ParseInt\"; got \"{e:?}\"",
+        assert_matches!(
+            e,
+            TupleError::InvalidInteger(_),
+            "Expected \"ParseInt\"; got \"{e:?}\""
         );
         let expected_value = "42 ";
         let e = Tuple::<u64, Vec<u64>>::from_str("42 @[]").unwrap_err();
-        assert!(
-            matches!(e, TupleError::InvalidValue(ref s) if s == expected_value),
+        assert_matches!(
+            e,
+            TupleError::InvalidValue(ref s) if s == expected_value,
             "Expected \"{:?}\"; got \"{e:?}\"",
-            TupleError::InvalidValue(expected_value.to_string()),
+            TupleError::InvalidValue(expected_value.to_string())
         );
         // We abuse of the fact that space can be converted to a valid string as long as the
         // string isn't empty. We use this to check the correct error for tuple value parsing.
         let e = Tuple::<String, u64>::from_str(" foo @ 42 ").unwrap_err();
-        assert!(
-            matches!(e, TupleError::InvalidInteger(_)),
-            "Expected \"ParseInt\"; got \"{e:?}\"",
+        assert_matches!(
+            e,
+            TupleError::InvalidInteger(_),
+            "Expected \"ParseInt\"; got \"{e:?}\""
         );
         // Cannot parse the space into a list
         let expected_value = "";
         let e = Tuple::<u64, Vec<u64>>::from_str("42@ []").unwrap_err();
-        assert!(
-            matches!(
-                e,
-                TupleError::InvalidIntegerList(
-                    IntegerListParseError::InvalidValue(ref s),
-                ) if s == expected_value
-            ),
+        assert_matches!(
+            e,
+            TupleError::InvalidIntegerList(
+                IntegerListParseError::InvalidValue(ref s),
+            ) if s == expected_value,
             "Expected \"{:?}\"; got \"{e:?}\"",
             TupleError::InvalidIntegerList(IntegerListParseError::InvalidValue(
                 expected_value.to_string()
@@ -948,12 +951,13 @@ mod tests {
     fn test_tuple_list_unbalanced_brackets_in_element() {
         let expected_value = "a@[1,2]],b@[3,4]";
         let e = TupleList::<String, Vec<u64>>::from_str("[a@[1,2]],b@[3,4]]").unwrap_err();
-        assert!(
-            matches!(e, TupleError::SplitInsideBrackets(OptionParserError::InvalidSyntax(ref s)) if s == expected_value),
+        assert_matches!(
+            e,
+            TupleError::SplitInsideBrackets(OptionParserError::InvalidSyntax(ref s)) if s == expected_value,
             "Expected \"{:?}\"; got \"{e:?}\"",
             TupleError::SplitInsideBrackets(OptionParserError::InvalidSyntax(
                 expected_value.to_string()
-            )),
+            ))
         );
     }
 
@@ -961,10 +965,11 @@ mod tests {
     fn test_tuple_list_missing_brackets() {
         let expected_value = "foo@42";
         let e = TupleList::<String, u64>::from_str("foo@42").unwrap_err();
-        assert!(
-            matches!(e, TupleError::UnbalancedOutsideBrackets(ref s) if s == expected_value),
+        assert_matches!(
+            e,
+            TupleError::UnbalancedOutsideBrackets(ref s) if s == expected_value,
             "Expected \"{:?}\"; got \"{e:?}\"",
-            TupleError::UnbalancedOutsideBrackets(expected_value.to_string()),
+            TupleError::UnbalancedOutsideBrackets(expected_value.to_string())
         );
     }
 
@@ -1008,19 +1013,21 @@ mod tests {
     fn test_tuple_missing_key() {
         let expected_value = "@42";
         let e = Tuple::<String, u64>::from_str("@42").unwrap_err();
-        assert!(
-            matches!(e, TupleError::EmptyKey(ref s) if s == expected_value),
+        assert_matches!(
+            e,
+            TupleError::EmptyKey(ref s) if s == expected_value,
             "Expected \"{:?}\"; got \"{e:?}\"",
-            TupleError::EmptyKey(expected_value.to_string()),
+            TupleError::EmptyKey(expected_value.to_string())
         );
     }
 
     #[test]
     fn test_tuple_missing_value() {
         let e = Tuple::<String, u64>::from_str("foo@").unwrap_err();
-        assert!(
-            matches!(e, TupleError::InvalidInteger(_)),
-            "Expected \"TupleError::InvalidInteger\"; got \"{e:?}\"",
+        assert_matches!(
+            e,
+            TupleError::InvalidInteger(_),
+            "Expected \"TupleError::InvalidInteger\"; got \"{e:?}\""
         );
     }
 
@@ -1028,10 +1035,11 @@ mod tests {
     fn test_tuple_reject_whitespace_as_empty_key() {
         let expected_value = "@42";
         let e = Tuple::<String, u64>::from_str(" @42").unwrap_err();
-        assert!(
-            matches!(e, TupleError::EmptyKey(ref s) if s == expected_value),
+        assert_matches!(
+            e,
+            TupleError::EmptyKey(ref s) if s == expected_value,
             "Expected \"{:?}\"; got \"{e:?}\"",
-            TupleError::EmptyKey(expected_value.to_string()),
+            TupleError::EmptyKey(expected_value.to_string())
         );
     }
 
@@ -1043,9 +1051,10 @@ mod tests {
         let t = Tuple::<String, u32>::from_str("foo@0").unwrap();
         assert_eq!(t, Tuple("foo".to_owned(), 0));
         let e = Tuple::<String, u32>::from_str("foo@-1").unwrap_err();
-        assert!(
-            matches!(e, TupleError::InvalidInteger(ref e) if *e.kind() == IntErrorKind::InvalidDigit),
-            "Expected \"InvalidInteger(ParseIntError(kind: InvalidDigit))\"; got \"{e:?}\"",
+        assert_matches!(
+            e,
+            TupleError::InvalidInteger(ref e) if *e.kind() == IntErrorKind::InvalidDigit,
+            "Expected \"InvalidInteger(ParseIntError(kind: InvalidDigit))\"; got \"{e:?}\""
         );
     }
 
