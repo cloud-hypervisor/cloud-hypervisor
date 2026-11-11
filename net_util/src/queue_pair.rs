@@ -642,6 +642,7 @@ impl NetQueuePair {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::fs::File;
     use std::os::fd::OwnedFd;
     use std::os::unix::net::UnixDatagram;
@@ -878,10 +879,7 @@ mod tests {
 
         let result = RxVirtio::new().process_desc_chain(&mem, &tap, &mut queue, &mut None, None);
 
-        assert!(matches!(
-            result,
-            Err(NetQueuePairError::DescriptorInvalidHeader)
-        ));
+        assert_matches!(result, Err(NetQueuePairError::DescriptorInvalidHeader));
         // The device must not write num_buffers past the one byte it was given
         let mut buf = [0u8; 16];
         mem.read_slice(&mut buf, GuestAddress(BUF0)).unwrap();
