@@ -32,6 +32,7 @@ pub(crate) enum LockedUnixListenerError {
     Io(#[source] io::Error),
 }
 
+#[derive(Debug)]
 struct SocketLock {
     _file: File,
     path: PathBuf,
@@ -83,6 +84,7 @@ impl Drop for SocketLock {
 ///
 /// The lock is held for as long as the socket is bound and released by the
 /// kernel when the process exits, including on a crash.
+#[derive(Debug)]
 pub struct LockedUnixListener {
     listener: UnixListener,
     _lock: SocketLock,
@@ -145,7 +147,7 @@ impl Drop for LockedUnixListener {
 #[cfg(test)]
 mod tests {
     use std::os::unix::net::UnixStream;
-    use std::thread;
+    use std::{assert_matches, thread};
 
     use vmm_sys_util::tempdir::TempDir;
 
@@ -176,10 +178,10 @@ mod tests {
 
         {
             let _socket = LockedUnixListener::bind(&path).unwrap();
-            assert!(matches!(
+            assert_matches!(
                 LockedUnixListener::bind(&path),
                 Err(LockedUnixListenerError::InUse(p)) if p == path
-            ));
+            );
         }
 
         // The guard has been dropped, so the path can be taken again.
@@ -233,7 +235,7 @@ mod tests {
         let lock_path = PathBuf::from(lock_path);
         fs::write(&path, "not a socket").unwrap();
 
-        assert!(LockedUnixListener::bind(&path).is_err());
+        LockedUnixListener::bind(&path).unwrap_err();
         assert!(!lock_path.exists());
     }
 

@@ -75,7 +75,7 @@ pub enum ConsoleDeviceError {
 
 type ConsoleDeviceResult<T> = result::Result<T, ConsoleDeviceError>;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ConsoleTransport {
     File(Arc<File>),
     Pty(Arc<File>),
@@ -394,6 +394,8 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
     use crate::vm_config::parse_tcp_address;
 
@@ -413,10 +415,10 @@ mod tests {
                 address: address.parse().unwrap(),
                 server: true,
             };
-            assert!(matches!(
+            assert_matches!(
                 tcp_console_transport(&tcp, None),
                 Err(ConsoleDeviceError::TcpAddressNotLoopback(_))
-            ));
+            );
         }
         parse_tcp_address("not-an-endpoint").unwrap_err();
         parse_tcp_address("localhost:0").unwrap_err();

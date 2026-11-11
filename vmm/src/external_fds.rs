@@ -712,8 +712,8 @@ impl UpdateFdsComponent for PlatformConfig {
 #[cfg(test)]
 pub(crate) mod tests {
     use std::os::fd::{AsRawFd, IntoRawFd};
-    use std::slice;
     use std::str::FromStr;
+    use std::{assert_matches, slice};
 
     use option_parser::{OptionParser, TupleList};
     use serde::{Deserialize, Serialize};
@@ -1262,7 +1262,7 @@ pub(crate) mod tests {
                     let result = unsafe {
                         RestoreConfig::parse(&format!("source_url=file:///tmp/snapshot,{fields}"))
                     };
-                    assert!(matches!(result, Err(ConfigError::MixedFdFormats)));
+                    assert_matches!(result, Err(ConfigError::MixedFdFormats));
                 } else {
                     // SAFETY: Each descriptor is exclusively transferred to the parser.
                     let result = unsafe {
@@ -1270,10 +1270,7 @@ pub(crate) mod tests {
                             "receiver_url=unix:/tmp/migration,{fields}"
                         ))
                     };
-                    assert!(matches!(
-                        result,
-                        Err(VmReceiveMigrationConfigError::MixedFdFormats)
-                    ));
+                    assert_matches!(result, Err(VmReceiveMigrationConfigError::MixedFdFormats));
                 }
             }
         }

@@ -6734,6 +6734,8 @@ impl Drop for DeviceManager {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     fn check_pci_slot_aml(mut config: serde_json::Value, fixed_slots: &[&[u8]]) {
         use vmm_sys_util::eventfd::EFD_NONBLOCK;
@@ -7051,9 +7053,9 @@ mod tests {
         );
 
         // The 3 MiB aperture rounds down to 0 for each of 1024 segments.
-        assert!(matches!(
+        assert_matches!(
             create_mmio_allocators(0x100000, 0x3fffff, 1024, &[1; 1024], 4 << 10),
             Err(DeviceManagerError::PciSegmentMmioAperture(0))
-        ));
+        );
     }
 }

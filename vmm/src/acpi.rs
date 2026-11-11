@@ -1421,7 +1421,7 @@ pub(crate) fn create_acpi_tables<M: GuestMemoryBackend>(
 
 #[cfg(test)]
 mod tests {
-    use std::slice;
+    use std::{assert_matches, slice};
 
     use super::*;
 
@@ -1431,10 +1431,10 @@ mod tests {
             next_table_address(GuestAddress(0x1000), 0x20).unwrap(),
             GuestAddress(0x1020)
         );
-        assert!(matches!(
+        assert_matches!(
             next_table_address(GuestAddress(u64::MAX), 1),
             Err(Error::AddressOverflow)
-        ));
+        );
     }
 
     #[test]

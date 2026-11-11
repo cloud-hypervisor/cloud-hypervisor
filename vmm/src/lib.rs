@@ -706,7 +706,7 @@ pub enum GuestShutdownAction {
 }
 
 /// Action to take when the guest requests a reset.
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, Debug)]
 pub enum GuestResetAction {
     /// Reset the VM.
     #[default]
@@ -3604,6 +3604,7 @@ mod util {
 }
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::assert_matches;
     use std::path::PathBuf;
 
     use arch::CpuProfileConfig;
@@ -3769,28 +3770,25 @@ pub(crate) mod tests {
         let mut vmm = create_dummy_vmm();
         let config = create_dummy_vm_config();
 
-        assert!(matches!(vmm.vm_create(config.clone()), Ok(())));
-        assert!(matches!(
-            vmm.vm_create(config),
-            Err(VmError::VmAlreadyCreated)
-        ));
+        assert_matches!(vmm.vm_create(config.clone()), Ok(()));
+        assert_matches!(vmm.vm_create(config), Err(VmError::VmAlreadyCreated));
     }
 
     #[test]
     fn test_vmm_lifecycle_errors_when_vm_is_not_created() {
         let mut vmm = create_dummy_vmm();
 
-        assert!(matches!(vmm.vm_pause(), Err(VmError::VmNotCreated)));
-        assert!(matches!(vmm.vm_resume(), Err(VmError::VmNotCreated)));
-        assert!(matches!(vmm.vm_power_button(), Err(VmError::VmNotCreated)));
-        assert!(matches!(vmm.vm_shutdown(), Err(VmError::VmNotCreated)));
+        assert_matches!(vmm.vm_pause(), Err(VmError::VmNotCreated));
+        assert_matches!(vmm.vm_resume(), Err(VmError::VmNotCreated));
+        assert_matches!(vmm.vm_power_button(), Err(VmError::VmNotCreated));
+        assert_matches!(vmm.vm_shutdown(), Err(VmError::VmNotCreated));
 
         vmm.vm_create(create_dummy_vm_config()).unwrap();
 
-        assert!(matches!(vmm.vm_pause(), Err(VmError::VmNotRunning)));
-        assert!(matches!(vmm.vm_resume(), Err(VmError::VmNotRunning)));
-        assert!(matches!(vmm.vm_power_button(), Err(VmError::VmNotRunning)));
-        assert!(matches!(vmm.vm_shutdown(), Err(VmError::VmNotRunning)));
+        assert_matches!(vmm.vm_pause(), Err(VmError::VmNotRunning));
+        assert_matches!(vmm.vm_resume(), Err(VmError::VmNotRunning));
+        assert_matches!(vmm.vm_power_button(), Err(VmError::VmNotRunning));
+        assert_matches!(vmm.vm_shutdown(), Err(VmError::VmNotRunning));
     }
 
     #[test]
@@ -3799,10 +3797,10 @@ pub(crate) mod tests {
         // SAFETY: This test input contains no inherited descriptors.
         let device_config = unsafe { DeviceConfig::parse("path=/path/to/device") }.unwrap();
 
-        assert!(matches!(
+        assert_matches!(
             vmm.vm_add_device(device_config.clone()),
             Err(VmError::VmNotCreated)
-        ));
+        );
 
         let _ = vmm.vm_create(create_dummy_vm_config());
         assert!(
@@ -3846,10 +3844,10 @@ pub(crate) mod tests {
         let mut vmm = create_dummy_vmm();
         let user_device_config = UserDeviceConfig::parse("socket=/path/to/socket,id=8").unwrap();
 
-        assert!(matches!(
+        assert_matches!(
             vmm.vm_add_user_device(user_device_config.clone()),
             Err(VmError::VmNotCreated)
-        ));
+        );
 
         let _ = vmm.vm_create(create_dummy_vm_config());
         assert!(
@@ -3905,20 +3903,20 @@ pub(crate) mod tests {
         let _ = vmm.vm_create(config);
         let config = vmm.vm_config.clone().unwrap();
 
-        assert!(matches!(
+        assert_matches!(
             vmm.vm_resize(Some(1), None, None),
             Err(VmError::ConfigValidation(ValidationError::TooManyQueues(
                 2, 1
             )))
-        ));
+        );
         assert_eq!(config.lock().unwrap().cpus.boot_vcpus, 2);
 
-        assert!(matches!(
+        assert_matches!(
             vmm.vm_resize(None, None, Some(512 << 20)),
             Err(VmError::ConfigValidation(
                 ValidationError::BalloonLargerThanRam(_, _)
             ))
-        ));
+        );
         assert_eq!(
             config.lock().unwrap().balloon.as_ref().unwrap().size,
             128 << 20
@@ -3941,12 +3939,12 @@ pub(crate) mod tests {
         let _ = vmm.vm_create(config);
         let config = vmm.vm_config.clone().unwrap();
 
-        assert!(matches!(
+        assert_matches!(
             vmm.vm_resize_zone("mem0".to_string(), 256 << 20),
             Err(VmError::ConfigValidation(
                 ValidationError::BalloonLargerThanRam(_, _)
             ))
-        ));
+        );
         assert_eq!(
             config.lock().unwrap().memory.zones.as_ref().unwrap()[0].size,
             512 << 20
@@ -3964,10 +3962,10 @@ pub(crate) mod tests {
         let mut vmm = create_dummy_vmm();
         let disk_config = DiskConfig::parse("path=/path/to_file,image_type=raw").unwrap();
 
-        assert!(matches!(
+        assert_matches!(
             vmm.vm_add_disk(disk_config.clone()),
             Err(VmError::VmNotCreated)
-        ));
+        );
 
         let _ = vmm.vm_create(create_dummy_vm_config());
         assert!(
@@ -4011,10 +4009,7 @@ pub(crate) mod tests {
         let mut vmm = create_dummy_vmm();
         let fs_config = FsConfig::parse("tag=mytag,socket=/tmp/sock").unwrap();
 
-        assert!(matches!(
-            vmm.vm_add_fs(fs_config.clone()),
-            Err(VmError::VmNotCreated)
-        ));
+        assert_matches!(vmm.vm_add_fs(fs_config.clone()), Err(VmError::VmNotCreated));
 
         let _ = vmm.vm_create(create_dummy_vm_config());
         assert!(vmm.vm_config.as_ref().unwrap().lock().unwrap().fs.is_none());
@@ -4052,10 +4047,10 @@ pub(crate) mod tests {
             GenericVhostUserConfig::parse("device_type=26,socket=/tmp/sock,queue_sizes=[1024]")
                 .unwrap();
 
-        assert!(matches!(
+        assert_matches!(
             vmm.vm_add_generic_vhost_user(generic_vhost_user_config.clone()),
             Err(VmError::VmNotCreated)
-        ));
+        );
 
         let _ = vmm.vm_create(create_dummy_vm_config());
         assert!(
@@ -4103,10 +4098,10 @@ pub(crate) mod tests {
         let mut vmm = create_dummy_vmm();
         let pmem_config = PmemConfig::parse("file=/tmp/pmem,size=128M").unwrap();
 
-        assert!(matches!(
+        assert_matches!(
             vmm.vm_add_pmem(pmem_config.clone()),
             Err(VmError::VmNotCreated)
-        ));
+        );
 
         let _ = vmm.vm_create(create_dummy_vm_config());
         assert!(
@@ -4156,10 +4151,10 @@ pub(crate) mod tests {
         }
         .unwrap();
 
-        assert!(matches!(
+        assert_matches!(
             vmm.vm_add_net(net_config.clone()),
             Err(VmError::VmNotCreated)
-        ));
+        );
 
         let _ = vmm.vm_create(create_dummy_vm_config());
         assert!(
@@ -4203,10 +4198,10 @@ pub(crate) mod tests {
         let mut vmm = create_dummy_vmm();
         let vdpa_config = VdpaConfig::parse("path=/dev/vhost-vdpa,num_queues=2").unwrap();
 
-        assert!(matches!(
+        assert_matches!(
             vmm.vm_add_vdpa(vdpa_config.clone()),
             Err(VmError::VmNotCreated)
-        ));
+        );
 
         let _ = vmm.vm_create(create_dummy_vm_config());
         assert!(
@@ -4250,10 +4245,10 @@ pub(crate) mod tests {
         let mut vmm = create_dummy_vmm();
         let vsock_config = VsockConfig::parse("socket=/tmp/sock,cid=3,iommu=on").unwrap();
 
-        assert!(matches!(
+        assert_matches!(
             vmm.vm_add_vsock(vsock_config.clone()),
             Err(VmError::VmNotCreated)
-        ));
+        );
 
         let _ = vmm.vm_create(create_dummy_vm_config());
         assert!(
@@ -4303,8 +4298,9 @@ pub(crate) mod tests {
             &memzone_updates,
             &Arc::new(Mutex::new(*dummy_config.clone())),
         );
-        assert!(
-            matches!(result, Err(MemoryZoneUpdateError::NoZones)),
+        assert_matches!(
+            result,
+            Err(MemoryZoneUpdateError::NoZones),
             "Expected `Err(MemoryZoneUpdateError::NoZones)` but got {result:?}"
         );
 
@@ -4318,11 +4314,9 @@ pub(crate) mod tests {
             &memzone_updates,
             &Arc::new(Mutex::new(*dummy_config.clone())),
         );
-        assert!(
-            matches!(
-                result,
-                Err(MemoryZoneUpdateError::ZoneNotFound(ref id)) if id=="zone2"
-            ),
+        assert_matches!(
+            result,
+            Err(MemoryZoneUpdateError::ZoneNotFound(ref id)) if id=="zone2",
             "Expected `Err(MemoryZoneUpdateError::ZoneNotFound(\"zone2\"))` but got {result:?}"
         );
 
@@ -4343,11 +4337,9 @@ pub(crate) mod tests {
             &memzone_updates,
             &Arc::new(Mutex::new(*dummy_config.clone())),
         );
-        assert!(
-            matches!(
-                result,
-                Err(MemoryZoneUpdateError::ZoneNotFound(ref id)) if id=="zone2"
-            ),
+        assert_matches!(
+            result,
+            Err(MemoryZoneUpdateError::ZoneNotFound(ref id)) if id=="zone2",
             "Expected `Err(MemoryZoneUpdateError::ZoneNotFound(\"zone2\"))` but got {result:?}"
         );
 
@@ -4379,11 +4371,9 @@ pub(crate) mod tests {
             &memzone_updates,
             &Arc::new(Mutex::new(*dummy_config.clone())),
         );
-        assert!(
-            matches!(
-                result,
-                Err(MemoryZoneUpdateError::MultipleUpdates(ref id)) if id=="zone1"
-            ),
+        assert_matches!(
+            result,
+            Err(MemoryZoneUpdateError::MultipleUpdates(ref id)) if id=="zone1",
             "Expected `Err(MemoryZoneUpdateError::MultipleUpdates(\"zone1\"))` but got {result:?}"
         );
 
@@ -4413,8 +4403,9 @@ pub(crate) mod tests {
         ];
         let dummy_config = Arc::new(Mutex::new(*dummy_config));
         let result = update_memory_zones(&memzone_updates, &dummy_config);
-        assert!(
-            matches!(result, Ok(()),),
+        assert_matches!(
+            result,
+            Ok(()),
             "Result should have been Ok(()) but got {result:?}"
         );
         let result_zones = dummy_config.lock().unwrap().memory.zones.clone().unwrap();
