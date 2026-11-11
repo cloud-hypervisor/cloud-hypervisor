@@ -107,10 +107,16 @@ impl Write for SerialBuffer {
             return Ok(());
         }
 
-        while let Some(byte) = self.buffer.pop_front() {
-            if self.out.write_all(&[byte]).is_err() {
-                self.buffer.push_front(byte);
-                break;
+        while !self.buffer.is_empty() {
+            let (front, _) = self.buffer.as_slices();
+            match self.out.write(front) {
+                Ok(0) => break,
+                Ok(written) => {
+                    self.buffer.drain(..written);
+                }
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                // Keep the rest for the next flush
+                Err(_) => break,
             }
         }
         self.out.flush()
