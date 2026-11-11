@@ -164,7 +164,7 @@ impl MsiCap {
         // Update cache without overriding the read-only bits.
         match data.len() {
             2 => {
-                let value = u16::from_le_bytes(data.try_into().expect("data should be 2 bytes"));
+                let value = u16::from_le_bytes(*data.as_array().expect("data should be 2 bytes"));
                 match offset {
                     MSI_MSG_CTL_OFFSET => self.set_msg_ctl(value),
                     x if x == msg_data_offset => self.msg_data = value,
@@ -172,7 +172,7 @@ impl MsiCap {
                 }
             }
             4 => {
-                let value = u32::from_le_bytes(data.try_into().expect("data should be 4 bytes"));
+                let value = u32::from_le_bytes(*data.as_array().expect("data should be 4 bytes"));
                 match offset {
                     0x0 => self.set_msg_ctl((value >> 16) as u16),
                     MSI_MSG_ADDR_LO_OFFSET => self.msg_addr_lo = value & MSI_MSG_ADDR_LO_MASK,

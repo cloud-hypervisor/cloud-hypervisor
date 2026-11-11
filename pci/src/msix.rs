@@ -349,7 +349,7 @@ impl MsixConfig {
 
         match data.len() {
             4 => {
-                let value = u32::from_le_bytes(data.try_into().expect("data should be 4 bytes"));
+                let value = u32::from_le_bytes(*data.as_array().expect("data should be 4 bytes"));
                 match modulo_offset {
                     0x0 => self.table_entries[index].msg_addr_lo = value,
                     0x4 => self.table_entries[index].msg_addr_hi = value,
@@ -363,7 +363,7 @@ impl MsixConfig {
                 debug!("MSI_W TABLE offset 0x{offset:x} data 0x{value:x}");
             }
             8 => {
-                let value = u64::from_le_bytes(data.try_into().expect("data should be 8 bytes"));
+                let value = u64::from_le_bytes(*data.as_array().expect("data should be 8 bytes"));
                 match modulo_offset {
                     0x0 => {
                         self.table_entries[index].msg_addr_lo = (value & 0xffff_ffffu64) as u32;
