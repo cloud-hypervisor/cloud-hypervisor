@@ -363,7 +363,7 @@ impl PciConfigIo {
             ),
             4 => (
                 0xffff_ffff,
-                u32::from_le_bytes(data.try_into().expect("data should be 4 bytes")),
+                u32::from_le_bytes(*data.as_array().expect("data should be 4 bytes")),
             ),
             _ => return,
         };
