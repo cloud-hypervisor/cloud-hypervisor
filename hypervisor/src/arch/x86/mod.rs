@@ -261,7 +261,7 @@ impl Default for LapicState {
 
 impl LapicState {
     pub fn get_klapic_reg(&self, reg_offset: usize) -> u32 {
-        let bytes: [raw::c_char; 4] = self.regs[reg_offset..reg_offset + 4].try_into().unwrap();
+        let bytes: [raw::c_char; 4] = *self.regs[reg_offset..reg_offset + 4].as_array().unwrap();
         u32::from_le_bytes(bytes.map(|byte| byte as u8))
     }
 
