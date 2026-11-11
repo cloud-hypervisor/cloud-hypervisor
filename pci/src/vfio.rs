@@ -2812,9 +2812,24 @@ impl PciDevice for VfioPciDevice {
                 let region_index = region.index;
                 let old_base = region.start.raw_value();
                 let map_p2p = self.p2p_dma_mapped && region.is_p2p_mappable();
+                let new_addresses = region
+                    .user_memory_regions
+                    .iter()
+                    .map(|user_memory_region| {
+                        let new_address = new_base
+                            .checked_add(user_memory_region.start - old_base)
+                            .ok_or_else(|| io::Error::other("BAR address overflows"))?;
+                        new_address
+                            .checked_add(user_memory_region.mapping.len() as u64)
+                            .ok_or_else(|| io::Error::other("BAR range overflows"))?;
+                        Ok(new_address)
+                    })
+                    .collect::<io::Result<Vec<_>>>()?;
                 region.start = GuestAddress(new_base);
 
-                for user_memory_region in region.user_memory_regions.iter_mut() {
+                for (user_memory_region, new_address) in
+                    region.user_memory_regions.iter_mut().zip(new_addresses)
+                {
                     let len = user_memory_region.mapping.len();
                     let offset = user_memory_region.start - old_base;
                     // Unmap the old MMIO region from the host IOMMU address space via VfioOps
@@ -2833,7 +2848,7 @@ iova 0x{:x}, size 0x{:x}: {}, ",
                             user_memory_region.start, len, e
                         );
                     }
-                    user_memory_region.move_region(self.vm.as_ref(), new_base + offset)?;
+                    user_memory_region.move_region(self.vm.as_ref(), new_address)?;
 
                     // Map the moved MMIO region into the host IOMMU address space via VfioOps
                     // Only needed if p2p_dma is enabled.

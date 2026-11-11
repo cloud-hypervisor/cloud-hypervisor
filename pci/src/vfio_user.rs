@@ -441,11 +441,27 @@ impl PciDevice for VfioUserPciDevice {
         for mmio_region in self.common.mmio_regions.iter_mut() {
             if mmio_region.index as usize == bar_idx {
                 let old_base = mmio_region.start.raw_value();
+                let new_addresses = mmio_region
+                    .user_memory_regions
+                    .iter()
+                    .map(|user_memory_region| {
+                        let new_address = new_base
+                            .checked_add(user_memory_region.start - old_base)
+                            .ok_or_else(|| io::Error::other("BAR address overflows"))?;
+                        new_address
+                            .checked_add(user_memory_region.mapping.len() as u64)
+                            .ok_or_else(|| io::Error::other("BAR range overflows"))?;
+                        Ok(new_address)
+                    })
+                    .collect::<io::Result<Vec<_>>>()?;
                 mmio_region.start = GuestAddress(new_base);
 
-                for user_memory_region in mmio_region.user_memory_regions.iter_mut() {
-                    let offset = user_memory_region.start - old_base;
-                    user_memory_region.move_region(self.vm.as_ref(), new_base + offset)?;
+                for (user_memory_region, new_address) in mmio_region
+                    .user_memory_regions
+                    .iter_mut()
+                    .zip(new_addresses)
+                {
+                    user_memory_region.move_region(self.vm.as_ref(), new_address)?;
                 }
                 info!("Moved bar 0x{old_base:x} -> 0x{new_base:x}");
             }
