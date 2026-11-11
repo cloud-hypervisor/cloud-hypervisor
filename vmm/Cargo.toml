@@ -47,7 +47,6 @@ async-channel = { version = "2.5.0", optional = true }
 bitflags = { workspace = true }
 block = { path = "../block" }
 blocking = { version = "1.6.2", optional = true }
-cfg-if = { workspace = true }
 devices = { path = "../devices" }
 epoll = { workspace = true }
 event_monitor = { path = "../event_monitor" }

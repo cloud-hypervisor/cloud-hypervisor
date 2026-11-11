@@ -115,7 +115,6 @@ anyhow = { version = "1.0.102", default-features = false }
 base64 = { version = "0.23.0", default-features = false }
 bitfield-struct = "0.13.0"
 bitflags = "2.11.1"
-cfg-if = "1.0.4"
 clap = { version = "4.6.1", default-features = false }
 crc-any = { version = "3.0.0", default-features = false }
 dhat = "0.3.3"
