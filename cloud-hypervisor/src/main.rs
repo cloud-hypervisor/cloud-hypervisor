@@ -1207,7 +1207,7 @@ mod tests {
     #[test]
     fn test_cli_options_sorted() {
         let command = Cli::command();
-        assert_args_sorted(|| command.get_arguments());
+        assert_args_sorted(command.get_arguments());
     }
 
     #[test]

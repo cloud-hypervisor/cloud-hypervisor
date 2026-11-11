@@ -1144,7 +1144,7 @@ mod tests {
     #[test]
     fn test_cli_args_sorted() {
         let command = Cli::command();
-        assert_args_sorted(|| command.get_arguments());
+        assert_args_sorted(command.get_arguments());
     }
 
     #[test]
@@ -1157,7 +1157,7 @@ mod tests {
                 .is_sorted()
         );
         for subcommand in command.get_subcommands() {
-            assert_args_sorted(|| subcommand.get_arguments());
+            assert_args_sorted(subcommand.get_arguments());
         }
     }
 
