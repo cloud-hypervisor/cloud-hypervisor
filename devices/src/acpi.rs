@@ -342,14 +342,28 @@ impl Aml for VmGenIdDevice {
     }
 }
 
+pub const ACPI_PM_TIMER_SNAPSHOT_ID: &str = "__acpi_pm_timer";
+
 pub struct AcpiPmTimerDevice {
     start: Instant,
+    elapsed: Duration,
+    paused: bool,
 }
 
 impl AcpiPmTimerDevice {
     pub fn new() -> Self {
         Self {
             start: Instant::now(),
+            elapsed: Duration::ZERO,
+            paused: false,
+        }
+    }
+
+    fn elapsed(&self) -> Duration {
+        if self.paused {
+            self.elapsed
+        } else {
+            self.elapsed + self.start.elapsed()
         }
     }
 }
@@ -360,15 +374,40 @@ impl Default for AcpiPmTimerDevice {
     }
 }
 
+impl Snapshottable for AcpiPmTimerDevice {
+    fn id(&self) -> String {
+        ACPI_PM_TIMER_SNAPSHOT_ID.to_string()
+    }
+}
+
+impl Pausable for AcpiPmTimerDevice {
+    fn pause(&mut self) -> Result<(), MigratableError> {
+        if !self.paused {
+            self.elapsed += self.start.elapsed();
+            self.paused = true;
+        }
+        Ok(())
+    }
+
+    fn resume(&mut self) -> Result<(), MigratableError> {
+        if self.paused {
+            self.start = Instant::now();
+            self.paused = false;
+        }
+        Ok(())
+    }
+}
+
+impl Transportable for AcpiPmTimerDevice {}
+impl Migratable for AcpiPmTimerDevice {}
+
 impl BusDevice for AcpiPmTimerDevice {
     fn read(&mut self, _base: u64, _offset: u64, data: &mut [u8]) {
         if data.len() != size_of::<u32>() {
             debug!("Invalid sized read of PM timer: {}", data.len());
             return;
         }
-        let now = Instant::now();
-        let since = now.duration_since(self.start);
-        let nanos = since.as_nanos();
+        let nanos = self.elapsed().as_nanos();
 
         const PM_TIMER_FREQUENCY_HZ: u128 = 3_579_545;
         const NANOS_PER_SECOND: u128 = 1_000_000_000;
@@ -431,6 +470,30 @@ mod tests {
         );
         restored.read(0, 0, &mut data);
         assert_eq!(data, [0]);
+    }
+
+    #[test]
+    fn pause_resume_pm_timer() {
+        let mut timer = AcpiPmTimerDevice::new();
+        // Advance the running clock without sleeping in the test.
+        timer.start = Instant::now() - Duration::from_secs(123);
+        timer.pause().unwrap();
+        let mut before = [0; 4];
+        timer.read(0, 0, &mut before);
+        assert!(u32::from_le_bytes(before) >= 123 * 3_579_545);
+        timer.pause().unwrap();
+        let mut after = [0; 4];
+        timer.read(0, 0, &mut after);
+        assert_eq!(before, after);
+        // Resuming must retain the elapsed time and restart the counter.
+        timer.resume().unwrap();
+        assert!(!timer.paused);
+        timer.start -= Duration::from_secs(1);
+        // Resuming an already running timer must not reset its interval.
+        timer.resume().unwrap();
+        timer.pause().unwrap();
+        timer.read(0, 0, &mut after);
+        assert!(u32::from_le_bytes(after) >= u32::from_le_bytes(before) + 3_579_545);
     }
 
     #[test]
