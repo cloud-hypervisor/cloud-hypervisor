@@ -117,7 +117,7 @@ The basic command to boot a Windows image is shown in the next code snippet. The
 
 ```shell
 cloud-hypervisor \
-	--kernel ./$OVMF_DIR/CLOUDHV.fd \
+	--firmware ./$OVMF_DIR/CLOUDHV.fd \
 	--disk path=./$IMG_FILE,image_type=raw \
 	--cpus boot=1,kvm_hyperv=on \
 	--memory size=4G \
@@ -128,7 +128,7 @@ cloud-hypervisor \
 
 It is necessary to always:
 
-- Carry the OVMF firmware in the `--kernel` option
+- Pass the `CLOUDHV.fd` firmware with the `--firmware` option
 - Add `kvm_hyperv=on` to the `--cpus` option
 
 In cases where the host processor supports address space > 39 bits, it might be necessary to limit the address space. It can be done by appending the option `max_phys_bits=X` to the `--cpus` parameter, where `X` is the number of bits to be supported. Windows was tested to support at least 39-bit address space.
