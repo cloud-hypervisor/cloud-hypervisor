@@ -344,6 +344,11 @@ impl Aml for VmGenIdDevice {
 
 pub const ACPI_PM_TIMER_SNAPSHOT_ID: &str = "__acpi_pm_timer";
 
+#[derive(Default, Serialize, Deserialize)]
+pub struct AcpiPmTimerState {
+    elapsed: Duration,
+}
+
 pub struct AcpiPmTimerDevice {
     start: Instant,
     elapsed: Duration,
@@ -351,11 +356,11 @@ pub struct AcpiPmTimerDevice {
 }
 
 impl AcpiPmTimerDevice {
-    pub fn new() -> Self {
+    pub fn new(state: Option<AcpiPmTimerState>) -> Self {
         Self {
             start: Instant::now(),
-            elapsed: Duration::ZERO,
-            paused: false,
+            paused: state.is_some(),
+            elapsed: state.unwrap_or_default().elapsed,
         }
     }
 
@@ -370,13 +375,19 @@ impl AcpiPmTimerDevice {
 
 impl Default for AcpiPmTimerDevice {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 
 impl Snapshottable for AcpiPmTimerDevice {
     fn id(&self) -> String {
         ACPI_PM_TIMER_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&mut self) -> Result<Snapshot, MigratableError> {
+        Snapshot::new_from_state(&AcpiPmTimerState {
+            elapsed: self.elapsed(),
+        })
     }
 }
 
@@ -474,7 +485,7 @@ mod tests {
 
     #[test]
     fn pause_resume_pm_timer() {
-        let mut timer = AcpiPmTimerDevice::new();
+        let mut timer = AcpiPmTimerDevice::new(None);
         // Advance the running clock without sleeping in the test.
         timer.start = Instant::now() - Duration::from_secs(123);
         timer.pause().unwrap();
@@ -493,6 +504,29 @@ mod tests {
         timer.resume().unwrap();
         timer.pause().unwrap();
         timer.read(0, 0, &mut after);
+        assert!(u32::from_le_bytes(after) >= u32::from_le_bytes(before) + 3_579_545);
+    }
+
+    #[test]
+    fn restore_preserves_paused_pm_timer() {
+        let mut timer = AcpiPmTimerDevice::new(None);
+        timer.start = Instant::now() - Duration::from_secs(123);
+        timer.pause().unwrap();
+        let mut before = [0; 4];
+        timer.read(0, 0, &mut before);
+        let state = timer.snapshot().unwrap().to_state().unwrap();
+        let mut restored = AcpiPmTimerDevice::new(Some(state));
+        assert!(restored.paused);
+        // Time spent restoring the VM must not advance the counter.
+        restored.start -= Duration::from_secs(1);
+        let mut after = [0; 4];
+        restored.read(0, 0, &mut after);
+        assert_eq!(before, after);
+        restored.resume().unwrap();
+        assert!(!restored.paused);
+        restored.start -= Duration::from_secs(1);
+        restored.pause().unwrap();
+        restored.read(0, 0, &mut after);
         assert!(u32::from_le_bytes(after) >= u32::from_le_bytes(before) + 3_579_545);
     }
 
