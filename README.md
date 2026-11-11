@@ -324,16 +324,14 @@ across updates because:
 
 Further details can be found in the [release documentation](docs/releases.md).
 
-As of 2023-01-03, the following cloud images are supported:
-
-- [Ubuntu Focal](https://cloud-images.ubuntu.com/focal/current/) (focal-server-cloudimg-{amd64,arm64}.img)
-- [Ubuntu Jammy](https://cloud-images.ubuntu.com/jammy/current/) (jammy-server-cloudimg-{amd64,arm64}.img)
-- [Ubuntu Noble](https://cloud-images.ubuntu.com/noble/current/) (noble-server-cloudimg-{amd64,arm64}.img)
-- [Fedora 36](https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/36/Cloud/) ([Fedora-Cloud-Base-36-1.5.x86_64.raw.xz](https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/36/Cloud/x86_64/images/) / [Fedora-Cloud-Base-36-1.5.aarch64.raw.xz](https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/36/Cloud/aarch64/images/))
-
-Direct kernel boot to userspace should work with a rootfs from most
-distributions although you may need to enable exotic filesystem types in the
-reference kernel configuration (e.g. XFS or btrfs.)
+Firmware boot works with the cloud images of recent distributions, for example
+Ubuntu and Windows Server, see [Windows](docs/windows.md). Linux guests with
+Linux 5.18 or newer support all features that Cloud Hypervisor offers, such as
+virtio-mem on AArch64 and the VM Generation ID device, except reading the clock
+from the ACPI Time and Alarm Device, which needs Linux 7.1. Direct kernel boot
+to userspace should work with a rootfs from most distributions, although you may
+need to enable exotic filesystem types in the reference kernel configuration
+(e.g. XFS or btrfs.)
 
 ## Hot Plug
 
