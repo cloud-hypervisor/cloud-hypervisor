@@ -325,7 +325,6 @@ impl Interrupt {
 
 #[derive(Clone)]
 pub(crate) struct UserMemoryRegion {
-    pub slot: u32,
     pub start: u64,
     pub mapping: Arc<Mutex<GuestRegion>>,
     pub p2p_mapped: bool,
@@ -435,13 +434,15 @@ impl MmioRegion {
         self.length >= get_page_size()
     }
 
-    /// Returns true if this region has the exact same memory slots as the other region.
-    pub fn has_matching_slots(&self, other: &MmioRegion) -> bool {
+    /// Whether both BAR descriptions refer to the same backing regions.
+    pub fn has_matching_mappings(&self, other: &MmioRegion) -> bool {
         self.user_memory_regions.len() == other.user_memory_regions.len()
-            && self
-                .user_memory_regions
-                .iter()
-                .all(|u| other.user_memory_regions.iter().any(|o| o.slot == u.slot))
+            && self.user_memory_regions.iter().all(|u| {
+                other
+                    .user_memory_regions
+                    .iter()
+                    .any(|o| Arc::ptr_eq(&o.mapping, &u.mapping))
+            })
     }
 }
 
@@ -2530,7 +2531,6 @@ impl VfioPciDevice {
                         .register()
                         .map_err(VfioPciError::CreateUserMemoryRegion)?;
                     let mut user_memory_region = UserMemoryRegion {
-                        slot: mapping.slot().unwrap(),
                         start: region.start.0 + area.offset,
                         mapping: Arc::new(Mutex::new(mapping)),
                         p2p_mapped: false,
@@ -3131,7 +3131,6 @@ mod tests {
             .unwrap();
             mapping.register().unwrap();
             regions.push(UserMemoryRegion {
-                slot: mapping.slot().unwrap(),
                 start: address,
                 mapping: Arc::new(Mutex::new(mapping)),
                 p2p_mapped: false,
@@ -3207,7 +3206,6 @@ mod tests {
             index: 0,
             user_memory_regions: vec![
                 UserMemoryRegion {
-                    slot: 0,
                     start: page_size,
                     mapping: mapping_a,
                     p2p_mapped: false,
@@ -3215,7 +3213,6 @@ mod tests {
                     dma_buf: None,
                 },
                 UserMemoryRegion {
-                    slot: 1,
                     start: 3 * page_size,
                     mapping: mapping_b,
                     p2p_mapped: false,

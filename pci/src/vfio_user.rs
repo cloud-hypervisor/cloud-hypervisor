@@ -192,11 +192,9 @@ impl VfioUserPciDevice {
                     mapping
                         .register()
                         .map_err(VfioUserPciDeviceError::MapRegionGuest)?;
-                    let slot = mapping.slot().unwrap();
                     let mapping = Arc::new(Mutex::new(mapping));
 
                     let user_memory_region = UserMemoryRegion {
-                        slot,
                         start: mmio_region.start.0 + s.offset,
                         mapping,
                         p2p_mapped: false,

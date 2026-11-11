@@ -5695,14 +5695,12 @@ impl DeviceManager {
                 }
 
                 // Remove this device's MMIO regions from the DeviceManager's
-                // mmio_regions list. We match on UserMemoryRegion slot numbers
-                // rather than MmioRegion start addresses because move_bar()
-                // updates the device's region addresses but not the
-                // DeviceManager's cloned copies.
+                // mmio_regions list. The shared backing identifies each BAR
+                // even when its guest address changes.
                 let device_regions = vfio_pci_device.lock().unwrap().mmio_regions();
                 let mut mmio_regions = self.mmio_regions.lock().unwrap();
                 for device_region in &device_regions {
-                    mmio_regions.retain(|x| !x.has_matching_slots(device_region));
+                    mmio_regions.retain(|x| !x.has_matching_mappings(device_region));
                 }
 
                 (
