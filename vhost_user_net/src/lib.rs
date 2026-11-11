@@ -68,9 +68,9 @@ pub enum Error {
 }
 
 pub const SYNTAX: &str = "vhost-user-net backend parameters \
-\"ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>,host_mac=<mac_addr>,mtu=<mtu>,\
-socket=<socket_path>,client=on|off,num_queues=<number_of_queues>,\
-queue_size=<size_of_each_queue>,tap=<if_name>\"";
+    \"ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>,host_mac=<mac_addr>,mtu=<mtu>,\
+    socket=<socket_path>,client=on|off,num_queues=<number_of_queues>,\
+    queue_size=<size_of_each_queue>,tap=<if_name>\"";
 
 impl From<Error> for io::Error {
     fn from(e: Error) -> Self {
