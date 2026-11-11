@@ -537,11 +537,11 @@ pub fn validate_image_type(f: &mut File, image_type: ImageType) -> BlockResult<b
     }
 
     match image_type {
-        ImageType::Qcow2 => Ok(u32::from_be_bytes(block[0..4].try_into().unwrap()) == QCOW_MAGIC),
+        ImageType::Qcow2 => Ok(u32::from_be_bytes(*block[0..4].as_array().unwrap()) == QCOW_MAGIC),
         ImageType::FixedVhd => formats::vhd::is_fixed_vhd(f).map_err(|e| {
             BlockError::new(BlockErrorKind::Io, e).with_op(ErrorOp::ValidateImageType)
         }),
-        ImageType::Vhdx => Ok(u64::from_le_bytes(block[0..8].try_into().unwrap()) == VHDX_SIGN),
+        ImageType::Vhdx => Ok(u64::from_le_bytes(*block[0..8].as_array().unwrap()) == VHDX_SIGN),
         ImageType::FlatVmdk => {
             if formats::vmdk::has_descriptor_header(&block) {
                 formats::vmdk::is_flat_vmdk(f).map_err(|e| {
