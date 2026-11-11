@@ -205,6 +205,7 @@ paths:
   /vm.resize-disk:
     put:
       summary: Resize a disk
+      description: Requires a booted VM.
       requestBody:
         description: Resizes a disk attached to the VM
         content:
