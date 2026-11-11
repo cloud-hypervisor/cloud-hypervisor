@@ -48,7 +48,7 @@ const PTM_CAP_SET_BUFFERSIZE: u64 = 1 << 13;
 pub fn is_selftest(input: &[u8]) -> bool {
     if input.len() >= TPM_REQ_HDR_SIZE {
         let ordinal: &[u8; 4] = input[6..6 + 4]
-            .try_into()
+            .as_array()
             .expect("slice with incorrect length");
 
         return u32::from_ne_bytes(*ordinal).to_be() == 0x143;
@@ -255,7 +255,7 @@ impl Emulator {
                 ))
             })?;
 
-        let result_code = u32::from_be_bytes(output[0..result_len].try_into().unwrap());
+        let result_code = u32::from_be_bytes(*output[0..result_len].as_array().unwrap());
         if result_code != TPM_SUCCESS {
             // swtpm returns only the 4-byte result code on error. Propagate
             // the failure without attempting to read or parse a payload that
@@ -425,7 +425,7 @@ impl Emulator {
 
         self.deliver_request(&mut cmd)?;
 
-        let response_code = u32::from_be_bytes(buffer[6..10].try_into().unwrap());
+        let response_code = u32::from_be_bytes(*buffer[6..10].as_array().unwrap());
         if !startup_response_is_ok(response_code) {
             return Err(Error::DeliverRequest(anyhow!(
                 "TPM2_Startup(CLEAR) returned error code: {response_code:#X}"
