@@ -645,7 +645,7 @@ impl VmSendMigrationData {
 
     // Same as QEMU.
     pub const DEFAULT_DOWNTIME: Duration = Duration::from_millis(300);
-    pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60 * 60 /* one hour */);
+    pub const DEFAULT_TIMEOUT: Duration = Duration::from_hours(1);
 
     fn default_downtime_ms() -> NonZeroU64 {
         let ms_u64 = u64::try_from(Self::DEFAULT_DOWNTIME.as_millis()).unwrap();
