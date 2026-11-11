@@ -285,7 +285,7 @@ impl QcowAsync {
 mod tests {
     use std::io::{ErrorKind, Write};
     use std::sync::Arc;
-    use std::{mem, thread};
+    use std::{assert_matches, mem, thread};
 
     use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
     use vmm_sys_util::tempfile::TempFile;
@@ -360,8 +360,9 @@ mod tests {
             }
             // Drain the eventfd when signaled (io_uring or synthetic).
             if let Err(err) = async_io.notifier().read() {
-                assert!(
-                    matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::Interrupted),
+                assert_matches!(
+                    err.kind(),
+                    ErrorKind::WouldBlock | ErrorKind::Interrupted,
                     "Failed to read completion eventfd: {err}"
                 );
             }

@@ -313,6 +313,8 @@ pub fn is_flat_vmdk(f: &mut File) -> io::Result<bool> {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
 
     fn parse_hdr(input: &str) -> io::Result<(VmdkDescriptorHeader, String)> {
@@ -517,7 +519,7 @@ mod tests {
 
         let (header, last) = parse_hdr(input).unwrap();
 
-        assert!(matches!(header.create_type, VMDKDiskType::MonolithicFlat));
+        assert_matches!(header.create_type, VMDKDiskType::MonolithicFlat);
         assert_eq!(last, "# Extent description");
     }
 
@@ -529,10 +531,7 @@ mod tests {
                            # Extent description\n";
 
         let (header, _last) = parse_hdr(input).unwrap();
-        assert!(matches!(
-            header.create_type,
-            VMDKDiskType::TwoGbMaxExtentFlat
-        ));
+        assert_matches!(header.create_type, VMDKDiskType::TwoGbMaxExtentFlat);
     }
 
     #[test]
@@ -547,7 +546,7 @@ mod tests {
 
         let (header, extents) = parse_full(input).unwrap();
 
-        assert!(matches!(header.create_type, VMDKDiskType::MonolithicFlat));
+        assert_matches!(header.create_type, VMDKDiskType::MonolithicFlat);
         assert_eq!(extents.extents.len(), 1);
         assert_eq!(extents.extents[0].access, ExtentAccess::ReadWrite);
     }
@@ -564,10 +563,7 @@ mod tests {
 
         let (header, extents) = parse_full(input).unwrap();
 
-        assert!(matches!(
-            header.create_type,
-            VMDKDiskType::TwoGbMaxExtentFlat
-        ));
+        assert_matches!(header.create_type, VMDKDiskType::TwoGbMaxExtentFlat);
         assert_eq!(extents.extents.len(), 2);
     }
 
@@ -593,7 +589,7 @@ mod tests {
 
         let (header, extents) = parse_full(input).unwrap();
 
-        assert!(matches!(header.create_type, VMDKDiskType::MonolithicFlat));
+        assert_matches!(header.create_type, VMDKDiskType::MonolithicFlat);
         assert_eq!(extents.extents.len(), 1);
         assert_eq!(extents.extents[0].access, ExtentAccess::ReadWrite);
         assert_eq!(extents.extents[0].size_in_sectors, 6_291_456);

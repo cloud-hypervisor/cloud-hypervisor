@@ -143,7 +143,7 @@ mod tests {
     use std::os::unix::fs::FileExt;
     use std::path::Path;
     use std::sync::Arc;
-    use std::{env, thread};
+    use std::{assert_matches, env, thread};
 
     use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
     use vmm_sys_util::tempdir::TempDir;
@@ -1026,7 +1026,7 @@ mod tests {
 
         let err = QcowDisk::new(File::open(&overlay_path).unwrap(), false, true, true, false)
             .unwrap_err();
-        assert!(matches!(err.kind(), BlockErrorKind::Io));
+        assert_matches!(err.kind(), BlockErrorKind::Io);
 
         let expected_path = test_dir
             .as_path()
@@ -1109,7 +1109,7 @@ mod tests {
 
         let overlay_file = overlay_temp.into_file();
         let err = QcowDisk::new(overlay_file, false, true, true, false).unwrap_err();
-        assert!(matches!(err.kind(), BlockErrorKind::Io));
+        assert_matches!(err.kind(), BlockErrorKind::Io);
 
         match err.downcast_ref::<QcowError>() {
             Some(QcowError::BackingFileIo(path, _)) => assert_eq!(path, "missing.raw"),

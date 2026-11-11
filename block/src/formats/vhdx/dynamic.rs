@@ -411,8 +411,8 @@ impl AsRawFd for Vhdx {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
     use std::os::unix::fs::FileExt;
+    use std::{assert_matches, fs};
 
     use super::*;
     use crate::formats::vhdx::bat::PAYLOAD_BLOCK_FULLY_PRESENT;
@@ -467,7 +467,7 @@ mod tests {
         file.sync_all().unwrap();
 
         let err = Vhdx::new(file, false).unwrap_err();
-        assert!(matches!(err, VhdxError::UnsupportedLogReplay), "{err}");
+        assert_matches!(err, VhdxError::UnsupportedLogReplay, "{err}");
     }
 
     /// An unaligned sector write under a forced O_DIRECT alignment must go
@@ -616,8 +616,9 @@ mod tests {
         drop(vhdx);
 
         let err = open_vhdx(tf.as_path()).unwrap_err();
-        assert!(
-            matches!(err, VhdxError::ReadBatEntry(VhdxBatError::PayloadPastEnd)),
+        assert_matches!(
+            err,
+            VhdxError::ReadBatEntry(VhdxBatError::PayloadPastEnd),
             "unexpected error: {err:?}"
         );
     }

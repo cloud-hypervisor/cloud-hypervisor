@@ -108,6 +108,7 @@ impl AsyncIo for VhdxSync {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::sync::{Arc, RwLock};
 
     use vmm_sys_util::tempfile::TempFile;
@@ -138,10 +139,10 @@ mod tests {
             OwnedIoBuffer::from_vec(vec![0u8; 1024]),
             1,
         );
-        assert!(matches!(
+        assert_matches!(
             sync.submit_data_operation(op),
             Err(AsyncIoError::ReadVectored(_))
-        ));
+        );
     }
 
     #[test]
@@ -153,10 +154,10 @@ mod tests {
             OwnedIoBuffer::from_vec(vec![0u8; 1024]),
             1,
         );
-        assert!(matches!(
+        assert_matches!(
             sync.submit_data_operation(op),
             Err(AsyncIoError::WriteVectored(_))
-        ));
+        );
     }
 
     #[test]

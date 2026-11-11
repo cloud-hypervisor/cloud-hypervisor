@@ -667,6 +667,7 @@ impl Request {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::sync::Arc;
 
     use vm_memory::GuestMemoryMmap;
@@ -731,15 +732,12 @@ mod tests {
                 };
                 let result = request.build_data_operation(Arc::clone(&mem), offset, alignment, 1);
                 if offset < 0 {
-                    assert!(matches!(
-                        result,
-                        Err(ExecuteError::BadRequest(Error::InvalidOffset))
-                    ));
+                    assert_matches!(result, Err(ExecuteError::BadRequest(Error::InvalidOffset)));
                 } else {
-                    assert!(matches!(
+                    assert_matches!(
                         result,
                         Err(ExecuteError::BadRequest(Error::InvalidDataAlignment(4096)))
-                    ));
+                    );
                 }
             }
         }
@@ -835,7 +833,7 @@ mod tests {
             .execute_async(Arc::clone(&mem), 1024, &mut disk, &[], 0)
             .unwrap();
         let op = disk.submitted.pop().unwrap();
-        assert!(matches!(op, AsyncIoOperation::ReadToMemory { .. }));
+        assert_matches!(op, AsyncIoOperation::ReadToMemory { .. });
 
         // The interesting part: the migration thread harvests the dirty log
         // while the read is still in flight. A page marked dirty at submit
@@ -871,8 +869,9 @@ mod tests {
                 if valid {
                     result.expect("an empty request at capacity should be accepted");
                 } else {
-                    assert!(
-                        matches!(result, Err(ExecuteError::BadRequest(Error::InvalidOffset))),
+                    assert_matches!(
+                        result,
+                        Err(ExecuteError::BadRequest(Error::InvalidOffset)),
                         "empty request at sector {sector} was accepted"
                     );
                 }
@@ -914,8 +913,9 @@ mod tests {
             if valid {
                 assert_eq!(result.unwrap().request_type(), RequestType::In);
             } else {
-                assert!(
-                    matches!(result, Err(Error::DescriptorLengthTooSmall)),
+                assert_matches!(
+                    result,
+                    Err(Error::DescriptorLengthTooSmall),
                     "header of {hdr_len} bytes was accepted"
                 );
             }

@@ -356,7 +356,7 @@ impl RefCount {
 
 #[cfg(test)]
 mod tests {
-    use std::io;
+    use std::{assert_matches, io};
 
     use super::super::qcow_raw_file::QcowRawFile;
     use super::super::test_util::{TestImage, WritebackPath, dirty_table_cache};
@@ -485,13 +485,15 @@ mod tests {
             let layout = MetadataLayout::new(&header, &l2_offsets);
             refs.set_block_addr(0, addr);
             let result = refs.get_cluster_refcount(&mut raw, 0, layout);
-            assert!(
-                matches!(result, Err(super::Error::InvalidRefblockOffset(a)) if a == addr),
+            assert_matches!(
+                result,
+                Err(super::Error::InvalidRefblockOffset(a)) if a == addr,
                 "{target}: {result:?}"
             );
             let result = refs.set_cluster_refcount(&mut raw, 0, 1, None, layout);
-            assert!(
-                matches!(result, Err(super::Error::InvalidRefblockOffset(a)) if a == addr),
+            assert_matches!(
+                result,
+                Err(super::Error::InvalidRefblockOffset(a)) if a == addr,
                 "{target}: {result:?}"
             );
             refs.set_block_addr(0, 0);
@@ -502,8 +504,9 @@ mod tests {
                 Some((addr, VecCache::new(block_entries as usize))),
                 layout,
             );
-            assert!(
-                matches!(result, Err(super::Error::InvalidRefblockOffset(a)) if a == addr),
+            assert_matches!(
+                result,
+                Err(super::Error::InvalidRefblockOffset(a)) if a == addr,
                 "{target}: {result:?}"
             );
             assert_eq!(refs.ref_table[0], 0);
