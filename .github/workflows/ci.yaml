@@ -308,6 +308,11 @@ jobs:
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           components: clippy
+      # Before cargo install so that the cache includes cargo-fuzz.
+      - name: Rust cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: fuzz
       - name: Install Cargo fuzz
         run: cargo install cargo-fuzz
       - name: Check fuzz lockfile
@@ -563,6 +568,10 @@ jobs:
         with:
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
+      - name: Rust cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: ${{ matrix.target }}
       - name: Build (default features)
         run: cargo build --locked --bin cloud-hypervisor --target=${{ matrix.target }}
       - name: Build (kvm)
