@@ -183,6 +183,8 @@ impl Migratable for Gic {}
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
 
     #[test]
@@ -196,18 +198,15 @@ mod tests {
         assert!(config.msi_addr >= floor);
         assert!(config.msi_addr - layout::GIC_V3_REDIST_SIZE < floor);
 
-        assert!(matches!(
+        assert_matches!(
             Gic::create_config(limit + 1, None),
             Err(Error::GicTooManyVcpus(n, l)) if n == limit + 1 && l == limit
-        ));
+        );
         // Counts whose layout would have wrapped below address 0 are refused
         // too, rather than wrapping or panicking.
         let wraps = layout::GIC_V3_DIST_START.raw_value() / layout::GIC_V3_REDIST_SIZE + 1;
         for n in [wraps, u64::MAX] {
-            assert!(matches!(
-                Gic::create_config(n, None),
-                Err(Error::GicTooManyVcpus(..))
-            ));
+            assert_matches!(Gic::create_config(n, None), Err(Error::GicTooManyVcpus(..)));
         }
     }
 }
