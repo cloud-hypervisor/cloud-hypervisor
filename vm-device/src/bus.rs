@@ -293,6 +293,8 @@ impl Bus {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
 
     struct DummyDevice;
@@ -443,10 +445,10 @@ mod tests {
     fn bus_read_unassigned() {
         let bus = Bus::new();
         let mut values = [0, 1, 2, 3];
-        assert!(matches!(
+        assert_matches!(
             bus.read(0x10, &mut values).unwrap_err(),
             Error::UnassignedAddressRange(addr) if addr == 0x10
-        ));
+        );
         assert_eq!(values, [BUS_UNASSIGNED_READ_VALUE; 4]);
     }
 }
