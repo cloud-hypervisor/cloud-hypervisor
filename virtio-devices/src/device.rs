@@ -31,6 +31,7 @@ use crate::{
     VIRTIO_F_RING_INDIRECT_DESC,
 };
 
+#[derive(Debug)]
 pub enum VirtioInterruptType {
     Config,
     Queue(u16),
@@ -492,6 +493,7 @@ impl Pausable for VirtioCommon {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::os::fd::AsRawFd;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Mutex, mpsc};
@@ -729,10 +731,7 @@ mod tests {
                     "offered={offered}, acknowledged={acknowledged}"
                 );
             } else {
-                assert!(matches!(
-                    result,
-                    Err(ActivateError::AccessPlatformNotAcknowledged)
-                ));
+                assert_matches!(result, Err(ActivateError::AccessPlatformNotAcknowledged));
                 assert!(common.workers.is_none());
             }
         }
@@ -851,10 +850,10 @@ mod tests {
         for (index, queue_evt) in device.queue_evts.iter().enumerate() {
             queue_evt.write(index as u64 + 1).unwrap();
         }
-        assert!(matches!(
+        assert_matches!(
             device.requests.recv_timeout(Duration::from_millis(20)),
             Err(mpsc::RecvTimeoutError::Timeout)
-        ));
+        );
 
         // A brief resume must not prevent the following pause from completing.
         device = device.resume_and_pause();

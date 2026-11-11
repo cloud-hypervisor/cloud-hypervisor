@@ -976,7 +976,7 @@ mod tests {
     use std::os::unix::net::UnixStream;
     use std::path::{Path, PathBuf};
     use std::time::Duration;
-    use std::{fs, thread};
+    use std::{assert_matches, fs, thread};
 
     use virtio_queue::QueueOwnedT;
 
@@ -1898,120 +1898,120 @@ mod tests {
 
     #[test]
     fn test_parse_command() {
-        assert!(matches!(
+        assert_matches!(
             VsockMuxer::parse_port_from_read_command(&PartiallyReadCommand::from_str("")),
             Err(Error::UnixRead(_))
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             VsockMuxer::parse_port_from_read_command(&PartiallyReadCommand::from_str("\n")),
             Err(Error::InvalidPortRequest)
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             VsockMuxer::parse_port_from_read_command(&PartiallyReadCommand::from_str("CONN\n")),
             Err(Error::InvalidPortRequest)
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             VsockMuxer::parse_port_from_read_command(&PartiallyReadCommand::from_str("FOO ")),
             Err(Error::UnixRead(_))
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             VsockMuxer::parse_port_from_read_command(&PartiallyReadCommand::from_str("FOOFOOX ")),
             Err(Error::InvalidPortRequest)
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             VsockMuxer::parse_port_from_read_command(&PartiallyReadCommand::from_str("CONNECT ")),
             Err(Error::UnixRead(_))
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             VsockMuxer::parse_port_from_read_command(&PartiallyReadCommand::from_str("connect ")),
             Err(Error::UnixRead(_))
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             VsockMuxer::parse_port_from_read_command(&PartiallyReadCommand::from_str("connect \n")),
             Err(Error::InvalidPortRequest)
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             VsockMuxer::parse_port_from_read_command(&PartiallyReadCommand::from_str(
                 "connect 1337"
             )),
             Err(Error::UnixRead(_))
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             VsockMuxer::parse_port_from_read_command(&PartiallyReadCommand::from_str(
                 "connect -1337\n"
             )),
             Err(Error::InvalidPortRequest)
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             VsockMuxer::parse_port_from_read_command(&PartiallyReadCommand::from_str(
                 "connect 8589934592\n"
             )),
             Err(Error::InvalidPortRequest)
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             VsockMuxer::parse_port_from_read_command(&PartiallyReadCommand::from_str(
                 "CONNECT 👾\n"
             )),
             Err(Error::InvalidPortRequest)
-        ));
+        );
         let max_buf_length_no_newline = "CONNECT                        1";
         assert_eq!(
             max_buf_length_no_newline.len(),
             PARTIALLY_READ_COMMAND_BUF_SIZE
         );
-        assert!(matches!(
+        assert_matches!(
             VsockMuxer::parse_port_from_read_command(&PartiallyReadCommand::from_str(
                 max_buf_length_no_newline
             )),
             Err(Error::InvalidPortRequest)
-        ));
+        );
         let max_buf_length_correct = "CONNECT                       1\n";
         assert_eq!(
             max_buf_length_correct.len(),
             PARTIALLY_READ_COMMAND_BUF_SIZE
         );
-        assert!(matches!(
+        assert_matches!(
             VsockMuxer::parse_port_from_read_command(&PartiallyReadCommand::from_str(
                 max_buf_length_correct
             )),
             Ok(1)
-        ));
+        );
 
-        assert!(matches!(
+        assert_matches!(
             VsockMuxer::parse_port_from_read_command(&PartiallyReadCommand::from_str(
                 "connect 0\n"
             )),
             Ok(0)
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             VsockMuxer::parse_port_from_read_command(&PartiallyReadCommand::from_str(
                 "connect 1337\n"
             )),
             Ok(1337)
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             VsockMuxer::parse_port_from_read_command(&PartiallyReadCommand::from_str(
                 "CONNECT 1337\n"
             )),
             Ok(1337)
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             VsockMuxer::parse_port_from_read_command(&PartiallyReadCommand::from_str(
                 "CONNECT  1337\n"
             )),
             Ok(1337)
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             VsockMuxer::parse_port_from_read_command(&PartiallyReadCommand::from_str(
                 "CONNECT 1337 \n"
             )),
             Ok(1337)
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             VsockMuxer::parse_port_from_read_command(&PartiallyReadCommand::from_str(
                 "CONNECT  1337 \n"
             )),
             Ok(1337)
-        ));
+        );
     }
 }

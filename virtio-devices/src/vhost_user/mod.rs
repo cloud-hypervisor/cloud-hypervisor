@@ -963,7 +963,7 @@ impl VhostUserCommon {
 mod tests {
     use std::io::{Read, Write};
     use std::os::unix::net::{UnixListener, UnixStream};
-    use std::thread;
+    use std::{assert_matches, thread};
 
     use vhost::vhost_user::message::{FrontendReq, VhostUserHeaderFlag};
     use vm_memory::{FileOffset, GuestAddress};
@@ -1267,7 +1267,7 @@ mod tests {
             &kill_evt,
             |_| Ok(()),
         );
-        assert!(matches!(result, Err(Error::ProtocolFeaturesUnsupported)));
+        assert_matches!(result.err(), Some(Error::ProtocolFeaturesUnsupported));
         backend.join().unwrap();
     }
 

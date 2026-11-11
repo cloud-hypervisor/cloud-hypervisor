@@ -1023,7 +1023,7 @@ mod tests {
     use std::fs::File;
     use std::io::{self, Write};
     use std::sync::{Arc, Mutex};
-    use std::thread;
+    use std::{assert_matches, thread};
 
     use vhost::vhost_user::message::{
         VhostTransferStatePhase, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
@@ -1150,10 +1150,7 @@ mod tests {
         handle.ready = true;
 
         let err = handle.save_backend_state().unwrap_err();
-        assert!(
-            matches!(err, Error::VhostUserCheckDeviceState(_)),
-            "{err:?}"
-        );
+        assert_matches!(err, Error::VhostUserCheckDeviceState(_), "{err:?}");
 
         // GET_VRING_BASE stopped the backend
         assert!(!handle.ready);
