@@ -25,6 +25,7 @@ pnet = { version = "0.35.0", default-features = false }
 pnet_datalink = "0.35.0"
 serde_json = { workspace = true }
 virtio-queue = { workspace = true, features = ["test-utils"] }
+vm-allocator = { path = "../vm-allocator" }
 
 [lints]
 workspace = true
