@@ -661,12 +661,15 @@ mod mock_vmm {
             let cs_reg = segment_from_gdt(gdt_entry(0xc09b, 0, 0xffffffff), 1);
             let ds_reg = segment_from_gdt(gdt_entry(0xc093, 0, 0xffffffff), 2);
             let es_reg = segment_from_gdt(gdt_entry(0xc093, 0, 0xffffffff), 3);
-            cfg_if::cfg_if! {
-                if #[cfg(feature = "kvm")] {
+            cfg_select! {
+                feature = "kvm" => {
                     let std_regs: StandardRegisters = kvm_bindings::kvm_regs::default().into();
-                } else if #[cfg(feature = "mshv")] {
-                    let std_regs: StandardRegisters = mshv_bindings::StandardRegisters::default().into();
-                } else {
+                }
+                feature = "mshv" => {
+                    let std_regs: StandardRegisters =
+                        mshv_bindings::StandardRegisters::default().into();
+                }
+                _ => {
                     panic!("Unsupported hypervisor type!")
                 }
             };
