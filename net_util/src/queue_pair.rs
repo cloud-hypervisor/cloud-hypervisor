@@ -651,6 +651,7 @@ mod tests {
     use virtio_queue::desc::RawDescriptor;
     use virtio_queue::desc::split::Descriptor;
     use virtio_queue::mock::MockSplitQueue;
+    use vm_allocator::page_size::get_page_size;
     use vm_memory::bitmap::AtomicBitmap;
     use vm_memory::{GuestMemoryMmap, GuestMemoryRegion};
 
@@ -787,23 +788,33 @@ mod tests {
 
     #[test]
     fn rx_marks_all_written_pages_dirty() {
-        const BUF0: u64 = 0x10000;
-        const BUF1: u64 = 0x20000;
+        const SPILL: usize = 1904;
         const FILL: u8 = 0xab;
 
-        let mem =
-            GuestMemoryMmap::<AtomicBitmap>::from_ranges(&[(GuestAddress(0), 0x10_0000)]).unwrap();
-        // One RX chain: one page at BUF0, two pages at BUF1
+        let page_size = get_page_size();
+        let buf0 = 16 * page_size;
+        let buf1 = 32 * page_size;
+        let mem = GuestMemoryMmap::<AtomicBitmap>::from_ranges(&[(
+            GuestAddress(0),
+            256 * page_size as usize,
+        )])
+        .unwrap();
+        // One RX chain: one page at buf0, two pages at buf1
         let vq = MockSplitQueue::new(&mem, 16);
         vq.add_desc_chains(
             &[
                 RawDescriptor::from(Descriptor::new(
-                    BUF0,
-                    0x1000,
+                    buf0,
+                    page_size as u32,
                     (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT) as u16,
                     1,
                 )),
-                RawDescriptor::from(Descriptor::new(BUF1, 0x2000, VRING_DESC_F_WRITE as u16, 0)),
+                RawDescriptor::from(Descriptor::new(
+                    buf1,
+                    2 * page_size as u32,
+                    VRING_DESC_F_WRITE as u16,
+                    0,
+                )),
             ],
             0,
         )
@@ -813,7 +824,7 @@ mod tests {
         let tap = {
             let (tx, rx) = UnixDatagram::pair().unwrap();
             rx.set_nonblocking(true).unwrap();
-            tx.send(&[FILL; 6000]).unwrap();
+            tx.send(&vec![FILL; page_size as usize + SPILL]).unwrap();
             Tap::new_for_fuzzing(File::from(OwnedFd::from(rx)), "test")
         };
 
@@ -824,13 +835,13 @@ mod tests {
             .process_desc_chain(&mem, &tap, &mut queue, &mut None, None)
             .unwrap();
 
-        // readv() fills BUF0 (4096 bytes) and spills the remaining 1904 bytes into BUF1
-        assert_eq!(mem.read_obj::<u8>(GuestAddress(BUF1 + 100)).unwrap(), FILL);
+        // readv() fills buf0 and spills the remaining SPILL bytes into buf1
+        assert_eq!(mem.read_obj::<u8>(GuestAddress(buf1 + 100)).unwrap(), FILL);
         let bitmap = mem.find_region(GuestAddress(0)).unwrap().bitmap();
-        assert!(bitmap.dirty_at(BUF0 as usize));
-        assert!(bitmap.dirty_at(BUF1 as usize));
-        // Only 6000 - 4096 bytes were written to the second buffer
-        assert!(!bitmap.dirty_at(BUF1 as usize + 0x1000));
+        assert!(bitmap.dirty_at(buf0 as usize));
+        assert!(bitmap.dirty_at(buf1 as usize));
+        // Only SPILL bytes, less than a page, were written to the second buffer
+        assert!(!bitmap.dirty_at((buf1 + page_size) as usize));
     }
 
     #[test]

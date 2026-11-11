@@ -37,6 +37,7 @@ zstd = { version = "0.14", default-features = false }
 
 [dev-dependencies]
 cfg-if = { workspace = true }
+vm-allocator = { path = "../vm-allocator" }
 
 [lints]
 workspace = true

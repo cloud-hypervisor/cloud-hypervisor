@@ -808,19 +808,24 @@ mod tests {
     /// the submit does not survive that harvest.
     #[test]
     fn read_marks_survive_a_dirty_log_harvest_while_in_flight() {
+        use vm_allocator::page_size::get_page_size;
         use vm_memory::bitmap::AtomicBitmap;
         use vm_memory::{GuestMemoryBackend, GuestMemoryRegion};
 
+        let page_size = get_page_size();
         let mem = Arc::new(
-            GuestMemoryMmap::<AtomicBitmap>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+            GuestMemoryMmap::<AtomicBitmap>::from_ranges(&[(
+                GuestAddress(0),
+                16 * page_size as usize,
+            )])
+            .unwrap(),
         );
-        // One page at 0x1000, two pages at 0x4000
         let mut request = Request {
             request_type: RequestType::In,
             sector: 0,
             data_descriptors: SmallVec::from_slice(&[
-                (GuestAddress(0x1000), 0x1000),
-                (GuestAddress(0x4000), 0x2000),
+                (GuestAddress(page_size), page_size as u32),
+                (GuestAddress(4 * page_size), 2 * page_size as u32),
             ]),
             writeback: true,
             start: Instant::now(),
@@ -839,15 +844,15 @@ mod tests {
         (**region).bitmap().get_and_reset();
 
         // The backend filled the first buffer and one page of the second
-        let mut completion = AsyncIoCompletion::from_operation(op, 0x2000);
+        let mut completion = AsyncIoCompletion::from_operation(op, 2 * page_size as i32);
         request
             .complete_async(mem.as_ref(), &mut completion)
             .unwrap();
 
         let bitmap = region.bitmap();
-        assert!(bitmap.dirty_at(0x1000));
-        assert!(bitmap.dirty_at(0x4000));
-        assert!(!bitmap.dirty_at(0x5000));
+        assert!(bitmap.dirty_at(page_size as usize));
+        assert!(bitmap.dirty_at(4 * page_size as usize));
+        assert!(!bitmap.dirty_at(5 * page_size as usize));
     }
 
     // A request without data still has to start within the disk.
