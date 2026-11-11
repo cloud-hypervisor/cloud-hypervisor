@@ -142,6 +142,7 @@ curl --unix-socket /tmp/cloud-hypervisor.sock -i \
      -H 'Content-Type: application/json'         \
      -d '{
          "cpus":{"boot_vcpus": 4, "max_vcpus": 4},
+         "memory":{"size": 1073741824},
          "payload":{"kernel":"/opt/clh/kernel/vmlinux-virtio-fs-virtio-iommu", "cmdline":"console=ttyS0 console=hvc0 root=/dev/vda1 rw"},
          "disks":[{"path":"/opt/clh/images/focal-server-cloudimg-amd64.raw", "image_type":"Raw"}],
          "rng":{"src":"/dev/urandom"},
