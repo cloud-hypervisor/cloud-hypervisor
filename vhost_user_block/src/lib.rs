@@ -80,9 +80,9 @@ enum Error {
 }
 
 pub const SYNTAX: &str = "vhost-user-block backend parameters \
- \"path=<image_path>,socket=<socket_path>,num_queues=<number_of_queues>,\
- queue_size=<size_of_each_queue>,readonly=true|false,direct=true|false,\
- poll_queue=true|false\"";
+    \"path=<image_path>,socket=<socket_path>,num_queues=<number_of_queues>,\
+    queue_size=<size_of_each_queue>,readonly=true|false,direct=true|false,\
+    poll_queue=true|false\"";
 
 impl convert::From<Error> for io::Error {
     fn from(e: Error) -> Self {

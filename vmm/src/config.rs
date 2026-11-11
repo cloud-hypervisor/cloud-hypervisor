@@ -931,7 +931,8 @@ impl CpusConfig {
 
 impl PciSegmentConfig {
     pub const SYNTAX: &'static str = "PCI Segment parameters \
-         \"pci_segment=<segment_id>,mmio32_aperture_weight=<scale>,mmio64_aperture_weight=<scale>\"";
+        \"pci_segment=<segment_id>,mmio32_aperture_weight=<scale>,\
+        mmio64_aperture_weight=<scale>\"";
 
     pub fn parse(disk: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -992,13 +993,13 @@ macro_rules! platform_syntax {
     ($($extra:literal)?) => {
         concat!(
             "Platform configuration parameters \
-            \"num_pci_segments=<num_pci_segments>,iommu_segments=<list_of_segments>,\
-            iommu_address_width=<bits>,iommufd=on|off,iommufd_fd=<fd>,vfio_p2p_dma=on|off,\
-            system_manufacturer=<dmi_system_manufacturer>,\
-            system_product_name=<dmi_system_product_name>,system_version=<dmi_system_version>,\
-            system_serial_number=<dmi_system_serial_number>,system_uuid=<dmi_system_uuid>,\
-            system_sku_number=<dmi_system_sku_number>,system_family=<dmi_system_family>,\
-            oem_strings=<list_of_strings>,chassis_asset_tag=<dmi_chassis_asset_tag>",
+                \"num_pci_segments=<num_pci_segments>,iommu_segments=<list_of_segments>,\
+                iommu_address_width=<bits>,iommufd=on|off,iommufd_fd=<fd>,vfio_p2p_dma=on|off,\
+                system_manufacturer=<dmi_system_manufacturer>,\
+                system_product_name=<dmi_system_product_name>,system_version=<dmi_system_version>,\
+                system_serial_number=<dmi_system_serial_number>,system_uuid=<dmi_system_uuid>,\
+                system_sku_number=<dmi_system_sku_number>,system_family=<dmi_system_family>,\
+                oem_strings=<list_of_strings>,chassis_asset_tag=<dmi_chassis_asset_tag>",
             $($extra,)?
             "\""
         )
@@ -1623,21 +1624,21 @@ impl PciDeviceCommonConfig {
 
 impl DiskConfig {
     pub const SYNTAX: &'static str = "Disk parameters \
-         \"path=<disk_image_path>,readonly=on|off,direct=on|off,iommu=off|virtio,\
-         num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,\
-         vhost_user=on|off,socket=<vhost_user_socket_path>,\
-         bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
-         bw_burst_rate=<bytes_per_second>,bw_burst_seconds=<seconds>,\
-         bw_burst_recharge_seconds=<seconds>,\
-         ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,\
-         ops_burst_rate=<io_ops_per_second>,ops_burst_seconds=<seconds>,\
-         ops_burst_recharge_seconds=<seconds>,\
-         id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>,\
-         rate_limit_group=<group_id>,\
-         queue_affinity=<list_of_queue_indices_with_their_associated_cpuset>,\
-         serial=<serial_number>,backing_files=on|off,sparse=on|off,\
-         image_type=<raw,qcow2,vhd,vhdx,vmdk>,lock_granularity=byte-range|full,\
-         guest_block_size=<size_in_bytes>\"";
+        \"path=<disk_image_path>,readonly=on|off,direct=on|off,iommu=off|virtio,\
+        num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,\
+        vhost_user=on|off,socket=<vhost_user_socket_path>,\
+        bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
+        bw_burst_rate=<bytes_per_second>,bw_burst_seconds=<seconds>,\
+        bw_burst_recharge_seconds=<seconds>,\
+        ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,\
+        ops_burst_rate=<io_ops_per_second>,ops_burst_seconds=<seconds>,\
+        ops_burst_recharge_seconds=<seconds>,\
+        id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>,\
+        rate_limit_group=<group_id>,\
+        queue_affinity=<list_of_queue_indices_with_their_associated_cpuset>,\
+        serial=<serial_number>,backing_files=on|off,sparse=on|off,\
+        image_type=<raw,qcow2,vhd,vhdx,vmdk>,lock_granularity=byte-range|full,\
+        guest_block_size=<size_in_bytes>\"";
 
     pub fn parse(disk: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -1893,18 +1894,18 @@ impl FromStr for IommuType {
 
 impl NetConfig {
     pub const SYNTAX: &'static str = "Network parameters \
-    \"tap=<if_name>,ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>,host_mac=<host_mac_addr>,\
-    fd=<[fd1,fd2,...]>,iommu=off|virtio,mtu=<mtu>,num_queues=<number_of_queues>,\
-    queue_size=<size_of_each_queue>,id=<device_id>,\
-    vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>,vhost_mode=client|server,\
-    bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
-    bw_burst_rate=<bytes_per_second>,bw_burst_seconds=<seconds>,\
-    bw_burst_recharge_seconds=<seconds>,\
-    ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,\
-    ops_burst_rate=<io_ops_per_second>,ops_burst_seconds=<seconds>,\
-    ops_burst_recharge_seconds=<seconds>,\
-    pci_segment=<segment_id>,pci_device_id=<pci_slot>,\
-    offload_tso=on|off,offload_ufo=on|off,offload_csum=on|off\"";
+        \"tap=<if_name>,ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>,host_mac=<host_mac_addr>,\
+        fd=<[fd1,fd2,...]>,iommu=off|virtio,mtu=<mtu>,num_queues=<number_of_queues>,\
+        queue_size=<size_of_each_queue>,id=<device_id>,\
+        vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>,vhost_mode=client|server,\
+        bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
+        bw_burst_rate=<bytes_per_second>,bw_burst_seconds=<seconds>,\
+        bw_burst_recharge_seconds=<seconds>,\
+        ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,\
+        ops_burst_rate=<io_ops_per_second>,ops_burst_seconds=<seconds>,\
+        ops_burst_recharge_seconds=<seconds>,\
+        pci_segment=<segment_id>,pci_device_id=<pci_slot>,\
+        offload_tso=on|off,offload_ufo=on|off,offload_csum=on|off\"";
 
     /// # Safety
     /// Live FDs named in the input must be exclusively owned by the caller.
@@ -2085,8 +2086,8 @@ impl NetConfig {
 }
 
 impl RngConfig {
-    pub const SYNTAX: &'static str = "Random number generator parameters \"\
-        src=<entropy_source_path>,iommu=off|virtio,pci_segment=<segment_id>,\
+    pub const SYNTAX: &'static str = "Random number generator parameters \
+        \"src=<entropy_source_path>,iommu=off|virtio,pci_segment=<segment_id>,\
         pci_device_id=<pci_slot>\"";
 
     pub fn parse(rng: &str) -> Result<Self> {
@@ -2113,8 +2114,8 @@ impl RngConfig {
 }
 
 impl RtcConfig {
-    pub const SYNTAX: &'static str = "Virtio RTC parameters \"\
-        iommu=off|virtio,id=<device_id>,\
+    pub const SYNTAX: &'static str = "Virtio RTC parameters \
+        \"iommu=off|virtio,id=<device_id>,\
         pci_segment=<segment_id>,pci_device_id=<pci_slot>\". \
         Passing --rtc with no arguments enables the device with default \
         settings.";
@@ -2135,7 +2136,8 @@ impl RtcConfig {
 }
 
 impl BalloonConfig {
-    pub const SYNTAX: &'static str = "Balloon parameters \"size=<balloon_size>,deflate_on_oom=on|off,\
+    pub const SYNTAX: &'static str = "Balloon parameters \
+        \"size=<balloon_size>,deflate_on_oom=on|off,\
         free_page_reporting=on|off,iommu=off|virtio,id=<device_id>,pci_segment=<segment_id>,\
         pci_device_id=<pci_slot>\"";
 
@@ -2181,10 +2183,10 @@ impl BalloonConfig {
 
 impl GenericVhostUserConfig {
     pub const SYNTAX: &'static str = "generic vhost-user parameters \
-    \"device_type=<ID number for virtio device type (FS, block, net, etc) or symbolic name>,\
-    socket=<socket_path>,\
-    queue_sizes=<list of queue sizes>,\
-    id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
+        \"device_type=<ID number for virtio device type (FS, block, net, etc) or symbolic name>,\
+        socket=<socket_path>,\
+        queue_sizes=<list of queue sizes>,\
+        id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 
     pub fn parse(vhost_user: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2300,9 +2302,9 @@ impl GenericVhostUserConfig {
 
 impl FsConfig {
     pub const SYNTAX: &'static str = "virtio-fs parameters \
-    \"tag=<tag_name>,socket=<socket_path>,num_queues=<number_of_queues>,\
-    queue_size=<size_of_each_queue>,id=<device_id>,\
-    pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
+        \"tag=<tag_name>,socket=<socket_path>,num_queues=<number_of_queues>,\
+        queue_size=<size_of_each_queue>,id=<device_id>,\
+        pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 
     pub fn parse(fs: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2365,8 +2367,8 @@ impl FsConfig {
 #[cfg(feature = "fw_cfg")]
 impl FwCfgConfig {
     pub const SYNTAX: &'static str = "Boot params to pass to FW CFG device \
-    \"e820=on|off,kernel=on|off,cmdline=on|off,initramfs=on|off,acpi_table=on|off,\
-    items=[name=<item_name>,file=<file_path>:name=<item_name>,string=<string_value>]\"";
+        \"e820=on|off,kernel=on|off,cmdline=on|off,initramfs=on|off,acpi_table=on|off,\
+        items=[name=<item_name>,file=<file_path>:name=<item_name>,string=<string_value>]\"";
     pub fn parse(fw_cfg_config: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
@@ -2464,9 +2466,9 @@ impl FwCfgItem {
 
 impl PmemConfig {
     pub const SYNTAX: &'static str = "Persistent memory parameters \
-    \"file=<backing_file_path>,size=<persistent_memory_size>,iommu=off|virtio,\
-    discard_writes=on|off,id=<device_id>,\
-    pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
+        \"file=<backing_file_path>,size=<persistent_memory_size>,iommu=off|virtio,\
+        discard_writes=on|off,id=<device_id>,\
+        pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 
     pub fn parse(pmem: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2622,8 +2624,8 @@ impl SerialConfig {
 
 #[cfg(target_arch = "x86_64")]
 impl DebugConsoleConfig {
-    pub const SYNTAX: &'static str =
-        "Debug console: \"off|null|pty|tty|file=<path>,iobase=<port in hex>\"";
+    pub const SYNTAX: &'static str = "Debug console: \
+        \"off|null|pty|tty|file=<path>,iobase=<port in hex>\"";
 
     pub fn parse(debug_console_ops: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2661,11 +2663,11 @@ impl DebugConsoleConfig {
 
 impl DeviceConfig {
     pub const SYNTAX: &'static str = "Direct device assignment parameters \
-    \"path=<device_path>,fd=<vfio_cdev_fd>,iommu=off|virtio|smmuv3,\
-    id=<device_id>,\
-    pci_segment=<segment_id>,pci_device_id=<pci_slot>,\
-    x_nv_gpudirect_clique=<clique_id>,\
-    x_exclude_mmap_bars=[<bar>...]\"";
+        \"path=<device_path>,fd=<vfio_cdev_fd>,iommu=off|virtio|smmuv3,\
+        id=<device_id>,\
+        pci_segment=<segment_id>,pci_device_id=<pci_slot>,\
+        x_nv_gpudirect_clique=<clique_id>,\
+        x_exclude_mmap_bars=[<bar>...]\"";
 
     /// # Safety
     /// Live FDs named in the input must be exclusively owned by the caller.
@@ -2756,7 +2758,8 @@ impl DeviceConfig {
 }
 
 impl UserDeviceConfig {
-    pub const SYNTAX: &'static str = "Userspace device \"socket=<socket_path>,id=<device_id>,\
+    pub const SYNTAX: &'static str = "Userspace device \
+        \"socket=<socket_path>,id=<device_id>,\
         pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 
     pub fn parse(user_device: &str) -> Result<Self> {
@@ -2860,8 +2863,8 @@ impl VsockConfig {
 
 impl NumaConfig {
     pub const SYNTAX: &'static str = "Settings related to a given NUMA node \
-        \"guest_numa_id=<node_id>,cpus=<cpus_id>,distances=<list_of_distances_to_destination_nodes>,\
-        device_id=<device_id>,\
+        \"guest_numa_id=<node_id>,cpus=<cpus_id>,\
+        distances=<list_of_distances_to_destination_nodes>,device_id=<device_id>,\
         memory_zones=<list_of_memory_zones>,\
         pci_segments=<list_of_pci_segments>\"";
 
@@ -3060,13 +3063,18 @@ pub struct RestoreConfig {
 
 impl RestoreConfig {
     pub const SYNTAX: &'static str = "Restore from a VM snapshot.\
-        \nRestore parameters \"source_url=<source_url>,prefault=on|off,memory_restore_mode=copy|ondemand|copyonwrite,\
+        \nRestore parameters \"source_url=<source_url>,prefault=on|off,\
+        memory_restore_mode=copy|ondemand|copyonwrite,\
         net_fds=<list_of_net_ids_with_their_associated_fds>,\
         vfio_fds=<list_of_vfio_ids_with_their_associated_fd>,iommufd_fd=<fd>,resume=true|false,\
         zone_updates=<list_of_updates>\"\n\
         \n`source_url` should be a valid URL (e.g file:///foo/bar or tcp://192.168.1.10/foo)\
-        \n`prefault` controls eager prefaulting for the copy-based restore path (disabled by default)\
-        \n`memory_restore_mode=copy` preserves the existing eager read-copy restore behavior, `memory_restore_mode=ondemand` enables lazy demand paging and fails restore if userfaultfd support is unavailable, and `memory_restore_mode=copyonwrite` maps the snapshot file copy-on-write (plain private RAM only; falls back to copy otherwise)\
+        \n`prefault` controls eager prefaulting for the copy-based restore path \
+        (disabled by default)\
+        \n`memory_restore_mode=copy` preserves the existing eager read-copy restore behavior, \
+        `memory_restore_mode=ondemand` enables lazy demand paging and fails restore if \
+        userfaultfd support is unavailable, and `memory_restore_mode=copyonwrite` maps the \
+        snapshot file copy-on-write (plain private RAM only; falls back to copy otherwise)\
         \n`net_fds` is a list of net ids with new file descriptors. \
         Only net devices backed by FDs directly are needed as input.\
         \n`vfio_fds` is a list of VFIO device ids each paired with a new cdev file descriptor, \
@@ -3075,7 +3083,8 @@ impl RestoreConfig {
         \n`iommufd_fd` is a new iommufd file descriptor for the restored VM. \
         The one saved in the snapshot does not survive serialization.\
         \n`resume` controls whether the VM will be directly resumed after restore\
-        \n`zone_updates` can be used to update NUMA memory zones. Expects a list of elements in the form `id@host_numa_node`";
+        \n`zone_updates` can be used to update NUMA memory zones. \
+        Expects a list of elements in the form `id@host_numa_node`";
 
     /// # Safety
     /// Live FDs named in the input must be exclusively owned by the caller.
@@ -3351,10 +3360,10 @@ impl LandlockConfig {
 #[cfg(feature = "ivshmem")]
 impl IvshmemConfig {
     pub const SYNTAX: &'static str = "Ivshmem device. Specify the backend file path and size \
-    for the shared memory: \"path=</path/to/a/file>,size=<file_size>,id=<device_id>,\
-    pci_segment=<segment_id>,pci_device_id=<pci_slot>\"\
-    \nThe <file_size> must be a power of 2 (e.g., 2M, 4M, etc.), as it represents the size \
-    of the memory region mapped to the guest. Default size is 128M.";
+        for the shared memory: \"path=</path/to/a/file>,size=<file_size>,id=<device_id>,\
+        pci_segment=<segment_id>,pci_device_id=<pci_slot>\"\
+        \nThe <file_size> must be a power of 2 (e.g., 2M, 4M, etc.), as it represents the size \
+        of the memory region mapped to the guest. Default size is 128M.";
     pub fn parse(ivshmem: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser.add("path").add("size");
