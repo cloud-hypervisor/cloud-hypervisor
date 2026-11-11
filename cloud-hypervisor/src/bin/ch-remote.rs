@@ -461,10 +461,8 @@ fn rest_api_do_command(
             simple_api_command(socket, "PUT", "add-vsock", Some(&vsock_config))
                 .map_err(Error::HttpApiClient)
         }
-        Command::Snapshot {
-            snapshot_config: arg_snapshot_config,
-        } => {
-            let snapshot_config = snapshot_config(arg_snapshot_config);
+        Command::Snapshot { destination_url } => {
+            let snapshot_config = snapshot_config(destination_url);
             simple_api_command(socket, "PUT", "snapshot", Some(&snapshot_config))
                 .map_err(Error::HttpApiClient)
         }
@@ -476,10 +474,8 @@ fn rest_api_do_command(
             &fds.iter().map(|fd| fd.as_raw_fd()).collect::<Vec<_>>(),
         )
         .map_err(Error::HttpApiClient),
-        Command::Coredump {
-            coredump_config: arg_coredump_config,
-        } => {
-            let coredump_config = coredump_config(arg_coredump_config);
+        Command::Coredump { destination_url } => {
+            let coredump_config = coredump_config(destination_url);
             simple_api_command(socket, "PUT", "coredump", Some(&coredump_config))
                 .map_err(Error::HttpApiClient)
         }
@@ -601,17 +597,13 @@ fn dbus_api_do_command(
             let vsock_config = add_vsock_config(arg_vsock_config)?;
             proxy.api_vm_add_vsock(&vsock_config)
         }
-        Command::Snapshot {
-            snapshot_config: arg_snapshot_config,
-        } => {
-            let snapshot_config = snapshot_config(arg_snapshot_config);
+        Command::Snapshot { destination_url } => {
+            let snapshot_config = snapshot_config(destination_url);
             proxy.api_vm_snapshot(&snapshot_config)
         }
         Command::Restore { .. } => proxy.api_vm_restore(fd_request_body.as_deref().unwrap()),
-        Command::Coredump {
-            coredump_config: arg_coredump_config,
-        } => {
-            let coredump_config = coredump_config(arg_coredump_config);
+        Command::Coredump { destination_url } => {
+            let coredump_config = coredump_config(destination_url);
             proxy.api_vm_coredump(&coredump_config)
         }
         Command::CancelMigration => proxy.api_vm_cancel_migration(),
@@ -935,8 +927,9 @@ enum Command {
     CancelMigration,
     #[command(about = "Create a coredump from VM")]
     Coredump {
-        #[arg(help = "Destination URL of the coredump")]
-        coredump_config: String,
+        // TODO: Take a PathBuf, as only file:// URLs are supported.
+        #[arg(help = "file:// URL of the coredump file, e.g. file:///tmp/coredump")]
+        destination_url: String,
     },
     #[command(about = "Counters from the VM")]
     Counters,
@@ -1019,8 +1012,9 @@ enum Command {
     ShutdownVmm,
     #[command(about = "Create a snapshot from VM")]
     Snapshot {
-        #[arg(help = "Destination URL of the snapshot")]
-        snapshot_config: String,
+        // TODO: Take a PathBuf, as only file:// URLs are supported.
+        #[arg(help = "file:// URL of an existing snapshot directory, e.g. file:///tmp/snapshot")]
+        destination_url: String,
     },
 }
 
