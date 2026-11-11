@@ -720,7 +720,7 @@ _Example_
 In this configuration:
 - Node 0: CPUs 0-1, 2GB memory
 - Node 1: CPUs 2-3, 2GB memory
-- Node 2 (auto-assigned): GPU device, closer to node 0 (distance=25) than node 1 (distance=30)
+- Node 2: GPU device, closer to node 0 (distance=25) than node 1 (distance=30)
 
 ### PCI bus
 
