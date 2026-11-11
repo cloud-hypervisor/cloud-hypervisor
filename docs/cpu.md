@@ -223,7 +223,8 @@ Set of CPU features to enable.
 This option allows the user to enable a set of CPU features that are disabled
 by default otherwise.
 
-The currently available feature set is: `amx`.
+The currently available feature set is: `amx`. It is available on x86-64 only,
+and other architectures reject any feature.
 
 The `amx` feature will enable the x86 extension adding hardware units for
 matrix operations (int and float dot products). The goal of the extension is to
