@@ -1004,9 +1004,9 @@ impl Migratable for Smmuv3 {}
 
 #[cfg(test)]
 mod tests {
-    use std::io;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::{assert_matches, io};
 
     use vm_allocator::GuestMemory;
     use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};
@@ -1249,7 +1249,7 @@ mod tests {
 
         let err = smmuv3.write_reg(CMDQ_PROD, 1, 4).unwrap_err();
 
-        assert!(matches!(err, Error::IllegalCommand(0x7f)));
+        assert_matches!(err, Error::IllegalCommand(0x7f));
         assert_eq!(cmdq_error(&smmuv3), CERROR_ILL);
         assert_eq!(smmuv3.cmdq_cons & 0xf, 0);
     }
@@ -1261,7 +1261,7 @@ mod tests {
 
         let err = smmuv3.write_reg(CMDQ_PROD, 1, 4).unwrap_err();
 
-        assert!(matches!(err, Error::SecureCommand(CMD_CFGI_STE)));
+        assert_matches!(err, Error::SecureCommand(CMD_CFGI_STE));
         assert_eq!(cmdq_error(&smmuv3), CERROR_ILL);
         assert_eq!(smmuv3.cmdq_cons & 0xf, 0);
     }
@@ -1284,7 +1284,7 @@ mod tests {
 
         let err = smmuv3.write_reg(CMDQ_PROD, 1, 4).unwrap_err();
 
-        assert!(matches!(err, Error::Backend(CMD_TLBI_NH_ALL, _)));
+        assert_matches!(err, Error::Backend(CMD_TLBI_NH_ALL, _));
         assert_eq!(cmdq_error(&smmuv3), CERROR_ILL);
         assert_ne!(smmuv3.gerror & GERROR_CMDQ_ERR, 0);
         assert_eq!(smmuv3.cmdq_cons & 0xf, 0);
