@@ -63,8 +63,8 @@ impl Qcow2Chain {
         if bytes.len() < 20 {
             return BackingName::Absent;
         }
-        let offset = u64::from_be_bytes(bytes[8..16].try_into().expect("8 bytes"));
-        let size = u32::from_be_bytes(bytes[16..20].try_into().expect("4 bytes"));
+        let offset = u64::from_be_bytes(*bytes[8..16].as_array().expect("8 bytes"));
+        let size = u32::from_be_bytes(*bytes[16..20].as_array().expect("4 bytes"));
         if offset == 0 || size == 0 {
             return BackingName::Absent;
         }
@@ -179,7 +179,7 @@ impl DiskFormat for Qcow2Chain {
 /// Splits an input into the image and its backing image.
 fn split(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
     let (len, rest) = bytes.split_at_checked(4)?;
-    let top_len = u32::from_le_bytes(len.try_into().expect("4 bytes")) as usize;
+    let top_len = u32::from_le_bytes(*len.as_array().expect("4 bytes")) as usize;
     Some(rest.split_at(top_len.min(rest.len())))
 }
 
