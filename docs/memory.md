@@ -726,7 +726,9 @@ In this configuration:
 
 Cloud Hypervisor supports guests with one or more PCI segments. The default PCI segment always
 has affinity to NUMA node 0. By default, all other PCI segments have affinity to NUMA node 0.
-The user may configure the NUMA affinity for any additional PCI segments.
+The user may configure the NUMA affinity for any additional PCI segments with
+the `pci_segments` option of `--numa`. Each segment must exist on the platform
+and belong to a single NUMA node, and segment 0 can only belong to node 0.
 
 _Example_
 
