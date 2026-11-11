@@ -34,7 +34,7 @@ struct MemoryConfig {
 
 Size of the RAM in the guest VM.
 
-This option is mandatory when using the `--memory` parameter.
+If this option is not specified, the guest gets 512 MiB of RAM.
 
 Value is an unsigned integer of 64 bits.
 

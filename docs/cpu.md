@@ -37,9 +37,8 @@ struct CpusConfig {
 Number of vCPUs present at boot time.
 
 This option allows defining a specific number of vCPUs to be present at the
-time the VM is started. This option is mandatory when using the `--cpus`
-parameter. If `--cpus` is not specified, this option takes the default value
-of `1`, starting the VM with a single vCPU.
+time the VM is started. If this option is not specified, it takes the
+default value of `1`, starting the VM with a single vCPU.
 
 Value is an unsigned integer of 32 bits.
 
