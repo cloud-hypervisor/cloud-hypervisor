@@ -1185,7 +1185,7 @@ mod tests {
     use std::mem::zeroed;
     use std::path::PathBuf;
     use std::ptr::from_mut;
-    use std::thread;
+    use std::{assert_matches, thread};
 
     use clap::{CommandFactory, Parser};
     use vmm::config::VmParams;
@@ -1238,14 +1238,12 @@ mod tests {
             let mut args = vec!["cloud-hypervisor", "--api-socket", "/tmp/api.sock"];
             args.extend(options);
             let matches = Cli::try_parse_from(&args).unwrap();
-            assert!(
-                matches!(
-                    (GuestResetAction::from(matches.guest_reset_action), expected),
-                    (GuestResetAction::ResetVm, GuestResetAction::ResetVm)
-                        | (GuestResetAction::ExitVmm, GuestResetAction::ExitVmm)
-                        | (GuestResetAction::ShutdownVm, GuestResetAction::ShutdownVm)
-                ),
-                "args: {args:?}",
+            assert_matches!(
+                (GuestResetAction::from(matches.guest_reset_action), expected),
+                (GuestResetAction::ResetVm, GuestResetAction::ResetVm)
+                    | (GuestResetAction::ExitVmm, GuestResetAction::ExitVmm)
+                    | (GuestResetAction::ShutdownVm, GuestResetAction::ShutdownVm),
+                "args: {args:?}"
             );
         }
     }
