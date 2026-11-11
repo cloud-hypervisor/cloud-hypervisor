@@ -177,11 +177,7 @@ fn main() -> Result<()> {
 /// Take an exclusive lock on `<socket>.lock` so two daemons can't bind the same
 /// socket, and so removing a stale socket file is safe.
 fn acquire_socket_lock(socket_path: &Path) -> Result<File> {
-    let lock_path: PathBuf = {
-        let mut p = socket_path.as_os_str().to_os_string();
-        p.push(".lock");
-        p.into()
-    };
+    let lock_path = socket_path.with_added_extension("lock");
     let lock = OpenOptions::new()
         .create(true)
         .truncate(false)
