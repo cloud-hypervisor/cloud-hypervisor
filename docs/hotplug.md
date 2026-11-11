@@ -4,8 +4,8 @@ Currently Cloud Hypervisor supports hot plugging of CPUs devices (x86 only), PCI
 
 ## Kernel support
 
-For hotplug on Cloud Hypervisor ACPI GED support is needed. This can either be achieved by turning on `CONFIG_ACPI_REDUCED_HARDWARE_ONLY`
-or by using this kernel patch (available in 5.5-rc1 and later): https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/patch/drivers/acpi/Makefile?id=ac36d37e943635fc072e9d4f47e40a48fbcdb3f0
+For hotplug on Cloud Hypervisor ACPI GED support is needed in the guest kernel.
+Linux includes it with `CONFIG_ACPI` since version 5.5.
 
 ## CPU Hot Plug
 
