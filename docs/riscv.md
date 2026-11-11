@@ -7,6 +7,9 @@ All instructions here are tested with Ubuntu 24.04.2 as the host OS.
 
 - riscv64 servers (recommended) or development boards equipped with the AIA
 (Advance Interrupt Architecture) interrupt controller.
+- The Smstateen extension. Cloud Hypervisor sets the `sstateen0` CSR of every
+vCPU so that the guest can access the AIA CSRs, and vCPU creation fails
+without it.
 
 ## Getting started
 
