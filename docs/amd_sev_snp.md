@@ -47,5 +47,8 @@ For more information related to Microsoft Hypervisor, please see [mshv.md](mshv.
 **Limitations**
 Note that Cloud Hypervisor does not support the following features with SEV-SNP:
 - Memory hotplug
+- CPU hotplug on MSHV
 - Huge Pages (HugeTLB)
 - Virtual IOMMU
+- vDPA devices
+- VFIO devices without `--platform iommufd=on`
