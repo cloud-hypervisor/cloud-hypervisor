@@ -581,6 +581,12 @@ impl CpuidFeatureEntry {
                 feature_reg: CpuidReg::EBX,
                 compatible_check: CpuidCompatibleCheck::BitwiseSubset,
             },
+            CpuidFeatureEntry {
+                function: EXTENDED_FEATURE_IDENTIFICATION2_LEAF,
+                index: 0,
+                feature_reg: CpuidReg::ECX,
+                compatible_check: CpuidCompatibleCheck::BitwiseSubset,
+            },
             // KVM CPUID bits: https://www.kernel.org/doc/html/latest/virt/kvm/x86/cpuid.html
             // Leaf 0x4000_0000, EAX/EBX/ECX/EDX, KVM CPUID SIGNATURE
             CpuidFeatureEntry {
