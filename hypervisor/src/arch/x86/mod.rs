@@ -11,9 +11,8 @@
 // Copyright © 2020, Microsoft Corporation
 //
 
-use core::fmt;
-use std::mem;
 use std::os::raw;
+use std::{fmt, mem};
 
 use thiserror::Error;
 
