@@ -1637,7 +1637,7 @@ impl DiskConfig {
          queue_affinity=<list_of_queue_indices_with_their_associated_cpuset>,\
          serial=<serial_number>,backing_files=on|off,sparse=on|off,\
          image_type=<raw,qcow2,vhd,vhdx,vmdk>,lock_granularity=byte-range|full,\
-         guest_block_size=<size_in_bytes>";
+         guest_block_size=<size_in_bytes>\"";
 
     pub fn parse(disk: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -3059,23 +3059,23 @@ pub struct RestoreConfig {
 }
 
 impl RestoreConfig {
-    pub const SYNTAX: &'static str = "Restore from a VM snapshot. \
+    pub const SYNTAX: &'static str = "Restore from a VM snapshot.\
         \nRestore parameters \"source_url=<source_url>,prefault=on|off,memory_restore_mode=copy|ondemand|copyonwrite,\
         net_fds=<list_of_net_ids_with_their_associated_fds>,\
         vfio_fds=<list_of_vfio_ids_with_their_associated_fd>,iommufd_fd=<fd>,resume=true|false,\
-        zone_updates=<list_of_updates>\"
-        \n`source_url` should be a valid URL (e.g file:///foo/bar or tcp://192.168.1.10/foo) \
-        \n`prefault` controls eager prefaulting for the copy-based restore path (disabled by default) \
-        \n`memory_restore_mode=copy` preserves the existing eager read-copy restore behavior, `memory_restore_mode=ondemand` enables lazy demand paging and fails restore if userfaultfd support is unavailable, and `memory_restore_mode=copyonwrite` maps the snapshot file copy-on-write (plain private RAM only; falls back to copy otherwise) \
+        zone_updates=<list_of_updates>\"\n\
+        \n`source_url` should be a valid URL (e.g file:///foo/bar or tcp://192.168.1.10/foo)\
+        \n`prefault` controls eager prefaulting for the copy-based restore path (disabled by default)\
+        \n`memory_restore_mode=copy` preserves the existing eager read-copy restore behavior, `memory_restore_mode=ondemand` enables lazy demand paging and fails restore if userfaultfd support is unavailable, and `memory_restore_mode=copyonwrite` maps the snapshot file copy-on-write (plain private RAM only; falls back to copy otherwise)\
         \n`net_fds` is a list of net ids with new file descriptors. \
         Only net devices backed by FDs directly are needed as input.\
         \n`vfio_fds` is a list of VFIO device ids each paired with a new cdev file descriptor, \
-        e.g. vfio_fds=[vfio0@5,vfio1@6]. Required for every VFIO device.\
+        e.g. vfio_fds=[vfio0@5,vfio1@6]. Required for every VFIO device. \
         Requires `iommufd_fd` and platform `iommufd=on`.\
         \n`iommufd_fd` is a new iommufd file descriptor for the restored VM. \
         The one saved in the snapshot does not survive serialization.\
-        \n `resume` controls whether the VM will be directly resumed after restore \
-        \n `zone_updates` can be used to update NUMA memory zones. Expects a list of elements in the form `id@host_numa_node`";
+        \n`resume` controls whether the VM will be directly resumed after restore\
+        \n`zone_updates` can be used to update NUMA memory zones. Expects a list of elements in the form `id@host_numa_node`";
 
     /// # Safety
     /// Live FDs named in the input must be exclusively owned by the caller.
@@ -3352,7 +3352,7 @@ impl LandlockConfig {
 impl IvshmemConfig {
     pub const SYNTAX: &'static str = "Ivshmem device. Specify the backend file path and size \
     for the shared memory: \"path=</path/to/a/file>,size=<file_size>,id=<device_id>,\
-    pci_segment=<segment_id>,pci_device_id=<pci_slot>\" \
+    pci_segment=<segment_id>,pci_device_id=<pci_slot>\"\
     \nThe <file_size> must be a power of 2 (e.g., 2M, 4M, etc.), as it represents the size \
     of the memory region mapped to the guest. Default size is 128M.";
     pub fn parse(ivshmem: &str) -> Result<Self> {
