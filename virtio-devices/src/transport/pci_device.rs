@@ -1428,7 +1428,7 @@ impl Migratable for VirtioPciDevice {}
 
 #[cfg(test)]
 mod tests {
-    use std::thread;
+    use std::{assert_matches, thread};
 
     use vm_device::interrupt::InterruptSourceConfig;
 
@@ -1717,7 +1717,7 @@ mod tests {
 
         let result = activator.activate();
 
-        assert!(matches!(result, Err(ActivateError::BadActivate)));
+        assert_matches!(result, Err(ActivateError::BadActivate));
         assert!(!device_activated.load(Ordering::SeqCst));
         assert_ne!(
             status.load(Ordering::SeqCst) & (DEVICE_NEEDS_RESET as u8),
@@ -1725,7 +1725,7 @@ mod tests {
         );
         let triggers = interrupt.triggers.lock().unwrap();
         assert_eq!(triggers.len(), 1);
-        assert!(matches!(triggers[0], VirtioInterruptType::Config));
+        assert_matches!(triggers[0], VirtioInterruptType::Config);
 
         // The barrier waiter must complete, showing the activator
         // did not deadlock the vCPU thread.
