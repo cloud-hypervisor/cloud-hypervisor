@@ -89,21 +89,6 @@ pub fn set_monitor(file: Option<File>) -> io::Result<Monitor> {
     Ok(monitor)
 }
 
-struct PropertiesFormatter<'a>(&'a Option<&'a HashMap<Cow<'a, str>, Cow<'a, str>>>);
-impl<'a> fmt::Display for PropertiesFormatter<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(map) = self.0 {
-            for (i, (key, value)) in map.iter().enumerate() {
-                if i > 0 {
-                    write!(f, ", ")?;
-                }
-                write!(f, "{key} = {value}")?;
-            }
-        }
-        Ok(())
-    }
-}
-
 pub fn event_log(source: &str, event: &str, properties: Option<&HashMap<Cow<str>, Cow<str>>>) {
     // `MONITOR` is always in a valid state (None or Some), because it is set
     // only once before any threads are spawned, and it's not mutated
@@ -112,7 +97,17 @@ pub fn event_log(source: &str, event: &str, properties: Option<&HashMap<Cow<str>
     // threads, making this function thread-safe.
     info!(
         "Event: source = {source} event = {event} {}",
-        PropertiesFormatter(&properties)
+        fmt::from_fn(|f| {
+            if let Some(map) = properties {
+                for (i, (key, value)) in map.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{key} = {value}")?;
+                }
+            }
+            Ok(())
+        })
     );
     if let Some(monitor_handle) = MONITOR.get().as_ref() {
         let event = Event {
