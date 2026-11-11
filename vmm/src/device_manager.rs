@@ -730,7 +730,7 @@ impl DeviceRelocation for AddressManager {
                         GuestAddress(old_base),
                         GuestAddress(new_base),
                         len as GuestUsize,
-                        None,
+                        Some(len.max(4)),
                     )
                     .is_none()
                 {
