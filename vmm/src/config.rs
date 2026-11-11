@@ -1880,9 +1880,7 @@ impl FromStr for IommuType {
         match s.to_lowercase().as_str() {
             "" | "off" | "false" => Ok(IommuType::Off),
             "on" | "true" => {
-                warn!(
-                    "iommu=on is deprecated, use iommu=virtio instead. It will be removed in a future release"
-                );
+                warn!("'iommu=on' is deprecated: use 'iommu=virtio' instead");
                 Ok(IommuType::Virtio)
             }
             "virtio" => Ok(IommuType::Virtio),

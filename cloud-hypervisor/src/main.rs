@@ -630,7 +630,9 @@ impl Cli {
     /// Combines --guest-shutdown-action with the deprecated --no-shutdown.
     fn guest_shutdown_action(&self) -> GuestShutdownAction {
         if self.no_shutdown {
-            warn!("--no-shutdown is deprecated: use --guest-shutdown-action=shutdown-vm instead");
+            warn!(
+                "'--no-shutdown' is deprecated: use '--guest-shutdown-action=shutdown-vm' instead"
+            );
             return GuestShutdownAction::ShutdownVm;
         }
 

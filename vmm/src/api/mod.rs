@@ -706,7 +706,7 @@ impl VmSendMigrationData {
             .convert::<Toggle>("local")
             .map_err(VmSendMigrationConfigError::ParseError)?
             .is_some_and(|Toggle(v)| {
-                warn!("The 'local' option is deprecated: use 'memory_mode=memfds' instead");
+                warn!("'local' is deprecated: use 'memory_mode=memfds' instead");
                 v
             });
         let preserve_source = parser
