@@ -188,10 +188,11 @@ mod tests {
 
     fn assert_async_io_from_dyn(disk: &dyn AsyncDiskFile, expect_backend: RawBackend) {
         let io: Box<dyn AsyncIo> = disk.create_async_io(128).unwrap();
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "io_uring")] {
+        cfg_select! {
+            feature = "io_uring" => {
                 let expected_batch_requests = expect_backend == RawBackend::IoUring;
-            } else {
+            }
+            _ => {
                 let _ = expect_backend;
                 let expected_batch_requests = false;
             }
