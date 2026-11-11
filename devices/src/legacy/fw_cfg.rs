@@ -588,7 +588,7 @@ impl FwCfg {
         }
         if let Err(e) = self.memory.memory().write_slice(
             &access_resp.0.to_be_bytes(),
-            GuestAddress(dma_address + core::mem::offset_of!(FwCfgDmaAccess, control_be) as u64),
+            GuestAddress(dma_address + offset_of!(FwCfgDmaAccess, control_be) as u64),
         ) {
             error!("fw_cfg: finishing dma: {e:?}");
         }

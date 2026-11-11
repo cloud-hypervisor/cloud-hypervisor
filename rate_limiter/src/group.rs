@@ -4,9 +4,9 @@
 // Copyright 2023 Crusoe Energy Systems LLC
 // SPDX-License-Identifier: Apache-2.0
 
-use core::panic::AssertUnwindSafe;
 use std::fs::File;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex};
 use std::{io, panic, result, thread};
 

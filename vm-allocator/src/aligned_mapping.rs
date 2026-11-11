@@ -4,10 +4,10 @@
 
 //! Helpers for `mmap()`
 
-use core::ffi::{c_int, c_void};
-use core::ptr::null_mut;
+use std::ffi::{c_int, c_void};
 use std::io::{self, Error, ErrorKind};
 use std::os::fd::{AsRawFd as _, BorrowedFd};
+use std::ptr::null_mut;
 
 use libc::size_t;
 use log::warn;
