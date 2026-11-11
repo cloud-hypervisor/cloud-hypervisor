@@ -29,7 +29,8 @@ instance, if creating a VM with 4GiB of RAM, along with a balloon of 1GiB, the
 guest will be able to use 3GiB of accessible memory. The guest sees all the RAM,
 and unless it is balloon enlightened, it is entitled to all of it.
 
-This parameter is mandatory.
+On the command line, this parameter is optional and defaults to `0`. The REST
+API requires it.
 
 Value is an unsigned integer of 64 bits corresponding to the balloon size in
 bytes.
