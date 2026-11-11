@@ -6,15 +6,16 @@
 use std::any::Any;
 use std::os::unix::prelude::AsRawFd;
 use std::sync::{Arc, Barrier, Mutex};
-use std::{io, result};
+use std::{io, process, result};
 
-use hypervisor::HypervisorVmError;
 use log::{error, info};
 use thiserror::Error;
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::VfioIrq;
 use vfio_user::{Client, Error as VfioUserError};
-use vm_allocator::{AddressAllocator, GuestRegion, MemorySlotAllocator, SystemAllocator};
+use vm_allocator::{
+    AddressAllocator, GuestRegion, GuestRegionError, MemorySlotAllocator, SystemAllocator,
+};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig};
 use vm_device::{BusDevice, Resource};
@@ -44,7 +45,7 @@ pub enum VfioUserPciDeviceError {
     #[error("Client error")]
     Client(#[source] VfioUserError),
     #[error("Failed to map VFIO PCI region into guest")]
-    MapRegionGuest(#[source] HypervisorVmError),
+    MapRegionGuest(#[source] GuestRegionError),
     #[error("Missing region {0}")]
     MissingRegion(u32),
     #[error("Missing file descriptor for mappable region {0}")]
@@ -188,10 +189,14 @@ impl VfioUserPciDevice {
                         Arc::clone(&self.memory_slot_allocator),
                     )
                     .map_err(|e| VfioUserPciDeviceError::Other(io::Error::other(e)))?;
+                    mapping
+                        .register()
+                        .map_err(VfioUserPciDeviceError::MapRegionGuest)?;
+                    let slot = mapping.slot().unwrap();
                     let mapping = Arc::new(Mutex::new(mapping));
 
                     let user_memory_region = UserMemoryRegion {
-                        slot: self.memory_slot_allocator.next_memory_slot(),
+                        slot,
                         start: mmio_region.start.0 + s.offset,
                         mapping,
                         p2p_mapped: false,
@@ -199,20 +204,6 @@ impl VfioUserPciDevice {
                         #[cfg(feature = "kvm")]
                         dma_buf: None,
                     };
-
-                    // SAFETY: validity of len and host_addr guaranteed by hypervisor::mmap::AlignedMapping
-                    unsafe {
-                        self.vm.create_user_memory_region(
-                            user_memory_region.slot,
-                            user_memory_region.start,
-                            user_memory_region.size(),
-                            user_memory_region.host_address(),
-                            false,
-                            false,
-                            hypervisor::MemoryVisibility::Shared,
-                        )
-                    }
-                    .map_err(VfioUserPciDeviceError::MapRegionGuest)?;
 
                     mmio_region.user_memory_regions.push(user_memory_region);
                 }
@@ -223,26 +214,8 @@ impl VfioUserPciDevice {
     }
 
     fn unmap_mmio_regions(&mut self) {
-        for mmio_region in self.common.mmio_regions.iter_mut() {
-            for user_memory_region in mmio_region.user_memory_regions.drain(..) {
-                // Remove region
-                // SAFETY: guaranteed by hypervisor::mmap::AlignedMapping invariants
-                if let Err(e) = unsafe {
-                    self.vm.remove_user_memory_region(
-                        user_memory_region.slot,
-                        user_memory_region.start,
-                        user_memory_region.size(),
-                        user_memory_region.host_address(),
-                        false,
-                    )
-                } {
-                    error!("Could not remove the userspace memory region: {e}");
-                }
-
-                self.memory_slot_allocator
-                    .free_memory_slot(user_memory_region.slot);
-                // memory will be unmapped on drop
-            }
+        for mmio_region in &mut self.common.mmio_regions {
+            mmio_region.user_memory_regions.clear();
         }
     }
 
@@ -437,35 +410,54 @@ impl PciDevice for VfioUserPciDevice {
 
     fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> Result<(), io::Error> {
         info!("Moving BAR {bar_idx} -> 0x{new_base:x}");
-        for mmio_region in self.common.mmio_regions.iter_mut() {
-            if mmio_region.index as usize == bar_idx {
-                let old_base = mmio_region.start.raw_value();
-                let new_addresses = mmio_region
-                    .user_memory_regions
-                    .iter()
-                    .map(|user_memory_region| {
-                        let new_address = new_base
-                            .checked_add(user_memory_region.start - old_base)
-                            .ok_or_else(|| io::Error::other("BAR address overflows"))?;
-                        new_address
-                            .checked_add(user_memory_region.size() as u64)
-                            .ok_or_else(|| io::Error::other("BAR range overflows"))?;
-                        Ok(new_address)
-                    })
-                    .collect::<io::Result<Vec<_>>>()?;
-                mmio_region.start = GuestAddress(new_base);
-
-                for (user_memory_region, new_address) in mmio_region
-                    .user_memory_regions
-                    .iter_mut()
-                    .zip(new_addresses)
-                {
-                    user_memory_region.move_region(self.vm.as_ref(), new_address)?;
-                }
-                info!("Moved bar 0x{old_base:x} -> 0x{new_base:x}");
+        for mmio_region in &mut self.common.mmio_regions {
+            if mmio_region.index as usize != bar_idx {
+                continue;
             }
+            let old_base = mmio_region.start.raw_value();
+            let new_addresses = mmio_region
+                .user_memory_regions
+                .iter()
+                .map(|user_memory_region| {
+                    let new_address = new_base
+                        .checked_add(user_memory_region.start - old_base)
+                        .ok_or_else(|| io::Error::other("BAR address overflows"))?;
+                    new_address
+                        .checked_add(user_memory_region.size() as u64)
+                        .ok_or_else(|| io::Error::other("BAR range overflows"))?;
+                    Ok((user_memory_region.start, new_address))
+                })
+                .collect::<io::Result<Vec<_>>>()?;
+            for (i, &(_, new_address)) in new_addresses.iter().enumerate() {
+                let user_memory_region = &mut mmio_region.user_memory_regions[i];
+                let result = user_memory_region.move_region(new_address);
+                if let Err(e) = result {
+                    for (user_memory_region, &(old_address, _)) in mmio_region.user_memory_regions
+                        [..=i]
+                        .iter_mut()
+                        .zip(&new_addresses[..=i])
+                        .rev()
+                    {
+                        let rollback = user_memory_region.move_region(old_address).and_then(|()| {
+                            let mapping = user_memory_region.mapping.lock().unwrap();
+                            if mapping.is_registered() {
+                                Ok(())
+                            } else {
+                                mapping.register().map_err(io::Error::other)
+                            }
+                        });
+                        if let Err(rollback) = rollback {
+                            // Continuing would leave the BAR with inconsistent mappings.
+                            error!("FATAL: Failed to restore BAR mapping: {rollback}");
+                            process::exit(1);
+                        }
+                    }
+                    return Err(e);
+                }
+            }
+            mmio_region.start = GuestAddress(new_base);
+            info!("Moved bar 0x{old_base:x} -> 0x{new_base:x}");
         }
-
         Ok(())
     }
 
