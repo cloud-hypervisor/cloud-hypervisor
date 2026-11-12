@@ -83,7 +83,8 @@ The following sections describe how to build and run Cloud Hypervisor.
 ## Host OS
 
 For required KVM functionality and adequate performance the minimum supported
-host kernel version is 6.8.
+host kernel version is 6.8. Cloud Hypervisor supports recent Linux
+distributions that ship this kernel version or a newer one.
 
 ## Use Pre-built Binaries
 
@@ -135,13 +136,14 @@ with upstream tianocore/edk2.
 Cloud Hypervisor supports booting disk images containing all needed components
 to run cloud workloads, a.k.a. cloud images.
 
-The following sample commands will download an Ubuntu Cloud image, converting
-it into a format that Cloud Hypervisor can use and a firmware to boot the image
-with.
+The following sample commands will download a recent Ubuntu cloud image,
+converting it into a format that Cloud Hypervisor can use and a firmware to
+boot the image with. Cloud images of other recent distributions work as well.
 
 ```shell
-$ wget https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img
-$ qemu-img convert -p -f qcow2 -O raw focal-server-cloudimg-amd64.img focal-server-cloudimg-amd64.raw
+$ wget -O cloudimg-amd64.img \
+  https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+$ qemu-img convert -p -f qcow2 -O raw cloudimg-amd64.img cloudimg-amd64.raw
 $ wget https://github.com/cloud-hypervisor/rust-hypervisor-firmware/releases/latest/download/hypervisor-fw
 ```
 
@@ -159,7 +161,7 @@ $ sudo setcap cap_net_admin+ep ./cloud-hypervisor
 $ ./create-cloud-init.sh
 $ ./cloud-hypervisor \
 	--firmware ./hypervisor-fw \
-	--disk path=focal-server-cloudimg-amd64.raw,image_type=raw \
+	--disk path=cloudimg-amd64.raw,image_type=raw \
 		path=/tmp/ubuntu-cloudinit.img,image_type=raw \
 	--cpus boot=4 \
 	--memory size=1024M \
@@ -173,7 +175,7 @@ GRUB) is required then it necessary to switch to the serial console instead of
 ```shell
 $ ./cloud-hypervisor \
 	--kernel ./hypervisor-fw \
-	--disk path=focal-server-cloudimg-amd64.raw,image_type=raw \
+	--disk path=cloudimg-amd64.raw,image_type=raw \
 		path=/tmp/ubuntu-cloudinit.img,image_type=raw \
 	--cpus boot=4 \
 	--memory size=1024M \
@@ -225,10 +227,14 @@ For the disk image the same Ubuntu image as before can be used. This contains
 an `ext4` root filesystem.
 
 ```shell
-$ wget https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img # x86-64
-$ wget https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-arm64.img # AArch64
-$ qemu-img convert -p -f qcow2 -O raw focal-server-cloudimg-amd64.img focal-server-cloudimg-amd64.raw # x86-64
-$ qemu-img convert -p -f qcow2 -O raw focal-server-cloudimg-arm64.img focal-server-cloudimg-arm64.raw # AArch64
+# x86-64
+$ wget -O cloudimg-amd64.img \
+  https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+$ qemu-img convert -p -f qcow2 -O raw cloudimg-amd64.img cloudimg-amd64.raw
+# AArch64
+$ wget -O cloudimg-arm64.img \
+  https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-arm64.img
+$ qemu-img convert -p -f qcow2 -O raw cloudimg-arm64.img cloudimg-arm64.raw
 ```
 
 #### Booting the guest VM
@@ -243,7 +249,7 @@ $ sudo setcap cap_net_admin+ep ./cloud-hypervisor
 $ ./create-cloud-init.sh
 $ ./cloud-hypervisor \
 	--kernel ./linux-cloud-hypervisor/arch/x86/boot/compressed/vmlinux.bin \
-	--disk path=focal-server-cloudimg-amd64.raw,image_type=raw \
+	--disk path=cloudimg-amd64.raw,image_type=raw \
 		path=/tmp/ubuntu-cloudinit.img,image_type=raw \
 	--cmdline "console=hvc0 root=/dev/vda1 rw" \
 	--cpus boot=4 \
@@ -258,7 +264,7 @@ $ sudo setcap cap_net_admin+ep ./cloud-hypervisor
 $ ./create-cloud-init.sh
 $ ./cloud-hypervisor \
 	--kernel ./linux-cloud-hypervisor/arch/arm64/boot/Image \
-	--disk path=focal-server-cloudimg-arm64.raw,image_type=raw \
+	--disk path=cloudimg-arm64.raw,image_type=raw \
 		path=/tmp/ubuntu-cloudinit.img,image_type=raw \
 	--cmdline "console=hvc0 root=/dev/vda1 rw" \
 	--cpus boot=4 \
@@ -275,7 +281,7 @@ $ ./cloud-hypervisor \
 	--kernel ./linux-cloud-hypervisor/arch/x86/boot/compressed/vmlinux.bin \
 	--console off \
 	--serial tty \
-	--disk path=focal-server-cloudimg-amd64.raw,image_type=raw \
+	--disk path=cloudimg-amd64.raw,image_type=raw \
 	--cmdline "console=ttyS0 root=/dev/vda1 rw" \
 	--cpus boot=4 \
 	--memory size=1024M \
@@ -289,7 +295,7 @@ $ ./cloud-hypervisor \
 	--kernel ./linux-cloud-hypervisor/arch/arm64/boot/Image \
 	--console off \
 	--serial tty \
-	--disk path=focal-server-cloudimg-arm64.raw,image_type=raw \
+	--disk path=cloudimg-arm64.raw,image_type=raw \
 	--cmdline "console=ttyAMA0 root=/dev/vda1 rw" \
 	--cpus boot=4 \
 	--memory size=1024M \
