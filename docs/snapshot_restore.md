@@ -105,7 +105,9 @@ snapshot earlier.
 The restored VM uses the console outputs from the snapshot. If an output is not
 available on the new host, the options `serial_file`, `serial_socket`,
 `serial_tcp`, `console_file`, `console_socket`, and `console_tcp` select a new
-one in the same mode:
+one in the same mode. They work as in
+[Migration Parameters](live_migration.md#migration-parameters), including the
+log file of a TCP output:
 
 ```bash
 ./cloud-hypervisor \

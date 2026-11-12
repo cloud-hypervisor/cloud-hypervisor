@@ -50,6 +50,9 @@ and can be selected explicitly with `server=on`.
 Setting `server=off` is rejected because TCP client mode is not supported.
 It serves one client at a time and buffers output until a client connects.
 It accepts another client only after the current client disconnects.
+With `file=<path>`, it also writes all output to that file, whether or not a
+client is connected. The file is truncated on every boot and is never read, so
+it does not provide input.
 Boot does not wait for a client to connect. The same backends and options apply
 to the `virtio-console` device through the `--console` parameter.
 
