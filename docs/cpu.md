@@ -276,8 +276,9 @@ Three modes are available:
   the cost of performance.
 - `off`: No core scheduling is applied.
 
-On kernels older than 5.14 (which lack `PR_SCHED_CORE` support), the
-option silently has no effect.
+If the host kernel is built without `CONFIG_SCHED_CORE`, the option has no
+effect and Cloud Hypervisor logs a warning. On hosts without SMT, the option
+silently has no effect.
 
 _Example_
 
