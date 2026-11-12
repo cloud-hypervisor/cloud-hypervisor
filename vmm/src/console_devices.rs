@@ -82,7 +82,7 @@ pub enum ConsoleTransport {
     Tty(Arc<File>),
     Null,
     Socket(Arc<LockedUnixListener>),
-    TcpListen(Arc<TcpListener>),
+    TcpListen { listener: Arc<TcpListener> },
     Off,
 }
 
@@ -98,13 +98,17 @@ fn tcp_console_transport(
     if let Some(listener) = stored
         && listener.local_addr().is_ok_and(|bound| bound == addr)
     {
-        return Ok(ConsoleTransport::TcpListen(Arc::clone(listener)));
+        return Ok(ConsoleTransport::TcpListen {
+            listener: Arc::clone(listener),
+        });
     }
     let listener = TcpListener::bind(addr).map_err(ConsoleDeviceError::BindTcpListener)?;
     listener
         .set_nonblocking(true)
         .map_err(ConsoleDeviceError::SetTcpListenerNonblocking)?;
-    Ok(ConsoleTransport::TcpListen(Arc::new(listener)))
+    Ok(ConsoleTransport::TcpListen {
+        listener: Arc::new(listener),
+    })
 }
 
 #[derive(Clone)]
@@ -380,12 +384,12 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
     };
 
     vmm.serial_tcp_listener = match &console_info.serial {
-        ConsoleTransport::TcpListen(listener) => Some(Arc::clone(listener)),
+        ConsoleTransport::TcpListen { listener } => Some(Arc::clone(listener)),
         _ => None,
     };
 
     vmm.console_tcp_listener = match &console_info.console {
-        ConsoleTransport::TcpListen(listener) => Some(Arc::clone(listener)),
+        ConsoleTransport::TcpListen { listener } => Some(Arc::clone(listener)),
         _ => None,
     };
 
@@ -428,12 +432,12 @@ mod tests {
             address: "127.0.0.1:0".parse().unwrap(),
             server: true,
         };
-        let ConsoleTransport::TcpListen(listener) = tcp_console_transport(&tcp, None).unwrap()
+        let ConsoleTransport::TcpListen { listener } = tcp_console_transport(&tcp, None).unwrap()
         else {
             panic!("Expected TCP listener");
         };
         tcp.address = listener.local_addr().unwrap();
-        let ConsoleTransport::TcpListen(reused) =
+        let ConsoleTransport::TcpListen { listener: reused } =
             tcp_console_transport(&tcp, Some(&listener)).unwrap()
         else {
             panic!("Expected TCP listener");

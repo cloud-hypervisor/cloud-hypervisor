@@ -171,7 +171,7 @@ impl SerialManager {
             ConsoleTransport::Socket(ref listener) => {
                 Some((listener.as_raw_fd(), EpollDispatch::Socket))
             }
-            ConsoleTransport::TcpListen(ref listener) => {
+            ConsoleTransport::TcpListen { ref listener } => {
                 Some((listener.as_raw_fd(), EpollDispatch::Socket))
             }
             _ => return Ok(None),
@@ -205,7 +205,7 @@ impl SerialManager {
         let mut socket_console = None;
         if matches!(
             transport,
-            ConsoleTransport::Socket(_) | ConsoleTransport::TcpListen(_)
+            ConsoleTransport::Socket(_) | ConsoleTransport::TcpListen { .. }
         ) {
             let console = SocketConsole::new();
             serial
@@ -332,7 +332,7 @@ impl SerialManager {
                                 }
                                 EpollDispatch::Socket => {
                                     if let Some(console) = socket_console.as_mut() {
-                                        if let ConsoleTransport::TcpListen(ref listener) = transport {
+                                        if let ConsoleTransport::TcpListen { ref listener } = transport {
                                             if console.accept_tcp(listener).map_err(Error::AcceptConnection)?
                                                 && let Some(fd) = console.client_fd()
                                             {
@@ -396,13 +396,13 @@ impl SerialManager {
                                 }
                                 EpollDispatch::File => {
                                     if event.events & libc::EPOLLIN as u32 != 0
-                                        || matches!(transport, ConsoleTransport::TcpListen(_))
+                                        || matches!(transport, ConsoleTransport::TcpListen { .. })
                                             && event.events & (libc::EPOLLHUP | libc::EPOLLERR) as u32 != 0
                                     {
                                         let mut input = [0u8; 64];
                                         let count = match &transport {
                                             ConsoleTransport::Socket(_)
-                                            | ConsoleTransport::TcpListen(_) => {
+                                            | ConsoleTransport::TcpListen { .. } => {
                                                 if let Some(console) = socket_console.as_mut() {
                                                     let was_connected = console.client_fd().is_some();
                                                     let count = match console.read(&mut input) {
@@ -416,7 +416,7 @@ impl SerialManager {
                                                     };
                                                     if was_connected
                                                             && console.client_fd().is_none()
-                                                            && let ConsoleTransport::TcpListen(ref listener) = transport
+                                                            && let ConsoleTransport::TcpListen { ref listener } = transport
                                                         {
                                                             epoll::ctl(
                                                                 epoll_fd.as_raw_fd(),
@@ -453,7 +453,7 @@ impl SerialManager {
                                             .queue_input_bytes(&input[..count])
                                             .map_err(Error::QueueInput)?;
                                     }
-                                    if matches!(transport, ConsoleTransport::TcpListen(_)) {
+                                    if matches!(transport, ConsoleTransport::TcpListen { .. }) {
                                         continue;
                                     }
                                     if event.events & libc::EPOLLHUP as u32 != 0 {
