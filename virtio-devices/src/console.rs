@@ -17,7 +17,7 @@ use libc::{EFD_NONBLOCK, TIOCGWINSZ};
 use log::{error, info, warn};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
-use serial_buffer::{SerialBuffer, SocketConsole};
+use serial_buffer::{SerialBuffer, SocketConsole, Tee};
 use smallvec::SmallVec;
 use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
@@ -112,7 +112,10 @@ pub enum Endpoint {
     FilePair(Arc<File>, Arc<File>),
     PtyPair(Arc<File>, Arc<File>),
     Socket(Arc<UnixListener>),
-    TcpListen { listener: Arc<TcpListener> },
+    TcpListen {
+        listener: Arc<TcpListener>,
+        file: Option<Arc<File>>,
+    },
     Null,
 }
 
@@ -168,7 +171,13 @@ impl ConsoleEpollHandler {
     ) -> Self {
         let (socket_console, out, write_out) = if endpoint.is_socket() {
             let console = SocketConsole::new();
-            let out = console.out_sink();
+            let mut out = console.out_sink();
+            if let Endpoint::TcpListen {
+                file: Some(file), ..
+            } = &endpoint
+            {
+                out = Box::new(Tee::new(out, Arc::clone(file)));
+            }
             (Some(console), Some(out), None)
         } else if let Some(out_file) = endpoint.out_file() {
             let writer = out_file.try_clone().unwrap();
@@ -350,7 +359,7 @@ impl ConsoleEpollHandler {
             Endpoint::Socket(listener) => {
                 helper.add_event(listener.as_raw_fd(), SOCKET_EVENT)?;
             }
-            Endpoint::TcpListen { listener } => {
+            Endpoint::TcpListen { listener, .. } => {
                 helper.add_event(listener.as_raw_fd(), SOCKET_EVENT)?;
             }
             _ => {}
@@ -468,7 +477,7 @@ impl EpollHelperHandler for ConsoleEpollHandler {
             }
             SOCKET_EVENT => {
                 if let Some(console) = self.socket_console.as_mut() {
-                    if let Endpoint::TcpListen { listener } = &self.endpoint {
+                    if let Endpoint::TcpListen { listener, .. } = &self.endpoint {
                         if console
                             .accept_tcp(listener)
                             .map_err(EpollHelperError::IoError)?
@@ -511,7 +520,7 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                         });
                         if was_connected
                             && console.client_fd().is_none()
-                            && let Endpoint::TcpListen { listener } = &self.endpoint
+                            && let Endpoint::TcpListen { listener, .. } = &self.endpoint
                         {
                             helper.add_event(listener.as_raw_fd(), SOCKET_EVENT)?;
                         }

@@ -2649,7 +2649,9 @@ impl DeviceManager {
                 self.console.socket = Some(listener);
                 Endpoint::Socket(Arc::new(inner))
             }
-            ConsoleTransport::TcpListen { listener } => Endpoint::TcpListen { listener },
+            ConsoleTransport::TcpListen { listener, file } => {
+                Endpoint::TcpListen { listener, file }
+            }
             ConsoleTransport::Null => Endpoint::Null,
             ConsoleTransport::Off => return Ok(None),
         };

@@ -15,7 +15,7 @@ use std::mem::zeroed;
 use std::net::{SocketAddr, TcpListener};
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{io, result};
 
@@ -82,12 +82,17 @@ pub enum ConsoleTransport {
     Tty(Arc<File>),
     Null,
     Socket(Arc<LockedUnixListener>),
-    TcpListen { listener: Arc<TcpListener> },
+    TcpListen {
+        listener: Arc<TcpListener>,
+        /// Optional output-only log of the console.
+        file: Option<Arc<File>>,
+    },
     Off,
 }
 
 fn tcp_console_transport(
     tcp: &TcpConsoleConfig,
+    output_copy_file: Option<&Path>,
     stored: Option<&Arc<TcpListener>>,
 ) -> ConsoleDeviceResult<ConsoleTransport> {
     let addr = tcp.address;
@@ -95,20 +100,23 @@ fn tcp_console_transport(
         return Err(ConsoleDeviceError::TcpAddressNotLoopback(addr));
     }
     // Reuse across reboot to avoid binding while sandboxed.
-    if let Some(listener) = stored
+    let listener = if let Some(listener) = stored
         && listener.local_addr().is_ok_and(|bound| bound == addr)
     {
-        return Ok(ConsoleTransport::TcpListen {
-            listener: Arc::clone(listener),
-        });
-    }
-    let listener = TcpListener::bind(addr).map_err(ConsoleDeviceError::BindTcpListener)?;
-    listener
-        .set_nonblocking(true)
-        .map_err(ConsoleDeviceError::SetTcpListenerNonblocking)?;
-    Ok(ConsoleTransport::TcpListen {
-        listener: Arc::new(listener),
-    })
+        Arc::clone(listener)
+    } else {
+        let listener = TcpListener::bind(addr).map_err(ConsoleDeviceError::BindTcpListener)?;
+        listener
+            .set_nonblocking(true)
+            .map_err(ConsoleDeviceError::SetTcpListenerNonblocking)?;
+        Arc::new(listener)
+    };
+    let file = output_copy_file
+        .map(File::create)
+        .transpose()
+        .map_err(ConsoleDeviceError::CreateConsoleDevice)?
+        .map(Arc::new);
+    Ok(ConsoleTransport::TcpListen { listener, file })
 }
 
 #[derive(Clone)]
@@ -288,7 +296,7 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                 }
             }
             ConsoleOutput::Tcp { tcp } => {
-                tcp_console_transport(tcp, vmm.console_tcp_listener.as_ref())?
+                tcp_console_transport(tcp, None, vmm.console_tcp_listener.as_ref())?
             }
             ConsoleOutput::Null => ConsoleTransport::Null,
             ConsoleOutput::Off => ConsoleTransport::Off,
@@ -341,7 +349,7 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                 }
             }
             ConsoleOutput::Tcp { tcp } => {
-                tcp_console_transport(tcp, vmm.serial_tcp_listener.as_ref())?
+                tcp_console_transport(tcp, None, vmm.serial_tcp_listener.as_ref())?
             }
             ConsoleOutput::Null => ConsoleTransport::Null,
             ConsoleOutput::Off => ConsoleTransport::Off,
@@ -384,12 +392,12 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
     };
 
     vmm.serial_tcp_listener = match &console_info.serial {
-        ConsoleTransport::TcpListen { listener } => Some(Arc::clone(listener)),
+        ConsoleTransport::TcpListen { listener, .. } => Some(Arc::clone(listener)),
         _ => None,
     };
 
     vmm.console_tcp_listener = match &console_info.console {
-        ConsoleTransport::TcpListen { listener } => Some(Arc::clone(listener)),
+        ConsoleTransport::TcpListen { listener, .. } => Some(Arc::clone(listener)),
         _ => None,
     };
 
@@ -418,7 +426,7 @@ mod tests {
                 server: true,
             };
             assert!(matches!(
-                tcp_console_transport(&tcp, None),
+                tcp_console_transport(&tcp, None, None),
                 Err(ConsoleDeviceError::TcpAddressNotLoopback(_))
             ));
         }
@@ -432,13 +440,15 @@ mod tests {
             address: "127.0.0.1:0".parse().unwrap(),
             server: true,
         };
-        let ConsoleTransport::TcpListen { listener } = tcp_console_transport(&tcp, None).unwrap()
+        let ConsoleTransport::TcpListen { listener, .. } =
+            tcp_console_transport(&tcp, None, None).unwrap()
         else {
             panic!("Expected TCP listener");
         };
         tcp.address = listener.local_addr().unwrap();
-        let ConsoleTransport::TcpListen { listener: reused } =
-            tcp_console_transport(&tcp, Some(&listener)).unwrap()
+        let ConsoleTransport::TcpListen {
+            listener: reused, ..
+        } = tcp_console_transport(&tcp, None, Some(&listener)).unwrap()
         else {
             panic!("Expected TCP listener");
         };
