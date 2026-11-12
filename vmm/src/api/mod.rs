@@ -403,8 +403,10 @@ impl VmReceiveMigrationData {
         \"<receiver_url>\" or \"receiver_url=<url>[,tls_dir=<path>]\
         [,vfio_fds=<list_of_vfio_ids_with_their_associated_fd>][,iommufd_fd=<fd>]\
         [,zone_updates=[<id@host_numa_node>]][,background_fetch_pages=on|off]\
-        [,serial_file=<path>|serial_socket=<path>|serial_tcp=<ip>:<port>]\
-        [,console_file=<path>|console_socket=<path>|console_tcp=<ip>:<port>]\"";
+        [,serial_file=<path>|serial_socket=<path>|serial_tcp=<ip>:<port>\
+        [,serial_file=<log_path>]]\
+        [,console_file=<path>|console_socket=<path>|console_tcp=<ip>:<port>\
+        [,console_file=<log_path>]]\"";
 
     /// # Safety
     /// Live FDs named in the input must be exclusively owned by the caller.
@@ -2345,7 +2347,7 @@ mod tests {
     #[test]
     fn test_vm_receive_migration_data_invalid_console_output() {
         for options in [
-            "serial_file=/tmp/a,serial_tcp=127.0.0.1:4444",
+            "serial_socket=/tmp/a,serial_tcp=127.0.0.1:4444",
             "console_tcp=localhost:4444",
         ] {
             // SAFETY: This test input contains no inherited descriptors.
@@ -2420,6 +2422,7 @@ mod tests {
                         address: "1.2.3.4:6789".parse().unwrap(),
                         server: true,
                     },
+                    file: None,
                 }),
                 console: Some(ConsoleOutput::File {
                     file: PathBuf::from("/tmp/c"),

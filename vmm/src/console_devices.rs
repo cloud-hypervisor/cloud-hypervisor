@@ -295,8 +295,8 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                     ConsoleTransport::Socket(Arc::new(listener))
                 }
             }
-            ConsoleOutput::Tcp { tcp } => {
-                tcp_console_transport(tcp, None, vmm.console_tcp_listener.as_ref())?
+            ConsoleOutput::Tcp { tcp, file } => {
+                tcp_console_transport(tcp, file.as_deref(), vmm.console_tcp_listener.as_ref())?
             }
             ConsoleOutput::Null => ConsoleTransport::Null,
             ConsoleOutput::Off => ConsoleTransport::Off,
@@ -348,8 +348,8 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                     ConsoleTransport::Socket(Arc::new(listener))
                 }
             }
-            ConsoleOutput::Tcp { tcp } => {
-                tcp_console_transport(tcp, None, vmm.serial_tcp_listener.as_ref())?
+            ConsoleOutput::Tcp { tcp, file } => {
+                tcp_console_transport(tcp, file.as_deref(), vmm.serial_tcp_listener.as_ref())?
             }
             ConsoleOutput::Null => ConsoleTransport::Null,
             ConsoleOutput::Off => ConsoleTransport::Off,
