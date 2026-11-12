@@ -9,7 +9,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 mod socket;
+mod tee;
 pub use socket::SocketConsole;
+pub use tee::Tee;
 
 const MAX_BUFFER_SIZE: usize = 1 << 20;
 
