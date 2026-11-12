@@ -635,6 +635,10 @@ impl VhostUserHandle {
         // The backend considers the vrings stopped after GET_VRING_BASE.
         self.ready = false;
 
+        // Store the vring bases in case any of the operation below fails, or
+        // in case we need to resume after snapshot.
+        self.vring_bases = Some(vring_bases.clone());
+
         let (local, remote) = UnixStream::pair().map_err(Error::SaveRestoreBackendState)?;
 
         let mut read_file: File = match self
@@ -660,9 +664,6 @@ impl VhostUserHandle {
         self.vu
             .check_device_state()
             .map_err(Error::VhostUserCheckDeviceState)?;
-
-        // Store the bases in case we need to resume after snapshot
-        self.vring_bases = Some(vring_bases.clone());
 
         Ok((state, vring_bases))
     }
