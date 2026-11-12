@@ -50,5 +50,8 @@ vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { workspace = true }
 zerocopy = { workspace = true, features = ["derive"] }
 
+[dev-dependencies]
+vhost-user-backend = { workspace = true }
+
 [lints]
 workspace = true

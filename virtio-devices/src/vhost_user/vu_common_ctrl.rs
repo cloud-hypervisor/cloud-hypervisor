@@ -889,3 +889,144 @@ fn memfd_create(name: &ffi::CStr, flags: u32) -> io::Result<RawFd> {
         Ok(res as RawFd)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs::File;
+    use std::io::{self, Write};
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+
+    use vhost::vhost_user::message::{
+        VhostTransferStatePhase, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
+    };
+    use vhost_user_backend::{VhostUserBackendMut, VhostUserDaemon, VringRwLock};
+    use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
+    use vmm_sys_util::epoll::EventSet;
+    use vmm_sys_util::tempdir::TempDir;
+
+    use super::*;
+
+    fn test_handle(vu: Frontend) -> VhostUserHandle {
+        VhostUserHandle {
+            vu,
+            backend_features: 0,
+            ready: false,
+            supports_migration: false,
+            supports_device_state: false,
+            shm_log: None,
+            acked_features: 0,
+            vrings_info: None,
+            queue_indexes: Vec::new(),
+            vring_bases: None,
+        }
+    }
+
+    /// Backend that streams a few bytes and then fails CHECK_DEVICE_STATE
+    struct FailingCheckBackend;
+
+    impl VhostUserBackendMut for FailingCheckBackend {
+        type Bitmap = ();
+        type Vring = VringRwLock;
+
+        fn num_queues(&self) -> usize {
+            2
+        }
+        fn max_queue_size(&self) -> usize {
+            256
+        }
+        fn features(&self) -> u64 {
+            (1 << 32) | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
+        }
+        fn protocol_features(&self) -> VhostUserProtocolFeatures {
+            VhostUserProtocolFeatures::MQ | VhostUserProtocolFeatures::DEVICE_STATE
+        }
+        fn set_event_idx(&mut self, _enabled: bool) {}
+        fn update_memory(&mut self, _mem: GuestMemoryAtomic<GuestMemoryMmap>) -> io::Result<()> {
+            Ok(())
+        }
+        fn handle_event(
+            &mut self,
+            _device_event: u16,
+            _evset: EventSet,
+            _vrings: &[VringRwLock],
+            _thread_id: usize,
+        ) -> io::Result<()> {
+            Ok(())
+        }
+        fn set_device_state_fd(
+            &mut self,
+            _direction: VhostTransferStateDirection,
+            _phase: VhostTransferStatePhase,
+            mut file: File,
+        ) -> io::Result<Option<File>> {
+            file.write_all(b"state")?;
+            // Dropping `file` signals EOF to the reader.
+            Ok(None)
+        }
+        fn check_device_state(&self) -> io::Result<()> {
+            Err(io::Error::other("injected device state failure"))
+        }
+    }
+
+    /// Start a daemon serving `FailingCheckBackend` and return a handle that
+    /// completed the vhost-user handshake with DEVICE_STATE negotiated.
+    fn connected_handle(dir: &TempDir) -> VhostUserHandle {
+        let path = dir.as_path().join("vu.sock");
+
+        let mut daemon = VhostUserDaemon::new(
+            "failing-check".to_string(),
+            Arc::new(Mutex::new(FailingCheckBackend)),
+            GuestMemoryAtomic::new(GuestMemoryMmap::new()),
+        )
+        .unwrap();
+        let server_path = path.clone();
+        thread::spawn(move || {
+            let _ = daemon.serve(&server_path);
+        });
+
+        // The daemon binds the socket asynchronously: retry for a short while.
+        let mut vu = None;
+        for _ in 0..50 {
+            if let Ok(v) = Frontend::connect(path.to_str().unwrap(), 2) {
+                vu = Some(v);
+                break;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        let mut handle = test_handle(vu.expect("failed to connect to test backend"));
+
+        handle.vu.set_owner().unwrap();
+        handle.backend_features = handle.vu.get_features().unwrap();
+        handle.vu.set_features(handle.backend_features).unwrap();
+        handle
+            .set_protocol_features_vhost_user(
+                handle.backend_features,
+                (VhostUserProtocolFeatures::MQ | VhostUserProtocolFeatures::DEVICE_STATE).bits(),
+            )
+            .unwrap();
+        assert!(handle.supports_device_state());
+        handle
+    }
+
+    /// When the state transfer fails after the vrings are stopped, the bases
+    /// must still be stored, otherwise the device stays stopped.
+    #[test]
+    fn failed_state_check_keeps_vring_bases_for_resume() {
+        let dir = TempDir::new_with_prefix("/tmp/ch-vu-").unwrap();
+        let mut handle = connected_handle(&dir);
+        handle.queue_indexes = vec![0, 1];
+        handle.ready = true;
+
+        let err = handle.save_backend_state().unwrap_err();
+        assert!(
+            matches!(err, Error::VhostUserCheckDeviceState(_)),
+            "{err:?}"
+        );
+
+        // GET_VRING_BASE stopped the backend
+        assert!(!handle.ready);
+        // the bases must be kept for resume().
+        assert_eq!(handle.vring_bases.as_ref().map(Vec::len), Some(2));
+    }
+}
