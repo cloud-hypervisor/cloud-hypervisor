@@ -435,20 +435,9 @@ impl SerialManager {
                                                 }
                                             }
                                             ConsoleTransport::Pty(file)
-                                            | ConsoleTransport::Tty(file) => {
-                                                match (&**file).read(&mut input) {
-                                                    Ok(count) => count,
-                                                    // Another reader of the same
-                                                    // tty took the input.
-                                                    Err(e)
-                                                        if e.kind()
-                                                            == io::ErrorKind::WouldBlock =>
-                                                    {
-                                                        continue;
-                                                    }
-                                                    Err(e) => return Err(Error::ReadInput(e)),
-                                                }
-                                            }
+                                            | ConsoleTransport::Tty(file) => (&**file)
+                                                .read(&mut input)
+                                                .map_err(Error::ReadInput)?,
                                             _ => unreachable!(),
                                         };
 
