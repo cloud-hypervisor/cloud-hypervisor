@@ -322,7 +322,8 @@ guarantees are currently made:
   two major releases to the current release ("n-2")  is guaranteed to work,
   excluding experimental features listed below. See
   [Version Compatibility](docs/live_migration.md#version-compatibility) for
-  details.
+  details. **Beware** that reliable usage in a **heterogeneous fleet** need the
+  use of a matching **CPU profile**, which are available since `v55`. 
 
 Currently the following items and experimental features are **not** guaranteed
 across updates because:
