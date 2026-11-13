@@ -1,9 +1,7 @@
 # How to test Vhost-user net with OpenVSwitch/DPDK
 
 The purpose of this document is to illustrate how to test vhost-user-net
-in cloud-hypervisor with OVS/DPDK as the backend. This document was
-tested with Open vSwitch v2.17.8, DPDK v21.11.4, and Cloud Hypervisor
-v37.0 on Ubuntu 22.04.3 (host kernel v5.15.0).
+in cloud-hypervisor with OVS/DPDK as the backend.
 
 ## Framework
 
