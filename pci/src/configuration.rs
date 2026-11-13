@@ -20,6 +20,7 @@ use crate::device::{BarRelocation, InstallParams, ReleaseParams};
 const NUM_CONFIGURATION_REGISTERS: usize = 1024;
 
 pub(crate) const COMMAND_REG: usize = 1;
+pub(crate) const COMMAND_REG_IO_SPACE_MASK: u32 = 0x0000_0001;
 pub(crate) const COMMAND_REG_MEMORY_SPACE_MASK: u32 = 0x0000_0002;
 const STATUS_REG: usize = 1;
 const STATUS_REG_CAPABILITIES_USED_MASK: u32 = 0x0010_0000;
@@ -1104,8 +1105,8 @@ impl PciConfiguration {
         (0..NUM_BAR_REGS)
             .chain([ROM_BAR_IDX])
             .filter_map(|slot| {
-                self.bar_region_type(slot)?;
-                if self.bar_installed[slot] || !self.decode_enabled() {
+                let region_type = self.bar_region_type(slot)?;
+                if self.bar_installed[slot] || !self.decode_enabled(region_type) {
                     return None;
                 }
                 Some(InstallParams {
@@ -1125,16 +1126,24 @@ impl PciConfiguration {
     /// it was released, in which case the caller leaves it unmapped until
     /// the guest enables the space.
     pub fn release_stale_bar(&mut self, slot: usize, _mapped_at: u64) -> bool {
-        if self.bar_region_type(slot).is_none() {
+        let Some(region_type) = self.bar_region_type(slot) else {
             return false;
-        }
-        let keep = self.decode_enabled();
+        };
+        let keep = self.decode_enabled(region_type);
         self.bar_installed[slot] = keep;
         !keep
     }
 
-    fn decode_enabled(&self) -> bool {
-        self.registers[COMMAND_REG] & COMMAND_REG_MEMORY_SPACE_MASK != 0
+    /// The COMMAND bit decoding `region_type`: IOSE for IO, MSE otherwise.
+    pub fn decode_mask(region_type: PciBarRegionType) -> u32 {
+        match region_type {
+            PciBarRegionType::IoRegion => COMMAND_REG_IO_SPACE_MASK,
+            _ => COMMAND_REG_MEMORY_SPACE_MASK,
+        }
+    }
+
+    fn decode_enabled(&self, region_type: PciBarRegionType) -> bool {
+        self.registers[COMMAND_REG] & Self::decode_mask(region_type) != 0
     }
 
     fn bar_target(&self, slot: usize) -> u64 {
