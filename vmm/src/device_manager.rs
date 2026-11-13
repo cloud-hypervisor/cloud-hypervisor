@@ -5846,25 +5846,6 @@ impl DeviceManager {
 
         // Shutdown and remove the underlying virtio-device if present
         if let Some(virtio_device) = virtio_device {
-            for mapping in virtio_device.lock().unwrap().userspace_mappings() {
-                // SAFETY: userspace_mappings only has valid mappings.
-                // TODO: do not rely on the correctness of all the code in this file
-                // for this to hold.
-                unsafe {
-                    self.memory_manager
-                        .lock()
-                        .unwrap()
-                        .remove_userspace_mapping(
-                            mapping.addr.raw_value(),
-                            mapping.mapping.size(),
-                            mapping.mapping.as_ptr().cast(),
-                            mapping.mergeable,
-                            mapping.mem_slot,
-                        )
-                        .map_err(DeviceManagerError::MemoryManager)
-                }?;
-            }
-
             virtio_device.lock().unwrap().shutdown();
 
             self.virtio_devices
