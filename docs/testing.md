@@ -1,25 +1,5 @@
 # Testing
 
-- [Testing](#testing)
-  - [Overview](#overview)
-  - [Prerequisites](#prerequisites)
-  - [The dev\_cli.sh entry point](#the-dev_clish-entry-point)
-    - [Global flags](#global-flags)
-    - [Building](#building)
-    - [Running tests](#running-tests)
-    - [Argument passthrough](#argument-passthrough)
-    - [Custom kernel and firmware](#custom-kernel-and-firmware)
-  - [Unit tests](#unit-tests)
-  - [Integration tests](#integration-tests)
-    - [x86\_64](#x86_64)
-    - [ARM64](#arm64)
-    - [VFIO](#vfio)
-    - [Windows guests](#windows-guests)
-    - [Rate limiter](#rate-limiter)
-    - [Confidential VMs](#confidential-vms)
-  - [Performance metrics](#performance-metrics)
-  - [Code coverage](#code-coverage)
-
 ## Overview
 
 Cloud Hypervisor's development script runs builds and tests inside a
