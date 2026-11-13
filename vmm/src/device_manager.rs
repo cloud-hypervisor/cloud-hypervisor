@@ -820,7 +820,7 @@ impl AddressManager {
                 self.allocator
                     .lock()
                     .unwrap()
-                    .allocate_io_addresses(Some(GuestAddress(base)), len as GuestUsize, None)
+                    .allocate_io_addresses(Some(GuestAddress(base)), len as GuestUsize, Some(len))
                     .ok_or_else(|| {
                         io::Error::other(format!("failed allocating new IO range: 0x{base:x}"))
                     })?;
