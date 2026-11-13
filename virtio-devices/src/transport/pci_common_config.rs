@@ -758,8 +758,32 @@ mod tests {
             Ok(())
         }
         fn ack_features(&mut self, value: u64) {
-            self.0 |= value;
+            self.0 = value;
         }
+    }
+
+    #[test]
+    fn driver_feature_writes_replace_earlier_values() {
+        let device = Arc::new(Mutex::new(FeatureDevice(0)));
+        let mut regs = make_regs(0);
+        regs.device = Arc::clone(&device) as Arc<Mutex<dyn VirtioDevice>>;
+        let mut queues = vec![Queue::new(QUEUE_SIZE).unwrap()];
+
+        // A driver may write its features again with fewer bits before
+        // FEATURES_OK, as FreeBSD's vtnet does with hw.vtnet.lro_disable=0.
+        // Only the last write counts.
+        regs.write(0x0c, &0b11u32.to_le_bytes(), &mut queues);
+        regs.write(0x08, &1u32.to_le_bytes(), &mut queues);
+        regs.write(0x0c, &1u32.to_le_bytes(), &mut queues);
+        regs.write(0x08, &0u32.to_le_bytes(), &mut queues);
+        regs.write(0x0c, &0b10u32.to_le_bytes(), &mut queues);
+        assert_eq!(device.lock().unwrap().0, (1 << 32) | 0b10);
+
+        // After a reset, the next negotiation starts from no features, as
+        // OpenBSD's vio needs when it negotiates again without TSO.
+        regs.reset();
+        regs.write(0x0c, &0b100u32.to_le_bytes(), &mut queues);
+        assert_eq!(device.lock().unwrap().0, 0b100);
     }
 
     #[test]

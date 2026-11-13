@@ -103,7 +103,8 @@ pub trait VirtioDevice: Send {
         0
     }
 
-    /// Acknowledges that this set of features should be enabled.
+    /// Sets the features the driver accepted. Each call replaces the
+    /// previously acknowledged set.
     fn ack_features(&mut self, value: u64) {
         let _ = value;
     }
@@ -302,7 +303,7 @@ impl VirtioCommon {
             // Don't count these features as acked.
             v &= !unrequested_features;
         }
-        self.acked_features |= v;
+        self.acked_features = v;
     }
 
     pub(crate) fn check_access_platform(&self) -> ActivateResult {
