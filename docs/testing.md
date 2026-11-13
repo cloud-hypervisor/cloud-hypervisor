@@ -43,11 +43,7 @@ host to fetch the workloads.
 scripts/dev_cli.sh [flags] <command> [<command args>]
 ```
 
-### Global flags
-
-| Flag      | Description                                      |
-|-----------|--------------------------------------------------|
-| `--local` | Build and use a local container image instead of pulling from the registry. |
+Run `scripts/dev_cli.sh --help` for all commands, flags, and defaults.
 
 ### Building
 
@@ -56,16 +52,6 @@ scripts/dev_cli.sh build [--debug|--release] [--libc musl|gnu] \
     [--hypervisor kvm|mshv] [--features <features>] \
     [--volumes /host:/ctr#...] [-- <cargo args>]
 ```
-
-| Flag           | Default | Description                              |
-|----------------|---------|------------------------------------------|
-| `--debug`      | yes     | Build debug binaries.                    |
-| `--release`    |         | Build release binaries.                  |
-| `--libc`       | `gnu`   | C library to link against (`musl`/`gnu`).|
-| `--hypervisor` | auto    | Hypervisor backend (`kvm`/`mshv`). Auto-detected from the host device node when omitted. |
-| `--features`   |         | Additional cargo features.               |
-| `--volumes`    |         | Extra host volumes (`/a:/a#/b:/b`).      |
-| `--runtime`    | `docker`| Container runtime (`docker`/`podman`).   |
 
 Arguments after `--` are forwarded directly to `cargo build`.
 
@@ -76,28 +62,6 @@ scripts/dev_cli.sh tests [<test type>] [--libc musl|gnu] \
     [--hypervisor kvm|mshv] [--volumes /host:/ctr#...] \
     [-- <script args> [-- <binary args>]]
 ```
-
-**Test type flags:**
-
-| Flag                           | Description                                |
-|--------------------------------|--------------------------------------------|
-| `--unit`                       | Run unit tests.                            |
-| `--integration`                | Run integration tests (includes live migration). |
-| `--integration-vfio`           | Run VFIO integration tests.                |
-| `--integration-windows`        | Run Windows guest integration tests.       |
-| `--integration-rate-limiter`   | Run rate limiter integration tests.        |
-| `--integration-cvm`            | Run confidential VM integration tests.     |
-| `--metrics`                    | Generate performance metrics.              |
-| `--coverage`                   | Generate code coverage.                    |
-| `--all`                        | Run both unit and integration tests.       |
-
-**Configuration flags:**
-
-| Flag           | Default | Description                              |
-|----------------|---------|------------------------------------------|
-| `--libc`       | `gnu`   | C library to link against (`musl`/`gnu`).|
-| `--hypervisor` | auto    | Hypervisor backend (`kvm`/`mshv`). Auto-detected from the host device node when omitted. |
-| `--volumes`    |         | Extra host volumes (`/a:/a#/b:/b`).      |
 
 ### Argument passthrough
 
@@ -370,16 +334,9 @@ scripts/dev_cli.sh tests --metrics [-- <script args> [-- <binary args>]]
 
 Runs `scripts/run_metrics.sh`, which builds and executes the
 `performance-metrics` binary. The binary produces a JSON report with
-boot time, throughput, and latency measurements.
-
-Useful arguments:
-
-```shell
-# Exclude micro-benchmarks and write results to a file
-scripts/dev_cli.sh tests --metrics \
-    -- --test-exclude micro_ \
-    -- --report-file /root/workloads/metrics.json
-```
+boot time, throughput, and latency measurements. Run
+`scripts/dev_cli.sh tests --metrics -- -- --help` for the arguments of the
+binary.
 
 ## Code coverage
 
