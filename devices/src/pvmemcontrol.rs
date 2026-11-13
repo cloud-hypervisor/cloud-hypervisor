@@ -130,7 +130,6 @@ struct PvmemcontrolTransport {
 }
 
 const PVMEMCONTROL_DEVICE_MMIO_SIZE: u64 = size_of::<PvmemcontrolTransport>() as u64;
-const PVMEMCONTROL_DEVICE_MMIO_ALIGN: u64 = align_of::<PvmemcontrolTransport>() as u64;
 
 impl PvmemcontrolTransport {
     fn ack() -> Self {
@@ -894,8 +893,9 @@ impl PciDevice for PvmemcontrolPciDevice {
             }
         }
 
+        let alignment = if restoring { None } else { Some(region_size) };
         let bar_addr = mmio32_allocator
-            .allocate(bar_addr, region_size, Some(PVMEMCONTROL_DEVICE_MMIO_ALIGN))
+            .allocate(bar_addr, region_size, alignment)
             .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
 
         let bar = PciBarConfiguration::default()
