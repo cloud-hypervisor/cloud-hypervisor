@@ -1,7 +1,6 @@
 # How to build and test Cloud Hypervisor on riscv64
 
 This document introduces how to build and test Cloud Hypervisor on `riscv64`.
-All instructions here are tested with Ubuntu 24.04.2 as the host OS.
 
 ## Hardware requirements
 
