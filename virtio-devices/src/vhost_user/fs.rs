@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 use serde_with::{Bytes, serde_as};
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler};
-use vm_device::UserspaceMapping;
 use vm_memory::ByteValued;
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -320,20 +319,6 @@ impl VirtioDevice for Fs {
 
     fn add_memory_region(&mut self, region: &Arc<GuestRegion>) -> result::Result<(), crate::Error> {
         self.vu_common.add_memory_region(region)
-    }
-
-    fn userspace_mappings(&self) -> Vec<UserspaceMapping> {
-        let mut mappings = Vec::new();
-        if let Some(cache) = self.cache.as_ref() {
-            mappings.push(UserspaceMapping {
-                mem_slot: cache.0.mem_slot,
-                addr: cache.0.addr,
-                mapping: Arc::clone(&cache.0.mapping),
-                mergeable: false,
-            });
-        }
-
-        mappings
     }
 }
 

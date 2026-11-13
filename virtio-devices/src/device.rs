@@ -29,8 +29,7 @@ use crate::epoll_helper::EpollHelperError;
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::{
-    ActivateError, ActivateResult, Error, GuestMemory, GuestRegion, MmapRegion,
-    VIRTIO_F_RING_INDIRECT_DESC,
+    ActivateError, ActivateResult, Error, GuestMemory, GuestRegion, VIRTIO_F_RING_INDIRECT_DESC,
 };
 
 pub enum VirtioInterruptType {
@@ -61,7 +60,7 @@ pub struct VirtioSharedMemory {
 pub struct VirtioSharedMemoryList {
     pub mem_slot: u32,
     pub addr: GuestAddress,
-    pub mapping: Arc<MmapRegion>,
+    pub mapping: Arc<GuestRegion>,
     pub region_list: Vec<VirtioSharedMemory>,
 }
 
