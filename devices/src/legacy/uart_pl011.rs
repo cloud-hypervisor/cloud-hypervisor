@@ -229,8 +229,10 @@ impl Pl011 {
         PL011_FIFO_SIZE.saturating_sub(self.read_fifo.len())
     }
 
-    /// Queues raw bytes for the guest to read and signals the interrupt
+    /// Queues raw bytes for the guest to read and signals the interrupt. Bytes beyond
+    /// `fifo_free_space()` are dropped.
     pub fn queue_input_bytes(&mut self, c: &[u8]) -> errno::Result<()> {
+        let c = &c[..c.len().min(self.fifo_free_space())];
         self.read_fifo.extend(c);
         self.read_count += c.len() as u32;
         self.flags &= !PL011_FLAG_RXFE;

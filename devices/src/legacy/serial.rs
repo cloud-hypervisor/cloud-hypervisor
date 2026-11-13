@@ -180,10 +180,11 @@ impl Serial {
     }
 
     /// Queues raw bytes for the guest to read and signals the interrupt if the line status would
-    /// change.
+    /// change. Bytes beyond `fifo_free_space()` are dropped.
     pub fn queue_input_bytes(&mut self, c: &[u8]) -> Result<()> {
         if !self.is_loop() {
-            self.in_buffer.extend(c);
+            let count = c.len().min(self.fifo_free_space());
+            self.in_buffer.extend(&c[..count]);
             self.recv_data()?;
         }
         Ok(())
@@ -570,7 +571,7 @@ mod tests {
         );
         serial.set_in_buffer_empty_evt(empty_evt.try_clone().unwrap());
 
-        serial.queue_input_bytes(&[b'a'; FIFO_SIZE]).unwrap();
+        serial.queue_input_bytes(&[b'a'; FIFO_SIZE + 1]).unwrap();
         assert_eq!(serial.fifo_free_space(), 0);
 
         let mut data = [0u8];
