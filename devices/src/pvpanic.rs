@@ -26,6 +26,7 @@ const PVPANIC_DEVICE_ID: u16 = 0x0011;
 const PVPANIC_SUBSYSTEM_VENDOR_ID: u16 = 0x1af4;
 const PVPANIC_SUBSYSTEM_ID: u16 = 0x1100;
 
+const PCI_BAR_REGION_SIZE_MIN: u64 = 0x10;
 pub const PVPANIC_DEVICE_MMIO_SIZE: u64 = 0x2;
 pub const PVPANIC_DEVICE_MMIO_ALIGNMENT: u64 = 0x10;
 
@@ -177,16 +178,19 @@ impl PciDevice for PvPanicDevice {
         let mut bars = Vec::new();
         let region_type = PciBarRegionType::Memory32BitRegion;
         let bar_id = 0;
-        let region_size = PVPANIC_DEVICE_MMIO_SIZE;
+        let mut region_size = PVPANIC_DEVICE_MMIO_SIZE.max(PCI_BAR_REGION_SIZE_MIN);
         let restoring = resources.is_some();
 
         let mut bar_addr = None;
         if let Some(resources) = resources {
             for resource in resources {
-                if let Resource::PciBar { index, base, .. } = resource
+                if let Resource::PciBar {
+                    index, base, size, ..
+                } = resource
                     && index == bar_id as usize
                 {
                     bar_addr = Some(GuestAddress(base));
+                    region_size = size;
                     break;
                 }
             }
