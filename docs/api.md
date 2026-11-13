@@ -1,26 +1,3 @@
-- [Cloud Hypervisor API](#cloud-hypervisor-api)
-  - [External API](#external-api)
-    - [REST API](#rest-api)
-      - [REST API Location and availability](#rest-api-location-and-availability)
-      - [REST API Endpoints](#rest-api-endpoints)
-        - [Virtual Machine Manager (VMM) Actions](#virtual-machine-manager-vmm-actions)
-        - [Virtual Machine (VM) Actions](#virtual-machine-vm-actions)
-      - [REST API Examples](#rest-api-examples)
-        - [Create a Virtual Machine](#create-a-virtual-machine)
-        - [Boot a Virtual Machine](#boot-a-virtual-machine)
-        - [Dump Virtual Machine Information](#dump-virtual-machine-information)
-        - [Get Balloon Statistics](#get-balloon-statistics)
-        - [Reboot a Virtual Machine](#reboot-a-virtual-machine)
-        - [Shut a Virtual Machine Down](#shut-a-virtual-machine-down)
-    - [D-Bus API](#d-bus-api)
-      - [D-Bus API Location and availability](#d-bus-api-location-and-availability)
-      - [D-Bus API Interface](#d-bus-api-interface)
-    - [Command Line Interface](#command-line-interface)
-    - [REST API, D-Bus API and CLI Architectural Relationship](#rest-api-d-bus-api-and-cli-architectural-relationship)
-  - [Internal API](#internal-api)
-    - [Goals and Design](#goals-and-design)
-  - [End to End Example](#end-to-end-example)
-
 # Cloud Hypervisor API
 
 The Cloud Hypervisor API is made of 2 distinct interfaces:

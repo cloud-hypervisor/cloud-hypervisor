@@ -1,9 +1,3 @@
-- [Building Cloud Hypervisor](#building-cloud-hypervisor)
-  - [Preparation](#preparation)
-  - [Install prerequisites](#install-prerequisites)
-  - [Clone and build](#clone-and-build)
-    - [Containerized builds and tests](#containerized-builds-and-tests)
-
 # Building Cloud Hypervisor
 
 We recommend users use the pre-built binaries that are mentioned in the README.md file in the root of the repository. Building from source is only necessary if you wish to make modifications.
