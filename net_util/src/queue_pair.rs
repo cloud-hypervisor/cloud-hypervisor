@@ -339,7 +339,7 @@ impl RxVirtio {
                     .memory()
                     .checked_offset(
                         desc.addr()
-                            .translate_gva(access_platform, vnet_hdr_len())
+                            .translate_gva_for_write(access_platform, vnet_hdr_len())
                             .map_err(|e| {
                                 NetQueuePairError::GuestMemory(
                                     vm_memory::GuestMemoryError::IOError(e),
@@ -353,7 +353,7 @@ impl RxVirtio {
                 while let Some(desc) = next_desc {
                     let desc_addr = desc
                         .addr()
-                        .translate_gva(access_platform, desc.len() as usize)
+                        .translate_gva_for_write(access_platform, desc.len() as usize)
                         .map_err(|e| {
                             NetQueuePairError::GuestMemory(vm_memory::GuestMemoryError::IOError(e))
                         })?;

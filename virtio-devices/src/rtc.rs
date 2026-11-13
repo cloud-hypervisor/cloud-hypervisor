@@ -318,7 +318,7 @@ impl RtcEpollHandler {
 
         let resp_addr = resp_desc
             .addr()
-            .translate_gva(access_platform, resp_desc.len() as usize)
+            .translate_gva_for_write(access_platform, resp_desc.len() as usize)
             .map_err(Error::AddressTranslation)?;
 
         let resp_len = match &response {

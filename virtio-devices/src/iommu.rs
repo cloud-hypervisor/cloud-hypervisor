@@ -672,6 +672,7 @@ impl Request {
                         Mapping {
                             gpa: req.phys_start,
                             size,
+                            flags: req.flags,
                         },
                     );
                 }
@@ -998,6 +999,20 @@ impl EpollHelperHandler for IommuEpollHandler {
 struct Mapping {
     gpa: u64,
     size: u64,
+    // VIRTIO_IOMMU_MAP_F_* flags of the MAP request. Snapshots taken before
+    // the flags were recorded did not restrict accesses.
+    #[serde(default = "Mapping::unrestricted_flags")]
+    flags: u32,
+}
+
+impl Mapping {
+    fn unrestricted_flags() -> u32 {
+        VIRTIO_IOMMU_MAP_F_READ | VIRTIO_IOMMU_MAP_F_WRITE
+    }
+
+    fn allows(&self, write: bool) -> bool {
+        !write || self.flags & VIRTIO_IOMMU_MAP_F_WRITE != 0
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1039,16 +1054,18 @@ fn span_end(addr: u64, size: u64) -> io::Result<u64> {
 /// may cross more than one mapping as long as those mappings are adjacent in
 /// IOVA space and contiguous in GPA space, so a buffer the guest mapped with
 /// several mappings still resolves to a single physical range. Returns None
-/// when `addr` is unmapped, a gap is hit before `end`, or the covered range is
-/// not physically contiguous.
+/// when `addr` is unmapped, a gap is hit before `end`, the covered range is
+/// not physically contiguous, or `write` is set and a covering mapping was not
+/// mapped with VIRTIO_IOMMU_MAP_F_WRITE.
 fn translate_contiguous_range(
     mappings: &BTreeMap<u64, Mapping>,
     addr: u64,
     end: u64,
+    write: bool,
 ) -> Option<u64> {
     // The mapping containing `addr` is the one with the greatest start <= addr.
     let (&start_key, start) = mappings.range(..=addr).next_back()?;
-    if addr > inclusive_end(start_key, start.size)? {
+    if addr > inclusive_end(start_key, start.size)? || !start.allows(write) {
         return None;
     }
     let base_gpa = addr - start_key + start.gpa;
@@ -1061,7 +1078,7 @@ fn translate_contiguous_range(
         if end < covered {
             break;
         }
-        if key != covered || value.gpa != next_gpa {
+        if key != covered || value.gpa != next_gpa || !value.allows(write) {
             return None;
         }
         covered = key.checked_add(value.size)?;
@@ -1071,9 +1088,9 @@ fn translate_contiguous_range(
     (end < covered).then_some(base_gpa)
 }
 
-impl DmaRemapping for IommuMapping {
-    fn translate_gva(&self, id: u32, addr: u64, size: u64) -> io::Result<u64> {
-        debug!("Translate GVA addr 0x{addr:x} size 0x{size:x}");
+impl IommuMapping {
+    fn translate_gva_access(&self, id: u32, addr: u64, size: u64, write: bool) -> io::Result<u64> {
+        debug!("Translate GVA addr 0x{addr:x} size 0x{size:x} write {write}");
         let end = span_end(addr, size)?;
         if let Some(domain_id) = self.endpoints.read().unwrap().get(&id) {
             if let Some(domain) = self.domains.read().unwrap().get(domain_id) {
@@ -1083,7 +1100,9 @@ impl DmaRemapping for IommuMapping {
                     return Ok(addr);
                 }
 
-                if let Some(new_addr) = translate_contiguous_range(&domain.mappings, addr, end) {
+                if let Some(new_addr) =
+                    translate_contiguous_range(&domain.mappings, addr, end, write)
+                {
                     debug!("Into GPA addr 0x{new_addr:x}");
                     return Ok(new_addr);
                 }
@@ -1093,8 +1112,20 @@ impl DmaRemapping for IommuMapping {
         }
 
         Err(io::Error::other(format!(
-            "failed to translate GVA addr 0x{addr:x} size 0x{size:x}"
+            "failed to translate GVA addr 0x{addr:x} size 0x{size:x} write {write}"
         )))
+    }
+}
+
+impl DmaRemapping for IommuMapping {
+    fn translate_gva(&self, id: u32, addr: u64, size: u64) -> io::Result<u64> {
+        self.translate_gva_access(id, addr, size, false)
+    }
+
+    // Virtio spec, MAP request device requirements: the device MUST NOT
+    // allow writes to a range mapped without VIRTIO_IOMMU_MAP_F_WRITE.
+    fn translate_gva_for_write(&self, id: u32, addr: u64, size: u64) -> io::Result<u64> {
+        self.translate_gva_access(id, addr, size, true)
     }
 
     fn translate_gpa(&self, id: u32, addr: u64, size: u64) -> io::Result<u64> {
@@ -1136,7 +1167,8 @@ impl InterruptRemapping for IommuMapping {
         let gpa = if (start..=end).contains(&addr) {
             addr
         } else {
-            self.translate_gva(dev_id, addr, size_of::<u32>() as u64)
+            // An MSI is a device write to the doorbell.
+            self.translate_gva_for_write(dev_id, addr, size_of::<u32>() as u64)
                 .ok()?
         };
 
@@ -1163,6 +1195,9 @@ impl AccessPlatformMapping {
 impl AccessPlatform for AccessPlatformMapping {
     fn translate_gva(&self, base: u64, size: u64) -> io::Result<u64> {
         self.mapping.translate_gva(self.id, base, size)
+    }
+    fn translate_gva_for_write(&self, base: u64, size: u64) -> io::Result<u64> {
+        self.mapping.translate_gva_for_write(self.id, base, size)
     }
     fn translate_gpa(&self, base: u64, size: u64) -> io::Result<u64> {
         self.mapping.translate_gpa(self.id, base, size)
@@ -1488,11 +1523,13 @@ mod tests {
     use virtio_queue::QueueT;
     use vm_device::dma_mapping::ExternalDmaMapping;
     use vm_memory::{ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
+    use vm_virtio::checked_descriptor::DescriptorChainExt;
     use vm_virtio::queue::testing::VirtQueue;
     use vmm_sys_util::eventfd::{EFD_NONBLOCK, EventFd};
 
     use super::{
-        Domain, Error, Iommu, IommuMapping, Mapping, Request, VIRTIO_IOMMU_S_DEVERR,
+        AccessPlatformMapping, Domain, Error, Iommu, IommuMapping, Mapping, Request,
+        VIRTIO_IOMMU_MAP_F_READ, VIRTIO_IOMMU_MAP_F_WRITE, VIRTIO_IOMMU_S_DEVERR,
         VIRTIO_IOMMU_S_INVAL, VIRTIO_IOMMU_S_NOENT, VIRTIO_IOMMU_S_OK, VIRTIO_IOMMU_S_RANGE,
         VIRTIO_IOMMU_T_ATTACH, VIRTIO_IOMMU_T_DETACH, VIRTIO_IOMMU_T_MAP, VIRTIO_IOMMU_T_UNMAP,
         VirtioIommuReqAttach, VirtioIommuReqDetach, VirtioIommuReqHead, VirtioIommuReqMap,
@@ -1564,7 +1601,8 @@ mod tests {
     fn iommu_mapping(entries: &[(u64, u64, u64)]) -> IommuMapping {
         let mut mappings = BTreeMap::new();
         for &(iova, gpa, size) in entries {
-            mappings.insert(iova, Mapping { gpa, size });
+            let flags = Mapping::unrestricted_flags();
+            mappings.insert(iova, Mapping { gpa, size, flags });
         }
         let mut domains = BTreeMap::new();
         domains.insert(
@@ -1811,5 +1849,58 @@ mod tests {
         assert_eq!(len.unwrap(), 0);
         assert_eq!(status, INITIAL_STATUS);
         assert_eq!(mapping.endpoints.read().unwrap().get(&0), Some(&0));
+    }
+
+    #[test]
+    fn device_writes_require_map_write_flag() {
+        let mapping = Arc::new(iommu_mapping(&[]));
+        for (virt_start, phys_start, flags) in [
+            (0x8000, 0x6000, VIRTIO_IOMMU_MAP_F_READ),
+            (
+                0x9000,
+                0x7000,
+                VIRTIO_IOMMU_MAP_F_READ | VIRTIO_IOMMU_MAP_F_WRITE,
+            ),
+        ] {
+            let request = VirtioIommuReqMap {
+                domain: 0,
+                virt_start,
+                virt_end: virt_start + 0xfff,
+                phys_start,
+                flags,
+            };
+            let (_, status) =
+                process_request(VIRTIO_IOMMU_T_MAP, request, &mapping, &BTreeMap::new());
+            assert_eq!(status, VIRTIO_IOMMU_S_OK);
+        }
+
+        assert_eq!(mapping.translate_gva(0, 0x8000, 0x100).unwrap(), 0x6000);
+        mapping
+            .translate_gva_for_write(0, 0x8000, 0x100)
+            .unwrap_err();
+        assert_eq!(
+            mapping.translate_gva_for_write(0, 0x9000, 0x100).unwrap(),
+            0x7000
+        );
+        // A write spanning both mappings needs both to be writable.
+        assert_eq!(mapping.translate_gva(0, 0x8f00, 0x200).unwrap(), 0x6f00);
+        mapping
+            .translate_gva_for_write(0, 0x8f00, 0x200)
+            .unwrap_err();
+
+        // A device-writable descriptor on the read-only mapping is refused.
+        let access_platform = AccessPlatformMapping::new(0, mapping);
+        let mem = GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let vq = VirtQueue::new(GuestAddress(0x1000), &mem, 2);
+        vq.dtable[0].set(0x8000, 0x100, VRING_DESC_F_WRITE as u16, 0);
+        vq.avail.ring[0].set(0);
+        vq.avail.idx.set(1);
+        let mut queue = vq.create_queue();
+        let mem_atomic = GuestMemoryAtomic::new(mem);
+        let mut chain = queue.pop_descriptor_chain(mem_atomic.memory()).unwrap();
+        assert_eq!(
+            chain.next_checked(Some(&access_platform)).unwrap_err(),
+            GuestAddress(0x8000)
+        );
     }
 }

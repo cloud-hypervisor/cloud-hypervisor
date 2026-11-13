@@ -99,12 +99,25 @@ impl fmt::Display for VirtioDeviceType {
 pub trait AccessPlatform: Send + Sync + Debug {
     /// Provide a way to translate GVA address ranges into GPAs.
     fn translate_gva(&self, base: u64, size: u64) -> io::Result<u64>;
+    /// Translate a GVA range the device is going to write to. Platforms
+    /// that track access permissions must reject ranges that are not
+    /// writable.
+    fn translate_gva_for_write(&self, base: u64, size: u64) -> io::Result<u64> {
+        self.translate_gva(base, size)
+    }
     /// Provide a way to translate GPA address ranges into GVAs.
     fn translate_gpa(&self, base: u64, size: u64) -> io::Result<u64>;
 }
 
 pub trait Translatable {
     fn translate_gva(
+        &self,
+        access_platform: Option<&dyn AccessPlatform>,
+        len: usize,
+    ) -> io::Result<Self>
+    where
+        Self: Sized;
+    fn translate_gva_for_write(
         &self,
         access_platform: Option<&dyn AccessPlatform>,
         len: usize,
@@ -128,6 +141,15 @@ impl Translatable for GuestAddress {
     ) -> io::Result<Self> {
         Ok(GuestAddress(self.0.translate_gva(access_platform, len)?))
     }
+    fn translate_gva_for_write(
+        &self,
+        access_platform: Option<&dyn AccessPlatform>,
+        len: usize,
+    ) -> io::Result<Self> {
+        Ok(GuestAddress(
+            self.0.translate_gva_for_write(access_platform, len)?,
+        ))
+    }
     fn translate_gpa(
         &self,
         access_platform: Option<&dyn AccessPlatform>,
@@ -145,6 +167,17 @@ impl Translatable for u64 {
     ) -> io::Result<Self> {
         if let Some(access_platform) = access_platform {
             access_platform.translate_gva(*self, len as u64)
+        } else {
+            Ok(*self)
+        }
+    }
+    fn translate_gva_for_write(
+        &self,
+        access_platform: Option<&dyn AccessPlatform>,
+        len: usize,
+    ) -> io::Result<Self> {
+        if let Some(access_platform) = access_platform {
+            access_platform.translate_gva_for_write(*self, len as u64)
         } else {
             Ok(*self)
         }

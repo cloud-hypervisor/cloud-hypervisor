@@ -191,7 +191,7 @@ impl Request {
 
         let addr = status_desc
             .addr()
-            .translate_gva(access_platform, 1)
+            .translate_gva_for_write(access_platform, 1)
             .map_err(|_| {
                 Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(status_desc.addr()))
             })?;
