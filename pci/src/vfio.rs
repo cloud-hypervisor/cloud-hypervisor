@@ -2265,97 +2265,124 @@ impl VfioPciDevice {
         region_size: u64,
         vfio_msix: Option<&VfioMsix>,
     ) -> Result<Vec<VfioRegionSparseMmapArea>, VfioPciError> {
+        let mut base_areas = None;
+        let mut msix_mappable = false;
+
         for cap in caps {
             match cap {
-                VfioRegionInfoCap::SparseMmap(sparse_mmap) => return Ok(sparse_mmap.areas.clone()),
+                VfioRegionInfoCap::SparseMmap(sparse_mmap) => {
+                    base_areas = Some(sparse_mmap.areas.clone());
+                }
                 VfioRegionInfoCap::MsixMappable => {
-                    if !is_4k_aligned(region_start) {
-                        error!(
-                            "Region start address 0x{region_start:x} must be at least aligned on 4KiB"
-                        );
-                        return Err(VfioPciError::RegionAlignment);
-                    }
-                    if !is_4k_multiple(region_size) {
-                        error!("Region size 0x{region_size:x} must be at least a multiple of 4KiB");
-                        return Err(VfioPciError::RegionSize);
-                    }
-
-                    // In case the region contains the MSI-X vectors table or
-                    // the MSI-X PBA table, we must calculate the subregions
-                    // around them, leading to a list of sparse areas.
-                    // We want to make sure we will still trap MMIO accesses
-                    // to these MSI-X specific ranges. If these region don't align
-                    // with pagesize, we can achieve it by enlarging its range.
-                    //
-                    // Using a BtreeMap as the list provided through the iterator is sorted
-                    // by key. This ensures proper split of the whole region.
-                    let mut inter_ranges = BTreeMap::new();
-                    if let Some(msix) = vfio_msix {
-                        if region_index == msix.cap.table_bir() {
-                            let (offset, size) = msix.cap.table_range();
-                            let offset = align_page_size_down(offset);
-                            let size = align_page_size_up(size);
-                            // MSI-X mmap region safety: when a device has a non page
-                            // aligned MSI-X offset, fixup_msix_region() relocates MSI-X
-                            // to the upper half of an enlarged virtual BAR, causing the
-                            // offsets in msix.cap to exceed the physical BAR size. This
-                            // check skips carving a hole, preventing invalid offsets from
-                            // reaching the mmap path. With no holes,
-                            // generate_sparse_areas() returns a single sparse region
-                            // covering the entire physical BAR. The relocated MSI-X in
-                            // the virtual BAR remains trapped because its upper half has
-                            // no mmap backing. Exposing the physical MSI-X region through
-                            // mmap is safe when the kernel advertises
-                            // VFIO_REGION_INFO_CAP_MSIX_MAPPABLE. When MSI-X offsets are
-                            // already page aligned, fixup_msix_region() does not relocate
-                            // and this check is satisfied, so a hole is carved at the
-                            // intended offset as before.
-                            if offset < region_size {
-                                inter_ranges.insert(offset, size);
-                            }
-                        }
-                        if region_index == msix.cap.pba_bir() {
-                            let (offset, size) = msix.cap.pba_range();
-                            let offset = align_page_size_down(offset);
-                            let size = align_page_size_up(size);
-                            // See MSI-X mmap safety comment above.
-                            if offset < region_size {
-                                inter_ranges.insert(offset, size);
-                            }
-                        }
-                    }
-
-                    let mut sparse_areas = Vec::new();
-                    let mut current_offset = 0;
-                    for (range_offset, range_size) in inter_ranges {
-                        if range_offset > current_offset {
-                            sparse_areas.push(VfioRegionSparseMmapArea {
-                                offset: current_offset,
-                                size: range_offset - current_offset,
-                            });
-                        }
-                        current_offset = align_page_size_down(range_offset + range_size);
-                    }
-
-                    if region_size > current_offset {
-                        sparse_areas.push(VfioRegionSparseMmapArea {
-                            offset: current_offset,
-                            size: region_size - current_offset,
-                        });
-                    }
-
-                    return Ok(sparse_areas);
+                    msix_mappable = true;
                 }
                 _ => {}
             }
         }
 
-        // In case no relevant capabilities have been found, create a single
-        // sparse area corresponding to the entire MMIO region.
-        Ok(vec![VfioRegionSparseMmapArea {
-            offset: 0,
-            size: region_size,
-        }])
+        if !msix_mappable {
+            return Ok(base_areas.unwrap_or_else(|| {
+                vec![VfioRegionSparseMmapArea {
+                    offset: 0,
+                    size: region_size,
+                }]
+            }));
+        }
+
+        if !is_4k_aligned(region_start) {
+            error!("Region start address 0x{region_start:x} must be at least aligned on 4KiB");
+            return Err(VfioPciError::RegionAlignment);
+        }
+        if !is_4k_multiple(region_size) {
+            error!("Region size 0x{region_size:x} must be at least a multiple of 4KiB");
+            return Err(VfioPciError::RegionSize);
+        }
+
+        // In case the region contains the MSI-X vectors table or
+        // the MSI-X PBA table, we must calculate the subregions
+        // around them, leading to a list of sparse areas.
+        // We want to make sure we will still trap MMIO accesses
+        // to these MSI-X specific ranges. If these region don't align
+        // with pagesize, we can achieve it by enlarging its range.
+        //
+        // Using a BtreeMap as the list provided through the iterator is sorted
+        // by key. This ensures proper split of the whole region.
+        let mut inter_ranges = BTreeMap::new();
+        if let Some(msix) = vfio_msix {
+            if region_index == msix.cap.table_bir() {
+                let (offset, size) = msix.cap.table_range();
+                let offset = align_page_size_down(offset);
+                let size = align_page_size_up(size);
+                // MSI-X mmap region safety: when a device has a non page
+                // aligned MSI-X offset, fixup_msix_region() relocates MSI-X
+                // to the upper half of an enlarged virtual BAR, causing the
+                // offsets in msix.cap to exceed the physical BAR size. This
+                // check skips carving a hole, preventing invalid offsets from
+                // reaching the mmap path. With no holes,
+                // generate_sparse_areas() returns a single sparse region
+                // covering the entire physical BAR. The relocated MSI-X in
+                // the virtual BAR remains trapped because its upper half has
+                // no mmap backing. Exposing the physical MSI-X region through
+                // mmap is safe when the kernel advertises
+                // VFIO_REGION_INFO_CAP_MSIX_MAPPABLE. When MSI-X offsets are
+                // already page aligned, fixup_msix_region() does not relocate
+                // and this check is satisfied, so a hole is carved at the
+                // intended offset as before.
+                if offset < region_size {
+                    inter_ranges.insert(offset, size);
+                }
+            }
+            if region_index == msix.cap.pba_bir() {
+                let (offset, size) = msix.cap.pba_range();
+                let offset = align_page_size_down(offset);
+                let size = align_page_size_up(size);
+                // See MSI-X mmap safety comment above.
+                if offset < region_size {
+                    inter_ranges.insert(offset, size);
+                }
+            }
+        }
+
+        let base_areas = base_areas.unwrap_or_else(|| {
+            vec![VfioRegionSparseMmapArea {
+                offset: 0,
+                size: region_size,
+            }]
+        });
+
+        let mut sparse_areas = Vec::new();
+        for area in base_areas {
+            let area_start = area.offset;
+            let area_end = area.offset + area.size;
+            let mut current_offset = area_start;
+
+            for (&range_offset, &range_size) in &inter_ranges {
+                let hole_start = range_offset;
+                let hole_end = align_page_size_down(range_offset + range_size);
+                if hole_end <= current_offset {
+                    continue;
+                }
+                if hole_start >= area_end {
+                    break;
+                }
+                if hole_start > current_offset {
+                    sparse_areas.push(VfioRegionSparseMmapArea {
+                        offset: current_offset,
+                        size: hole_start - current_offset,
+                    });
+                }
+                current_offset = cmp::min(area_end, hole_end);
+            }
+
+            if area_end > current_offset {
+                sparse_areas.push(VfioRegionSparseMmapArea {
+                    offset: current_offset,
+                    size: area_end - current_offset,
+                });
+            }
+        }
+
+        Ok(sparse_areas)
     }
 
     /// Map MMIO regions into the guest, and avoid VM exits when the guest tries
