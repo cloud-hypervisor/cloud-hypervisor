@@ -295,7 +295,7 @@ impl VirtioCommon {
             // Don't count these features as acked.
             v &= !unrequested_features;
         }
-        self.acked_features |= v;
+        self.acked_features = v;
     }
 
     pub(crate) fn check_access_platform(&self) -> ActivateResult {
