@@ -49,12 +49,11 @@ layer of virtualization.
 
 ## Why virtio-iommu?
 
-The Cloud Hypervisor project decided to implement the brand new virtio-iommu
+The Cloud Hypervisor project decided to implement the virtio-iommu
 device in order to provide a virtual IOMMU to its users. The reason being the
 simplicity brought by the paravirtualization solution. By having one side
 handled from the guest itself, it removes the complexity of trapping memory
-page accesses and shadowing them. This is why the project will not try to
-implement a full emulation of a physical IOMMU.
+page accesses and shadowing them.
 
 ## Pre-requisites
 
@@ -265,8 +264,6 @@ e.g.
 
 Devices that cannot be placed behind an IOMMU (e.g. lacking an `iommu=` option)
 cannot be placed on the IOMMU segments.
-
-
 
 ## Emulated ARM SMMUv3 (AArch64)
 
