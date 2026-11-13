@@ -441,10 +441,6 @@ pub enum Error {
     #[error("Failed to register a guest region")]
     RegisterGuestRegion(#[source] GuestRegionError),
 
-    /// Failed to remove the user memory region.
-    #[error("Failed to remove the user memory region")]
-    RemoveUserMemoryRegion(#[source] hypervisor::HypervisorVmError),
-
     /// Failed to EventFd.
     #[error("Failed to EventFd")]
     EventFdFail(#[source] io::Error),
@@ -3032,72 +3028,6 @@ impl MemoryManager {
 
     pub fn memory_slot_allocator(&self) -> &Arc<MemorySlotAllocator> {
         &self.memory_slot_allocator
-    }
-
-    /// # Safety
-    ///
-    /// `userspace_addr` and `memory_size` must have previously been passed
-    /// to the matching hypervisor registration.
-    ///
-    /// # Errors
-    ///
-    /// If this function fails there is no way to clean up resources and you
-    /// should probably crash the process.
-    pub unsafe fn remove_userspace_mapping(
-        &mut self,
-        guest_phys_addr: u64,
-        memory_size: usize,
-        userspace_addr: *mut u8,
-        mergeable: bool,
-        slot: u32,
-    ) -> Result<(), Error> {
-        // SAFETY: Caller promises parameters are correct.
-        unsafe {
-            self.vm
-                .remove_user_memory_region(
-                    slot,
-                    guest_phys_addr,
-                    memory_size,
-                    userspace_addr,
-                    false, /* readonly -- don't care */
-                )
-                .map_err(Error::RemoveUserMemoryRegion)?;
-        }
-
-        // Mark the pages as unmergeable if there were previously marked as
-        // mergeable.
-        if mergeable {
-            // SAFETY: the address and size are valid as the region was
-            // previously advised.
-            let ret = unsafe {
-                libc::madvise(
-                    userspace_addr.cast(),
-                    memory_size as libc::size_t,
-                    libc::MADV_UNMERGEABLE,
-                )
-            };
-            if ret != 0 {
-                let err = io::Error::last_os_error();
-                // Safe to unwrap because the error is constructed with
-                // last_os_error(), which ensures the output will be Some().
-                let errno = err.raw_os_error().unwrap();
-                if errno == libc::EINVAL {
-                    warn!("kernel not configured with CONFIG_KSM");
-                } else {
-                    warn!("madvise error: {err}");
-                }
-                warn!("failed to mark pages as unmergeable");
-            }
-        }
-
-        info!(
-            "Removed userspace mapping: {guest_phys_addr:x} -> {userspace_addr_:x} {memory_size:x}",
-            userspace_addr_ = userspace_addr as u64
-        );
-
-        self.memory_slot_allocator().free_memory_slot(slot);
-
-        Ok(())
     }
 
     pub fn virtio_mem_resize(&mut self, id: &str, size: u64) -> Result<(), Error> {
