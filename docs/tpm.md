@@ -98,24 +98,4 @@ Build time dependencies for `tpm2-tss` are captured in [INSTALL](https://github.
 # cd tpm2-tss
 # ./configure --enable-integration --with-devicetests="mandatory,optional" --with-device=/dev/tpm0
 # sudo make check-device
-.
-.
-.
-.
-============================================================================
-Testsuite summary for tpm2-tss 3.2.0-74-ge03617d9
-============================================================================
-# TOTAL: 154
-# PASS:  88
-# SKIP:  7
-# XFAIL: 0
-# FAIL:  59
-# XPASS: 0
-# ERROR: 0
-============================================================================
-See ./test-suite.log
-Please report to https://github.com/tpm2-software/tpm2-tss/issues
-============================================================================
 ```
-The same set of failures are noticed while running these tests on `Qemu` with
-its TPM implementation.
