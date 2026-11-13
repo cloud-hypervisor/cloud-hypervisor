@@ -555,6 +555,7 @@ impl VirtioPciDevice {
                     config_generation: 0,
                     device_feature_select: 0,
                     driver_feature_select: 0,
+                    driver_features: 0,
                     queue_select: 0,
                     msix_config: VIRTQ_MSI_NO_VECTOR,
                     msix_queues: vec![VIRTQ_MSI_NO_VECTOR; num_queues as usize],
