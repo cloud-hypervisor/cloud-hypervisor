@@ -127,6 +127,12 @@ impl VfioUserPciDevice {
     /// Map all of the MMIO regions.
     pub fn map_mmio_regions(&mut self) -> Result<(), VfioUserPciDeviceError> {
         for mmio_region in &mut self.common.mmio_regions {
+            // A BAR released on restore keeps its mapping and slot for its
+            // install, but is not mapped into the guest yet.
+            let released = self
+                .common
+                .configuration
+                .is_bar_released(mmio_region.index as usize);
             let (region_flags, file_offset, sparse_areas) = {
                 let client = self.client.lock().unwrap();
                 let region = client
@@ -202,19 +208,21 @@ impl VfioUserPciDevice {
                         p2p_dma_mapped: false,
                     };
 
-                    // SAFETY: validity of len and host_addr guaranteed by hypervisor::mmap::MmapRegion
-                    unsafe {
-                        self.vm.create_user_memory_region(
-                            user_memory_region.slot,
-                            user_memory_region.start,
-                            user_memory_region.mapping.len(),
-                            user_memory_region.mapping.addr(),
-                            false,
-                            false,
-                            hypervisor::MemoryVisibility::Shared,
-                        )
+                    if !released {
+                        // SAFETY: validity of len and host_addr guaranteed by hypervisor::mmap::MmapRegion
+                        unsafe {
+                            self.vm.create_user_memory_region(
+                                user_memory_region.slot,
+                                user_memory_region.start,
+                                user_memory_region.mapping.len(),
+                                user_memory_region.mapping.addr(),
+                                false,
+                                false,
+                                hypervisor::MemoryVisibility::Shared,
+                            )
+                        }
+                        .map_err(VfioUserPciDeviceError::MapRegionGuest)?;
                     }
-                    .map_err(VfioUserPciDeviceError::MapRegionGuest)?;
 
                     mmio_region.user_memory_regions.push(user_memory_region);
                 }
@@ -530,6 +538,12 @@ impl PciDevice for VfioUserPciDevice {
         }
 
         Ok(())
+    }
+
+    fn release_stale_bar(&mut self, bar_idx: usize, mapped_at: u64) -> bool {
+        self.common
+            .configuration
+            .release_stale_bar(bar_idx, mapped_at)
     }
 
     fn is_bar_released(&self, bar_idx: usize) -> bool {

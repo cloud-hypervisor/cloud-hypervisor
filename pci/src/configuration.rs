@@ -541,7 +541,7 @@ pub struct PciConfigurationState {
     rom_bar_used: bool,
     last_capability: Option<(usize, usize)>,
     msix_cap_reg_idx: Option<usize>,
-    // Preserve deferred BAR moves across snapshot and restore.
+    // Legacy in-flight BAR moves: decoded for old snapshots, otherwise ignored.
     #[serde(default)]
     pending_bar_reprogram: Vec<BarReprogrammingParams>,
 }
@@ -562,6 +562,10 @@ pub struct PciConfiguration {
     msix_cap_reg_idx: Option<usize>,
     msix_config: Option<Arc<Mutex<MsixConfig>>>,
     pending_bar_reprogram: Vec<BarReprogrammingParams>,
+    /// Whether each BAR slot (the ROM at ROM_BAR_IDX) is mapped at its
+    /// register. Set by add_pci_bar() and on a reported install, cleared by
+    /// a release. A restored device starts with every BAR mapped, at its
+    /// saved address; release_stale_bar() then settles each one.
     bar_installed: [bool; NUM_BAR_REGS + 1],
 }
 
@@ -665,6 +669,7 @@ impl PciConfiguration {
         msix_config: Option<Arc<Mutex<MsixConfig>>>,
         state: Option<PciConfigurationState>,
     ) -> Self {
+        let restoring = state.is_some();
         let (
             registers,
             writable_bits,
@@ -674,9 +679,13 @@ impl PciConfiguration {
             rom_bar_used,
             last_capability,
             msix_cap_reg_idx,
-            pending_bar_reprogram,
-            restoring,
         ) = if let Some(state) = state {
+            let legacy_moves = state.pending_bar_reprogram.len();
+            if legacy_moves != 0 {
+                info!(
+                    "Ignoring {legacy_moves} legacy in-flight BAR moves: undecoded BARs are reinstalled on decode enable"
+                );
+            }
             let registers: Vec<u32> = state.registers.into();
             let writable_bits: Vec<u32> = state.writable_bits.into();
             (
@@ -688,8 +697,6 @@ impl PciConfiguration {
                 state.rom_bar_used,
                 state.last_capability,
                 state.msix_cap_reg_idx,
-                state.pending_bar_reprogram,
-                true,
             )
         } else {
             let mut registers = [0u32; NUM_CONFIGURATION_REGISTERS];
@@ -729,8 +736,6 @@ impl PciConfiguration {
                 false,
                 None,
                 None,
-                Vec::new(),
-                false,
             )
         };
 
@@ -744,16 +749,15 @@ impl PciConfiguration {
             last_capability,
             msix_cap_reg_idx,
             msix_config,
-            pending_bar_reprogram,
+            pending_bar_reprogram: Vec::new(),
             bar_installed: [false; NUM_BAR_REGS + 1],
         };
 
-        // Restored devices are mapped at creation, like booted ones.
+        // A restored device is mapped at its saved addresses, like a new one
+        // by add_pci_bar(); release_stale_bar() then settles each BAR.
         if restoring {
             for slot in (0..NUM_BAR_REGS).chain([ROM_BAR_IDX]) {
-                if config.bar_region_type(slot).is_some() {
-                    config.bar_installed[slot] = true;
-                }
+                config.bar_installed[slot] = config.bar_region_type(slot).is_some();
             }
         }
 
@@ -1115,12 +1119,19 @@ impl PciConfiguration {
             _ => (),
         }
 
-        if let Some(param) = self.detect_bar_reprogramming(reg_idx, data) {
+        // A released BAR is installed at its register once memory decoding
+        // is enabled, so a move of it is not queued.
+        if let Some(param) = self.detect_bar_reprogramming(reg_idx, data)
+            && self.bar_installed[param.bar_idx.expect("bar_idx is set on detection")]
+        {
             self.pending_bar_reprogram.push(param);
         }
 
         let mut reloc = BarRelocation::default();
         self.drain_pending_relocation(&mut reloc);
+        if reg_idx == COMMAND_REG {
+            self.drain_pending_installs(&mut reloc);
+        }
         reloc
     }
 
@@ -1154,12 +1165,69 @@ impl PciConfiguration {
 
     // A failed install is not reported, so the slot stays released and is
     // retried later.
+    /// Queue the installs of every released BAR whose space is decoded.
+    pub(crate) fn drain_pending_installs(&mut self, reloc: &mut BarRelocation) {
+        reloc.install.extend(self.pending_bar_installs());
+        if !reloc.is_empty() {
+            info!("BAR relocation plan: {reloc:x?}");
+        }
+    }
+
     pub fn on_bar_installed(&mut self, bar_idx: usize) {
         self.bar_installed[bar_idx] = true;
     }
 
+    /// The installs owed to the guest: released BARs whose space is decoded,
+    /// at their config-space targets.
+    pub fn pending_bar_installs(&self) -> Vec<InstallParams> {
+        (0..NUM_BAR_REGS)
+            .chain([ROM_BAR_IDX])
+            .filter_map(|slot| {
+                self.bar_region_type(slot)?;
+                if self.bar_installed[slot] || !self.decode_enabled() {
+                    return None;
+                }
+                Some(InstallParams {
+                    bar_idx: slot,
+                    new_base: self.bar_target(slot),
+                })
+            })
+            .collect()
+    }
+
     pub fn is_bar_released(&self, bar_idx: usize) -> bool {
         self.bar_region_type(bar_idx).is_some() && !self.bar_installed[bar_idx]
+    }
+
+    /// On restore, release BAR `slot` unless its space is decoded; it is
+    /// about to be mapped at `mapped_at`, its saved address. Returns whether
+    /// it was released, in which case the caller leaves it unmapped until
+    /// the guest enables the space.
+    pub fn release_stale_bar(&mut self, slot: usize, _mapped_at: u64) -> bool {
+        if self.bar_region_type(slot).is_none() {
+            return false;
+        }
+        let keep = self.decode_enabled();
+        self.bar_installed[slot] = keep;
+        !keep
+    }
+
+    fn decode_enabled(&self) -> bool {
+        self.registers[COMMAND_REG] & COMMAND_REG_MEMORY_SPACE_MASK != 0
+    }
+
+    fn bar_target(&self, slot: usize) -> u64 {
+        if slot == ROM_BAR_IDX {
+            return u64::from(self.registers[ROM_BAR_REG] & self.writable_bits[ROM_BAR_REG]);
+        }
+
+        let reg_idx = BAR0_REG + slot;
+        let mut addr = u64::from(self.registers[reg_idx] & self.writable_bits[reg_idx]);
+        if self.bars[slot].r#type == Some(PciBarRegionType::Memory64BitRegion) {
+            addr |= u64::from(self.registers[reg_idx + 1] & self.writable_bits[reg_idx + 1]) << 32;
+        }
+
+        addr
     }
 
     fn bar_region_type(&self, slot: usize) -> Option<PciBarRegionType> {
@@ -1745,125 +1813,6 @@ mod tests {
         assert_eq!(reprogram.install[0].bar_idx, ROM_BAR_IDX);
         assert_eq!(reprogram.release[0].bar_idx, ROM_BAR_IDX);
         assert_eq!(reprogram.install[0].new_base, 0xf100_0000);
-    }
-
-    fn restore_legacy(cfg: &PciConfiguration) -> Vec<BarReprogrammingParams> {
-        let mut state = cfg.state();
-        for p in state.pending_bar_reprogram.iter_mut() {
-            p.bar_idx = None;
-        }
-        reloc_config(Some(state)).pending_bar_reprogram
-    }
-
-    fn legacy_pending_move(
-        idx: usize,
-        region_type: PciBarRegionType,
-        prefetchable: PciBarPrefetchable,
-        old: u64,
-        new: u64,
-    ) -> Vec<BarReprogrammingParams> {
-        let mut cfg = reloc_config(None);
-        let size = if region_type == PciBarRegionType::IoRegion {
-            0x100
-        } else {
-            RELOC_BAR_SIZE
-        };
-        let bar = PciBarConfiguration::new(idx, size, region_type, prefetchable).set_address(old);
-        if idx == ROM_BAR_IDX {
-            cfg.add_pci_rom_bar(&bar, 0).unwrap();
-            cfg.write_config_register(ROM_BAR_REG, 0, &(new as u32).to_le_bytes());
-        } else {
-            cfg.add_pci_bar(&bar).unwrap();
-            let low = cfg.read_reg(BAR0_REG + idx) & !cfg.writable_bits[BAR0_REG + idx];
-            cfg.write_config_register(BAR0_REG + idx, 0, &(new as u32 | low).to_le_bytes());
-            if region_type == PciBarRegionType::Memory64BitRegion {
-                let high = (new >> 32) as u32;
-                cfg.write_config_register(BAR0_REG + idx + 1, 0, &high.to_le_bytes());
-            }
-        }
-        assert_eq!(cfg.pending_bar_reprogram.len(), 1);
-        restore_legacy(&cfg)
-    }
-
-    #[test]
-    fn legacy_pending_move_recovers_the_bar_index() {
-        use PciBarPrefetchable::{NotPrefetchable, Prefetchable};
-        use PciBarRegionType::{IoRegion, Memory32BitRegion, Memory64BitRegion};
-
-        let cases = [
-            (
-                1,
-                Memory32BitRegion,
-                NotPrefetchable,
-                0xd000_0000,
-                0xe000_0000,
-            ),
-            (1, Memory32BitRegion, Prefetchable, 0xd000_0000, 0xe000_0000),
-            (1, IoRegion, NotPrefetchable, 0xc000, 0xd000),
-            (
-                0,
-                Memory64BitRegion,
-                Prefetchable,
-                0x4_0000_0000,
-                0x8_0000_0000,
-            ),
-            (
-                1,
-                Memory64BitRegion,
-                NotPrefetchable,
-                0x4_0000_0000,
-                0x8_0000_0000,
-            ),
-            (
-                ROM_BAR_IDX,
-                Memory32BitRegion,
-                NotPrefetchable,
-                0xf000_0000,
-                0xf100_0000,
-            ),
-        ];
-        for (idx, region_type, prefetchable, old, new) in cases {
-            let pending = legacy_pending_move(idx, region_type, prefetchable, old, new);
-            assert_eq!(pending.len(), 1, "BAR {idx} {region_type:?}");
-            assert_eq!(pending[0].bar_idx, Some(idx), "BAR {idx} {region_type:?}");
-            assert_eq!(pending[0].old_base, old);
-            assert_eq!(pending[0].new_base, new);
-        }
-    }
-
-    #[test]
-    fn legacy_chained_moves_resolve_to_the_same_bar() {
-        let mut cfg = reloc_config(None);
-        add_reloc_bar(&mut cfg, 0, 0xc000_0000);
-        add_reloc_bar(&mut cfg, 1, 0xd000_0000);
-        cfg.write_reg(COMMAND_REG, 0);
-
-        cfg.write_config_register(BAR0_REG + 1, 0, &0xe000_0000u32.to_le_bytes());
-        cfg.write_config_register(BAR0_REG + 1, 0, &0xf000_0000u32.to_le_bytes());
-
-        let pending = restore_legacy(&cfg);
-
-        assert_eq!(pending.len(), 2);
-        assert_eq!(pending[0].bar_idx, Some(1));
-        assert_eq!(pending[0].new_base, 0xe000_0000);
-        assert_eq!(pending[1].bar_idx, Some(1));
-        assert_eq!(pending[1].new_base, 0xf000_0000);
-    }
-
-    #[test]
-    fn legacy_pending_move_without_a_match_is_dropped() {
-        let mut cfg = reloc_config(None);
-        add_reloc_bar(&mut cfg, 0, 0xc000_0000);
-        let mut state = cfg.state();
-        state.pending_bar_reprogram.push(BarReprogrammingParams {
-            bar_idx: None,
-            old_base: 0xa000_0000,
-            new_base: 0xb000_0000,
-            len: RELOC_BAR_SIZE,
-            region_type: PciBarRegionType::Memory32BitRegion,
-        });
-
-        assert!(reloc_config(Some(state)).pending_bar_reprogram.is_empty());
     }
 
     #[test]

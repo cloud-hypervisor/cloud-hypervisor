@@ -194,9 +194,17 @@ impl PciDevice for PvPanicDevice {
             }
         }
 
-        let bar_addr = mmio32_allocator
-            .allocate(bar_addr, region_size, Some(PVPANIC_DEVICE_MMIO_ALIGNMENT))
-            .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
+        // A BAR released on restore is not allocated: another device may hold
+        // its saved range by now, and its install allocates at its register.
+        let bar_addr = if let Some(addr) = bar_addr
+            && self.configuration.is_bar_released(bar_id as usize)
+        {
+            addr
+        } else {
+            mmio32_allocator
+                .allocate(bar_addr, region_size, Some(PVPANIC_DEVICE_MMIO_ALIGNMENT))
+                .ok_or(PciDeviceError::IoAllocationFailed(region_size))?
+        };
 
         let bar = PciBarConfiguration::default()
             .set_index(bar_id as usize)
@@ -242,6 +250,10 @@ impl PciDevice for PvPanicDevice {
         }
 
         Ok(())
+    }
+
+    fn release_stale_bar(&mut self, bar_idx: usize, mapped_at: u64) -> bool {
+        self.configuration.release_stale_bar(bar_idx, mapped_at)
     }
 
     fn is_bar_released(&self, bar_idx: usize) -> bool {

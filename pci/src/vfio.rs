@@ -1091,30 +1091,40 @@ impl VfioCommon {
                 }
             }
 
-            let bar_addr = match region_type {
-                PciBarRegionType::IoRegion => {
-                    // The address needs to be 4 bytes aligned.
-                    allocator
-                        .allocate_io_addresses(restored_bar_addr, region_size, Some(0x4))
-                        .ok_or(PciDeviceError::IoAllocationFailed(region_size))?
-                }
-                PciBarRegionType::Memory32BitRegion => {
-                    // BAR allocation must be naturally aligned
-                    mmio32_allocator
-                        .allocate(restored_bar_addr, region_size, Some(region_size))
-                        .ok_or(PciDeviceError::IoAllocationFailed(region_size))?
-                }
-                PciBarRegionType::Memory64BitRegion => {
-                    // We need do some fixup to keep MMIO RW region and msix cap region page size
-                    // aligned.
-                    region_size = self.fixup_msix_region(bar_id, region_size);
-                    mmio64_allocator
+            if region_type == PciBarRegionType::Memory64BitRegion {
+                // We need do some fixup to keep MMIO RW region and msix cap region page size
+                // aligned.
+                region_size = self.fixup_msix_region(bar_id, region_size);
+            }
+
+            // A BAR released on restore is not allocated: another device may
+            // hold its saved range by now, and its install allocates at its
+            // register.
+            let bar_addr = if let Some(addr) = restored_bar_addr
+                && self.configuration.is_bar_released(bar_id as usize)
+            {
+                addr
+            } else {
+                match region_type {
+                    PciBarRegionType::IoRegion => {
+                        // The address needs to be 4 bytes aligned.
+                        allocator
+                            .allocate_io_addresses(restored_bar_addr, region_size, Some(0x4))
+                            .ok_or(PciDeviceError::IoAllocationFailed(region_size))?
+                    }
+                    PciBarRegionType::Memory32BitRegion => {
+                        // BAR allocation must be naturally aligned
+                        mmio32_allocator
+                            .allocate(restored_bar_addr, region_size, Some(region_size))
+                            .ok_or(PciDeviceError::IoAllocationFailed(region_size))?
+                    }
+                    PciBarRegionType::Memory64BitRegion => mmio64_allocator
                         .allocate(
                             restored_bar_addr,
                             region_size,
                             Some(cmp::max(get_page_size(), region_size)),
                         )
-                        .ok_or(PciDeviceError::IoAllocationFailed(region_size))?
+                        .ok_or(PciDeviceError::IoAllocationFailed(region_size))?,
                 }
             };
 
@@ -1824,15 +1834,9 @@ impl VfioCommon {
             self.vfio_wrapper.write_config((reg + offset) as u32, data);
         }
 
-        // The non BAR write path goes directly to the VFIO device and not the shadow,
-        // so the PciConfiguration shadow can get stale. Mirror the write into the
-        // shadow here since snapshot() serializes it. Without this the shadow keeps its
-        // device init values and a snapshot encodes PCI_COMMAND as zero.
-        //
-        // Use the raw write_* helpers rather than the PciConfiguration method
-        // self.configuration.write_config_register(), which would otherwise drain
-        // pending_bar_reprogram, owned by the BAR block below, and rerun MSI-X
-        // set_msg_ctl, already done by update_msix_capabilities above.
+        // Mirror the write into the shadow, which snapshot() serializes and
+        // which installs released BARs on COMMAND writes. MSI-X was handled
+        // above and BAR writes returned early, so write the raw bytes.
         let byte_offset = reg_idx * PCI_CONFIG_REGISTER_SIZE + offset as usize;
         match data.len() {
             1 => self.configuration.write_byte(byte_offset, data[0]),
@@ -1847,6 +1851,9 @@ impl VfioCommon {
         }
         let mut reloc = BarRelocation::default();
         self.configuration.drain_pending_relocation(&mut reloc);
+        if reg_idx == COMMAND_REG {
+            self.configuration.drain_pending_installs(&mut reloc);
+        }
 
         (reloc, None)
     }
@@ -2422,6 +2429,10 @@ impl VfioPciDevice {
 
                 let page_size = get_page_size();
                 let map_p2p = self.p2p_dma && region.is_p2p_mappable();
+                let released = self
+                    .common
+                    .configuration
+                    .is_bar_released(region.index as usize);
                 if self.p2p_dma && !map_p2p {
                     warn!(
                         "Skipping P2P DMA mapping of BAR {} of device {}: its size \
@@ -2488,34 +2499,38 @@ impl VfioPciDevice {
                         dma_buf: None,
                         p2p_dma_mapped: false,
                     };
-                    // SAFETY: MmapRegion invariants guarantee that
-                    // user_memory_region.mapping.addr() points to
-                    // user_memory_region.mapping.len() bytes of
-                    // valid memory that will only be unmapped with munmap().
-                    unsafe {
-                        self.vm.create_user_memory_region(
-                            user_memory_region.slot,
-                            user_memory_region.start,
-                            user_memory_region.mapping.len(),
-                            user_memory_region.mapping.addr(),
-                            false,
-                            false,
-                            hypervisor::MemoryVisibility::Shared,
-                        )
-                    }
-                    .map_err(VfioPciError::CreateUserMemoryRegion)?;
+                    // A BAR released on restore keeps its mapping and slot
+                    // for its install, but is not mapped into the guest yet.
+                    if !released {
+                        // SAFETY: MmapRegion invariants guarantee that
+                        // user_memory_region.mapping.addr() points to
+                        // user_memory_region.mapping.len() bytes of
+                        // valid memory that will only be unmapped with munmap().
+                        unsafe {
+                            self.vm.create_user_memory_region(
+                                user_memory_region.slot,
+                                user_memory_region.start,
+                                user_memory_region.mapping.len(),
+                                user_memory_region.mapping.addr(),
+                                false,
+                                false,
+                                hypervisor::MemoryVisibility::Shared,
+                            )
+                        }
+                        .map_err(VfioPciError::CreateUserMemoryRegion)?;
 
-                    // Map the MMIO BAR into the host IOMMU address space via VfioOps
-                    // Only needed if p2p_dma is enabled.
-                    if map_p2p {
-                        user_memory_region.map_for_p2p(
-                            &self.device,
-                            &self.vfio_ops,
-                            &self.device_path,
-                            self.bdf,
-                            region.index,
-                            area.offset,
-                        )?;
+                        // Map the MMIO BAR into the host IOMMU address space via VfioOps
+                        // Only needed if p2p_dma is enabled.
+                        if map_p2p {
+                            user_memory_region.map_for_p2p(
+                                &self.device,
+                                &self.vfio_ops,
+                                &self.device_path,
+                                self.bdf,
+                                region.index,
+                                area.offset,
+                            )?;
+                        }
                     }
                     region.user_memory_regions.push(user_memory_region);
                 }
@@ -2936,6 +2951,12 @@ iova 0x{:x}, size 0x{:x}: {}, ",
         }
 
         Ok(())
+    }
+
+    fn release_stale_bar(&mut self, bar_idx: usize, mapped_at: u64) -> bool {
+        self.common
+            .configuration
+            .release_stale_bar(bar_idx, mapped_at)
     }
 
     fn is_bar_released(&self, bar_idx: usize) -> bool {

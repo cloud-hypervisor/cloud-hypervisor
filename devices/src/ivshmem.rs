@@ -207,9 +207,17 @@ impl PciDevice for IvshmemDevice {
         }
 
         // BAR0 holds device registers (256 Byte MMIO)
-        let bar0_addr = mmio32_allocator
-            .allocate(bar0_addr, IVSHMEM_REG_BAR_SIZE, None)
-            .ok_or(PciDeviceError::IoAllocationFailed(IVSHMEM_REG_BAR_SIZE))?;
+        // A BAR released on restore is not allocated: another device may hold
+        // its saved range by now, and its install allocates at its register.
+        let bar0_addr = if let Some(addr) = bar0_addr
+            && self.configuration.is_bar_released(IVSHMEM_BAR0_IDX)
+        {
+            addr
+        } else {
+            mmio32_allocator
+                .allocate(bar0_addr, IVSHMEM_REG_BAR_SIZE, None)
+                .ok_or(PciDeviceError::IoAllocationFailed(IVSHMEM_REG_BAR_SIZE))?
+        };
         debug!("ivshmem bar0 address 0x{:x}", bar0_addr.0);
 
         let bar0 = PciBarConfiguration::default()
@@ -223,9 +231,15 @@ impl PciDevice for IvshmemDevice {
 
         // The data BAR maps the shared memory object
         let data_bar_size = self.region_size;
-        let data_bar_addr = mmio64_allocator
-            .allocate(data_bar_addr, data_bar_size, None)
-            .ok_or(PciDeviceError::IoAllocationFailed(data_bar_size))?;
+        let data_bar_addr = if let Some(addr) = data_bar_addr
+            && self.configuration.is_bar_released(IVSHMEM_DATA_BAR_IDX)
+        {
+            addr
+        } else {
+            mmio64_allocator
+                .allocate(data_bar_addr, data_bar_size, None)
+                .ok_or(PciDeviceError::IoAllocationFailed(data_bar_size))?
+        };
         debug!("ivshmem data BAR address 0x{:x}", data_bar_addr.0);
 
         let data_bar = PciBarConfiguration::default()
@@ -336,6 +350,10 @@ impl PciDevice for IvshmemDevice {
         }
 
         Ok(())
+    }
+
+    fn release_stale_bar(&mut self, bar_idx: usize, mapped_at: u64) -> bool {
+        self.configuration.release_stale_bar(bar_idx, mapped_at)
     }
 
     fn is_bar_released(&self, bar_idx: usize) -> bool {

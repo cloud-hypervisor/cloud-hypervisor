@@ -99,6 +99,10 @@ impl PciDevice for PciRoot {
         self.config.on_bar_installed(bar_idx);
     }
 
+    fn release_stale_bar(&mut self, bar_idx: usize, mapped_at: u64) -> bool {
+        self.config.release_stale_bar(bar_idx, mapped_at)
+    }
+
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }

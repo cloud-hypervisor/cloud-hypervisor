@@ -850,6 +850,10 @@ impl PciDevice for PvmemcontrolPciDevice {
         self.configuration.read_config_register(reg_idx)
     }
 
+    fn release_stale_bar(&mut self, bar_idx: usize, mapped_at: u64) -> bool {
+        self.configuration.release_stale_bar(bar_idx, mapped_at)
+    }
+
     fn is_bar_released(&self, bar_idx: usize) -> bool {
         self.configuration.is_bar_released(bar_idx)
     }
