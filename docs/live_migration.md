@@ -397,6 +397,11 @@ device-specific config falls back to safe false/disabled values. Hence, only
 newly spawned VMs will be able to use new functionality, while being able to run
 VMs first spawned in older versions of Cloud Hypervisor.
 
+**Beware** that reliable usage in a **heterogeneous fleet** need the use of a
+matching **CPU profile**, which are available since `v55`. The progress is
+tracked in
+[#7086](https://github.com/cloud-hypervisor/cloud-hypervisor/issues/7068).
+
 ## Events
 
 To observe live migrations, we recommend observing events from the
