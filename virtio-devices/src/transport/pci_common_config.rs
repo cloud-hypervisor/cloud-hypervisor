@@ -133,6 +133,9 @@ pub struct VirtioPciCommonConfig {
     pub config_changed: Arc<AtomicBool>,
     pub device_feature_select: u32,
     pub driver_feature_select: u32,
+    /// Last written driver features. A write replaces only the selected
+    /// 32-bit half.
+    pub driver_features: u64,
     pub queue_select: u16,
     pub msix_config: Arc<AtomicU16>,
     pub msix_queues: Arc<Mutex<Vec<u16>>>,
@@ -147,6 +150,7 @@ impl VirtioPciCommonConfig {
             config_changed: Arc::new(AtomicBool::new(false)),
             device_feature_select: state.device_feature_select,
             driver_feature_select: state.driver_feature_select,
+            driver_features: 0,
             queue_select: state.queue_select,
             msix_config: Arc::new(AtomicU16::new(state.msix_config)),
             msix_queues: Arc::new(Mutex::new(state.msix_queues)),
@@ -183,6 +187,7 @@ impl VirtioPciCommonConfig {
         self.config_changed.store(false, Ordering::Release);
         self.device_feature_select = 0;
         self.driver_feature_select = 0;
+        self.driver_features = 0;
         self.queue_select = 0;
         self.msix_config
             .store(VIRTQ_MSI_NO_VECTOR, Ordering::Release);
@@ -402,9 +407,18 @@ impl VirtioPciCommonConfig {
                     return;
                 }
                 if self.driver_feature_select < 2 {
-                    let mut locked_device = self.device.lock().unwrap();
-                    locked_device
-                        .ack_features(u64::from(value) << (self.driver_feature_select * 32));
+                    let shift = self.driver_feature_select * 32;
+                    let remaining_half = self.driver_features & !(0xffff_ffff << shift);
+                    self.driver_features = remaining_half | (u64::from(value) << shift);
+                    self.device
+                        .lock()
+                        .unwrap()
+                        .ack_features(self.driver_features);
+                } else if value != 0 {
+                    debug!(
+                        "Ignoring driver features above bit 63: select {}, value 0x{value:x}",
+                        self.driver_feature_select
+                    );
                 }
             }
             0x20 => self.with_queue_mut(queues, |q| q.set_desc_table_address(Some(value), None)),
@@ -513,6 +527,7 @@ mod tests {
             config_changed: Arc::new(AtomicBool::new(false)),
             device_feature_select: 0x0,
             driver_feature_select: 0x0,
+            driver_features: 0,
             queue_select: 0xff,
             msix_config: Arc::new(AtomicU16::new(0)),
             msix_queues: Arc::new(Mutex::new(vec![0; 3])),
@@ -566,6 +581,7 @@ mod tests {
             config_changed: Arc::new(AtomicBool::new(false)),
             device_feature_select: 0,
             driver_feature_select: 0,
+            driver_features: 0,
             queue_select: 0,
             msix_config: Arc::new(AtomicU16::new(0)),
             msix_queues: Arc::new(Mutex::new(vec![0; 1])),
@@ -595,6 +611,7 @@ mod tests {
             config_changed: Arc::new(AtomicBool::new(true)),
             device_feature_select: 1,
             driver_feature_select: 1,
+            driver_features: 0,
             queue_select: 7,
             msix_config: Arc::new(AtomicU16::new(3)),
             msix_queues: Arc::new(Mutex::new(vec![1, 2, 3])),
@@ -630,6 +647,7 @@ mod tests {
             config_changed: Arc::new(AtomicBool::new(false)),
             device_feature_select: 0,
             driver_feature_select: 0,
+            driver_features: 0,
             queue_select: 0,
             msix_config: Arc::new(AtomicU16::new(0)),
             msix_queues: Arc::new(Mutex::new(vec![0; 1])),
