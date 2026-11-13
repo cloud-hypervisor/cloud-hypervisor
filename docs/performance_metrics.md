@@ -45,40 +45,10 @@ $ ./scripts/dev_cli.sh tests --metrics -- -- --timeout 5 --iterations 10
 
 ## Performance Tests Details
 
-The following table lists the supported performance tests with default
-timeout and number of iterations. The `timeout` defines the maximum
+The `timeout` defines the maximum
 execution time of each test for each iteration. The `iteration` defines
 how many times a test needs to be executed to generate the final metrics
 data.
-
-| **Type**   | **Metric**                                 | **Timeout(s)** | **Iterations** |
-|------------|--------------------------------------------|----------------|----------------|
-| Boot Time  | boot_time_ms                               | 2              | 10             |
-|            | boot_time_pmem_ms                          | 2              | 10             |
-|            | boot_time_16_vcpus_ms                      | 2              | 10             |
-|            | boot_time_16_vcpus_pmem_ms                 | 2              | 10             |
-| Virtio Net | virtio_net_latency_us                      | 10             | 5              |
-|            | virtio_net_throughput_single_queue_rx_gbps | 10             | 5              |
-|            | virtio_net_throughput_single_queue_tx_gbps | 10             | 5              |
-|            | virtio_net_throughput_multi_queue_rx_gbps  | 10             | 5              |
-|            | virtio_net_throughput_multi_queue_tx_gbps  | 10             | 5              |
-| Block      | block_read_MiBps                           | 10             | 5              |
-|            | block_write_MiBps                          | 10             | 5              |
-|            | block_random_read_MiBps                    | 10             | 5              |
-|            | block_random_write_MiBps                   | 10             | 5              |
-|            | block_multi_queue_read_MiBps               | 10             | 5              |
-|            | block_multi_queue_write_MiBps              | 10             | 5              |
-|            | block_multi_queue_random_read_MiBps        | 10             | 5              |
-|            | block_multi_queue_random_write_MiBps       | 10             | 5              |
-|            | block_read_IOPS                            | 10             | 5              |
-|            | block_write_IOPS                           | 10             | 5              |
-|            | block_random_read_IOPS                     | 10             | 5              |
-|            | block_random_write_IOPS                    | 10             | 5              |
-|            | block_multi_queue_read_IOPS                | 10             | 5              |
-|            | block_multi_queue_write_IOPS               | 10             | 5              |
-|            | block_multi_queue_random_read_IOPS         | 10             | 5              |
-|            | block_multi_queue_random_write_IOPS        | 10             | 5              |
-| Other      | restore_latency_time_ms                    | 2              | 10             |
 
 ## Output Format
 
