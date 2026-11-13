@@ -208,8 +208,13 @@ impl PciDevice for IvshmemDevice {
         }
 
         // BAR0 holds device registers (256 Byte MMIO)
+        let bar0_alignment = if restoring {
+            None
+        } else {
+            Some(IVSHMEM_REG_BAR_SIZE)
+        };
         let bar0_addr = mmio32_allocator
-            .allocate(bar0_addr, IVSHMEM_REG_BAR_SIZE, None)
+            .allocate(bar0_addr, IVSHMEM_REG_BAR_SIZE, bar0_alignment)
             .ok_or(PciDeviceError::IoAllocationFailed(IVSHMEM_REG_BAR_SIZE))?;
         debug!("ivshmem bar0 address 0x{:x}", bar0_addr.0);
 
@@ -224,8 +229,9 @@ impl PciDevice for IvshmemDevice {
 
         // The data BAR maps the shared memory object
         let data_bar_size = self.region_size;
+        let data_bar_alignment = if restoring { None } else { Some(data_bar_size) };
         let data_bar_addr = mmio64_allocator
-            .allocate(data_bar_addr, data_bar_size, None)
+            .allocate(data_bar_addr, data_bar_size, data_bar_alignment)
             .ok_or(PciDeviceError::IoAllocationFailed(data_bar_size))?;
         debug!("ivshmem data BAR address 0x{:x}", data_bar_addr.0);
 
