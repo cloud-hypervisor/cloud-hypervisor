@@ -1072,9 +1072,16 @@ impl PciConfiguration {
             reloc.release.push(ReleaseParams { bar_idx: slot });
             self.bar_installed[slot] = false;
         }
-        // Any BAR register write, moving the BAR or not, retries the installs.
-        let bar_written =
-            (BAR0_REG..BAR0_REG + NUM_BAR_REGS).contains(&reg_idx) || reg_idx == ROM_BAR_REG;
+        // A size probe is answered from the register alone; the write-back of
+        // the address, which is no move, retries the installs. Any other BAR
+        // register write, moving the BAR or not, retries them.
+        let probe = <[u8; 4]>::try_from(data).is_ok_and(|bytes| {
+            let value = u32::from_le_bytes(bytes);
+            self.is_bar_size_probe(reg_idx, value)
+                || (reg_idx == ROM_BAR_REG && value & ROM_BAR_ADDR_MASK == ROM_BAR_ADDR_MASK)
+        });
+        let bar_written = !probe
+            && ((BAR0_REG..BAR0_REG + NUM_BAR_REGS).contains(&reg_idx) || reg_idx == ROM_BAR_REG);
 
         // After a BAR or COMMAND write, install every released BAR whose space
         // is decoded: a moved BAR, a failed install or a newly enabled space.
