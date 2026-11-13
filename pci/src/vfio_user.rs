@@ -28,8 +28,8 @@ use crate::vfio::{
     UserMemoryRegion, VFIO_COMMON_ID, Vfio, VfioCommon, VfioCommonConfig, VfioError,
 };
 use crate::{
-    BarReprogrammingParams, PciBarConfiguration, PciBdf, PciDevice, PciDeviceError, PciSubclass,
-    VfioPciError,
+    BarRelocation, InstallParams, PciBarConfiguration, PciBdf, PciDevice, PciDeviceError,
+    PciSubclass, VfioPciError,
 };
 
 pub struct VfioUserPciDevice {
@@ -127,6 +127,12 @@ impl VfioUserPciDevice {
     /// Map all of the MMIO regions.
     pub fn map_mmio_regions(&mut self) -> Result<(), VfioUserPciDeviceError> {
         for mmio_region in &mut self.common.mmio_regions {
+            // A BAR released on restore keeps its mapping and slot for its
+            // install, but is not mapped into the guest yet.
+            let released = self
+                .common
+                .configuration
+                .is_bar_released(mmio_region.index as usize);
             let (region_flags, file_offset, sparse_areas) = {
                 let client = self.client.lock().unwrap();
                 let region = client
@@ -199,21 +205,24 @@ impl VfioUserPciDevice {
                         // A vfio-user device exports no dma-buf.
                         #[cfg(feature = "kvm")]
                         dma_buf: None,
+                        p2p_dma_mapped: false,
                     };
 
-                    // SAFETY: validity of len and host_addr guaranteed by hypervisor::mmap::MmapRegion
-                    unsafe {
-                        self.vm.create_user_memory_region(
-                            user_memory_region.slot,
-                            user_memory_region.start,
-                            user_memory_region.mapping.len(),
-                            user_memory_region.mapping.addr(),
-                            false,
-                            false,
-                            hypervisor::MemoryVisibility::Shared,
-                        )
+                    if !released {
+                        // SAFETY: validity of len and host_addr guaranteed by hypervisor::mmap::MmapRegion
+                        unsafe {
+                            self.vm.create_user_memory_region(
+                                user_memory_region.slot,
+                                user_memory_region.start,
+                                user_memory_region.mapping.len(),
+                                user_memory_region.mapping.addr(),
+                                false,
+                                false,
+                                hypervisor::MemoryVisibility::Shared,
+                            )
+                        }
+                        .map_err(VfioUserPciDeviceError::MapRegionGuest)?;
                     }
-                    .map_err(VfioUserPciDeviceError::MapRegionGuest)?;
 
                     mmio_region.user_memory_regions.push(user_memory_region);
                 }
@@ -225,7 +234,17 @@ impl VfioUserPciDevice {
 
     fn unmap_mmio_regions(&mut self) {
         for mmio_region in self.common.mmio_regions.iter_mut() {
+            // A released BAR is already unmapped; only free its memory slots.
+            let released = self
+                .common
+                .configuration
+                .is_bar_released(mmio_region.index as usize);
             for user_memory_region in mmio_region.user_memory_regions.drain(..) {
+                if released {
+                    self.memory_slot_allocator
+                        .free_memory_slot(user_memory_region.slot);
+                    continue;
+                }
                 // Remove region
                 // SAFETY: guaranteed by hypervisor::mmap::MmapRegion invariants
                 if let Err(e) = unsafe {
@@ -407,10 +426,6 @@ impl PciDevice for VfioUserPciDevice {
             .free_bars(allocator, mmio32_allocator, mmio64_allocator)
     }
 
-    fn restore_bar_addr(&mut self, params: &BarReprogrammingParams) {
-        self.common.configuration.restore_bar_addr(params);
-    }
-
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
@@ -420,7 +435,7 @@ impl PciDevice for VfioUserPciDevice {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>) {
+    ) -> (BarRelocation, Option<Arc<Barrier>>) {
         self.common.write_config_register(reg_idx, offset, data)
     }
 
@@ -436,13 +451,10 @@ impl PciDevice for VfioUserPciDevice {
         self.common.write_bar(base, offset, data)
     }
 
-    fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> Result<(), io::Error> {
-        info!("Moving BAR {bar_idx} -> 0x{new_base:x}");
+    fn move_bar_prepare(&mut self, bar_idx: usize) -> Result<(), io::Error> {
+        info!("Unmapping BAR {bar_idx}");
         for mmio_region in self.common.mmio_regions.iter_mut() {
             if mmio_region.index as usize == bar_idx {
-                let old_base = mmio_region.start.raw_value();
-                mmio_region.start = GuestAddress(new_base);
-
                 for user_memory_region in mmio_region.user_memory_regions.iter_mut() {
                     // Remove old region
                     // SAFETY: only valid regions are in user_memory_regions
@@ -456,34 +468,94 @@ impl PciDevice for VfioUserPciDevice {
                         )
                     }
                     .map_err(io::Error::other)?;
+                }
+            }
+        }
 
-                    // Update the user memory region with the correct start address.
-                    if new_base > old_base {
-                        user_memory_region.start += new_base - old_base;
-                    } else {
-                        user_memory_region.start -= old_base - new_base;
-                    }
+        Ok(())
+    }
 
-                    // Insert new region
-                    // SAFETY: only valid regions are in user_memory_regions
-                    unsafe {
-                        self.vm.create_user_memory_region(
+    fn move_bar_commit(&mut self, bar_idx: usize, new_base: u64) -> Result<(), io::Error> {
+        info!("Mapping BAR {bar_idx} -> 0x{new_base:x}");
+        for mmio_region in self.common.mmio_regions.iter_mut() {
+            if mmio_region.index as usize != bar_idx {
+                continue;
+            }
+            let old_base = mmio_region.start.raw_value();
+
+            // Map each sparse area at the new address. On a failure, unmap
+            // the areas mapped so far: the caller gives the range back, and
+            // nothing of the BAR may stay mapped there.
+            let mut result = Ok(());
+            let mut mapped = 0;
+            for user_memory_region in mmio_region.user_memory_regions.iter_mut() {
+                let start = new_base + (user_memory_region.start - old_base);
+
+                // Insert new region
+                // SAFETY: only valid regions are in user_memory_regions
+                if let Err(e) = unsafe {
+                    self.vm.create_user_memory_region(
+                        user_memory_region.slot,
+                        start,
+                        user_memory_region.mapping.len(),
+                        user_memory_region.mapping.addr(),
+                        false,
+                        false,
+                        hypervisor::MemoryVisibility::Shared,
+                    )
+                } {
+                    result = Err(io::Error::other(e));
+                    break;
+                }
+                user_memory_region.start = start;
+                mapped += 1;
+            }
+
+            if result.is_err() {
+                for user_memory_region in mmio_region.user_memory_regions.iter_mut().take(mapped) {
+                    // SAFETY: the slot was created above with these parameters.
+                    if let Err(e) = unsafe {
+                        self.vm.remove_user_memory_region(
                             user_memory_region.slot,
                             user_memory_region.start,
                             user_memory_region.mapping.len(),
                             user_memory_region.mapping.addr(),
                             false,
-                            false,
-                            hypervisor::MemoryVisibility::Shared,
                         )
+                    } {
+                        error!(
+                            "Could not remove memory slot {} at 0x{:x}: {}",
+                            user_memory_region.slot, user_memory_region.start, e
+                        );
                     }
-                    .map_err(io::Error::other)?;
+                    user_memory_region.start = old_base + (user_memory_region.start - new_base);
                 }
-                info!("Moved bar 0x{old_base:x} -> 0x{new_base:x}");
+                return result;
             }
+
+            mmio_region.start = GuestAddress(new_base);
+            info!("Moved bar 0x{old_base:x} -> 0x{new_base:x}");
         }
 
         Ok(())
+    }
+
+    fn release_stale_bar(&mut self, bar_idx: usize, mapped_at: u64) -> bool {
+        self.common
+            .configuration
+            .release_stale_bar(bar_idx, mapped_at)
+    }
+
+    fn is_bar_released(&self, bar_idx: usize) -> bool {
+        self.common.configuration.is_bar_released(bar_idx)
+    }
+
+    fn on_bar_installed(&mut self, bar_idx: usize) {
+        self.common.configuration.on_bar_installed(bar_idx);
+    }
+
+    fn pending_bar_installs(&self) -> Vec<InstallParams> {
+        self.common.configuration.pending_bar_installs()
     }
 
     fn id(&self) -> Option<String> {

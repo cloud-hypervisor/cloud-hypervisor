@@ -168,6 +168,39 @@ impl GuestRegion {
         Ok(())
     }
 
+    /// Removes the region from the hypervisor, keeping its mapping and
+    /// guest address, so that it can be registered again later, possibly
+    /// after a move. A region that is not registered is left as is.
+    pub fn unregister(&mut self) -> Result<(), Error> {
+        if !*self.registered.get_mut() {
+            return Ok(());
+        }
+        let vm = self.vm.as_ref().ok_or(Error::MissingVm)?;
+        let slot = self.slot.unwrap();
+        let guest_phys_addr = self.region.start_addr().raw_value();
+        let memory_size = self.region.size();
+        let userspace_addr = self.region.as_ptr();
+        // SAFETY: exclusive access keeps the region and its mapping alive.
+        unsafe {
+            vm.remove_user_memory_region(
+                slot,
+                guest_phys_addr,
+                memory_size,
+                userspace_addr,
+                false, // Read-only flags are ignored when removing a region.
+            )
+        }
+        .map_err(Error::RemoveRegion)?;
+        *self.registered.get_mut() = false;
+
+        info!(
+            "Removed userspace mapping: {:#} -> {:#} {:#}",
+            guest_phys_addr, userspace_addr as usize, memory_size
+        );
+
+        Ok(())
+    }
+
     /// The reserved slot, including before registration.
     pub fn slot(&self) -> Option<u32> {
         self.slot
@@ -293,31 +326,12 @@ impl From<GuestRegionMmap<AtomicBitmap>> for GuestRegion {
 
 impl Drop for GuestRegion {
     fn drop(&mut self) {
-        let guest_phys_addr = self.region.start_addr().raw_value();
+        if let Err(e) = self.unregister() {
+            error!("Error releasing memory region: {e:?}");
+            process::exit(1);
+        }
         let memory_size = self.region.size();
         let userspace_addr = self.region.as_ptr();
-        if *self.registered.get_mut() {
-            let vm = self.vm.as_ref().unwrap();
-            let slot = self.slot.unwrap();
-            // SAFETY: the owned region remains mapped until after this destructor returns.
-            if let Err(e) = unsafe {
-                vm.remove_user_memory_region(
-                    slot,
-                    guest_phys_addr,
-                    memory_size,
-                    userspace_addr,
-                    false, // Read-only flags are ignored when removing a region.
-                )
-            } {
-                error!("Error releasing memory region: {e}");
-                process::exit(1);
-            }
-
-            info!(
-                "Removed userspace mapping: {:#} -> {:#} {:#}",
-                guest_phys_addr, userspace_addr as usize, memory_size
-            );
-        }
         if self.mergeable {
             // SAFETY: the address and size are valid as the region was
             // previously advised.

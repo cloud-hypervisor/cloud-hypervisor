@@ -16,10 +16,10 @@ use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
 use log::{debug, error, info, warn};
 use pci::{
-    BarReprogrammingParams, MaybeMutInterruptSourceGroup, MsixCap, MsixConfig, PciBarConfiguration,
-    PciBarRegionType, PciBdf, PciCapability, PciCapabilityId, PciClassCode, PciConfiguration,
-    PciDevice, PciDeviceError, PciHeaderType, PciMassStorageSubclass, PciNetworkControllerSubclass,
-    PciSubclass,
+    BarRelocation, InstallParams, MaybeMutInterruptSourceGroup, MsixCap, MsixConfig,
+    PciBarConfiguration, PciBarRegionType, PciBdf, PciCapability, PciCapabilityId, PciClassCode,
+    PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciMassStorageSubclass,
+    PciNetworkControllerSubclass, PciSubclass,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -1022,7 +1022,7 @@ impl PciDevice for VirtioPciDevice {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>) {
+    ) -> (BarRelocation, Option<Arc<Barrier>>) {
         // Handle the special case where the capability VIRTIO_PCI_CAP_PCI_CFG
         // is accessed. This capability has a special meaning as it allows the
         // guest to access other capabilities without mapping the PCI BAR.
@@ -1032,7 +1032,10 @@ impl PciDevice for VirtioPciDevice {
                 <= self.cap_pci_cfg_info.offset + self.cap_pci_cfg_info.cap.bytes().len()
         {
             let offset = base + offset as usize - self.cap_pci_cfg_info.offset;
-            (Vec::new(), self.write_cap_pci_cfg(offset, data))
+            (
+                BarRelocation::default(),
+                self.write_cap_pci_cfg(offset, data),
+            )
         } else {
             (
                 self.configuration
@@ -1099,27 +1102,34 @@ impl PciDevice for VirtioPciDevice {
 
         // Allocate the virtio-pci capability BAR.
         // See http://docs.oasis-open.org/virtio/virtio/v1.0/cs04/virtio-v1.0-cs04.html#x1-740004
-        let (virtio_pci_bar_addr, region_type) = if use_64bit_bar {
-            let region_type = PciBarRegionType::Memory64BitRegion;
+        let region_type = if use_64bit_bar {
+            PciBarRegionType::Memory64BitRegion
+        } else {
+            PciBarRegionType::Memory32BitRegion
+        };
+        // A BAR released on restore is not allocated: another device may hold
+        // its saved range by now, and its install allocates at its register.
+        let virtio_pci_bar_addr = if let Some(addr) = settings_bar_addr
+            && self.configuration.is_bar_released(VIRTIO_CONFIG_BAR_INDEX)
+        {
+            addr
+        } else if use_64bit_bar {
             let alignment = if restoring {
                 None
             } else {
                 Some(VIRTIO_PCI_BAR_ALIGN)
             };
-            let addr = mmio64_allocator
+            mmio64_allocator
                 .allocate(settings_bar_addr, CAPABILITY_BAR_SIZE, alignment)
-                .ok_or(PciDeviceError::IoAllocationFailed(CAPABILITY_BAR_SIZE))?;
-            (addr, region_type)
+                .ok_or(PciDeviceError::IoAllocationFailed(CAPABILITY_BAR_SIZE))?
         } else {
-            let region_type = PciBarRegionType::Memory32BitRegion;
-            let addr = mmio32_allocator
+            mmio32_allocator
                 .allocate(
                     settings_bar_addr,
                     CAPABILITY_BAR_SIZE,
                     Some(CAPABILITY_BAR_SIZE),
                 )
-                .ok_or(PciDeviceError::IoAllocationFailed(CAPABILITY_BAR_SIZE))?;
-            (addr, region_type)
+                .ok_or(PciDeviceError::IoAllocationFailed(CAPABILITY_BAR_SIZE))?
         };
 
         let bar = PciBarConfiguration::default()
@@ -1189,6 +1199,9 @@ impl PciDevice for VirtioPciDevice {
         mmio64_allocator: &mut AddressAllocator,
     ) -> result::Result<(), PciDeviceError> {
         for bar in self.bar_regions.drain(..) {
+            if self.configuration.is_bar_released(bar.idx()) {
+                continue;
+            }
             match bar.region_type() {
                 PciBarRegionType::Memory32BitRegion => {
                     mmio32_allocator.free(GuestAddress(bar.addr()), bar.size());
@@ -1202,7 +1215,7 @@ impl PciDevice for VirtioPciDevice {
         Ok(())
     }
 
-    fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> io::Result<()> {
+    fn move_bar_commit(&mut self, bar_idx: usize, new_base: u64) -> io::Result<()> {
         // We only update our idea of the bar in order to support free_bars() above.
         // The majority of the reallocation is done inside DeviceManager.
         for bar in self.bar_regions.iter_mut() {
@@ -1214,8 +1227,20 @@ impl PciDevice for VirtioPciDevice {
         Ok(())
     }
 
-    fn restore_bar_addr(&mut self, params: &BarReprogrammingParams) {
-        self.configuration.restore_bar_addr(params);
+    fn release_stale_bar(&mut self, bar_idx: usize, mapped_at: u64) -> bool {
+        self.configuration.release_stale_bar(bar_idx, mapped_at)
+    }
+
+    fn is_bar_released(&self, bar_idx: usize) -> bool {
+        self.configuration.is_bar_released(bar_idx)
+    }
+
+    fn on_bar_installed(&mut self, bar_idx: usize) {
+        self.configuration.on_bar_installed(bar_idx);
+    }
+
+    fn pending_bar_installs(&self) -> Vec<InstallParams> {
+        self.configuration.pending_bar_installs()
     }
 
     fn read_bar(&mut self, _base: u64, offset: u64, data: &mut [u8]) {

@@ -97,9 +97,9 @@ use libc::{
 use log::{debug, error, info, warn};
 use net_util::MacAddr;
 use pci::{
-    DeviceRelocation, MmioRegion, PasidCap, PciBarConfiguration, PciBarRegionType, PciBdf,
-    PciDevice, PciExpressCapability, VfioDmaMapping, VfioPciDevice, VfioUserDmaMapping,
-    VfioUserPciDevice, VfioUserPciDeviceError,
+    DeviceRelocation, InstallParams, MmioRegion, PasidCap, PciBarConfiguration, PciBarRegionType,
+    PciBdf, PciDevice, PciExpressCapability, ReleaseParams, VfioDmaMapping, VfioPciDevice,
+    VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError,
 };
 use rate_limiter::group;
 use rate_limiter::group::RateLimiterGroup;
@@ -321,6 +321,10 @@ pub enum DeviceManagerError {
     /// Cannot allocate PCI BARs
     #[error("Cannot allocate PCI BARs")]
     AllocateBars(#[source] pci::PciDeviceError),
+
+    /// Failed leaving a released BAR unmapped
+    #[error("Failed leaving a released BAR unmapped")]
+    UnmapReleasedBar(#[source] io::Error),
 
     /// Could not free the BARs associated with a PCI device.
     #[error("Could not free the BARs associated with a PCI device")]
@@ -712,105 +716,261 @@ pub(crate) struct AddressManager {
     pci_mmio64_allocators: Box<[Arc<Mutex<AddressAllocator>>]>,
 }
 
-impl DeviceRelocation for AddressManager {
-    fn move_bar(
+/// What the device tree records about one BAR of a device.
+struct BarResource {
+    /// The address the BAR was last installed at; a released BAR keeps it.
+    base: u64,
+    len: u64,
+    region_type: PciBarRegionType,
+}
+
+impl AddressManager {
+    fn bar_resource(
         &self,
+        pci_dev: &dyn PciDevice,
         bar_idx: usize,
-        old_base: u64,
+    ) -> result::Result<BarResource, io::Error> {
+        let id = pci_dev
+            .id()
+            .ok_or_else(|| io::Error::other("PCI device without an id"))?;
+        let device_tree = self.device_tree.lock().unwrap();
+        let node = device_tree
+            .get(&id)
+            .ok_or_else(|| io::Error::other(format!("No device-tree node for {id}")))?;
+        node.resources
+            .iter()
+            .find_map(|resource| match resource {
+                Resource::PciBar {
+                    index,
+                    base,
+                    size,
+                    type_,
+                    ..
+                } if *index == bar_idx => Some(BarResource {
+                    base: *base,
+                    len: *size,
+                    region_type: PciBarRegionType::from(*type_),
+                }),
+                _ => None,
+            })
+            .ok_or_else(|| {
+                io::Error::other(format!("No resource for BAR {bar_idx} of device {id}"))
+            })
+    }
+
+    fn update_bar_base(
+        &self,
+        pci_dev: &dyn PciDevice,
+        bar_idx: usize,
         new_base: u64,
-        len: u64,
-        pci_dev: &mut dyn PciDevice,
-        region_type: PciBarRegionType,
     ) -> result::Result<(), io::Error> {
+        let id = pci_dev
+            .id()
+            .ok_or_else(|| io::Error::other("PCI device without an id"))?;
+        let mut device_tree = self.device_tree.lock().unwrap();
+        let node = device_tree
+            .get_mut(&id)
+            .ok_or_else(|| io::Error::other(format!("No device-tree node for {id}")))?;
+        let base = node
+            .resources
+            .iter_mut()
+            .find_map(|resource| match resource {
+                Resource::PciBar { index, base, .. } if *index == bar_idx => Some(base),
+                _ => None,
+            })
+            .ok_or_else(|| {
+                io::Error::other(format!("No resource for BAR {bar_idx} of device {id}"))
+            })?;
+        *base = new_base;
+
+        Ok(())
+    }
+
+    fn allocator_free(&self, segment: usize, base: u64, len: u64, region_type: PciBarRegionType) {
         match region_type {
             PciBarRegionType::IoRegion => {
-                let mut sys_allocator = self.allocator.lock().unwrap();
-                if sys_allocator
-                    .move_io_addresses(
-                        GuestAddress(old_base),
-                        GuestAddress(new_base),
-                        len as GuestUsize,
-                        None,
-                    )
-                    .is_none()
-                {
-                    return Err(io::Error::other(format!(
-                        "Cannot move IO BAR address range from {old_base:#x} to {new_base:#x}"
-                    )));
-                }
-
-                // Update PIO bus
-                self.io_bus
-                    .update_range(old_base, len, new_base, len)
-                    .map_err(io::Error::other)?;
+                self.allocator
+                    .lock()
+                    .unwrap()
+                    .free_io_addresses(GuestAddress(base), len as GuestUsize);
             }
             PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
-                let pci_mmio_allocators = if region_type == PciBarRegionType::Memory32BitRegion {
+                let allocators = if region_type == PciBarRegionType::Memory32BitRegion {
                     &self.pci_mmio32_allocators
                 } else {
                     &self.pci_mmio64_allocators
                 };
-                let mut pci_mmio_allocator = pci_mmio_allocators
-                    [usize::from(pci_dev.bdf().segment())]
-                .lock()
-                .unwrap();
+                allocators[segment]
+                    .lock()
+                    .unwrap()
+                    .free(GuestAddress(base), len as GuestUsize);
+            }
+        }
+    }
 
-                if pci_mmio_allocator
-                    .move_range(
-                        GuestAddress(old_base),
-                        GuestAddress(new_base),
-                        len as GuestUsize,
-                        Some(len),
-                    )
-                    .is_none()
-                {
-                    return Err(io::Error::other(format!(
-                        "Cannot move MMIO BAR address range from {old_base:#x} to {new_base:#x}"
-                    )));
-                }
-
-                // Update MMIO bus
-                self.mmio_bus
-                    .update_range(old_base, len, new_base, len)
-                    .map_err(io::Error::other)?;
+    fn allocator_allocate(
+        &self,
+        segment: usize,
+        base: u64,
+        len: u64,
+        region_type: PciBarRegionType,
+    ) -> result::Result<(), io::Error> {
+        match region_type {
+            PciBarRegionType::IoRegion => {
+                self.allocator
+                    .lock()
+                    .unwrap()
+                    .allocate_io_addresses(Some(GuestAddress(base)), len as GuestUsize, Some(len))
+                    .ok_or_else(|| {
+                        io::Error::other(format!("failed allocating new IO range: 0x{base:x}"))
+                    })?;
+            }
+            PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
+                let allocators = if region_type == PciBarRegionType::Memory32BitRegion {
+                    &self.pci_mmio32_allocators
+                } else {
+                    &self.pci_mmio64_allocators
+                };
+                // A range outside this segment's window is rejected.
+                allocators[segment]
+                    .lock()
+                    .unwrap()
+                    .allocate(Some(GuestAddress(base)), len as GuestUsize, Some(len))
+                    .ok_or_else(|| {
+                        io::Error::other(format!(
+                            "failed allocating new MMIO range: 0x{base:x}(0x{len:x})"
+                        ))
+                    })?;
             }
         }
 
-        // Update the device_tree resources associated with the device
-        if let Some(id) = pci_dev.id() {
-            if let Some(node) = self.device_tree.lock().unwrap().get_mut(&id) {
-                let mut resource_updated = false;
-                for resource in node.resources.iter_mut() {
-                    if let Resource::PciBar { index, base, .. } = resource
-                        && *index == bar_idx
-                    {
-                        *base = new_base;
-                        resource_updated = true;
-                        break;
-                    }
-                }
+        Ok(())
+    }
+}
 
-                if !resource_updated {
-                    return Err(io::Error::other(format!(
-                        "Couldn't find a resource for BAR {bar_idx} of device {id}"
-                    )));
-                }
-            } else {
-                return Err(io::Error::other(format!(
-                    "Couldn't find device {id} from device tree"
-                )));
+impl DeviceRelocation for AddressManager {
+    fn move_bar_prepare(
+        &self,
+        pci_dev: &mut dyn PciDevice,
+        params: &ReleaseParams,
+    ) -> result::Result<(), io::Error> {
+        let bar_idx = params.bar_idx;
+        let BarResource {
+            base,
+            len,
+            region_type,
+        } = self.bar_resource(pci_dev, bar_idx)?;
+        let segment = usize::from(pci_dev.bdf().segment());
+
+        // Tear the device side down first: if it fails, the range stays held
+        // and no other BAR is installed over a live mapping.
+        self.move_bar_prepare_device(pci_dev, bar_idx, base)?;
+
+        let bus = match region_type {
+            PciBarRegionType::IoRegion => &self.io_bus,
+            PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
+                &self.mmio_bus
             }
+        };
+        bus.remove(base, len).map_err(io::Error::other)?;
+        self.allocator_free(segment, base, len, region_type);
+
+        Ok(())
+    }
+
+    fn move_bar_commit(
+        &self,
+        pci_dev: &mut dyn PciDevice,
+        bus_device: &Arc<dyn BusDeviceSync>,
+        params: &InstallParams,
+    ) -> result::Result<(), io::Error> {
+        let InstallParams { bar_idx, new_base } = *params;
+        let BarResource {
+            len, region_type, ..
+        } = self.bar_resource(pci_dev, bar_idx)?;
+        let segment = usize::from(pci_dev.bdf().segment());
+        self.allocator_allocate(segment, new_base, len, region_type)?;
+
+        let bus = match region_type {
+            PciBarRegionType::IoRegion => &self.io_bus,
+            PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
+                &self.mmio_bus
+            }
+        };
+        if let Err(e) = bus.insert(Arc::clone(bus_device), new_base, len) {
+            self.allocator_free(segment, new_base, len, region_type);
+            return Err(io::Error::other(e));
         }
 
+        if let Err(e) = self.move_bar_commit_device(pci_dev, params) {
+            if let Err(remove_err) = bus.remove(new_base, len) {
+                error!("Failed unwinding bus range for BAR {bar_idx}: {remove_err}");
+            }
+            self.allocator_free(segment, new_base, len, region_type);
+            return Err(e);
+        }
+
+        // Record the new base only once the move has succeeded.
+        self.update_bar_base(pci_dev, bar_idx, new_base)
+    }
+}
+
+impl AddressManager {
+    /// Device-side release of a BAR at `base`: the virtio follow-on mappings,
+    /// then the device's own prepare.
+    fn move_bar_prepare_device(
+        &self,
+        pci_dev: &mut dyn PciDevice,
+        bar_idx: usize,
+        base: u64,
+    ) -> result::Result<(), io::Error> {
         let any_dev = pci_dev.as_any_mut();
         if let Some(virtio_pci_dev) = any_dev.downcast_ref::<VirtioPciDevice>() {
             if bar_idx == VIRTIO_CONFIG_BAR_INDEX {
-                for (event, addr) in virtio_pci_dev.ioeventfds(old_base) {
+                for (event, addr) in virtio_pci_dev.ioeventfds(base) {
                     let io_addr = IoEventAddress::Mmio(addr);
                     self.vm.unregister_ioevent(event, &io_addr).map_err(|e| {
                         io::Error::other(format!("failed to unregister ioevent: {e:?}"))
                     })?;
                 }
+            } else if bar_idx == VIRTIO_SHM_BAR_INDEX {
+                let virtio_dev = virtio_pci_dev.virtio_device();
+                let virtio_dev = virtio_dev.lock().unwrap();
+                if let Some(shm_regions) = virtio_dev.get_shm_regions() {
+                    // SAFETY: guaranteed by MmapRegion invariants
+                    unsafe {
+                        self.vm.remove_user_memory_region(
+                            shm_regions.mem_slot,
+                            base,
+                            shm_regions.mapping.len(),
+                            shm_regions.mapping.as_ptr(),
+                            false,
+                        )
+                    }
+                    .map_err(|e| {
+                        io::Error::other(format!("failed to remove user memory region: {e:?}"))
+                    })?;
+                }
+            }
+        }
+
+        pci_dev.move_bar_prepare(bar_idx)
+    }
+
+    /// Device-side install of a BAR at `new_base`: the device's own commit,
+    /// then the virtio follow-on mappings.
+    fn move_bar_commit_device(
+        &self,
+        pci_dev: &mut dyn PciDevice,
+        params: &InstallParams,
+    ) -> result::Result<(), io::Error> {
+        let &InstallParams { bar_idx, new_base } = params;
+
+        pci_dev.move_bar_commit(bar_idx, new_base)?;
+
+        let any_dev = pci_dev.as_any_mut();
+        if let Some(virtio_pci_dev) = any_dev.downcast_ref::<VirtioPciDevice>() {
+            if bar_idx == VIRTIO_CONFIG_BAR_INDEX {
                 for (event, addr) in virtio_pci_dev.ioeventfds(new_base) {
                     let io_addr = IoEventAddress::Mmio(addr);
                     self.vm
@@ -825,38 +985,19 @@ impl DeviceRelocation for AddressManager {
                 if let Some(mut shm_regions) = virtio_dev.get_shm_regions() {
                     // SAFETY: guaranteed by MmapRegion invariants
                     unsafe {
-                        // Remove old mapping
-                        self.vm
-                            .remove_user_memory_region(
-                                shm_regions.mem_slot,
-                                old_base,
-                                shm_regions.mapping.len(),
-                                shm_regions.mapping.as_ptr(),
-                                false,
-                            )
-                            .map_err(|e| {
-                                io::Error::other(format!(
-                                    "failed to remove user memory region: {e:?}"
-                                ))
-                            })?;
-
-                        // Create new mapping by inserting new region to KVM.
-                        self.vm
-                            .create_user_memory_region(
-                                shm_regions.mem_slot,
-                                new_base,
-                                shm_regions.mapping.len(),
-                                shm_regions.mapping.as_ptr(),
-                                false,
-                                false,
-                                hypervisor::MemoryVisibility::Shared,
-                            )
-                            .map_err(|e| {
-                                io::Error::other(format!(
-                                    "failed to create user memory regions: {e:?}"
-                                ))
-                            })?;
+                        self.vm.create_user_memory_region(
+                            shm_regions.mem_slot,
+                            new_base,
+                            shm_regions.mapping.len(),
+                            shm_regions.mapping.as_ptr(),
+                            false,
+                            false,
+                            hypervisor::MemoryVisibility::Shared,
+                        )
                     }
+                    .map_err(|e| {
+                        io::Error::other(format!("failed to create user memory regions: {e:?}"))
+                    })?;
 
                     // Update shared memory regions to reflect the new mapping.
                     shm_regions.addr = GuestAddress(new_base);
@@ -867,7 +1008,7 @@ impl DeviceRelocation for AddressManager {
             }
         }
 
-        pci_dev.move_bar(bar_idx, new_base)
+        Ok(())
     }
 }
 
@@ -4734,6 +4875,26 @@ impl DeviceManager {
         segment_id: u16,
         resources: Option<Vec<Resource>>,
     ) -> DeviceManagerResult<(Vec<PciBarConfiguration>, Vec<Resource>)> {
+        // On restore, a BAR whose space is not decoded, or whose register no
+        // longer names its saved address, is left unmapped: the device marks
+        // it released here, before anything is allocated or mapped, so that
+        // allocate_bars() leaves its saved range alone, which
+        // another device may hold by now, and the creation path skips the
+        // rest. The configuration reads as mapped until this point, so a
+        // device that writes its own COMMAND register at creation (pvpanic)
+        // plans nothing.
+        let mut released = Vec::new();
+        if let Some(resources) = &resources {
+            let mut device = pci_device.lock().unwrap();
+            for resource in resources {
+                if let Resource::PciBar { index, base, .. } = resource
+                    && device.release_stale_bar(*index, *base)
+                {
+                    released.push(*index);
+                }
+            }
+        }
+
         let bars = pci_device
             .lock()
             .unwrap()
@@ -4762,7 +4923,56 @@ impl DeviceManager {
             });
         }
 
+        if !released.is_empty() {
+            let mut device = pci_device.lock().unwrap();
+            for bar in bars.iter().filter(|bar| released.contains(&bar.idx())) {
+                self.unmap_released_bar(&mut *device, segment_id, bar)
+                    .map_err(DeviceManagerError::UnmapReleasedBar)?;
+            }
+        }
+
         Ok((bars, new_resources))
+    }
+
+    /// Give back what a virtio device set up for its shared memory BAR when
+    /// it was created, before the BAR was marked released: its allocator
+    /// range and its memory region. The other BARs of a released device are
+    /// not allocated or mapped in the first place.
+    fn unmap_released_bar(
+        &self,
+        pci_device: &mut dyn PciDevice,
+        segment_id: u16,
+        bar: &PciBarConfiguration,
+    ) -> result::Result<(), io::Error> {
+        if bar.idx() == VIRTIO_SHM_BAR_INDEX
+            && let Some(virtio_pci_dev) = pci_device.as_any_mut().downcast_ref::<VirtioPciDevice>()
+        {
+            self.address_manager.allocator_free(
+                segment_id as usize,
+                bar.addr(),
+                bar.size(),
+                bar.region_type(),
+            );
+            let virtio_dev = virtio_pci_dev.virtio_device();
+            let virtio_dev = virtio_dev.lock().unwrap();
+            if let Some(shm_regions) = virtio_dev.get_shm_regions() {
+                // SAFETY: guaranteed by MmapRegion invariants
+                unsafe {
+                    self.address_manager.vm.remove_user_memory_region(
+                        shm_regions.mem_slot,
+                        bar.addr(),
+                        shm_regions.mapping.len(),
+                        shm_regions.mapping.as_ptr(),
+                        false,
+                    )
+                }
+                .map_err(|e| {
+                    io::Error::other(format!("failed to remove user memory region: {e:?}"))
+                })?;
+            }
+        }
+
+        Ok(())
     }
 
     #[expect(clippy::needless_pass_by_value)]
@@ -4776,13 +4986,21 @@ impl DeviceManager {
     ) -> DeviceManagerResult<()> {
         self.bus_devices.push(Arc::clone(&bus_device));
 
-        self.register_bar_mapping(bus_device, &bars)?;
+        // A BAR the device marked released on restore stays off the bus.
+        let mapped: Vec<PciBarConfiguration> = {
+            let device = pci_device.lock().unwrap();
+            bars.iter()
+                .filter(|bar| !device.is_bar_released(bar.idx()))
+                .copied()
+                .collect()
+        };
+        self.register_bar_mapping(Arc::clone(&bus_device), &mapped)?;
 
         self.pci_segments[segment_id as usize]
             .pci_bus
             .lock()
             .unwrap()
-            .add_device(bdf.device(), pci_device)
+            .add_device(bdf.device(), pci_device, Some(bus_device))
             .map_err(DeviceManagerError::AddPciDevice)?;
 
         Ok(())
@@ -5117,12 +5335,20 @@ impl DeviceManager {
             .find(|bar| bar.idx() == VIRTIO_CONFIG_BAR_INDEX)
             .unwrap()
             .addr();
-        for (event, addr) in virtio_pci_device.lock().unwrap().ioeventfds(bar_addr) {
-            let io_addr = IoEventAddress::Mmio(addr);
-            self.address_manager
-                .vm
-                .register_ioevent(event, &io_addr, None)
-                .map_err(DeviceManagerError::RegisterIoevent)?;
+        // A config BAR left unmapped on restore gets its ioeventfds when it
+        // is installed.
+        if !virtio_pci_device
+            .lock()
+            .unwrap()
+            .is_bar_released(VIRTIO_CONFIG_BAR_INDEX)
+        {
+            for (event, addr) in virtio_pci_device.lock().unwrap().ioeventfds(bar_addr) {
+                let io_addr = IoEventAddress::Mmio(addr);
+                self.address_manager
+                    .vm
+                    .register_ioevent(event, &io_addr, None)
+                    .map_err(DeviceManagerError::RegisterIoevent)?;
+            }
         }
 
         // Update the device tree with correct resource information.
@@ -5254,9 +5480,16 @@ impl DeviceManager {
             hypervisor::MemoryVisibility::Shared,
         )
         .map_err(DeviceManagerError::RegisterGuestRegion)?;
-        region
-            .register()
-            .map_err(DeviceManagerError::RegisterGuestRegion)?;
+        // A data BAR left unmapped on restore is registered when installed.
+        if !ivshmem_device
+            .lock()
+            .unwrap()
+            .is_bar_released(IVSHMEM_DATA_BAR_IDX)
+        {
+            region
+                .register()
+                .map_err(DeviceManagerError::RegisterGuestRegion)?;
+        }
         ivshmem_device.lock().unwrap().set_region(region);
 
         let mut node = device_node!(id, ivshmem_device);
@@ -5696,9 +5929,9 @@ impl DeviceManager {
 
                 // Remove this device's MMIO regions from the DeviceManager's
                 // mmio_regions list. We match on UserMemoryRegion slot numbers
-                // rather than MmioRegion start addresses because move_bar()
-                // updates the device's region addresses but not the
-                // DeviceManager's cloned copies.
+                // rather than MmioRegion start addresses because
+                // move_bar_commit() updates the device's region addresses
+                // but not the DeviceManager's cloned copies.
                 let device_regions = vfio_pci_device.lock().unwrap().mmio_regions();
                 let mut mmio_regions = self.mmio_regions.lock().unwrap();
                 for device_region in &device_regions {
@@ -5719,7 +5952,10 @@ impl DeviceManager {
                     Resource::PciBar { index, base, .. } if *index == config_bar_idx => Some(*base),
                     _ => None,
                 });
-                if let Some(bar_addr) = bar_addr {
+                // A released BAR has no ioeventfds registered.
+                if let Some(bar_addr) = bar_addr
+                    && !dev.is_bar_released(config_bar_idx)
+                {
                     for (event, addr) in dev.ioeventfds(bar_addr) {
                         let io_addr = IoEventAddress::Mmio(addr);
                         self.address_manager
@@ -6807,6 +7043,19 @@ mod tests {
         );
     }
 
+    use std::any::Any;
+    use std::collections::HashSet;
+    use std::sync::Barrier;
+
+    use pci::{
+        BarRelocation, COMMAND_REG, COMMAND_REG_IO_SPACE_MASK, COMMAND_REG_MEMORY_SPACE_MASK,
+        PciBarPrefetchable, PciBus, PciClassCode, PciConfigMmio, PciConfiguration,
+        PciConfigurationState, PciHeaderType, PciRoot, PciSubclass,
+    };
+    #[cfg(target_arch = "x86_64")]
+    use vm_allocator::GsiApic;
+    use vm_migration::Snapshottable;
+
     use super::*;
 
     #[test]
@@ -6903,5 +7152,1006 @@ mod tests {
             create_mmio_allocators(0x100000, 0x3fffff, 1024, &[1; 1024], 4 << 10),
             Err(DeviceManagerError::PciSegmentMmioAperture(0))
         ));
+    }
+
+    // ---- BAR relocation through the real AddressManager -----------------
+    //
+    // Guest-style config writes go through PciConfigMmio, a real PciBus,
+    // AddressManager and VM; only the PCI device is a test device.
+
+    // Config-space register constants the pci crate does not export.
+    const BAR0_REG: usize = 4;
+    const ROM_BAR_REG: usize = 12;
+    const ROM_BAR_IDX: usize = 6;
+    const BAR_SIZE: u64 = 0x1000;
+    const BAR0_ADDR: u64 = 0x8010_0000;
+    const BAR1_ADDR: u64 = 0x8020_0000;
+    const MMIO32_BASE: u64 = 0x8000_0000;
+    const MMIO32_SIZE: u64 = 0x1000_0000;
+    const OUT_OF_WINDOW_ADDR: u64 = 0xf800_0000;
+    const IO_OLD: u64 = 0x2000;
+    const IO_NEW: u64 = 0x3000;
+    const IO_SIZE: u64 = 0x100;
+    const ROM_ADDR: u64 = 0x8040_0000;
+    const ROM_NEW_ADDR: u64 = 0x8050_0000;
+    const ROM_SIZE: u64 = 0x1000;
+    const TEST_DEV_ID: &str = "_bar_test_dev";
+    const TEST_DEV_SLOT: u8 = 1;
+    const BAR1_REG: usize = BAR0_REG + 1;
+    const IOSE: u32 = COMMAND_REG_IO_SPACE_MASK;
+    const MSE: u32 = COMMAND_REG_MEMORY_SPACE_MASK;
+
+    #[derive(Clone, Copy)]
+    enum TestSubclass {
+        Other,
+    }
+
+    impl PciSubclass for TestSubclass {
+        fn get_register_value(&self) -> u8 {
+            0xff
+        }
+    }
+
+    fn mem_bar(idx: usize, addr: u64) -> PciBarConfiguration {
+        PciBarConfiguration::new(
+            idx,
+            BAR_SIZE,
+            PciBarRegionType::Memory32BitRegion,
+            PciBarPrefetchable::NotPrefetchable,
+        )
+        .set_address(addr)
+    }
+
+    fn io_bar(idx: usize, addr: u64) -> PciBarConfiguration {
+        PciBarConfiguration::new(
+            idx,
+            IO_SIZE,
+            PciBarRegionType::IoRegion,
+            PciBarPrefetchable::NotPrefetchable,
+        )
+        .set_address(addr)
+    }
+
+    fn rom_bar(addr: u64) -> PciBarConfiguration {
+        PciBarConfiguration::new(
+            ROM_BAR_IDX,
+            ROM_SIZE,
+            PciBarRegionType::Memory32BitRegion,
+            PciBarPrefetchable::NotPrefetchable,
+        )
+        .set_address(addr)
+    }
+
+    /// A minimal PciDevice around a real PciConfiguration. BAR reads return
+    /// the BAR index, so that tests can tell which BAR an access reached.
+    struct TestBarDevice {
+        configuration: PciConfiguration,
+        bar_regions: Vec<PciBarConfiguration>,
+        commit_fail_bases: HashSet<u64>,
+        prepare_fail_bars: HashSet<usize>,
+        id: String,
+        bdf: PciBdf,
+        restoring: bool,
+    }
+
+    impl TestBarDevice {
+        fn new(bars: &[PciBarConfiguration], state: Option<PciConfigurationState>) -> Self {
+            let restoring = state.is_some();
+            let mut configuration = PciConfiguration::new(
+                0,
+                0,
+                0,
+                PciClassCode::Other,
+                &TestSubclass::Other,
+                None,
+                PciHeaderType::Device,
+                0,
+                0,
+                None,
+                state,
+            );
+
+            let mut bar_regions = Vec::new();
+            for bar in bars {
+                // On restore the registers come from the state; only the
+                // device-side BAR records are rebuilt, like real devices do.
+                if !restoring {
+                    if bar.idx() == ROM_BAR_IDX {
+                        configuration.add_pci_rom_bar(bar, 0x1).unwrap();
+                    } else {
+                        configuration.add_pci_bar(bar).unwrap();
+                    }
+                }
+                bar_regions.push(*bar);
+            }
+
+            TestBarDevice {
+                configuration,
+                bar_regions,
+                commit_fail_bases: HashSet::new(),
+                prepare_fail_bars: HashSet::new(),
+                id: TEST_DEV_ID.to_string(),
+                bdf: PciBdf::new(0, 0, TEST_DEV_SLOT, 0),
+                restoring,
+            }
+        }
+    }
+
+    impl PciDevice for TestBarDevice {
+        fn write_config_register(
+            &mut self,
+            reg_idx: usize,
+            offset: u64,
+            data: &[u8],
+        ) -> (BarRelocation, Option<Arc<Barrier>>) {
+            (
+                self.configuration
+                    .write_config_register(reg_idx, offset, data),
+                None,
+            )
+        }
+
+        fn read_config_register(&mut self, reg_idx: usize) -> u32 {
+            self.configuration.read_reg(reg_idx)
+        }
+
+        fn move_bar_prepare(&mut self, bar_idx: usize) -> Result<(), io::Error> {
+            if self.prepare_fail_bars.contains(&bar_idx) {
+                return Err(io::Error::other("injected device-prepare failure"));
+            }
+            Ok(())
+        }
+
+        fn move_bar_commit(&mut self, bar_idx: usize, new_base: u64) -> Result<(), io::Error> {
+            if self.commit_fail_bases.contains(&new_base) {
+                return Err(io::Error::other("injected device-commit failure"));
+            }
+            for bar in self.bar_regions.iter_mut() {
+                if bar.idx() == bar_idx {
+                    *bar = bar.set_address(new_base);
+                    return Ok(());
+                }
+            }
+            Err(io::Error::other(format!("no BAR record for {bar_idx}")))
+        }
+
+        fn is_bar_released(&self, bar_idx: usize) -> bool {
+            self.configuration.is_bar_released(bar_idx)
+        }
+
+        fn release_stale_bar(&mut self, bar_idx: usize, mapped_at: u64) -> bool {
+            self.configuration.release_stale_bar(bar_idx, mapped_at)
+        }
+
+        fn on_bar_installed(&mut self, bar_idx: usize) {
+            self.configuration.on_bar_installed(bar_idx);
+        }
+
+        fn pending_bar_installs(&self) -> Vec<InstallParams> {
+            self.configuration.pending_bar_installs()
+        }
+
+        fn read_bar(&mut self, base: u64, _offset: u64, data: &mut [u8]) {
+            let marker = self
+                .bar_regions
+                .iter()
+                .find(|bar| bar.addr() == base)
+                .map_or(0xee, |bar| bar.idx() as u8);
+            if let Some(b) = data.first_mut() {
+                *b = marker;
+            }
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+
+        fn id(&self) -> Option<String> {
+            Some(self.id.clone())
+        }
+
+        fn bdf(&self) -> PciBdf {
+            self.bdf
+        }
+    }
+
+    impl BusDevice for TestBarDevice {
+        fn read(&mut self, base: u64, offset: u64, data: &mut [u8]) {
+            self.read_bar(base, offset, data);
+        }
+    }
+
+    struct BarBench {
+        address_manager: Arc<AddressManager>,
+        pci_bus: Arc<Mutex<PciBus>>,
+        config_mmio: PciConfigMmio,
+        device: Arc<Mutex<TestBarDevice>>,
+    }
+
+    fn test_address_manager(mmio32_windows: &[(u64, u64)]) -> Arc<AddressManager> {
+        let hv = hypervisor::new().unwrap();
+        let vm = hv
+            .create_vm(hypervisor::HypervisorVmConfig::default())
+            .unwrap();
+        Arc::new(AddressManager {
+            allocator: Arc::new(Mutex::new(
+                SystemAllocator::new(
+                    GuestAddress(0x1000),
+                    0xffff,
+                    GuestAddress(0x1000_0000),
+                    0x100_0000,
+                    #[cfg(target_arch = "x86_64")]
+                    &[GsiApic::new(5, 19)],
+                    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+                    arch::IRQ_BASE,
+                )
+                .unwrap(),
+            )),
+            io_bus: Arc::new(Bus::new()),
+            mmio_bus: Arc::new(Bus::new()),
+            vm,
+            device_tree: Arc::new(Mutex::new(DeviceTree::new())),
+            pci_mmio32_allocators: mmio32_windows
+                .iter()
+                .map(|&(base, size)| {
+                    Arc::new(Mutex::new(
+                        AddressAllocator::new(GuestAddress(base), size).unwrap(),
+                    ))
+                })
+                .collect(),
+            pci_mmio64_allocators: vec![Arc::new(Mutex::new(
+                AddressAllocator::new(GuestAddress(0x1_0000_0000), 0x1_0000_0000).unwrap(),
+            ))]
+            .into_boxed_slice(),
+        })
+    }
+
+    /// Register `device` like DeviceManager does: a PciBus entry, bus and
+    /// allocator ranges at `bars`, and a device-tree node.
+    fn bar_bench_with(
+        address_manager: Arc<AddressManager>,
+        device: TestBarDevice,
+        bars: &[PciBarConfiguration],
+    ) -> BarBench {
+        let device = Arc::new(Mutex::new(device));
+
+        let mut pci_bus = PciBus::new(
+            Some(PciRoot::new(None)),
+            Arc::clone(&address_manager) as Arc<dyn DeviceRelocation>,
+        );
+        register_bar_device(&address_manager, &mut pci_bus, TEST_DEV_SLOT, &device, bars);
+
+        let pci_bus = Arc::new(Mutex::new(pci_bus));
+        BarBench {
+            address_manager,
+            config_mmio: PciConfigMmio::new(Arc::clone(&pci_bus)),
+            pci_bus,
+            device,
+        }
+    }
+
+    /// The per-device part of bar_bench_with().
+    fn register_bar_device(
+        address_manager: &Arc<AddressManager>,
+        pci_bus: &mut PciBus,
+        slot: u8,
+        device: &Arc<Mutex<TestBarDevice>>,
+        bars: &[PciBarConfiguration],
+    ) {
+        assert_eq!(pci_bus.allocate_device_id(Some(slot)).unwrap(), slot);
+        pci_bus
+            .add_device(
+                slot,
+                Arc::clone(device) as Arc<Mutex<dyn PciDevice>>,
+                Some(Arc::clone(device) as Arc<dyn BusDeviceSync>),
+            )
+            .unwrap();
+
+        let id = device.lock().unwrap().id.clone();
+        let mut node = DeviceNode::new(id.clone(), None);
+        node.pci_bdf = Some(PciBdf::new(0, 0, slot, 0));
+        for bar in bars {
+            // On restore the device decides, before anything is allocated or
+            // mapped, whether the BAR is left unmapped, like
+            // allocate_pci_bars().
+            let released = {
+                let mut d = device.lock().unwrap();
+                d.restoring && d.release_stale_bar(bar.idx(), bar.addr())
+            };
+            node.resources.push(Resource::PciBar {
+                index: bar.idx(),
+                base: bar.addr(),
+                size: bar.size(),
+                type_: bar.region_type().into(),
+                prefetchable: false,
+            });
+            if released {
+                continue;
+            }
+            match bar.region_type() {
+                PciBarRegionType::IoRegion => {
+                    address_manager
+                        .allocator
+                        .lock()
+                        .unwrap()
+                        .allocate_io_addresses(
+                            Some(GuestAddress(bar.addr())),
+                            bar.size() as GuestUsize,
+                            None,
+                        )
+                        .unwrap();
+                    address_manager
+                        .io_bus
+                        .insert(
+                            Arc::clone(device) as Arc<dyn BusDeviceSync>,
+                            bar.addr(),
+                            bar.size(),
+                        )
+                        .unwrap();
+                }
+                _ => {
+                    address_manager.pci_mmio32_allocators[0]
+                        .lock()
+                        .unwrap()
+                        .allocate(
+                            Some(GuestAddress(bar.addr())),
+                            bar.size() as GuestUsize,
+                            Some(bar.size()),
+                        )
+                        .unwrap();
+                    address_manager
+                        .mmio_bus
+                        .insert(
+                            Arc::clone(device) as Arc<dyn BusDeviceSync>,
+                            bar.addr(),
+                            bar.size(),
+                        )
+                        .unwrap();
+                }
+            }
+        }
+        address_manager.device_tree.lock().unwrap().insert(id, node);
+    }
+
+    fn bar_bench(bars: &[PciBarConfiguration]) -> BarBench {
+        let mut device = TestBarDevice::new(bars, None);
+        // Boot-style initial state: decode enabled, BARs mapped.
+        device.configuration.write_config_register(
+            COMMAND_REG,
+            0,
+            &((MSE | IOSE) as u16).to_le_bytes(),
+        );
+        bar_bench_with(
+            test_address_manager(&[(MMIO32_BASE, MMIO32_SIZE)]),
+            device,
+            bars,
+        )
+    }
+
+    impl BarBench {
+        /// A guest-style dword config write through ECAM.
+        fn cfg_write(&mut self, reg: usize, value: u32) {
+            self.cfg_write_at(TEST_DEV_SLOT, reg, value);
+        }
+
+        fn cfg_write_at(&mut self, slot: u8, reg: usize, value: u32) {
+            let offset = (u64::from(slot) << 15) | ((reg as u64) << 2);
+            BusDevice::write(&mut self.config_mmio, 0, offset, &value.to_le_bytes());
+        }
+
+        fn cfg_read(&mut self, reg: usize) -> u32 {
+            self.cfg_read_at(TEST_DEV_SLOT, reg)
+        }
+
+        fn cfg_read_at(&mut self, slot: u8, reg: usize) -> u32 {
+            let offset = (u64::from(slot) << 15) | ((reg as u64) << 2);
+            let mut data = [0u8; 4];
+            BusDevice::read(&mut self.config_mmio, 0, offset, &mut data);
+            u32::from_le_bytes(data)
+        }
+
+        /// Add a second device at `slot`, set up like bar_bench().
+        fn add_device(
+            &mut self,
+            slot: u8,
+            bars: &[PciBarConfiguration],
+        ) -> Arc<Mutex<TestBarDevice>> {
+            let mut device = TestBarDevice::new(bars, None);
+            device.id = format!("{TEST_DEV_ID}_{slot}");
+            device.bdf = PciBdf::new(0, 0, slot, 0);
+            device.configuration.write_config_register(
+                COMMAND_REG,
+                0,
+                &((MSE | IOSE) as u16).to_le_bytes(),
+            );
+            let device = Arc::new(Mutex::new(device));
+            register_bar_device(
+                &self.address_manager,
+                &mut self.pci_bus.lock().unwrap(),
+                slot,
+                &device,
+                bars,
+            );
+            device
+        }
+
+        /// The BAR is released awaiting install (nothing backs it).
+        fn released(&self, bar_idx: usize) -> bool {
+            self.released_of(&self.device, bar_idx)
+        }
+
+        fn released_of(&self, device: &Arc<Mutex<TestBarDevice>>, bar_idx: usize) -> bool {
+            device
+                .lock()
+                .unwrap()
+                .configuration
+                .is_bar_released(bar_idx)
+        }
+
+        /// Read one byte through the mmio_bus: the BAR marker, or None.
+        fn mmio_probe(&self, addr: u64) -> Option<u8> {
+            let mut data = [0u8; 1];
+            self.address_manager
+                .mmio_bus
+                .read(addr, &mut data)
+                .ok()
+                .map(|_| data[0])
+        }
+
+        fn io_probe(&self, addr: u64) -> Option<u8> {
+            let mut data = [0u8; 1];
+            self.address_manager
+                .io_bus
+                .read(addr, &mut data)
+                .ok()
+                .map(|_| data[0])
+        }
+
+        fn mmio32_range_free(&self, base: u64, size: u64) -> bool {
+            let mut allocator = self.address_manager.pci_mmio32_allocators[0]
+                .lock()
+                .unwrap();
+            if allocator
+                .allocate(Some(GuestAddress(base)), size as GuestUsize, Some(size))
+                .is_some()
+            {
+                allocator.free(GuestAddress(base), size as GuestUsize);
+                true
+            } else {
+                false
+            }
+        }
+
+        fn io_range_free(&self, base: u64, size: u64) -> bool {
+            let mut allocator = self.address_manager.allocator.lock().unwrap();
+            if allocator
+                .allocate_io_addresses(Some(GuestAddress(base)), size as GuestUsize, None)
+                .is_some()
+            {
+                allocator.free_io_addresses(GuestAddress(base), size as GuestUsize);
+                true
+            } else {
+                false
+            }
+        }
+
+        fn tree_bar_base(&self, bar_idx: usize) -> Option<u64> {
+            self.tree_bar_base_of(&self.device, bar_idx)
+        }
+
+        fn tree_bar_base_of(
+            &self,
+            device: &Arc<Mutex<TestBarDevice>>,
+            bar_idx: usize,
+        ) -> Option<u64> {
+            let id = device.lock().unwrap().id.clone();
+            self.address_manager
+                .device_tree
+                .lock()
+                .unwrap()
+                .get(&id)
+                .and_then(|node| {
+                    node.resources.iter().find_map(|resource| match resource {
+                        Resource::PciBar { index, base, .. } if *index == bar_idx => Some(*base),
+                        _ => None,
+                    })
+                })
+        }
+
+        /// Assert that the memory BAR released from `addr` has no allocator
+        /// or bus range; its device-tree resource keeps `addr`.
+        fn assert_released(&self, bar_idx: usize, addr: u64) {
+            assert!(self.released(bar_idx), "BAR {bar_idx} should be released");
+            assert!(
+                self.mmio32_range_free(addr, BAR_SIZE),
+                "allocator range 0x{addr:x} should be free"
+            );
+            assert_eq!(self.mmio_probe(addr), None, "bus range 0x{addr:x} remains");
+            assert_eq!(
+                self.tree_bar_base(bar_idx),
+                Some(addr),
+                "tree resource must keep the released-from base"
+            );
+        }
+
+        /// Asserts the full mapped state of one memory BAR at `addr`.
+        fn assert_mapped(&self, bar_idx: usize, addr: u64) {
+            self.assert_mapped_of(&self.device, bar_idx, addr);
+        }
+
+        fn assert_mapped_of(&self, device: &Arc<Mutex<TestBarDevice>>, bar_idx: usize, addr: u64) {
+            assert!(
+                !self.released_of(device, bar_idx),
+                "BAR {bar_idx} still released"
+            );
+            assert!(
+                !self.mmio32_range_free(addr, BAR_SIZE),
+                "allocator range 0x{addr:x} should be occupied"
+            );
+            assert_eq!(
+                self.mmio_probe(addr),
+                Some(bar_idx as u8),
+                "bus access at 0x{addr:x} should reach BAR {bar_idx}"
+            );
+            assert_eq!(self.tree_bar_base_of(device, bar_idx), Some(addr));
+        }
+    }
+
+    // Swap both BARs of a device with decode off, then enable decode: no
+    // transient overlap.
+    #[test]
+    fn test_bar_swap_relocates_both_bars_through_vmm() {
+        let mut bench = bar_bench(&[mem_bar(0, BAR0_ADDR), mem_bar(1, BAR1_ADDR)]);
+        bench.assert_mapped(0, BAR0_ADDR);
+        bench.assert_mapped(1, BAR1_ADDR);
+
+        bench.cfg_write(COMMAND_REG, 0);
+        // Each decode-off BAR write releases eagerly and in full.
+        bench.cfg_write(BAR0_REG, BAR1_ADDR as u32);
+        bench.assert_released(0, BAR0_ADDR);
+        bench.cfg_write(BAR1_REG, BAR0_ADDR as u32);
+        bench.assert_released(1, BAR1_ADDR);
+
+        // The registers carry the guest-written targets mid-window.
+        assert_eq!(bench.cfg_read(BAR0_REG) & !0xf, BAR1_ADDR as u32);
+        assert_eq!(bench.cfg_read(BAR1_REG) & !0xf, BAR0_ADDR as u32);
+
+        // Enabling decode installs both at their swapped addresses.
+        bench.cfg_write(COMMAND_REG, MSE);
+        bench.assert_mapped(0, BAR1_ADDR);
+        bench.assert_mapped(1, BAR0_ADDR);
+    }
+
+    // A target in another PCI segment's window is rejected.
+    #[test]
+    fn test_bar_move_into_other_segment_window_rejected() {
+        const WIN_B_BASE: u64 = MMIO32_BASE + MMIO32_SIZE;
+        // Valid inside window B, but outside the BAR's own window A.
+        const TARGET_IN_B: u64 = WIN_B_BASE + 0x10_0000;
+
+        let am = test_address_manager(&[(MMIO32_BASE, MMIO32_SIZE), (WIN_B_BASE, MMIO32_SIZE)]);
+        let mut device = TestBarDevice::new(&[mem_bar(0, BAR0_ADDR)], None);
+        device.configuration.write_config_register(
+            COMMAND_REG,
+            0,
+            &((MSE | IOSE) as u16).to_le_bytes(),
+        );
+        let mut bench = bar_bench_with(am, device, &[mem_bar(0, BAR0_ADDR)]);
+        bench.assert_mapped(0, BAR0_ADDR);
+
+        // Reprogram (decode off) to a valid address in the SIBLING window B.
+        bench.cfg_write(COMMAND_REG, 0);
+        bench.cfg_write(BAR0_REG, TARGET_IN_B as u32);
+        bench.assert_released(0, BAR0_ADDR);
+
+        // The BAR stays released and window B is untouched.
+        bench.cfg_write(COMMAND_REG, MSE);
+        assert!(bench.released(0), "cross-segment target must be rejected");
+        {
+            let mut win_b = bench.address_manager.pci_mmio32_allocators[1]
+                .lock()
+                .unwrap();
+            assert!(
+                win_b
+                    .allocate(
+                        Some(GuestAddress(TARGET_IN_B)),
+                        BAR_SIZE as GuestUsize,
+                        Some(BAR_SIZE),
+                    )
+                    .is_some(),
+                "window B must be untouched by the rejected move"
+            );
+            win_b.free(GuestAddress(TARGET_IN_B), BAR_SIZE as GuestUsize);
+        }
+
+        // Recovery: a valid in-segment (window A) target installs at the BAR
+        // write, as MSE is on, and survives a decode toggle.
+        bench.cfg_write(BAR0_REG, BAR1_ADDR as u32);
+        bench.cfg_write(COMMAND_REG, 0);
+        bench.cfg_write(COMMAND_REG, MSE);
+        bench.assert_mapped(0, BAR1_ADDR);
+    }
+
+    // A snapshot taken with a BAR released and decode off, restored into a
+    // fresh VMM: the BAR stays unmapped until decode is enabled.
+    #[test]
+    fn test_mid_window_restore_unmaps_undecoded_bar_until_enable() {
+        // Source side: enter the window, then snapshot the config space.
+        let mut bench = bar_bench(&[mem_bar(0, BAR0_ADDR)]);
+        bench.cfg_write(COMMAND_REG, 0);
+        bench.cfg_write(BAR0_REG, BAR1_ADDR as u32);
+        bench.assert_released(0, BAR0_ADDR);
+        let state: PciConfigurationState = bench
+            .device
+            .lock()
+            .unwrap()
+            .configuration
+            .snapshot()
+            .unwrap()
+            .to_state()
+            .unwrap();
+
+        // Restore: the BAR is left unmapped, as its space is undecoded.
+        let device = TestBarDevice::new(&[mem_bar(0, BAR0_ADDR)], Some(state));
+        let mut restored = bar_bench_with(
+            test_address_manager(&[(MMIO32_BASE, MMIO32_SIZE)]),
+            device,
+            &[mem_bar(0, BAR0_ADDR)],
+        );
+
+        // Unmapped, with the register holding the target.
+        assert!(restored.released(0));
+        assert_eq!(restored.mmio_probe(BAR0_ADDR), None);
+        assert!(restored.mmio32_range_free(BAR0_ADDR, BAR_SIZE));
+        assert_eq!(restored.cfg_read(BAR0_REG) & !0xf, BAR1_ADDR as u32);
+
+        // Post-restore decode enable: the drain installs at the target.
+        restored.cfg_write(COMMAND_REG, MSE);
+        restored.assert_mapped(0, BAR1_ADDR);
+        assert_eq!(restored.mmio_probe(BAR0_ADDR), None);
+    }
+
+    /// Snapshot the device's config space, as a migration does.
+    fn config_state(bench: &BarBench) -> PciConfigurationState {
+        bench
+            .device
+            .lock()
+            .unwrap()
+            .configuration
+            .snapshot()
+            .unwrap()
+            .to_state()
+            .unwrap()
+    }
+
+    /// Restore `state` with the BAR at `base`, its device-tree address.
+    fn restore_bench(state: PciConfigurationState, base: u64) -> BarBench {
+        let device = TestBarDevice::new(&[mem_bar(0, base)], Some(state));
+        bar_bench_with(
+            test_address_manager(&[(MMIO32_BASE, MMIO32_SIZE)]),
+            device,
+            &[mem_bar(0, base)],
+        )
+    }
+
+    // A decoded BAR whose register names its mapping is left alone by restore.
+    #[test]
+    fn test_restore_keeps_decoded_bar_at_its_register() {
+        let mut bench = bar_bench(&[mem_bar(0, BAR0_ADDR)]);
+        bench.cfg_write(COMMAND_REG, MSE);
+        let state = config_state(&bench);
+
+        let restored = restore_bench(state, BAR0_ADDR);
+        restored.assert_mapped(0, BAR0_ADDR);
+    }
+
+    // A failed install pending at snapshot time: the register names the
+    // target, the device tree the old base. Restore leaves the old base
+    // unmapped; the guest's next write to the device installs at the
+    // register.
+    #[test]
+    fn test_restore_reinstalls_decoded_bar_at_its_register() {
+        const DEV_B_SLOT: u8 = 2;
+
+        // Source side: A's move onto B's range fails and stays pending.
+        let mut bench = bar_bench(&[mem_bar(0, BAR0_ADDR)]);
+        let b = bench.add_device(DEV_B_SLOT, &[mem_bar(0, BAR1_ADDR)]);
+        bench.cfg_write(COMMAND_REG, MSE);
+        bench.cfg_write(BAR0_REG, BAR1_ADDR as u32);
+        bench.assert_released(0, BAR0_ADDR);
+        bench.assert_mapped_of(&b, 0, BAR1_ADDR);
+        let state = config_state(&bench);
+
+        // Restored without B, the target is free, but nothing installs until
+        // the guest writes the device: a COMMAND write does.
+        let mut restored = restore_bench(state, BAR0_ADDR);
+        restored.assert_released(0, BAR0_ADDR);
+        assert_eq!(restored.cfg_read(BAR0_REG) & !0xf, BAR1_ADDR as u32);
+        restored.cfg_write(COMMAND_REG, MSE);
+        restored.assert_mapped(0, BAR1_ADDR);
+        assert!(restored.mmio32_range_free(BAR0_ADDR, BAR_SIZE));
+        assert_eq!(restored.mmio_probe(BAR0_ADDR), None);
+    }
+
+    // The same, with the target still held by another restored device: the
+    // BAR stays released until the holder moves away.
+    #[test]
+    fn test_restore_mismatched_bar_waits_for_holder() {
+        const DEV_B_SLOT: u8 = 2;
+
+        let mut bench = bar_bench(&[mem_bar(0, BAR0_ADDR)]);
+        bench.add_device(DEV_B_SLOT, &[mem_bar(0, BAR1_ADDR)]);
+        bench.cfg_write(COMMAND_REG, MSE);
+        bench.cfg_write(BAR0_REG, BAR1_ADDR as u32);
+        bench.assert_released(0, BAR0_ADDR);
+        let state = config_state(&bench);
+
+        let mut restored = restore_bench(state, BAR0_ADDR);
+        let b = restored.add_device(DEV_B_SLOT, &[mem_bar(0, BAR1_ADDR)]);
+        restored.assert_released(0, BAR0_ADDR);
+        restored.assert_mapped_of(&b, 0, BAR1_ADDR);
+        assert_eq!(restored.cfg_read(BAR0_REG) & !0xf, BAR1_ADDR as u32);
+
+        // B moves away: A's install is retried.
+        restored.cfg_write_at(DEV_B_SLOT, BAR0_REG, BAR0_ADDR as u32);
+        restored.assert_mapped_of(&b, 0, BAR0_ADDR);
+        restored.assert_mapped(0, BAR1_ADDR);
+    }
+
+    // A failing device commit unwinds the allocator and bus; the next COMMAND
+    // write retries.
+    // A release that fails keeps the BAR mapped at its old address and
+    // skips its install; the guest's next move releases it again.
+    #[test]
+    fn test_release_failure_keeps_bar_mapped_and_skips_install() {
+        const NEW_ADDR: u64 = 0x8030_0000;
+
+        let mut bench = bar_bench(&[mem_bar(0, BAR0_ADDR)]);
+        bench.device.lock().unwrap().prepare_fail_bars.insert(0);
+        bench.cfg_write(BAR0_REG, BAR1_ADDR as u32);
+
+        // Still mapped at the old address, with the register at the target.
+        assert!(!bench.released(0));
+        assert!(!bench.mmio32_range_free(BAR0_ADDR, BAR_SIZE));
+        assert_eq!(bench.mmio_probe(BAR0_ADDR), Some(0));
+        assert!(bench.mmio32_range_free(BAR1_ADDR, BAR_SIZE));
+        assert_eq!(bench.tree_bar_base(0), Some(BAR0_ADDR));
+        assert_eq!(bench.cfg_read(BAR0_REG) & !0xf, BAR1_ADDR as u32);
+
+        // Not owed an install: a COMMAND write changes nothing.
+        bench.cfg_write(COMMAND_REG, MSE);
+        assert!(!bench.released(0));
+        assert!(bench.mmio32_range_free(BAR1_ADDR, BAR_SIZE));
+        assert_eq!(bench.mmio_probe(BAR0_ADDR), Some(0));
+
+        // The next move releases it again and installs at the new target.
+        bench.device.lock().unwrap().prepare_fail_bars.clear();
+        bench.cfg_write(BAR0_REG, NEW_ADDR as u32);
+        bench.assert_mapped(0, NEW_ADDR);
+        assert!(bench.mmio32_range_free(BAR0_ADDR, BAR_SIZE));
+        assert_eq!(bench.mmio_probe(BAR0_ADDR), None);
+    }
+
+    #[test]
+    fn test_install_device_commit_failure_unwinds_and_command_write_recovers() {
+        let mut bench = bar_bench(&[mem_bar(0, BAR0_ADDR)]);
+        bench.cfg_write(COMMAND_REG, 0);
+        bench.cfg_write(BAR0_REG, BAR1_ADDR as u32);
+
+        bench
+            .device
+            .lock()
+            .unwrap()
+            .commit_fail_bases
+            .insert(BAR1_ADDR);
+        bench.cfg_write(COMMAND_REG, MSE);
+
+        // Fully released, with the target kept in config space.
+        assert_eq!(bench.cfg_read(COMMAND_REG) & MSE, MSE);
+        assert!(bench.released(0));
+        assert!(bench.mmio32_range_free(BAR1_ADDR, BAR_SIZE));
+        assert_eq!(bench.mmio_probe(BAR1_ADDR), None);
+        assert!(bench.mmio32_range_free(BAR0_ADDR, BAR_SIZE));
+        assert_eq!(bench.cfg_read(BAR0_REG) & !0xf, BAR1_ADDR as u32);
+
+        // Any COMMAND write with decode on is the retry handle.
+        bench.device.lock().unwrap().commit_fail_bases.clear();
+        bench.cfg_write(COMMAND_REG, MSE);
+        bench.assert_mapped(0, BAR1_ADDR);
+    }
+
+    // A target outside every MMIO window fails to allocate; rewriting it to a
+    // valid address installs it at once.
+    #[test]
+    fn test_install_alloc_failure_stays_pending_and_new_target_installs_at_once() {
+        let mut bench = bar_bench(&[mem_bar(0, BAR0_ADDR)]);
+        bench.cfg_write(COMMAND_REG, 0);
+        bench.cfg_write(BAR0_REG, OUT_OF_WINDOW_ADDR as u32);
+        bench.assert_released(0, BAR0_ADDR);
+
+        bench.cfg_write(COMMAND_REG, MSE);
+        assert!(bench.released(0));
+        assert!(bench.mmio32_range_free(BAR0_ADDR, BAR_SIZE));
+
+        // With decode on, the rewrite itself installs the BAR.
+        bench.cfg_write(BAR0_REG, BAR1_ADDR as u32);
+        bench.assert_mapped(0, BAR1_ADDR);
+    }
+
+    // A bus insert conflict returns the allocator range; the next COMMAND
+    // write retries.
+    #[test]
+    fn test_install_bus_conflict_unwinds_allocator_and_command_write_recovers() {
+        struct Blocker;
+        impl BusDeviceSync for Blocker {}
+
+        let mut bench = bar_bench(&[mem_bar(0, BAR0_ADDR)]);
+        bench.cfg_write(COMMAND_REG, 0);
+        bench.cfg_write(BAR0_REG, BAR1_ADDR as u32);
+
+        bench
+            .address_manager
+            .mmio_bus
+            .insert(Arc::new(Blocker), BAR1_ADDR, BAR_SIZE)
+            .unwrap();
+        bench.cfg_write(COMMAND_REG, MSE);
+
+        assert!(bench.released(0));
+        assert!(
+            bench.mmio32_range_free(BAR1_ADDR, BAR_SIZE),
+            "allocator range must be unwound after the bus conflict"
+        );
+
+        bench
+            .address_manager
+            .mmio_bus
+            .remove(BAR1_ADDR, BAR_SIZE)
+            .unwrap();
+        bench.cfg_write(COMMAND_REG, MSE);
+        bench.assert_mapped(0, BAR1_ADDR);
+    }
+
+    // A BAR moved onto another device's range is installed once that device
+    // moves away.
+    #[test]
+    fn test_other_device_release_retries_failed_install() {
+        const DEV_B_SLOT: u8 = 2;
+
+        let mut bench = bar_bench(&[mem_bar(0, BAR0_ADDR)]);
+        let a = Arc::clone(&bench.device);
+        let b = bench.add_device(DEV_B_SLOT, &[mem_bar(0, BAR1_ADDR)]);
+        bench.assert_mapped_of(&a, 0, BAR0_ADDR);
+        bench.assert_mapped_of(&b, 0, BAR1_ADDR);
+
+        // A moves onto B's range: its install fails.
+        bench.cfg_write(BAR0_REG, BAR1_ADDR as u32);
+        assert!(bench.released_of(&a, 0));
+        assert!(bench.mmio32_range_free(BAR0_ADDR, BAR_SIZE));
+        bench.assert_mapped_of(&b, 0, BAR1_ADDR);
+        assert_eq!(
+            bench.cfg_read_at(TEST_DEV_SLOT, BAR0_REG) & !0xf,
+            BAR1_ADDR as u32
+        );
+
+        // B moves away: its own plan installs it, then the retry installs A.
+        bench.cfg_write_at(DEV_B_SLOT, BAR0_REG, BAR0_ADDR as u32);
+        bench.assert_mapped_of(&a, 0, BAR1_ADDR);
+        bench.assert_mapped_of(&b, 0, BAR0_ADDR);
+    }
+
+    // IO BARs are gated on IOSE, through the real PIO path.
+    #[test]
+    fn test_io_bar_release_and_drain_gated_on_iose() {
+        let mut bench = bar_bench(&[io_bar(0, IO_OLD)]);
+        assert_eq!(bench.io_probe(IO_OLD), Some(0));
+
+        bench.cfg_write(COMMAND_REG, 0);
+        bench.cfg_write(BAR0_REG, IO_NEW as u32);
+
+        // Released from the PIO side eagerly.
+        assert!(bench.released(0));
+        assert!(bench.io_range_free(IO_OLD, IO_SIZE));
+        assert_eq!(bench.io_probe(IO_OLD), None);
+
+        // MSE alone must not drain an IO BAR.
+        bench.cfg_write(COMMAND_REG, MSE);
+        assert!(bench.released(0));
+        assert_eq!(bench.io_probe(IO_NEW), None);
+
+        // IOSE drains it.
+        bench.cfg_write(COMMAND_REG, MSE | IOSE);
+        assert!(!bench.released(0));
+        assert_eq!(bench.io_probe(IO_NEW), Some(0));
+        assert!(!bench.io_range_free(IO_NEW, IO_SIZE));
+        assert_eq!(bench.tree_bar_base(0), Some(IO_NEW));
+    }
+
+    // Clearing a decode bit unmaps the BARs of that space; setting it again
+    // maps them back at their registers.
+    #[test]
+    fn test_decode_clear_unmaps_bar_until_reenable() {
+        let mut bench = bar_bench(&[mem_bar(0, BAR0_ADDR), io_bar(1, IO_OLD)]);
+        bench.cfg_write(COMMAND_REG, MSE | IOSE);
+        bench.assert_mapped(0, BAR0_ADDR);
+        assert_eq!(bench.io_probe(IO_OLD), Some(1));
+
+        // MSE off: the memory BAR is released, the IO BAR untouched.
+        bench.cfg_write(COMMAND_REG, IOSE);
+        bench.assert_released(0, BAR0_ADDR);
+        assert_eq!(bench.io_probe(IO_OLD), Some(1));
+        assert_eq!(bench.cfg_read(BAR0_REG) & !0xf, BAR0_ADDR as u32);
+
+        // MSE on: installed at the unchanged register.
+        bench.cfg_write(COMMAND_REG, MSE | IOSE);
+        bench.assert_mapped(0, BAR0_ADDR);
+
+        // IOSE off: the IO BAR is released, the memory BAR untouched.
+        bench.cfg_write(COMMAND_REG, MSE);
+        assert!(bench.released(1));
+        assert_eq!(bench.io_probe(IO_OLD), None);
+        assert!(bench.io_range_free(IO_OLD, IO_SIZE));
+        assert_eq!(bench.tree_bar_base(1), Some(IO_OLD));
+        bench.assert_mapped(0, BAR0_ADDR);
+
+        bench.cfg_write(COMMAND_REG, MSE | IOSE);
+        assert!(!bench.released(1));
+        assert_eq!(bench.io_probe(IO_OLD), Some(1));
+    }
+
+    // A BAR moved onto a range whose holder then stops decoding is installed
+    // when the holder's space is disabled, as Windows expects while it cycles
+    // several devices.
+    #[test]
+    fn test_other_device_decode_clear_retries_failed_install() {
+        const DEV_B_SLOT: u8 = 2;
+
+        let mut bench = bar_bench(&[mem_bar(0, BAR0_ADDR)]);
+        let a = Arc::clone(&bench.device);
+        let b = bench.add_device(DEV_B_SLOT, &[mem_bar(0, BAR1_ADDR)]);
+        bench.cfg_write(COMMAND_REG, MSE);
+        bench.assert_mapped_of(&a, 0, BAR0_ADDR);
+        bench.assert_mapped_of(&b, 0, BAR1_ADDR);
+
+        // B moves onto A's range while A decodes: its install fails.
+        bench.cfg_write_at(DEV_B_SLOT, BAR0_REG, BAR0_ADDR as u32);
+        assert!(bench.released_of(&b, 0));
+        assert!(bench.mmio32_range_free(BAR1_ADDR, BAR_SIZE));
+        bench.assert_mapped_of(&a, 0, BAR0_ADDR);
+
+        // A stops decoding: its BAR is unmapped and B's install is retried.
+        bench.cfg_write(COMMAND_REG, 0);
+        assert!(bench.released_of(&a, 0));
+        bench.assert_mapped_of(&b, 0, BAR0_ADDR);
+
+        // A decodes again while B holds its range: A stays pending until it is
+        // moved away.
+        bench.cfg_write(COMMAND_REG, MSE);
+        assert!(bench.released_of(&a, 0));
+        bench.assert_mapped_of(&b, 0, BAR0_ADDR);
+        bench.cfg_write(BAR0_REG, BAR1_ADDR as u32);
+        bench.assert_mapped_of(&a, 0, BAR1_ADDR);
+        bench.assert_mapped_of(&b, 0, BAR0_ADDR);
+    }
+
+    // The expansion ROM takes the memory BAR path, gated on MSE.
+    #[test]
+    fn test_rom_bar_reprogram_defers_and_lands_via_mse() {
+        let mut bench = bar_bench(&[mem_bar(0, BAR0_ADDR), rom_bar(ROM_ADDR)]);
+        assert_eq!(bench.mmio_probe(ROM_ADDR), Some(ROM_BAR_IDX as u8));
+
+        bench.cfg_write(COMMAND_REG, 0);
+        bench.cfg_write(ROM_BAR_REG, ROM_NEW_ADDR as u32 | 0x1);
+
+        assert!(bench.released(ROM_BAR_IDX));
+        assert!(bench.mmio32_range_free(ROM_ADDR, ROM_SIZE));
+        assert_eq!(bench.mmio_probe(ROM_ADDR), None);
+        // Disabling MSE released the memory BAR as well.
+        bench.assert_released(0, BAR0_ADDR);
+
+        bench.cfg_write(COMMAND_REG, MSE);
+        assert!(!bench.released(ROM_BAR_IDX));
+        assert_eq!(bench.mmio_probe(ROM_NEW_ADDR), Some(ROM_BAR_IDX as u8));
+        assert_eq!(bench.tree_bar_base(ROM_BAR_IDX), Some(ROM_NEW_ADDR));
+        bench.assert_mapped(0, BAR0_ADDR);
     }
 }

@@ -10,7 +10,7 @@ use std::{io, result};
 use event_monitor::event;
 use log::{debug, info};
 use pci::{
-    BarReprogrammingParams, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable,
+    BarRelocation, InstallParams, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable,
     PciBarRegionType, PciBdf, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
     PciHeaderType, PciSubclass,
 };
@@ -155,7 +155,7 @@ impl PciDevice for PvPanicDevice {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>) {
+    ) -> (BarRelocation, Option<Arc<Barrier>>) {
         (
             self.configuration
                 .write_config_register(reg_idx, offset, data),
@@ -195,9 +195,17 @@ impl PciDevice for PvPanicDevice {
             }
         }
 
-        let bar_addr = mmio32_allocator
-            .allocate(bar_addr, region_size, Some(PVPANIC_DEVICE_MMIO_ALIGNMENT))
-            .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
+        // A BAR released on restore is not allocated: another device may hold
+        // its saved range by now, and its install allocates at its register.
+        let bar_addr = if let Some(addr) = bar_addr
+            && self.configuration.is_bar_released(bar_id as usize)
+        {
+            addr
+        } else {
+            mmio32_allocator
+                .allocate(bar_addr, region_size, Some(PVPANIC_DEVICE_MMIO_ALIGNMENT))
+                .ok_or(PciDeviceError::IoAllocationFailed(region_size))?
+        };
 
         let bar = PciBarConfiguration::default()
             .set_index(bar_id as usize)
@@ -226,13 +234,16 @@ impl PciDevice for PvPanicDevice {
         _mmio64_allocator: &mut AddressAllocator,
     ) -> result::Result<(), PciDeviceError> {
         for bar in self.bar_regions.drain(..) {
+            if self.configuration.is_bar_released(bar.idx()) {
+                continue;
+            }
             mmio32_allocator.free(GuestAddress(bar.addr()), bar.size());
         }
 
         Ok(())
     }
 
-    fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> io::Result<()> {
+    fn move_bar_commit(&mut self, bar_idx: usize, new_base: u64) -> io::Result<()> {
         for bar in self.bar_regions.iter_mut() {
             if bar.idx() == bar_idx {
                 *bar = bar.set_address(new_base);
@@ -242,8 +253,20 @@ impl PciDevice for PvPanicDevice {
         Ok(())
     }
 
-    fn restore_bar_addr(&mut self, params: &BarReprogrammingParams) {
-        self.configuration.restore_bar_addr(params);
+    fn release_stale_bar(&mut self, bar_idx: usize, mapped_at: u64) -> bool {
+        self.configuration.release_stale_bar(bar_idx, mapped_at)
+    }
+
+    fn is_bar_released(&self, bar_idx: usize) -> bool {
+        self.configuration.is_bar_released(bar_idx)
+    }
+
+    fn on_bar_installed(&mut self, bar_idx: usize) {
+        self.configuration.on_bar_installed(bar_idx);
+    }
+
+    fn pending_bar_installs(&self) -> Vec<InstallParams> {
+        self.configuration.pending_bar_installs()
     }
 
     fn read_bar(&mut self, _base: u64, _offset: u64, data: &mut [u8]) {

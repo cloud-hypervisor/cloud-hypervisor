@@ -200,43 +200,6 @@ impl AddressAllocator {
         Some(new_addr)
     }
 
-    /// Moves an allocated address range to `new_address`.
-    ///
-    /// The range at `old_address` must match `size` exactly. The new range may overlap the old
-    /// range, but it cannot overlap any other allocation. Returns `Some(new_address)` when
-    /// successful, or `None` if the range cannot be moved. A failed move leaves the old range
-    /// allocated.
-    pub fn move_range(
-        &mut self,
-        old_address: GuestAddress,
-        new_address: GuestAddress,
-        size: GuestUsize,
-        align_size: Option<GuestUsize>,
-    ) -> Option<GuestAddress> {
-        if self.ranges.get(&old_address) != Some(&size) {
-            debug!(
-                "Cannot move address range from {:#x} to {:#x} with size {size:#x}: allocated size is {:?}",
-                old_address.0,
-                new_address.0,
-                self.ranges.get(&old_address)
-            );
-            return None;
-        }
-
-        self.ranges.remove(&old_address);
-
-        if let Some(new_address) = self.allocate(Some(new_address), size, align_size) {
-            Some(new_address)
-        } else {
-            self.ranges.insert(old_address, size);
-            debug!(
-                "Cannot move address range from {:#x} to {:#x} with size {size:#x}: destination allocation failed",
-                old_address.0, new_address.0
-            );
-            None
-        }
-    }
-
     /// Free an already allocated address range.
     /// We can only free a range if it matches exactly an already allocated range.
     pub fn free(&mut self, address: GuestAddress, size: GuestUsize) {
@@ -441,59 +404,5 @@ mod tests {
             pool.allocate(Some(GuestAddress(0x1200)), 0x800, Some(0x100)),
             Some(GuestAddress(0x1200))
         );
-    }
-
-    #[test]
-    fn move_range_overlapping_old_range() {
-        let mut pool = AddressAllocator::new(GuestAddress(0x1000), 0x1000).unwrap();
-
-        assert_eq!(
-            pool.allocate(Some(GuestAddress(0x1400)), 0x400, Some(0x100)),
-            Some(GuestAddress(0x1400))
-        );
-        assert_eq!(
-            pool.move_range(
-                GuestAddress(0x1400),
-                GuestAddress(0x1600),
-                0x400,
-                Some(0x100),
-            ),
-            Some(GuestAddress(0x1600))
-        );
-        assert_eq!(
-            pool.move_range(
-                GuestAddress(0x1600),
-                GuestAddress(0x1400),
-                0x400,
-                Some(0x100),
-            ),
-            Some(GuestAddress(0x1400))
-        );
-    }
-
-    #[test]
-    fn move_range_fails_when_overlapping_another_range() {
-        let mut pool = AddressAllocator::new(GuestAddress(0x1000), 0x1000).unwrap();
-
-        assert_eq!(
-            pool.allocate(Some(GuestAddress(0x1400)), 0x400, Some(0x100)),
-            Some(GuestAddress(0x1400))
-        );
-        assert_eq!(
-            pool.allocate(Some(GuestAddress(0x1900)), 0x200, Some(0x100)),
-            Some(GuestAddress(0x1900))
-        );
-        let old_ranges = pool.ranges.clone();
-
-        assert_eq!(
-            pool.move_range(
-                GuestAddress(0x1400),
-                GuestAddress(0x1600),
-                0x400,
-                Some(0x100),
-            ),
-            None
-        );
-        assert_eq!(pool.ranges, old_ranges);
     }
 }
