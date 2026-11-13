@@ -35,7 +35,6 @@ Here are some good references for detailing them.
 
 ## Test environment
 
-The below test environment is based on Ubuntu release (20.04.1 LTS), as for other system, please check related documents.
 This test runs with multiple queue (MQ) support enabled, using 4 queues defined for both SPDK and the virtual machine.
 Here are the detailed instructions.
 
