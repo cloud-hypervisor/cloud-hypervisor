@@ -219,7 +219,6 @@ fn exercise_device_api(pmem: &mut Pmem, cursor: &mut FuzzCursor<'_>, enable_acce
         (features & !access_platform_feature) & feature_noise
     };
     pmem.ack_features(acked_features);
-    let _ = pmem.userspace_mappings();
 
     let mut config = [0u8; size_of::<u64>() * 2];
     let config_len = 1 + (cursor.next_u8() as usize % config.len());
