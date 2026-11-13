@@ -561,7 +561,6 @@ pub struct PciConfiguration {
     last_capability: Option<(usize, usize)>,
     msix_cap_reg_idx: Option<usize>,
     msix_config: Option<Arc<Mutex<MsixConfig>>>,
-    pending_bar_reprogram: Vec<BarReprogrammingParams>,
     /// Whether each BAR slot (the ROM at ROM_BAR_IDX) is mapped at its
     /// register. Set by add_pci_bar() and on a reported install, cleared by
     /// a release. A restored device starts with every BAR mapped, at its
@@ -749,7 +748,6 @@ impl PciConfiguration {
             last_capability,
             msix_cap_reg_idx,
             msix_config,
-            pending_bar_reprogram: Vec::new(),
             bar_installed: [false; NUM_BAR_REGS + 1],
         };
 
@@ -774,7 +772,7 @@ impl PciConfiguration {
             rom_bar_used: self.rom_bar_used,
             last_capability: self.last_capability,
             msix_cap_reg_idx: self.msix_cap_reg_idx,
-            pending_bar_reprogram: self.pending_bar_reprogram.clone(),
+            pending_bar_reprogram: Vec::new(),
         }
     }
 
@@ -923,7 +921,6 @@ impl PciConfiguration {
         self.bars[bar_idx].addr = self.registers[reg_idx];
         self.bars[bar_idx].used = true;
         self.bars[bar_idx].r#type = Some(config.region_type);
-
         self.bar_installed[bar_idx] = true;
 
         Ok(())
@@ -961,7 +958,6 @@ impl PciConfiguration {
         self.rom_bar_size =
             encode_32_bits_bar_size(config.size as u32).ok_or(Error::Encode32BarSize)?;
         self.rom_bar_used = true;
-
         self.bar_installed[ROM_BAR_IDX] = true;
 
         Ok(())
@@ -1077,52 +1073,29 @@ impl PciConfiguration {
             _ => (),
         }
 
-        // A released BAR is installed at its register once memory decoding
-        // is enabled, so a move of it is not queued.
-        if let Some(param) = self.detect_bar_reprogramming(reg_idx, data)
-            && self.bar_installed[param.bar_idx.expect("bar_idx is set on detection")]
-        {
-            self.pending_bar_reprogram.push(param);
-        }
-
         let mut reloc = BarRelocation::default();
-        self.drain_pending_relocation(&mut reloc);
-        if reg_idx == COMMAND_REG {
+
+        // Release the old location as soon as the guest moves the BAR.
+        if let Some(param) = self.detect_bar_reprogramming(reg_idx, data) {
+            let slot = param.bar_idx.expect("bar_idx is set on detection");
+            if self.bar_installed[slot] {
+                reloc.release.push(ReleaseParams { bar_idx: slot });
+                self.bar_installed[slot] = false;
+            }
+        }
+        // Any BAR register write, moving the BAR or not, retries the installs.
+        let bar_written =
+            (BAR0_REG..BAR0_REG + NUM_BAR_REGS).contains(&reg_idx) || reg_idx == ROM_BAR_REG;
+
+        // After a BAR or COMMAND write, install every released BAR whose space
+        // is decoded: a moved BAR, a failed install or a newly enabled space.
+        if bar_written || reg_idx == COMMAND_REG {
             self.drain_pending_installs(&mut reloc);
         }
+
         reloc
     }
 
-    /// Add the pending BAR moves to `reloc` once memory decoding (MSE) is
-    /// enabled.
-    pub(crate) fn drain_pending_relocation(&mut self, reloc: &mut BarRelocation) {
-        if !self.pending_bar_reprogram.is_empty() {
-            if self.read_config_register(COMMAND_REG) & COMMAND_REG_MEMORY_SPACE_MASK
-                == COMMAND_REG_MEMORY_SPACE_MASK
-            {
-                for params in self.pending_bar_reprogram.drain(..) {
-                    let bar_idx = params
-                        .bar_idx
-                        .expect("bar_idx is set on detection and on restore");
-                    reloc.release.push(ReleaseParams { bar_idx });
-                    self.bar_installed[bar_idx] = false;
-                    reloc.install.push(InstallParams {
-                        bar_idx,
-                        new_base: params.new_base,
-                    });
-                }
-                info!("BAR relocation plan: {reloc:x?}");
-            } else {
-                info!(
-                    "MSE bit is disabled. No BAR relocation plan is returned: {:x?}",
-                    self.pending_bar_reprogram
-                );
-            }
-        }
-    }
-
-    // A failed install is not reported, so the slot stays released and is
-    // retried later.
     /// Queue the installs of every released BAR whose space is decoded.
     pub(crate) fn drain_pending_installs(&mut self, reloc: &mut BarRelocation) {
         reloc.install.extend(self.pending_bar_installs());
@@ -1131,6 +1104,8 @@ impl PciConfiguration {
         }
     }
 
+    // A failed install is not reported, so the slot stays released and is
+    // retried later.
     pub fn on_bar_installed(&mut self, bar_idx: usize) {
         self.bar_installed[bar_idx] = true;
     }
@@ -1714,6 +1689,8 @@ mod tests {
         assert_eq!(aliased.install.len(), 1);
         assert_eq!(aliased.install[0].bar_idx, 0);
         assert_eq!(cfg.get_bar_addr(0), cfg.get_bar_addr(1));
+        // The move lands; otherwise the next write re-emits BAR0's install.
+        cfg.on_bar_installed(0);
 
         let reprogram = cfg.write_config_register(BAR0_REG + 1, 0, &0xe000_0000u32.to_le_bytes());
 
