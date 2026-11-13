@@ -2302,6 +2302,7 @@ impl VfioPciDevice {
         region_start: u64,
         region_size: u64,
         vfio_msix: Option<&VfioMsix>,
+        vendor_id: u16,
     ) -> Result<Vec<VfioRegionSparseMmapArea>, VfioPciError> {
         let mut base_areas = None;
         let mut msix_mappable = false;
@@ -2318,7 +2319,10 @@ impl VfioPciDevice {
             }
         }
 
-        if !msix_mappable {
+        let carve_nvidia_bar0_mirror =
+            vendor_id == VENDOR_NVIDIA && region_index == VFIO_PCI_BAR0_REGION_INDEX;
+
+        if !msix_mappable && !carve_nvidia_bar0_mirror {
             return Ok(base_areas.unwrap_or_else(|| {
                 vec![VfioRegionSparseMmapArea {
                     offset: 0,
@@ -2336,17 +2340,17 @@ impl VfioPciDevice {
             return Err(VfioPciError::RegionSize);
         }
 
-        // In case the region contains the MSI-X vectors table or
-        // the MSI-X PBA table, we must calculate the subregions
-        // around them, leading to a list of sparse areas.
-        // We want to make sure we will still trap MMIO accesses
-        // to these MSI-X specific ranges. If these region don't align
-        // with pagesize, we can achieve it by enlarging its range.
+        // In case the region contains the MSI-X vectors table, the MSI-X PBA
+        // table, or the NVIDIA BAR0 self-mirroring PCI config space window, we
+        // must calculate the subregions around them, leading to a list of
+        // sparse areas. We want to make sure we will still trap MMIO accesses
+        // to these specific ranges. If these regions don't align with pagesize,
+        // we can achieve it by enlarging their range.
         //
-        // Using a BtreeMap as the list provided through the iterator is sorted
+        // Using a BTreeMap as the list provided through the iterator is sorted
         // by key. This ensures proper split of the whole region.
         let mut inter_ranges = BTreeMap::new();
-        if let Some(msix) = vfio_msix {
+        if msix_mappable && let Some(msix) = vfio_msix {
             if region_index == msix.cap.table_bir() {
                 let (offset, size) = msix.cap.table_range();
                 let offset = align_page_size_down(offset);
@@ -2378,6 +2382,20 @@ impl VfioPciDevice {
                 if offset < region_size {
                     inter_ranges.insert(offset, size);
                 }
+            }
+        }
+
+        if carve_nvidia_bar0_mirror {
+            let start = align_page_size_down(NVIDIA_BAR0_CONFIG_MIRROR_OFFSET);
+            let end = align_page_size_up(
+                NVIDIA_BAR0_CONFIG_MIRROR_OFFSET + NVIDIA_BAR0_CONFIG_MIRROR_SIZE,
+            );
+            if start < region_size {
+                let aligned_size = end - start;
+                inter_ranges
+                    .entry(start)
+                    .and_modify(|s: &mut u64| *s = (*s).max(aligned_size))
+                    .or_insert(aligned_size);
             }
         }
 
@@ -2487,6 +2505,7 @@ impl VfioPciDevice {
                     region.start.0,
                     mmap_size,
                     self.common.interrupt.msix.as_ref(),
+                    self.common.vendor_id,
                 )?;
 
                 let page_size = get_page_size();
@@ -4049,5 +4068,79 @@ mod tests {
 
         common.write_bar(bar0_gpa, 0x80000, &0x99aa_bbccu32.to_le_bytes());
         assert_eq!(mock.bar0_dword(0x80000), 0x99aa_bbcc);
+    }
+
+    #[test]
+    fn generate_sparse_areas_carves_out_nvidia_bar0_config_mirror() {
+        let region_size: u64 = 0x400_0000; // 64 MiB BAR0
+        let hole_start = align_page_size_down(NVIDIA_BAR0_CONFIG_MIRROR_OFFSET);
+        let hole_end =
+            align_page_size_up(NVIDIA_BAR0_CONFIG_MIRROR_OFFSET + NVIDIA_BAR0_CONFIG_MIRROR_SIZE);
+
+        // 1. NVIDIA BAR0 without capabilities still carves out the mirror window.
+        let areas = VfioPciDevice::generate_sparse_areas(
+            &[],
+            VFIO_PCI_BAR0_REGION_INDEX,
+            0x1_0000_0000,
+            region_size,
+            None,
+            VENDOR_NVIDIA,
+        )
+        .unwrap();
+        assert_eq!(areas.len(), 2);
+        assert_eq!(areas[0].offset, 0);
+        assert_eq!(areas[0].size, hole_start);
+        assert_eq!(areas[1].offset, hole_end);
+        assert_eq!(areas[1].size, region_size - hole_end);
+
+        // 2. Non-NVIDIA BAR0 without capabilities maps the entire region.
+        let non_nv = VfioPciDevice::generate_sparse_areas(
+            &[],
+            VFIO_PCI_BAR0_REGION_INDEX,
+            0x1_0000_0000,
+            region_size,
+            None,
+            0x8086,
+        )
+        .unwrap();
+        assert_eq!(non_nv.len(), 1);
+        assert_eq!(non_nv[0].offset, 0);
+        assert_eq!(non_nv[0].size, region_size);
+
+        // 3. NVIDIA non-BAR0 (e.g. BAR2) without capabilities maps the entire region.
+        let nv_bar2 = VfioPciDevice::generate_sparse_areas(
+            &[],
+            VFIO_PCI_BAR2_REGION_INDEX,
+            0x1_0000_0000,
+            region_size,
+            None,
+            VENDOR_NVIDIA,
+        )
+        .unwrap();
+        assert_eq!(nv_bar2.len(), 1);
+        assert_eq!(nv_bar2[0].offset, 0);
+        assert_eq!(nv_bar2[0].size, region_size);
+
+        // 4. NVIDIA BAR0 with SparseMmap capability still carves out the mirror window.
+        let sparse_cap = VfioRegionInfoCap::SparseMmap(vfio_ioctls::VfioRegionInfoCapSparseMmap {
+            areas: vec![VfioRegionSparseMmapArea {
+                offset: 0,
+                size: region_size,
+            }],
+        });
+        let sparse_areas = VfioPciDevice::generate_sparse_areas(
+            &[sparse_cap],
+            VFIO_PCI_BAR0_REGION_INDEX,
+            0x1_0000_0000,
+            region_size,
+            None,
+            VENDOR_NVIDIA,
+        )
+        .unwrap();
+        assert_eq!(sparse_areas.len(), 2);
+        assert_eq!(sparse_areas[0].offset, 0);
+        assert_eq!(sparse_areas[0].size, hole_start);
+        assert_eq!(sparse_areas[1].offset, hole_end);
+        assert_eq!(sparse_areas[1].size, region_size - hole_end);
     }
 }
