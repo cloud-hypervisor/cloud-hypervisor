@@ -8,19 +8,10 @@ features related to guest memory management.
 ## Parameters
 
 `BalloonConfig` (known as `--balloon` from the CLI perspective) contains the
-list of parameters available for the balloon device.
-
-```rust
-struct BalloonConfig {
-    pub size: u64,
-    pub deflate_on_oom: bool,
-    pub free_page_reporting: bool,
-}
-```
-
-```
---balloon <balloon>	Balloon parameters "size=<balloon_size>,deflate_on_oom=on|off,free_page_reporting=on|off"
-```
+list of parameters available for the balloon device. See
+`cloud-hypervisor --help` for the syntax and `BalloonConfig` in the
+[OpenAPI spec](../vmm/src/api/openapi/cloud-hypervisor.yaml) for the JSON
+structure.
 
 ### `size`
 
