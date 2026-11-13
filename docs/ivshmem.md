@@ -21,11 +21,7 @@ enabled by default or in the release binaries.
 
 `--ivshmem`, an optional argument, can be passed to enable ivshmem device.
 This argument takes a file as a `path` value and a file size as a `size` value.
-The `size` value must be 2^n.
-
-```
---ivshmem <ivshmem>  device backend file "path=</path/to/a/file>,size=<file_size>,id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>"
-```
+The `size` value must be 2^n. See `cloud-hypervisor --help` for the syntax.
 
 ## Example
 
