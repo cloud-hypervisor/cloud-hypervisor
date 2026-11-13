@@ -3,11 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::sync::Arc;
-
 use serde::{Deserialize, Serialize};
-use vm_memory::bitmap::AtomicBitmap;
-use vm_memory::{GuestAddress, MmapRegion};
 
 mod bus;
 pub mod dma_mapping;
@@ -36,12 +32,4 @@ pub enum Resource {
         type_: PciBarType,
         prefetchable: bool,
     },
-}
-
-#[derive(Clone)]
-pub struct UserspaceMapping {
-    pub mem_slot: u32,
-    pub addr: GuestAddress,
-    pub mapping: Arc<MmapRegion<AtomicBitmap>>,
-    pub mergeable: bool,
 }

@@ -19,7 +19,6 @@ use log::{error, info, warn};
 use seccompiler::SeccompAction;
 use virtio_bindings::virtio_config::VIRTIO_F_ACCESS_PLATFORM;
 use virtio_queue::Queue;
-use vm_device::UserspaceMapping;
 use vm_memory::{GuestAddress, GuestMemoryAtomic};
 use vm_migration::{MigratableError, Pausable};
 use vm_virtio::{AccessPlatform, VirtioDeviceType};
@@ -155,11 +154,6 @@ pub trait VirtioDevice: Send {
 
     fn add_memory_region(&mut self, _region: &Arc<GuestRegion>) -> result::Result<(), Error> {
         Ok(())
-    }
-
-    /// Returns the list of userspace mappings associated with this device.
-    fn userspace_mappings(&self) -> Vec<UserspaceMapping> {
-        Vec::new()
     }
 
     /// Return the counters that this device exposes
