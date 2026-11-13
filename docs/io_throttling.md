@@ -1,6 +1,6 @@
 # I/O Throttling
 
-Cloud Hypervisor now supports I/O throttling on virtio-block and virtio-net
+Cloud Hypervisor supports I/O throttling on virtio-block and virtio-net
 devices. This support is based on the [`rate-limiter` module](https://github.com/firecracker-microvm/firecracker/tree/7a1231b141e958d15d5b2c079dd5e0880528b4b0/src/rate_limiter)
 from Firecracker. This document explains the user interface of this
 feature, and highlights some internal implementations that can help users
