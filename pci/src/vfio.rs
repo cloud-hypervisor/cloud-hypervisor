@@ -1084,9 +1084,13 @@ impl VfioCommon {
 
             let bar_addr = match region_type {
                 PciBarRegionType::IoRegion => {
-                    // The address needs to be 4 bytes aligned.
+                    let alignment = if restored_bar_addr.is_some() {
+                        Some(4)
+                    } else {
+                        Some(region_size.max(4))
+                    };
                     allocator
-                        .allocate_io_addresses(restored_bar_addr, region_size, Some(0x4))
+                        .allocate_io_addresses(restored_bar_addr, region_size, alignment)
                         .ok_or(PciDeviceError::IoAllocationFailed(region_size))?
                 }
                 PciBarRegionType::Memory32BitRegion => {
