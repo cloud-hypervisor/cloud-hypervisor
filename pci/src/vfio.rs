@@ -2833,63 +2833,106 @@ iova 0x{:x}, size 0x{:x}: {}, ",
 
     fn move_bar_commit(&mut self, bar_idx: usize, new_base: u64) -> Result<(), io::Error> {
         for region in self.common.mmio_regions.iter_mut() {
-            if region.index as usize == bar_idx {
-                let region_index = region.index;
-                let old_base = region.start.raw_value();
-                let map_p2p = self.p2p_dma && region.is_p2p_mappable();
-                region.start = GuestAddress(new_base);
+            if region.index as usize != bar_idx {
+                continue;
+            }
+            let region_index = region.index;
+            let old_base = region.start.raw_value();
+            let map_p2p = self.p2p_dma && region.is_p2p_mappable();
 
-                for user_memory_region in region.user_memory_regions.iter_mut() {
+            // Map each sparse area at the new address. On a failure, unmap
+            // the areas mapped so far: the caller gives the range back, and
+            // nothing of the BAR may stay mapped there.
+            let mut result = Ok(());
+            let mut mapped = 0;
+            for user_memory_region in region.user_memory_regions.iter_mut() {
+                let len = user_memory_region.mapping.len();
+                let host_addr = user_memory_region.mapping.addr();
+                let offset = user_memory_region.start - old_base;
+                let start = new_base + offset;
+
+                // Insert new region
+                // SAFETY: MmapRegion invariants guarantee that
+                // host_addr points to len bytes of
+                // valid memory that will only be unmapped with munmap().
+                if let Err(e) = unsafe {
+                    self.vm.create_user_memory_region(
+                        user_memory_region.slot,
+                        start,
+                        len,
+                        host_addr,
+                        false,
+                        false,
+                        hypervisor::MemoryVisibility::Shared,
+                    )
+                } {
+                    result = Err(io::Error::other(e));
+                    break;
+                }
+                user_memory_region.start = start;
+                mapped += 1;
+
+                // Map the moved MMIO region into the host IOMMU address space via VfioOps
+                // Only needed if p2p_dma is enabled.
+                if map_p2p
+                    && let Err(e) = user_memory_region.map_for_p2p(
+                        &self.device,
+                        &self.vfio_ops,
+                        &self.device_path,
+                        self.bdf,
+                        region_index,
+                        offset,
+                    )
+                {
+                    result = Err(io::Error::other(format!(
+                        "Could not map MMIO region into the host IOMMU address space: \
+iova 0x{start:x}, size 0x{len:x}: {e}, "
+                    )));
+                    break;
+                }
+            }
+
+            if result.is_err() {
+                for user_memory_region in region.user_memory_regions.iter_mut().take(mapped) {
                     let len = user_memory_region.mapping.len();
                     let host_addr = user_memory_region.mapping.addr();
-                    let offset = user_memory_region.start - old_base;
-
-                    // Update the user memory region with the correct start address.
-                    if new_base > old_base {
-                        user_memory_region.start += new_base - old_base;
-                    } else {
-                        user_memory_region.start -= old_base - new_base;
+                    if user_memory_region.p2p_dma_mapped {
+                        user_memory_region.p2p_dma_mapped = false;
+                        if let Err(e) = self
+                            .vfio_ops
+                            .vfio_dma_unmap(user_memory_region.start, len)
+                            .map_err(|e| {
+                                VfioPciError::DmaUnmap(e, self.device_path.clone(), self.bdf)
+                            })
+                        {
+                            error!(
+                                "Could not unmap MMIO region from the host IOMMU address space: \
+iova 0x{:x}, size 0x{:x}: {}, ",
+                                user_memory_region.start, len, e
+                            );
+                        }
                     }
-
-                    // Insert new region
-                    // SAFETY: MmapRegion invariants guarantee that
-                    // host_addr points to len bytes of
-                    // valid memory that will only be unmapped with munmap().
-                    unsafe {
-                        self.vm.create_user_memory_region(
+                    // SAFETY: the slot was created above with these parameters.
+                    if let Err(e) = unsafe {
+                        self.vm.remove_user_memory_region(
                             user_memory_region.slot,
                             user_memory_region.start,
                             len,
                             host_addr,
                             false,
-                            false,
-                            hypervisor::MemoryVisibility::Shared,
                         )
+                    } {
+                        error!(
+                            "Could not remove memory slot {} at 0x{:x}: {}",
+                            user_memory_region.slot, user_memory_region.start, e
+                        );
                     }
-                    .map_err(io::Error::other)?;
-
-                    // Map the moved MMIO region into the host IOMMU address space via VfioOps
-                    // Only needed if p2p_dma is enabled.
-                    if map_p2p {
-                        user_memory_region
-                            .map_for_p2p(
-                                &self.device,
-                                &self.vfio_ops,
-                                &self.device_path,
-                                self.bdf,
-                                region_index,
-                                offset,
-                            )
-                            .map_err(|e| {
-                                io::Error::other(format!(
-                                    "Could not map MMIO region into the host IOMMU address space: \
-iova 0x{:x}, size 0x{:x}: {}, ",
-                                    user_memory_region.start, len, e
-                                ))
-                            })?;
-                    }
+                    user_memory_region.start = old_base + (user_memory_region.start - new_base);
                 }
+                return result;
             }
+
+            region.start = GuestAddress(new_base);
         }
 
         Ok(())
