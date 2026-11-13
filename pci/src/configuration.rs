@@ -445,35 +445,12 @@ fn encode_32_bits_bar_size(bar_size: u32) -> Option<u32> {
     None
 }
 
-fn decode_32_bits_bar_size(bar_size: u32) -> Option<u32> {
-    if bar_size > 0 {
-        let size = !bar_size + 1;
-        // PCI specification requires BAR sizes to be non-zero powers of two.
-        if size.is_power_of_two() {
-            return Some(size);
-        }
-    }
-    None
-}
-
 fn encode_64_bits_bar_size(bar_size: u64) -> Option<(u32, u32)> {
     if bar_size > 0 {
         let result = !(bar_size - 1);
         let result_hi = (result >> 32) as u32;
         let result_lo = (result & 0xffff_ffff) as u32;
         return Some((result_hi, result_lo));
-    }
-    None
-}
-
-fn decode_64_bits_bar_size(bar_size_hi: u32, bar_size_lo: u32) -> Option<u64> {
-    let bar_size: u64 = ((bar_size_hi as u64) << 32) | (bar_size_lo as u64);
-    if bar_size > 0 {
-        let size = !bar_size + 1;
-        // PCI specification requires BAR sizes to be non-zero powers of two.
-        if size.is_power_of_two() {
-            return Some(size);
-        }
     }
     None
 }
@@ -1076,12 +1053,11 @@ impl PciConfiguration {
         let mut reloc = BarRelocation::default();
 
         // Release the old location as soon as the guest moves the BAR.
-        if let Some(param) = self.detect_bar_reprogramming(reg_idx, data) {
-            let slot = param.bar_idx.expect("bar_idx is set on detection");
-            if self.bar_installed[slot] {
-                reloc.release.push(ReleaseParams { bar_idx: slot });
-                self.bar_installed[slot] = false;
-            }
+        if let Some(slot) = self.detect_bar_reprogramming(reg_idx, data)
+            && self.bar_installed[slot]
+        {
+            reloc.release.push(ReleaseParams { bar_idx: slot });
+            self.bar_installed[slot] = false;
         }
         // Any BAR register write, moving the BAR or not, retries the installs.
         let bar_written =
@@ -1178,11 +1154,7 @@ impl PciConfiguration {
         self.read_reg(reg_idx)
     }
 
-    fn detect_bar_reprogramming(
-        &mut self,
-        reg_idx: usize,
-        data: &[u8],
-    ) -> Option<BarReprogrammingParams> {
+    fn detect_bar_reprogramming(&mut self, reg_idx: usize, data: &[u8]) -> Option<usize> {
         let Ok(data) = <[u8; 4]>::try_from(data) else {
             return None;
         };
@@ -1217,21 +1189,10 @@ impl PciConfiguration {
                     "Detected BAR reprogramming: (BAR {}) 0x{:x}->0x{:x}",
                     bar_idx, self.bars[bar_idx].addr, value
                 );
-                let old_base = u64::from(self.bars[bar_idx].addr & mask);
-                let new_base = u64::from(value & mask);
-                let decoded_len = decode_32_bits_bar_size(self.bars[bar_idx].size)?;
-                let len = u64::from(decoded_len);
-                let region_type = bar_type;
 
                 self.bars[bar_idx].addr = value;
 
-                return Some(BarReprogrammingParams {
-                    bar_idx: Some(bar_idx),
-                    old_base,
-                    new_base,
-                    len,
-                    region_type,
-                });
+                return Some(bar_idx);
             } else if (bar_idx > 0)
                 && self.bars[bar_idx].used
                 && self.bars[bar_idx - 1].r#type == Some(PciBarRegionType::Memory64BitRegion)
@@ -1243,25 +1204,12 @@ impl PciConfiguration {
                     "Detected BAR reprogramming: (BAR {}) 0x{:x}->0x{:x}",
                     bar_idx, self.bars[bar_idx].addr, value
                 );
-                let old_base = (u64::from(self.bars[bar_idx].addr & mask) << 32)
-                    | u64::from(self.bars[bar_idx - 1].addr & self.writable_bits[reg_idx - 1]);
-                let new_base = (u64::from(value & mask) << 32)
-                    | u64::from(self.registers[reg_idx - 1] & self.writable_bits[reg_idx - 1]);
-                let len =
-                    decode_64_bits_bar_size(self.bars[bar_idx].size, self.bars[bar_idx - 1].size)?;
-                let region_type = PciBarRegionType::Memory64BitRegion;
 
                 self.bars[bar_idx].addr = value;
                 self.bars[bar_idx - 1].addr = self.registers[reg_idx - 1];
 
-                return Some(BarReprogrammingParams {
-                    // 64-bit BAR is tracked by the lower slot.
-                    bar_idx: Some(bar_idx - 1),
-                    old_base,
-                    new_base,
-                    len,
-                    region_type,
-                });
+                // A 64-bit BAR is keyed by its low slot.
+                return Some(bar_idx - 1);
             }
         } else if reg_idx == ROM_BAR_REG && (value & mask) != (self.rom_bar_addr & mask) {
             // Ignore the case where the BAR size is being asked for.
@@ -1273,21 +1221,10 @@ impl PciConfiguration {
                 "Detected ROM BAR reprogramming: (Expansion ROM BAR) 0x{:x}->0x{:x}",
                 self.rom_bar_addr, value
             );
-            let old_base = u64::from(self.rom_bar_addr & mask);
-            let new_base = u64::from(value & mask);
-            let decoded_len = decode_32_bits_bar_size(self.rom_bar_size)?;
-            let len = u64::from(decoded_len);
-            let region_type = PciBarRegionType::Memory32BitRegion;
 
             self.rom_bar_addr = value;
 
-            return Some(BarReprogrammingParams {
-                bar_idx: Some(ROM_BAR_IDX),
-                old_base,
-                new_base,
-                len,
-                region_type,
-            });
+            return Some(ROM_BAR_IDX);
         }
 
         None
@@ -1748,17 +1685,6 @@ mod tests {
         assert_eq!(reprogram.install[0].bar_idx, ROM_BAR_IDX);
         assert_eq!(reprogram.release[0].bar_idx, ROM_BAR_IDX);
         assert_eq!(reprogram.install[0].new_base, 0xf100_0000);
-    }
-
-    #[test]
-    fn decode_bar_size_requires_power_of_two() {
-        assert_eq!(decode_32_bits_bar_size(0xfff8_0000), Some(0x80000));
-        assert_eq!(decode_32_bits_bar_size(0xffff_fffa), None);
-        assert_eq!(
-            decode_64_bits_bar_size(0xffff_ffff, 0xfff8_0000),
-            Some(0x80000)
-        );
-        assert_eq!(decode_64_bits_bar_size(0xffff_ffff, 0xffff_fffa), None);
     }
 
     #[test]
