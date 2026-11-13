@@ -4,7 +4,7 @@ vDPA aims at achieving bare-metal performance for devices passed into a virtual
 machine. It is an alternative to VFIO, as it provides a simpler solution for
 achieving migration.
 
-It is a kernel framework introduced recently to handle devices complying with
+It is a kernel framework to handle devices complying with
 the VIRTIO specification on their data-path, while the control path is vendor
 specific. In practice, virtqueues are accessed directly through DMA mechanism
 between the hardware and the guest. The control path is accessed through the
@@ -23,22 +23,10 @@ documentation on the topic.
 ## Usage
 
 `VdpaConfig` (known as `--vdpa` from the CLI perspective) contains the list of
-parameters available for the vDPA device.
-
-```rust
-struct VdpaConfig {
-    path: PathBuf,
-    num_queues: usize,
-    iommu: bool,
-    id: Option<String>,
-    pci_segment: u16,
-    pci_device_id: Option<u8>
-}
-```
-
-```
---vdpa <vdpa>	vDPA device "path=<device_path>,num_queues=<number_of_queues>,iommu=off|virtio,id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>"
-```
+parameters available for the vDPA device. See `cloud-hypervisor --help` for
+the syntax and `VdpaConfig` in the
+[OpenAPI spec](../vmm/src/api/openapi/cloud-hypervisor.yaml) for the JSON
+structure.
 
 ### `path`
 
