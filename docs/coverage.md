@@ -5,9 +5,6 @@ in human-consumable forms.
 
 ## Building a suitable binary
 
-The compiler flag to generate code coverage data has been stabilized since Rust
-1.60.
-
 An instrumented binary can be built with the following command:
 
 ```shell
