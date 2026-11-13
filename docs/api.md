@@ -38,53 +38,10 @@ $ ./target/debug/cloud-hypervisor --api-socket path=/tmp/cloud-hypervisor.sock
 
 #### REST API Endpoints
 
-The Cloud Hypervisor API exposes the following actions through its endpoints:
+The endpoints and their request and response bodies are defined in the
+[Cloud Hypervisor OpenAPI Document](../vmm/src/api/openapi/cloud-hypervisor.yaml).
 
-##### Virtual Machine Manager (VMM) Actions
-
-| Action                              | Endpoint        | Request Body | Response Body              | Prerequisites      |
-| ----------------------------------- | --------------- | ------------ | -------------------------- | ------------------ |
-| Check for the REST API availability | `/vmm.ping`     | N/A          | `/schemas/VmmPingResponse` | N/A                |
-| Shut the VMM down                   | `/vmm.shutdown` | N/A          | N/A                        | The VMM is running |
-
-##### Virtual Machine (VM) Actions
-
-| Action                                  | Endpoint                     | Request Body                      | Response Body                   | Prerequisites                                            |
-| --------------------------------------- | ---------------------------- | --------------------------------- | ------------------------------- | -------------------------------------------------------- |
-| Add VFIO PCI device to the VM           | `/vm.add-device`             | `/schemas/VmAddDevice`            | `/schemas/PciDeviceInfo`        | The VM is created                                        |
-| Add disk device to the VM               | `/vm.add-disk`               | `/schemas/DiskConfig`             | `/schemas/PciDeviceInfo`        | The VM is created                                        |
-| Add fs device to the VM                 | `/vm.add-fs`                 | `/schemas/FsConfig`               | `/schemas/PciDeviceInfo`        | The VM is created                                        |
-| Add generic vhost-user device to the VM | `/vm.add-generic-vhost-user` | `/schemas/GenericVhostUserConfig` | `/schemas/PciDeviceInfo`        | The VM is created                                        |
-| Add network device to the VM            | `/vm.add-net`                | `/schemas/NetConfig`              | `/schemas/PciDeviceInfo`        | The VM is created                                        |
-| Add pmem device to the VM               | `/vm.add-pmem`               | `/schemas/PmemConfig`             | `/schemas/PciDeviceInfo`        | The VM is created                                        |
-| Add userspace PCI device to the VM      | `/vm.add-user-device`        | `/schemas/VmAddUserDevice`        | `/schemas/PciDeviceInfo`        | The VM is created                                        |
-| Add vdpa device to the VM               | `/vm.add-vdpa`               | `/schemas/VdpaConfig`             | `/schemas/PciDeviceInfo`        | The VM is created                                        |
-| Add vsock device to the VM              | `/vm.add-vsock`              | `/schemas/VsockConfig`            | `/schemas/PciDeviceInfo`        | The VM is created                                        |
-| Get virtio-balloon statistics           | `/vm.balloon-stats`          | N/A                               | `/schemas/BalloonStatsResponse` | The VM is running and balloon statistics were negotiated |
-| Boot the VM                             | `/vm.boot`                   | N/A                               | N/A                             | The VM is created but not booted                         |
-| Cancel an ongoing VM migration          | `/vm.cancel-migration`       | N/A                               | N/A                             | The VM is migrating                                      |
-| Perform a coredump of the VM*           | `/vm.coredump`               | `/schemas/VmCoredumpData`         | N/A                             | The VM is booted                                         |
-| Dump the VM counters                    | `/vm.counters`               | N/A                               | `/schemas/VmCounters`           | The VM is booted                                         |
-| Create the VM                           | `/vm.create`                 | `/schemas/VmConfig`               | N/A                             | The VM is not created yet                                |
-| Delete the VM                           | `/vm.delete`                 | N/A                               | N/A                             | N/A                                                      |
-| Dump the VM information                 | `/vm.info`                   | N/A                               | `/schemas/VmInfo`               | The VM is created                                        |
-| Inject an NMI                           | `/vm.nmi`                    | N/A                               | N/A                             | The VM is booted                                         |
-| Pause the VM                            | `/vm.pause`                  | N/A                               | N/A                             | The VM is booted                                         |
-| Trigger power button of the VM          | `/vm.power-button`           | N/A                               | N/A                             | The VM is booted                                         |
-| Reboot the VM                           | `/vm.reboot`                 | N/A                               | N/A                             | The VM is booted                                         |
-| Prepare to receive a migration          | `/vm.receive-migration`      | `/schemas/ReceiveMigrationData`   | N/A                             | N/A                                                      |
-| Remove device from the VM               | `/vm.remove-device`          | `/schemas/VmRemoveDevice`         | N/A                             | The VM is created                                        |
-| Add/remove CPUs to/from the VM          | `/vm.resize`                 | `/schemas/VmResize`               | N/A                             | The VM is created                                        |
-| Add/remove memory from the VM           | `/vm.resize`                 | `/schemas/VmResize`               | N/A                             | The VM is created                                        |
-| Resize a disk attached to the VM        | `/vm.resize-disk`            | `/schemas/VmResizeDisk`           | N/A                             | The VM is booted                                         |
-| Add/remove memory from a zone           | `/vm.resize-zone`            | `/schemas/VmResizeZone`           | N/A                             | The VM is created                                        |
-| Restore the VM from a snapshot          | `/vm.restore`                | `/schemas/RestoreConfig`          | N/A                             | The VM is not created yet                                |
-| Resume the VM                           | `/vm.resume`                 | N/A                               | N/A                             | The VM is paused                                         |
-| Start to send migration to target       | `/vm.send-migration`         | `/schemas/SendMigrationData`      | N/A                             | The VM is booted and (shared mem or hugepages enabled)   |
-| Shut the VM down                        | `/vm.shutdown`               | N/A                               | N/A                             | The VM is booted                                         |
-| Take a snapshot of the VM               | `/vm.snapshot`               | `/schemas/VmSnapshotConfig`       | N/A                             | The VM is paused                                         |
-
-* The `vmcoredump` action is available exclusively for the `x86_64`
+The `vmcoredump` action is available exclusively for the `x86_64`
 architecture and can be executed only when the `guest_debug` feature is
 enabled. Without this feature, the corresponding [REST API](#rest-api) or
 [D-Bus API](#d-bus-api) endpoints are not available.
@@ -105,7 +62,7 @@ We want to create a virtual machine with the following characteristics:
 * 4 vCPUs
 * 1 GB of RAM
 * 1 virtio based networking interface
-* Direct kernel boot from a custom 5.6.0-rc4 Linux kernel located at
+* Direct kernel boot from a custom Linux kernel located at
   `/opt/clh/kernel/vmlinux-virtio-fs-virtio-iommu`
 * Using a Ubuntu image as its root filesystem, located at
   `/opt/clh/images/focal-server-cloudimg-amd64.raw`
@@ -208,16 +165,8 @@ feature flag when compiling Cloud Hypervisor.
 $ ./scripts/dev_cli.sh build --release --libc musl -- --features dbus_api
 ```
 
-Once this feature is enabled, it can be configured with the following
-CLI options:
-
-```
-  --dbus-service-name
-                    well known name of the service
-  --dbus-object-path
-                    object path to serve the dbus interface
-  --dbus-system-bus use the system bus instead of a session bus
-```
+Once this feature is enabled, it can be configured with the `--dbus-*` CLI
+options. See `cloud-hypervisor --help` for details.
 
 Example invocation:
 
@@ -361,89 +310,19 @@ The sender of any internal API command is therefore responsible for:
 
 ## End to End Example
 
-In order to further understand how the external and internal Cloud Hypervisor
-APIs work together, let's look at a complete VM creation flow, from the
-[REST API](#rest-api) call, to the reply the external user will receive:
+The following steps show how a `vm.create` request flows through the external
+and internal APIs. The other requests follow the same path.
 
-1. A user or operator sends an HTTP request to the Cloud Hypervisor
-   [REST API](#rest-api) in order to create a virtual machine:
-   ```shell
-   #!/usr/bin/env bash
-
-	curl --unix-socket /tmp/cloud-hypervisor.sock -i \
-		-X PUT 'http://localhost/api/v1/vm.create'  \
-		-H 'Accept: application/json'               \
-		-H 'Content-Type: application/json'         \
-		-d '{
-			"cpus":{"boot_vcpus": 4, "max_vcpus": 4},
-			"payload":{"kernel":"/opt/clh/kernel/vmlinux-virtio-fs-virtio-iommu", "cmdline":"console=ttyS0 console=hvc0 root=/dev/vda1 rw"},
-			"disks":[{"path":"/opt/clh/images/focal-server-cloudimg-amd64.raw", "image_type":"Raw"}],
-			"rng":{"src":"/dev/urandom"},
-			"net":[{"ip":"192.168.10.10", "mask":"255.255.255.0", "mac":"12:34:56:78:90:01"}]
-			}'
-   ```
-1. The Cloud Hypervisor HTTP thread processes the request and de-serializes the
-   HTTP request JSON body into an internal `VmConfig` structure.
-1. The Cloud Hypervisor HTTP thread creates an
-   [MPSC](https://doc.rust-lang.org/std/sync/mpsc/) channel for the internal API
-   server to send its response back.
-1. The Cloud Hypervisor HTTP thread prepares an internal API command for creating a
-   virtual machine. The command's payload is made of the de-serialized
-   `VmConfig` structure and the response channel:
-   ```Rust
-   VmCreate(Arc<Mutex<VmConfig>>, Sender<ApiResponse>)
-   ```
-1. The Cloud Hypervisor HTTP thread sends the internal API command, and waits
-   for the response:
-   ```Rust
-   // Send the VM creation request.
-    api_sender
-        .send(ApiRequest::VmCreate(config, response_sender))
-        .map_err(ApiError::RequestSend)?;
-    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
-
-    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
-   ```
-1. The Cloud Hypervisor control loop receives the command, as it listens on the
-   internal API [MPSC](https://doc.rust-lang.org/std/sync/mpsc/) channel:
-   ```Rust
-   // Read from the API receiver channel
-   let api_request = api_receiver.recv().map_err(Error::ApiRequestRecv)?;
-   ```
-1. The Cloud Hypervisor control loop matches the received internal API against
-   the `VmCreate` payload, and extracts both the `VmConfig` structure and the
-   [Sender](https://doc.rust-lang.org/std/sync/mpsc/struct.Sender.html) from the
-   command payload. It stores the `VmConfig` structure and replies back to the
-   sender (The HTTP thread):
-   ```Rust
-   match api_request {
-	   ApiRequest::VmCreate(config, sender) => {
-		   // We only store the passed VM config.
-		   // The VM will be created when being asked to boot it.
-		   let response = if self.vm_config.is_none() {
-			   self.vm_config = Some(config);
-			   Ok(ApiResponsePayload::Empty)
-		   } else {
-			   Err(ApiError::VmAlreadyCreated)
-		   };
-
-	       sender.send(response).map_err(Error::ApiResponseSend)?;
-	   }
-   ```
-1. The Cloud Hypervisor HTTP thread receives the internal API command response
-   as the return value from its `VmCreate` HTTP handler. Depending on the
-   control loop internal API response, it generates the appropriate HTTP
-   response:
-   ```Rust
-   // Call vm_create()
-   match vm_create(api_notifier, api_sender, Arc::new(Mutex::new(vm_config)))
-	   .map_err(HttpError::VmCreate)
-   {
-	   Ok(_) => Response::new(Version::Http11, StatusCode::NoContent),
-	   Err(e) => error_response(e, StatusCode::InternalServerError),
-   }
-   ```
-1. The Cloud Hypervisor HTTP thread sends the formed HTTP response back to the
-   user. This is abstracted by the
-   [micro_http](https://github.com/firecracker-microvm/micro-http)
-   crate.
+1. A user sends a `PUT /api/v1/vm.create` request with a `VmConfig` JSON body
+   to the [REST API](#rest-api) socket.
+1. The HTTP thread deserializes the body into a `VmConfig` and calls
+   `VmCreate.send()`.
+1. `send()` creates a response channel and wraps the request into an
+   `ApiRequest` closure that holds the response sender. It sends the closure
+   through the API channel and writes to the API `EventFd` to wake up the
+   control loop.
+1. The control loop receives the closure and runs it. The closure calls
+   `vm_create()`, which only stores the configuration. The VM itself is created
+   when a `vm.boot` request arrives.
+1. The closure sends the result through the response channel. The HTTP thread
+   receives it and replies with `204 No Content` on success.
