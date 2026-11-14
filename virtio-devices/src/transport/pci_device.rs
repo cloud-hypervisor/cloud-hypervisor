@@ -30,7 +30,10 @@ use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
 use vm_device::{BusDevice, PciBarType, Resource};
-use vm_memory::{Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, Le32};
+use vm_memory::{
+    Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryRegion,
+    Le32,
+};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
@@ -1146,10 +1149,11 @@ impl PciDevice for VirtioPciDevice {
 
         // Allocate a dedicated BAR if there are some shared memory regions.
         if let Some(shm_list) = device.get_shm_regions() {
+            let mapping = shm_list.mapping.lock().unwrap();
             let bar = PciBarConfiguration::default()
                 .set_index(VIRTIO_SHM_BAR_INDEX)
-                .set_address(shm_list.addr.raw_value())
-                .set_size(shm_list.mapping.size() as _);
+                .set_address(mapping.start_addr().raw_value())
+                .set_size(mapping.len());
 
             // The creation of the PCI BAR and its associated capabilities must
             // happen only during the creation of a brand new VM. When a VM is
@@ -1157,7 +1161,7 @@ impl PciDevice for VirtioPciDevice {
             // right content, therefore we don't need to go through this codepath.
             if !restoring {
                 self.configuration.add_pci_bar(&bar).map_err(|e| {
-                    PciDeviceError::IoRegistrationFailed(shm_list.addr.raw_value(), e)
+                    PciDeviceError::IoRegistrationFailed(mapping.start_addr().raw_value(), e)
                 })?;
 
                 for (idx, shm) in shm_list.region_list.iter().enumerate() {
@@ -1203,8 +1207,17 @@ impl PciDevice for VirtioPciDevice {
     }
 
     fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> io::Result<()> {
-        // We only update our idea of the bar in order to support free_bars() above.
-        // The majority of the reallocation is done inside DeviceManager.
+        if bar_idx == VIRTIO_SHM_BAR_INDEX
+            && let Some(shm_list) = self.device.lock().unwrap().get_shm_regions()
+        {
+            shm_list
+                .mapping
+                .lock()
+                .unwrap()
+                .move_guest_address(GuestAddress(new_base))
+                .map_err(io::Error::other)?;
+        }
+
         for bar in self.bar_regions.iter_mut() {
             if bar.idx() == bar_idx {
                 *bar = bar.set_address(new_base);

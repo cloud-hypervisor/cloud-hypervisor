@@ -23,7 +23,7 @@ use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::vhost_user::{PostcopyHandler, VhostUserCommon, VhostUserState};
 use crate::{
-    ActivateResult, GuestRegion, MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon, VirtioDevice,
+    ActivateResult, GuestRegion, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon, VirtioDevice,
     VirtioInterrupt, VirtioInterruptType, VirtioSharedMemoryList,
 };
 
@@ -50,7 +50,7 @@ pub struct GenericVhostUser {
     id: String,
     // Hold ownership of the memory that is allocated for the device
     // which will be automatically dropped when the device is dropped
-    cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
+    cache: Option<VirtioSharedMemoryList>,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
     cfg_warning: AtomicBool,
@@ -64,7 +64,7 @@ impl GenericVhostUser {
         path: &str,
         request_queue_sizes: Vec<u16>,
         device_type: u32,
-        cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
+        cache: Option<VirtioSharedMemoryList>,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
         access_platform_enabled: bool,
@@ -365,7 +365,7 @@ impl VirtioDevice for GenericVhostUser {
     }
 
     fn get_shm_regions(&self) -> Option<VirtioSharedMemoryList> {
-        self.cache.as_ref().map(|cache| cache.0.clone())
+        self.cache.clone()
     }
 
     fn set_shm_regions(
@@ -373,7 +373,7 @@ impl VirtioDevice for GenericVhostUser {
         shm_regions: VirtioSharedMemoryList,
     ) -> result::Result<(), crate::Error> {
         if let Some(cache) = self.cache.as_mut() {
-            cache.0 = shm_regions;
+            *cache = shm_regions;
             Ok(())
         } else {
             Err(crate::Error::SetShmRegionsNotSupported)

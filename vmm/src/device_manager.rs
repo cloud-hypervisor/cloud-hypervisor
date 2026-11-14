@@ -112,8 +112,7 @@ use vfio_ioctls::VfioIommufd;
 use vfio_ioctls::{VfioContainer, VfioDevice, VfioDeviceFd, VfioOps};
 use virtio_devices::block::Error as VirtioBlockError;
 use virtio_devices::transport::{
-    VIRTIO_CONFIG_BAR_INDEX, VIRTIO_SHM_BAR_INDEX, VirtioPciDevice, VirtioPciDeviceActivator,
-    VirtioTransport,
+    VIRTIO_CONFIG_BAR_INDEX, VirtioPciDevice, VirtioPciDeviceActivator, VirtioTransport,
 };
 use virtio_devices::vhost_user::{PostcopyHandler, VhostUserConfig};
 use virtio_devices::{
@@ -128,9 +127,7 @@ use vm_device::interrupt::{
 };
 use vm_device::{Bus, BusDevice, BusDeviceSync, Resource};
 use vm_memory::guest_memory::FileOffset;
-use vm_memory::{
-    Address, GuestAddress, GuestMemoryRegion, GuestUsize, MmapRegion, VolatileMemory, mmap,
-};
+use vm_memory::{Address, GuestAddress, GuestMemoryRegion, GuestUsize, MmapRegion, mmap};
 #[cfg(target_arch = "x86_64")]
 use vm_memory::{GuestAddressSpace, GuestMemoryBackend};
 use vm_migration::protocol::MemoryRangeTable;
@@ -803,67 +800,20 @@ impl DeviceRelocation for AddressManager {
         }
 
         let any_dev = pci_dev.as_any_mut();
-        if let Some(virtio_pci_dev) = any_dev.downcast_ref::<VirtioPciDevice>() {
-            if bar_idx == VIRTIO_CONFIG_BAR_INDEX {
-                for (event, addr) in virtio_pci_dev.ioeventfds(old_base) {
-                    let io_addr = IoEventAddress::Mmio(addr);
-                    self.vm.unregister_ioevent(event, &io_addr).map_err(|e| {
-                        io::Error::other(format!("failed to unregister ioevent: {e:?}"))
-                    })?;
-                }
-                for (event, addr) in virtio_pci_dev.ioeventfds(new_base) {
-                    let io_addr = IoEventAddress::Mmio(addr);
-                    self.vm
-                        .register_ioevent(event, &io_addr, None)
-                        .map_err(|e| {
-                            io::Error::other(format!("failed to register ioevent: {e:?}"))
-                        })?;
-                }
-            } else if bar_idx == VIRTIO_SHM_BAR_INDEX {
-                let virtio_dev = virtio_pci_dev.virtio_device();
-                let mut virtio_dev = virtio_dev.lock().unwrap();
-                if let Some(mut shm_regions) = virtio_dev.get_shm_regions() {
-                    // SAFETY: guaranteed by MmapRegion invariants
-                    unsafe {
-                        // Remove old mapping
-                        self.vm
-                            .remove_user_memory_region(
-                                shm_regions.mem_slot,
-                                old_base,
-                                shm_regions.mapping.len(),
-                                shm_regions.mapping.as_ptr(),
-                                false,
-                            )
-                            .map_err(|e| {
-                                io::Error::other(format!(
-                                    "failed to remove user memory region: {e:?}"
-                                ))
-                            })?;
-
-                        // Create new mapping by inserting new region to KVM.
-                        self.vm
-                            .create_user_memory_region(
-                                shm_regions.mem_slot,
-                                new_base,
-                                shm_regions.mapping.len(),
-                                shm_regions.mapping.as_ptr(),
-                                false,
-                                false,
-                                hypervisor::MemoryVisibility::Shared,
-                            )
-                            .map_err(|e| {
-                                io::Error::other(format!(
-                                    "failed to create user memory regions: {e:?}"
-                                ))
-                            })?;
-                    }
-
-                    // Update shared memory regions to reflect the new mapping.
-                    shm_regions.addr = GuestAddress(new_base);
-                    virtio_dev.set_shm_regions(shm_regions).map_err(|e| {
-                        io::Error::other(format!("failed to update shared memory regions: {e:?}"))
-                    })?;
-                }
+        if let Some(virtio_pci_dev) = any_dev.downcast_ref::<VirtioPciDevice>()
+            && bar_idx == VIRTIO_CONFIG_BAR_INDEX
+        {
+            for (event, addr) in virtio_pci_dev.ioeventfds(old_base) {
+                let io_addr = IoEventAddress::Mmio(addr);
+                self.vm.unregister_ioevent(event, &io_addr).map_err(|e| {
+                    io::Error::other(format!("failed to unregister ioevent: {e:?}"))
+                })?;
+            }
+            for (event, addr) in virtio_pci_dev.ioeventfds(new_base) {
+                let io_addr = IoEventAddress::Mmio(addr);
+                self.vm
+                    .register_ioevent(event, &io_addr, None)
+                    .map_err(|e| io::Error::other(format!("failed to register ioevent: {e:?}")))?;
             }
         }
 
