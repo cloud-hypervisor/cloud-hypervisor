@@ -112,8 +112,7 @@ use vfio_ioctls::VfioIommufd;
 use vfio_ioctls::{VfioContainer, VfioDevice, VfioDeviceFd, VfioOps};
 use virtio_devices::block::Error as VirtioBlockError;
 use virtio_devices::transport::{
-    VIRTIO_CONFIG_BAR_INDEX, VIRTIO_SHM_BAR_INDEX, VirtioPciDevice, VirtioPciDeviceActivator,
-    VirtioTransport,
+    VIRTIO_CONFIG_BAR_INDEX, VirtioPciDevice, VirtioPciDeviceActivator, VirtioTransport,
 };
 use virtio_devices::vhost_user::{PostcopyHandler, VhostUserConfig};
 use virtio_devices::{
@@ -801,35 +800,20 @@ impl DeviceRelocation for AddressManager {
         }
 
         let any_dev = pci_dev.as_any_mut();
-        if let Some(virtio_pci_dev) = any_dev.downcast_ref::<VirtioPciDevice>() {
-            if bar_idx == VIRTIO_CONFIG_BAR_INDEX {
-                for (event, addr) in virtio_pci_dev.ioeventfds(old_base) {
-                    let io_addr = IoEventAddress::Mmio(addr);
-                    self.vm.unregister_ioevent(event, &io_addr).map_err(|e| {
-                        io::Error::other(format!("failed to unregister ioevent: {e:?}"))
-                    })?;
-                }
-                for (event, addr) in virtio_pci_dev.ioeventfds(new_base) {
-                    let io_addr = IoEventAddress::Mmio(addr);
-                    self.vm
-                        .register_ioevent(event, &io_addr, None)
-                        .map_err(|e| {
-                            io::Error::other(format!("failed to register ioevent: {e:?}"))
-                        })?;
-                }
-            } else if bar_idx == VIRTIO_SHM_BAR_INDEX
-                && let Some(shm_list) = virtio_pci_dev
-                    .virtio_device()
-                    .lock()
-                    .unwrap()
-                    .get_shm_regions()
-            {
-                shm_list
-                    .mapping
-                    .lock()
-                    .unwrap()
-                    .move_guest_address(GuestAddress(new_base))
-                    .map_err(io::Error::other)?;
+        if let Some(virtio_pci_dev) = any_dev.downcast_ref::<VirtioPciDevice>()
+            && bar_idx == VIRTIO_CONFIG_BAR_INDEX
+        {
+            for (event, addr) in virtio_pci_dev.ioeventfds(old_base) {
+                let io_addr = IoEventAddress::Mmio(addr);
+                self.vm.unregister_ioevent(event, &io_addr).map_err(|e| {
+                    io::Error::other(format!("failed to unregister ioevent: {e:?}"))
+                })?;
+            }
+            for (event, addr) in virtio_pci_dev.ioeventfds(new_base) {
+                let io_addr = IoEventAddress::Mmio(addr);
+                self.vm
+                    .register_ioevent(event, &io_addr, None)
+                    .map_err(|e| io::Error::other(format!("failed to register ioevent: {e:?}")))?;
             }
         }
 
