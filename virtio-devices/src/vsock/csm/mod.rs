@@ -9,6 +9,9 @@ use std::{io, result};
 use thiserror::Error;
 
 mod connection;
+pub(crate) mod seqpacket;
+pub(crate) mod stream;
+pub(crate) mod transport;
 mod txbuf;
 
 pub(super) use connection::VsockConnection;

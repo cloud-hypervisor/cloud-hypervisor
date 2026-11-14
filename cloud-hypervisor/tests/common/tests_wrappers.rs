@@ -16,6 +16,7 @@ use std::{panic, thread};
 use block::ImageType;
 use net_util::MacAddr;
 use test_infra::*;
+use vmm::vm_config::SocketType;
 use vmm_sys_util::tempdir::TempDir;
 use vmm_sys_util::tempfile::TempFile;
 use wait_timeout::ChildExt;
@@ -1235,8 +1236,21 @@ pub(crate) fn test_virtio_pmem(discard_writes: bool, specify_size: bool) {
 }
 
 pub(crate) fn _test_virtio_vsock(guest: &Guest, hotplug: bool) {
+    _test_virtio_vsock_with_type(guest, hotplug, SocketType::Stream);
+}
+
+pub(crate) fn _test_virtio_vsock_with_type(guest: &Guest, hotplug: bool, socket_type: SocketType) {
     let socket = temp_vsock_path(&guest.tmp_dir);
     let api_socket = temp_api_path(&guest.tmp_dir);
+    let (type_name, sock_type) = match socket_type {
+        SocketType::Stream => ("stream", libc::SOCK_STREAM),
+        SocketType::SeqPacket => ("seqpacket", libc::SOCK_SEQPACKET),
+    };
+    let vsock_config = if socket_type == SocketType::Stream {
+        format!("cid=3,socket={socket}")
+    } else {
+        format!("cid=3,socket={socket},sock_type={type_name}")
+    };
 
     let mut cmd = GuestCommand::new(guest);
     cmd.args(["--api-socket", &api_socket]);
@@ -1251,7 +1265,7 @@ pub(crate) fn _test_virtio_vsock(guest: &Guest, hotplug: bool) {
     cmd.default_net();
 
     if !hotplug {
-        cmd.args(["--vsock", format!("cid=3,socket={socket}").as_str()]);
+        cmd.args(["--vsock", vsock_config.as_str()]);
     }
 
     let mut child = cmd.capture_output().spawn().unwrap();
@@ -1263,7 +1277,7 @@ pub(crate) fn _test_virtio_vsock(guest: &Guest, hotplug: bool) {
             let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-vsock",
-                Some(format!("cid=3,socket={socket},id=test0").as_str()),
+                Some(format!("{vsock_config},id=test0").as_str()),
             );
             assert!(cmd_success);
             assert!(
@@ -1280,10 +1294,10 @@ pub(crate) fn _test_virtio_vsock(guest: &Guest, hotplug: bool) {
         }
 
         // Validate vsock works as expected.
-        guest.check_vsock(socket.as_str());
+        guest.check_vsock(socket.as_str(), sock_type);
         guest.reboot_linux(0);
         // Validate vsock still works after a reboot.
-        guest.check_vsock(socket.as_str());
+        guest.check_vsock(socket.as_str(), sock_type);
 
         if hotplug {
             assert!(remote_command(&api_socket, "remove-device", Some("test0")));
