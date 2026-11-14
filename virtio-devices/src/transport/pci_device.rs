@@ -1207,8 +1207,17 @@ impl PciDevice for VirtioPciDevice {
     }
 
     fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> io::Result<()> {
-        // We only update our idea of the bar in order to support free_bars() above.
-        // The majority of the reallocation is done inside DeviceManager.
+        if bar_idx == VIRTIO_SHM_BAR_INDEX
+            && let Some(shm_list) = self.device.lock().unwrap().get_shm_regions()
+        {
+            shm_list
+                .mapping
+                .lock()
+                .unwrap()
+                .move_guest_address(GuestAddress(new_base))
+                .map_err(io::Error::other)?;
+        }
+
         for bar in self.bar_regions.iter_mut() {
             if bar.idx() == bar_idx {
                 *bar = bar.set_address(new_base);
