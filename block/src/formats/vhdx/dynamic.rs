@@ -75,7 +75,10 @@ impl Sector {
     ) -> result::Result<Sector, VhdxIoError> {
         let mut sector = Sector::default();
 
-        sector.bat_index = sector_index / disk_spec.sectors_per_block as u64;
+        // The BAT holds a sector bitmap entry after every chunk_ratio payload
+        // entries.
+        let block_index = sector_index / disk_spec.sectors_per_block as u64;
+        sector.bat_index = block_index + block_index / disk_spec.chunk_ratio;
         sector.block_offset = sector_index % disk_spec.sectors_per_block as u64;
         sector.free_sectors = disk_spec.sectors_per_block as u64 - sector.block_offset;
         if sector.free_sectors > sector_count {
@@ -424,6 +427,30 @@ mod tests {
     const VHDX_HEADER_2_OFFSET: u64 = 0x20000;
     const VHDX_HEADER_SIZE: usize = 4096;
     const VHDX_LOG_GUID_OFFSET: usize = 48;
+
+    #[test]
+    fn bat_index_skips_sector_bitmap_entries() {
+        // 256 MiB blocks: 16 payload entries, then a sector bitmap entry.
+        let disk_spec = DiskSpec {
+            sectors_per_block: 1 << 19,
+            logical_sector_size: 512,
+            chunk_ratio: 16,
+            ..Default::default()
+        };
+        let bat = vec![BatEntry::default(); 40];
+        let bat_index = |block: u64| {
+            let sector_index = block * disk_spec.sectors_per_block as u64;
+            Sector::new(&disk_spec, &bat, sector_index, 1)
+                .unwrap()
+                .bat_index
+        };
+
+        assert_eq!(bat_index(0), 0);
+        assert_eq!(bat_index(15), 15);
+        assert_eq!(bat_index(16), 17);
+        assert_eq!(bat_index(31), 32);
+        assert_eq!(bat_index(32), 34);
+    }
 
     /// A VHDX image with an active log must be rejected until replay is
     /// supported; opening it would silently use a stale BAT.
