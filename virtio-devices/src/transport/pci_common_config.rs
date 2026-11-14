@@ -334,9 +334,11 @@ impl VirtioPciCommonConfig {
                             return;
                         }
                     };
-                    let used_ring = match access_platform
-                        .translate_gva(q.used_ring(), get_vring_size(VringType::Used, q.size()))
-                    {
+                    // The device writes the used ring.
+                    let used_ring = match access_platform.translate_gva_for_write(
+                        q.used_ring(),
+                        get_vring_size(VringType::Used, q.size()),
+                    ) {
                         Ok(addr) => addr,
                         Err(e) => {
                             error!("Failed to translate used_ring GVA: {e}");

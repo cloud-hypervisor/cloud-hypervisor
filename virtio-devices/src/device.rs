@@ -205,6 +205,9 @@ pub trait DmaRemapping {
     /// implementation must reject translations whose [addr, addr+size)
     /// span isn't entirely covered by a single mapping.
     fn translate_gva(&self, id: u32, addr: u64, size: u64) -> io::Result<u64>;
+    /// Same as `translate_gva`, for a range the device is going to write
+    /// to: every mapping covering the span must allow writes.
+    fn translate_gva_for_write(&self, id: u32, addr: u64, size: u64) -> io::Result<u64>;
     /// Provide a way to translate GPA address ranges into GVAs. Same
     /// span requirement as `translate_gva`.
     fn translate_gpa(&self, id: u32, addr: u64, size: u64) -> io::Result<u64>;

@@ -106,8 +106,14 @@ where
         let desc_addr = desc.addr();
         let desc_len = desc.len() as usize;
 
-        let result = desc_addr
-            .translate_gva(self.access_platform, desc_len)
+        // The device writes to device-writable buffers, so the access
+        // platform must allow writes to them.
+        let translated = if desc.is_write_only() {
+            desc_addr.translate_gva_for_write(self.access_platform, desc_len)
+        } else {
+            desc_addr.translate_gva(self.access_platform, desc_len)
+        };
+        let result = translated
             .map_err(|_| {
                 warn!(
                     "Descriptor address translation failed: addr=0x{:x} len={}",
@@ -459,6 +465,39 @@ mod tests {
         // The error reports the original descriptor address, not a
         // translated one.
         assert_eq!(result.unwrap_err(), GuestAddress(gva));
+    }
+
+    /// AccessPlatform stub whose mappings allow reads but not writes.
+    #[derive(Debug)]
+    struct ReadOnlyTranslator;
+
+    impl AccessPlatform for ReadOnlyTranslator {
+        fn translate_gva(&self, base: u64, _size: u64) -> io::Result<u64> {
+            Ok(base)
+        }
+        fn translate_gva_for_write(&self, _base: u64, _size: u64) -> io::Result<u64> {
+            Err(io::Error::other("not writable"))
+        }
+        fn translate_gpa(&self, base: u64, _size: u64) -> io::Result<u64> {
+            Ok(base)
+        }
+    }
+
+    #[test]
+    fn device_writable_descriptor_requires_write_access() {
+        let (_mem, mem_atomic, mut queue) = setup_vq_chain(
+            128 * 1024,
+            &[(0x4000, 256, 0), (0x5000, 256, VRING_DESC_F_WRITE as u16)],
+        );
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let mut it = chain.checked_iter(Some(&ReadOnlyTranslator));
+
+        let readable = it.next().unwrap().expect("device-readable must be Ok");
+        assert_eq!(readable.addr().0, 0x4000);
+        let writable = it.next().expect("must yield an item");
+        assert_eq!(writable.unwrap_err(), GuestAddress(0x5000));
+        assert!(it.next().is_none());
     }
 
     #[test]

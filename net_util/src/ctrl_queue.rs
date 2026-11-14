@@ -266,7 +266,7 @@ impl CtrlQueue {
                     if ok { VIRTIO_NET_OK } else { VIRTIO_NET_ERR } as u8,
                     status_desc
                         .addr()
-                        .translate_gva(access_platform, status_desc.len() as usize)
+                        .translate_gva_for_write(access_platform, status_desc.len() as usize)
                         .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?,
                 )
                 .map_err(Error::GuestMemory)?;

@@ -453,6 +453,9 @@ impl VsockPacket {
                 .next_checked(access_platform)
                 .map_err(|_| VsockError::GuestMemory)?
                 .ok_or(VsockError::BufDescMissing)?;
+            if !buf_desc.is_write_only() {
+                return Err(VsockError::UnwritableDescriptor);
+            }
             let buf_size = buf_desc.len() as usize;
 
             // TODO: We still assume that there are at most two descriptors. We should probably
@@ -902,6 +905,13 @@ mod tests {
         {
             create_context!(test_ctx, handler_ctx);
             handler_ctx.guest_rxvq.dtable[0].flags.set(0);
+            expect_asm_error!(rx, test_ctx, handler_ctx, VsockError::UnwritableDescriptor);
+        }
+
+        // Test case: read-only RX packet buffer.
+        {
+            create_context!(test_ctx, handler_ctx);
+            handler_ctx.guest_rxvq.dtable[1].flags.set(0);
             expect_asm_error!(rx, test_ctx, handler_ctx, VsockError::UnwritableDescriptor);
         }
 
