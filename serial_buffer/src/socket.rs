@@ -172,7 +172,8 @@ impl SocketConsole {
         buffer.flush()
     }
 
-    fn detach(&self) {
+    /// Stops writing output to the client. Output is buffered for the next client.
+    pub fn detach(&self) {
         self.write_out.store(false, Ordering::Release);
         self.buffer.lock().unwrap().set_out(Box::new(io::sink()));
     }
