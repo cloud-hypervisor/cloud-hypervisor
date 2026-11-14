@@ -334,23 +334,28 @@ impl FromStr for ByteSized {
     type Err = ByteSizedParseError;
 
     fn from_str(s: &str) -> result::Result<Self, Self::Err> {
-        Ok(ByteSized({
-            let s = s.trim();
-            let shift = if s.ends_with('K') {
-                10
-            } else if s.ends_with('M') {
-                20
-            } else if s.ends_with('G') {
-                30
-            } else {
-                0
-            };
+        let s = s.trim();
+        let shift = if s.ends_with('K') {
+            10
+        } else if s.ends_with('M') {
+            20
+        } else if s.ends_with('G') {
+            30
+        } else {
+            0
+        };
 
-            let s = s.trim_end_matches(['K', 'M', 'G']);
-            s.parse::<u64>()
-                .map_err(|_| ByteSizedParseError::InvalidValue(s.to_owned()))?
-                << shift
-        }))
+        let digits = s.trim_end_matches(['K', 'M', 'G']);
+        let value = digits
+            .parse::<u64>()
+            .map_err(|_| ByteSizedParseError::InvalidValue(digits.to_owned()))?;
+
+        // Apply the binary unit suffix, rejecting inputs whose byte count
+        // does not fit in a u64 rather than silently wrapping around.
+        value
+            .checked_mul(1u64 << shift)
+            .map(ByteSized)
+            .ok_or_else(|| ByteSizedParseError::InvalidValue(s.to_owned()))
     }
 }
 
@@ -805,6 +810,25 @@ mod tests {
             .expect_err("the invalid size should be rejected");
         "".parse::<ByteSized>()
             .expect_err("the invalid size should be rejected");
+    }
+
+    #[test]
+    fn test_byte_sized_overflow() {
+        // The largest byte count that still fits in a u64.
+        assert_eq!(
+            u64::MAX.to_string().parse::<ByteSized>().unwrap().0,
+            u64::MAX
+        );
+
+        // Applying a suffix must not silently wrap: 2^35 G would be 2^65
+        // bytes, which does not fit in a u64, so it has to be rejected
+        // instead of truncating to a bogus value.
+        "34359738368G"
+            .parse::<ByteSized>()
+            .expect_err("a size that overflows u64 should be rejected");
+        format!("{}K", u64::MAX)
+            .parse::<ByteSized>()
+            .expect_err("a size that overflows u64 should be rejected");
     }
 
     #[test]
