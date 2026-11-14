@@ -1854,6 +1854,14 @@ components:
           type: boolean
         memory_restore_mode:
           $ref: "#/components/schemas/MemoryRestoreMode"
+        num_pagefault_handlers:
+          type: integer
+          format: uint32
+          minimum: 1
+          maximum: 128
+          description: >
+            How many pagefault handlers used for file on-demand restore.
+            Only valid with memory_restore_mode=OnDemand, with the default to 1.
         resume:
           type: boolean
         zone_updates:

@@ -8,16 +8,16 @@ use std::collections::BTreeMap;
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom};
-use std::mem::{self, MaybeUninit, zeroed};
-use std::num::NonZeroUsize;
+use std::mem::{MaybeUninit, zeroed};
+use std::num::{NonZeroU32, NonZeroUsize};
 use std::ops::{BitAnd, Not, Sub};
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Barrier, Mutex};
-use std::{cmp, ffi, panic, process, result, thread, time};
+use std::{cmp, ffi, panic, process, result, thread};
 
 use acpi_tables::{Aml, aml};
 use anyhow::{Context, anyhow};
@@ -65,35 +65,89 @@ use crate::uffd::{
 use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
 use crate::{GuestMemory, GuestRegion, MEMORY_MANAGER_SNAPSHOT_ID, prefault, userfaultfd};
 
-struct UffdHandler {
-    stop_event: EventFd,
+struct UffdWorker {
     result_rx: Receiver<Result<(), io::Error>>,
     handle: thread::JoinHandle<()>,
     fault_socket_fd: Option<OwnedFd>,
+}
+
+struct UffdHandler {
+    workers: Box<[UffdWorker]>,
     uffd_registry: Arc<UffdRegistry>,
+}
+
+struct UffdPages {
+    // Per-range bitmap tracking which pages have been populated by the
+    // on-demand fault handler. Lets the prefault cursor skip them without
+    // doing a wasted file read + UFFDIO_COPY.
+    served: Box<[AtomicBitmap]>,
+    loading: Mutex<HashSet<(usize, u64)>>,
+    // Next page to prefault, flattened across ranges
+    prefault_cursor: AtomicU64,
+    // Pages not served yet
+    remaining: AtomicU64,
+}
+
+impl UffdPages {
+    fn new(ranges: &[UffdRange]) -> Self {
+        let served = ranges
+            .iter()
+            .map(|r| {
+                AtomicBitmap::new(
+                    r.length as usize,
+                    NonZeroUsize::new(r.page_size as usize).unwrap(),
+                )
+            })
+            .collect();
+        UffdPages {
+            served,
+            loading: Mutex::new(HashSet::new()),
+            prefault_cursor: AtomicU64::new(0),
+            remaining: AtomicU64::new(ranges.iter().map(UffdRange::num_pages).sum()),
+        }
+    }
 }
 
 /// Userfaultfds sent to a UFFD handler.
 pub(crate) struct UffdRegistry {
-    added_uffds: Mutex<Vec<(String /* device identifier */, Uffd)>>,
+    uffds: Mutex<Vec<(String /* device identifier */, Arc<Uffd>)>>,
     added_uffd_evt: EventFd,
-    done: EventFd,
+    stopped: EventFd,
     ranges: Box<[UffdRange]>,
 }
 
 impl UffdRegistry {
-    fn drain_added_uffds(&self) -> Vec<(String, Uffd)> {
-        mem::take(&mut *self.added_uffds.lock().unwrap())
-    }
-
-    fn is_done(&self) -> bool {
+    fn is_stopped(&self) -> bool {
         let mut pollfd = libc::pollfd {
-            fd: self.done.as_raw_fd(),
+            fd: self.stopped.as_raw_fd(),
             events: libc::POLLIN,
             revents: 0,
         };
         // SAFETY: `pollfd` is valid for the one descriptor polled.
         unsafe { libc::poll(&mut pollfd, 1, 0) == 1 }
+    }
+
+    fn stop(&self) -> Result<(), io::Error> {
+        let uffds = self.uffds.lock().unwrap();
+        self.stopped.write(1)?;
+        // uffd handlers are shutting down, so any new faults should be handled
+        // by the kernel.
+        for (_, uffd) in uffds.iter() {
+            for range in uffd.ranges() {
+                match uffd::unregister(uffd.fd(), range.host_addr, range.length) {
+                    // The process is gone, (eg. a vhost-user backend that died)
+                    Err(e) if e.raw_os_error() == Some(libc::ENOMEM) => {}
+                    result => result?,
+                }
+            }
+            for hole in uffd.holes() {
+                match uffd::unregister(uffd.fd(), hole.host_addr, hole.length) {
+                    Err(e) if e.raw_os_error() == Some(libc::ENOMEM) => {}
+                    result => result?,
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -121,8 +175,8 @@ impl PostcopyHandler for UffdRegistry {
         fd: OwnedFd,
         regions: &[PostcopyRegion],
     ) -> Result<(), io::Error> {
-        let mut added_uffds = self.added_uffds.lock().unwrap();
-        if self.is_done() {
+        let mut uffds = self.uffds.lock().unwrap();
+        if self.is_stopped() {
             return Ok(());
         }
 
@@ -171,13 +225,18 @@ impl PostcopyHandler for UffdRegistry {
             }
         }
 
-        let entry = (id.to_string(), Uffd::new(fd, ranges.into(), holes.into())?);
-        added_uffds.push(entry);
+        let uffd = Arc::new(Uffd::new(fd, ranges.into(), holes.into())?);
+        if let Some(idx) = uffds.iter().position(|(uffd_id, _)| uffd_id == id) {
+            // Its process remapped guest memory, as on a device reset
+            uffds[idx].1 = uffd;
+        } else {
+            uffds.push((id.to_string(), uffd));
+        }
         self.added_uffd_evt.write(1)
     }
 
     fn postcopy_done_event(&self) -> &EventFd {
-        &self.done
+        &self.stopped
     }
 }
 
@@ -1192,14 +1251,19 @@ impl MemoryManager {
         &mut self,
         file_path: &Path,
         saved_regions: &MemoryRangeTable,
+        num_uffd_handlers: NonZeroU32,
         exit_evt: &EventFd,
     ) -> Result<(), Error> {
         let mut file_offset: u64 = 0;
 
         let snapshot_file = File::open(file_path).map_err(Error::SnapshotOpen)?;
-        let source: Box<dyn UffdMemorySource> = Box::new(FileUffdMemorySource::new(
-            snapshot_file.try_clone().map_err(Error::SnapshotOpen)?,
-        ));
+        let mut sources: Vec<(Box<dyn UffdMemorySource>, Option<OwnedFd>)> = Vec::new();
+        for _ in 0..num_uffd_handlers.get() {
+            let source: Box<dyn UffdMemorySource> = Box::new(FileUffdMemorySource::new(
+                snapshot_file.try_clone().map_err(Error::SnapshotOpen)?,
+            ));
+            sources.push((source, None));
+        }
 
         let Some(uffd) = self.prepare_uffd(
             saved_regions,
@@ -1208,27 +1272,15 @@ impl MemoryManager {
                 file_offset += r.length;
                 o
             },
-            source.requires_uffd_minor_mode(),
+            sources[0].0.requires_uffd_minor_mode(),
         )?
         else {
             return Ok(());
         };
-        // Per-range bitmap tracking which pages have been populated by the
-        // on-demand fault handler. Lets the prefault cursor skip them without
-        // doing a wasted file read + UFFDIO_COPY.
-        let served_bitmap: Vec<AtomicBitmap> = uffd
-            .ranges()
-            .iter()
-            .map(|r| {
-                AtomicBitmap::new(
-                    r.length as usize,
-                    NonZeroUsize::new(r.page_size as usize).unwrap(),
-                )
-            })
-            .collect();
+        let pages = UffdPages::new(uffd.ranges());
 
         // For sparse files, we mark holes as served pages so we don't prefault them.
-        for (range, served) in uffd.ranges().iter().zip(&served_bitmap) {
+        for (range, served) in uffd.ranges().iter().zip(&pages.served) {
             let end = range.source_offset + range.length;
             let mut file_cursor = range.source_offset;
             while let Ok(next) = next_data_extent(snapshot_file.as_fd(), file_cursor, end) {
@@ -1238,6 +1290,9 @@ impl MemoryManager {
                 let hole_end = align_down(data_off - range.source_offset, range.page_size);
                 if hole_end > hole_start {
                     served.set_addr_range(hole_start as usize, (hole_end - hole_start) as usize);
+                    pages
+                        .remaining
+                        .fetch_sub((hole_end - hole_start) / range.page_size, Ordering::Relaxed);
                 }
                 if next.is_none() {
                     break;
@@ -1246,56 +1301,47 @@ impl MemoryManager {
             }
         }
 
-        self.spawn_uffd_handler(uffd, None, served_bitmap, source, exit_evt, true)?;
+        self.spawn_uffd_handlers(uffd, sources, pages, exit_evt, true)?;
         info!("UFFD restore: demand-paged restore enabled");
         Ok(())
     }
 
-    /// Register UFFD and spawn the handler that serves faults over `socket`.
-    /// No-op when there are no regions.
+    /// Register UFFD and spawn one handler per socket to serve faults over
+    /// it. No-op when there are no regions.
     pub(crate) fn start_postcopy_serving(
         &mut self,
         saved_regions: &MemoryRangeTable,
         shared_backing: bool,
         background_fetch_pages: bool,
-        socket: SocketStream,
+        sockets: Vec<SocketStream>,
         exit_evt: &EventFd,
     ) -> Result<(), Error> {
-        // Make every fault a small request/response round-trip.
-        socket.set_nodelay(true).map_err(UffdError::SetSocket)?;
-        let socket_fd = socket
-            .as_fd()
-            .try_clone_to_owned()
-            .map_err(UffdError::SetSocket)?;
-        let source: Box<dyn UffdMemorySource> =
-            Box::new(SocketUffdMemorySource::new(socket, shared_backing));
+        let mut sources: Vec<(Box<dyn UffdMemorySource>, Option<OwnedFd>)> = Vec::new();
+        for socket in sockets {
+            // Make every fault a small request/response round-trip.
+            socket.set_nodelay(true).map_err(UffdError::SetSocket)?;
+            let socket_fd = socket
+                .as_fd()
+                .try_clone_to_owned()
+                .map_err(UffdError::SetSocket)?;
+            let source: Box<dyn UffdMemorySource> =
+                Box::new(SocketUffdMemorySource::new(socket, shared_backing));
+            sources.push((source, Some(socket_fd)));
+        }
 
         // PageFault uses the GPA as the page identifier on the wire.
-        let Some(uffd) =
-            self.prepare_uffd(saved_regions, |r| r.gpa, source.requires_uffd_minor_mode())?
+        let Some(uffd) = self.prepare_uffd(
+            saved_regions,
+            |r| r.gpa,
+            sources[0].0.requires_uffd_minor_mode(),
+        )?
         else {
             return Ok(());
         };
 
-        let served_bitmap: Vec<AtomicBitmap> = uffd
-            .ranges()
-            .iter()
-            .map(|r| {
-                AtomicBitmap::new(
-                    r.length as usize,
-                    NonZeroUsize::new(r.page_size as usize).unwrap(),
-                )
-            })
-            .collect();
+        let pages = UffdPages::new(uffd.ranges());
         info!("UFFD: postcopy background prefault {background_fetch_pages}");
-        self.spawn_uffd_handler(
-            uffd,
-            Some(socket_fd),
-            served_bitmap,
-            source,
-            exit_evt,
-            background_fetch_pages,
-        )
+        self.spawn_uffd_handlers(uffd, sources, pages, exit_evt, background_fetch_pages)
     }
 
     /// Create a UFFD fd and register every range.
@@ -1388,63 +1434,101 @@ impl MemoryManager {
         ))
     }
 
-    /// Spawn the UFFD handler thread that resolves faults through `source`.
-    fn spawn_uffd_handler(
+    /// Spawn one UFFD handler thread per source, all prefaulting from a
+    /// shared cursor if `background_fetch_pages` is set.
+    fn spawn_uffd_handlers(
         &mut self,
         uffd: Uffd,
-        fault_socket_fd: Option<OwnedFd>,
-        served_bitmap: Vec<AtomicBitmap>,
-        source: Box<dyn UffdMemorySource>,
+        sources: Vec<(Box<dyn UffdMemorySource>, Option<OwnedFd>)>,
+        pages: UffdPages,
         exit_evt: &EventFd,
         background_fetch_pages: bool,
     ) -> Result<(), Error> {
         info!(
-            "UFFD: spawning handler for {} region(s)",
+            "UFFD: spawning {} handlers for {} region(s)",
+            sources.len(),
             uffd.ranges().len()
         );
 
-        let stop_event = EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?;
-        let thread_stop_event = stop_event.try_clone().map_err(Error::EventFdFail)?;
+        let ranges = Box::from(uffd.ranges());
+        let uffd_registry = Arc::new(UffdRegistry {
+            uffds: Mutex::new(vec![(VMM_UFFD_ID.to_string(), Arc::new(uffd))]),
+            added_uffd_evt: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
+            stopped: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
+            ranges,
+        });
+        let pages = Arc::new(pages);
+
+        let mut workers = Vec::with_capacity(sources.len());
+        for (index, (source, fault_socket_fd)) in sources.into_iter().enumerate() {
+            match Self::spawn_uffd_worker(
+                index,
+                &uffd_registry,
+                &pages,
+                source,
+                fault_socket_fd,
+                exit_evt,
+                background_fetch_pages,
+            ) {
+                Ok(worker) => workers.push(worker),
+                Err(e) => {
+                    Self::stop_uffd_workers(&uffd_registry, workers.into());
+                    return Err(e);
+                }
+            }
+        }
+
+        self.uffd_handler = Some(UffdHandler {
+            workers: workers.into(),
+            uffd_registry,
+        });
+
+        Ok(())
+    }
+
+    /// Spawn UFFD handler `index` and wait until it serves faults.
+    fn spawn_uffd_worker(
+        index: usize,
+        uffd_registry: &Arc<UffdRegistry>,
+        pages: &Arc<UffdPages>,
+        source: Box<dyn UffdMemorySource>,
+        fault_socket_fd: Option<OwnedFd>,
+        exit_evt: &EventFd,
+        background_fetch_pages: bool,
+    ) -> Result<UffdWorker, Error> {
         let thread_exit_evt = exit_evt.try_clone().map_err(Error::EventFdFail)?;
         let panic_exit_evt = exit_evt.try_clone().map_err(Error::EventFdFail)?;
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let (result_tx, result_rx) = mpsc::sync_channel(1);
-        let ranges = Box::from(uffd.ranges());
-        let uffd_registry = Arc::new(UffdRegistry {
-            added_uffds: Mutex::new(vec![(VMM_UFFD_ID.to_string(), uffd)]),
-            added_uffd_evt: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
-            done: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
-            ranges,
-        });
-        let thread_uffd_registry = Arc::clone(&uffd_registry);
+        let thread_uffd_registry = Arc::clone(uffd_registry);
+        let thread_pages = Arc::clone(pages);
         let handle = thread::Builder::new()
-            .name("uffd-handler".to_string())
+            .name(format!("uffd-handler-{index}"))
             .spawn(move || {
                 panic::catch_unwind(panic::AssertUnwindSafe(move || {
                     let mut result = Self::uffd_handler_loop(
                         &thread_uffd_registry,
-                        &thread_stop_event,
                         &thread_exit_evt,
                         source,
-                        served_bitmap,
+                        &thread_pages,
                         &ready_tx,
                         background_fetch_pages,
                     );
 
-                    if result.is_err() && thread_stop_event.read().is_ok() {
+                    if result.is_err() && thread_uffd_registry.is_stopped() {
                         // Error during shutdown is expected
                         result = Ok(());
                     }
 
                     if let Err(e) = &result {
-                        error!("UFFD handler exited with error: {e}");
+                        error!("UFFD handler {index} exited with error: {e}");
                         thread_exit_evt.write(1).ok();
                     }
 
                     result_tx.send(result).ok();
                 }))
                 .map_err(|_| {
-                    error!("uffd-handler thread panicked");
+                    error!("uffd-handler-{index} thread panicked");
                     panic_exit_evt.write(1).ok();
                 })
                 .ok();
@@ -1453,7 +1537,7 @@ impl MemoryManager {
 
         if ready_rx.recv().is_err() {
             handle.join().ok();
-            return Err(UffdError::HandlerStartup.into());
+            return Err(UffdError::HandlerStartup { index }.into());
         }
 
         if let Ok(Err(e)) = result_rx.try_recv() {
@@ -1461,15 +1545,11 @@ impl MemoryManager {
             return Err(UffdError::HandlerFailed(e).into());
         }
 
-        self.uffd_handler = Some(UffdHandler {
-            stop_event,
+        Ok(UffdWorker {
             result_rx,
             handle,
             fault_socket_fd,
-            uffd_registry,
-        });
-
-        Ok(())
+        })
     }
 
     fn required_uffd_features(&self, uffd_requires_minor_mode: bool) -> u64 {
@@ -1489,19 +1569,24 @@ impl MemoryManager {
         features
     }
 
-    fn stop_uffd_handler(&mut self) {
-        if let Some(uffd_handler) = self.uffd_handler.take() {
-            uffd_handler.stop_event.write(1).ok();
-            if let Some(fd) = &uffd_handler.fault_socket_fd {
+    fn stop_uffd_workers(uffd_registry: &UffdRegistry, workers: Box<[UffdWorker]>) {
+        if let Err(e) = uffd_registry.stop() {
+            error!("UFFD registry stop failed: {e}");
+        }
+        for worker in &workers {
+            if let Some(fd) = &worker.fault_socket_fd {
                 // SAFETY: fd is a valid owned fd for the duration of this call.
                 unsafe { libc::shutdown(fd.as_raw_fd(), libc::SHUT_RDWR) };
             }
-            uffd_handler.handle.join().ok();
+        }
 
-            match uffd_handler.result_rx.try_recv() {
-                Ok(Err(e)) => error!("UFFD handler terminated with error: {e}"),
+        for (index, worker) in workers.into_iter().enumerate() {
+            worker.handle.join().ok();
+
+            match worker.result_rx.try_recv() {
+                Ok(Err(e)) => error!("UFFD handler {index} terminated with error: {e}"),
                 Err(mpsc::TryRecvError::Disconnected) => {
-                    warn!("UFFD handler terminated unexpectedly (possible panic)");
+                    warn!("UFFD handler {index} terminated unexpectedly (possible panic)");
                 }
                 _ => {}
             }
@@ -1517,7 +1602,7 @@ impl MemoryManager {
     pub fn restoring(&self) -> bool {
         self.uffd_handler
             .as_ref()
-            .is_some_and(|h| !h.uffd_registry.is_done())
+            .is_some_and(|h| !h.uffd_registry.is_stopped())
     }
 
     /// Poison a page that can no longer be restored. Exits if that's not
@@ -1542,33 +1627,28 @@ impl MemoryManager {
         }
     }
 
-    /// Serve UFFD faults from every userfaultfd received through
-    /// `uffd_registry` via `source`, prefaulting one page per idle iteration
-    /// through the first one, which `uffd_registry` must hold already. Once
-    /// `source` fails, poison each faulted page instead.
+    /// Serve UFFD faults via `source` from every userfaultfd in
+    /// `uffd_registry`, re-synced on its `added_uffd_evt`. If
+    /// `background_fetch_pages`, prefault one page from the shared cursor per
+    /// idle iteration through the first userfaultfd, which `uffd_registry`
+    /// must hold already. Once `source` fails, poison each faulted page
+    /// instead.
     ///
     /// A userfaultfd received with the id of an earlier one replaces it. Once
-    /// all pages are present, `uffd_registry.done` is written.
-    #[expect(clippy::needless_pass_by_value)]
+    /// all pages are present, `uffd_registry.stopped` is written and every
+    /// handler returns.
     fn uffd_handler_loop(
         uffd_registry: &UffdRegistry,
-        stop_event: &EventFd,
         exit_evt: &EventFd,
         mut source: Box<dyn UffdMemorySource>,
-        served_bitmap: Vec<AtomicBitmap>,
+        pages: &UffdPages,
         ready_tx: &SyncSender<()>,
         background_fetch_pages: bool,
     ) -> Result<(), io::Error> {
-        let mut uffds = uffd_registry.drain_added_uffds();
+        let mut uffds = uffd_registry.uffds.lock().unwrap().clone();
         assert!(!uffds.is_empty());
         let (_, vmm_uffd) = &uffds[0];
         let ranges = vmm_uffd.ranges();
-
-        let total_pages: u64 = ranges.iter().map(UffdRange::num_pages).sum();
-        let mut pages_served: u64 = 0;
-        let mut pages_prefaulted: u64 = 0;
-
-        let pages_loading: Mutex<HashSet<(usize, u64)>> = Mutex::new(HashSet::new());
 
         let zero_buf = uffd::allocate_zero_buffer(
             ranges.iter().map(|r| r.page_size).max().unwrap_or(0) as usize,
@@ -1576,9 +1656,6 @@ impl MemoryManager {
 
         let mut prefault_active = background_fetch_pages && !ranges.is_empty();
         let mut source_failed = false;
-        let mut range_idx = 0;
-        let mut page_idx = 0;
-        let prefault_start = time::Instant::now();
 
         const EVENT_STOP: u64 = u64::MAX;
         const EVENT_ADDED_UFFD: u64 = u64::MAX - 1;
@@ -1590,7 +1667,7 @@ impl MemoryManager {
         epoll::ctl(
             epoll_fd,
             epoll::ControlOptions::EPOLL_CTL_ADD,
-            stop_event.as_raw_fd(),
+            uffd_registry.stopped.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, EVENT_STOP),
         )
         .map_err(io::Error::other)?;
@@ -1599,7 +1676,11 @@ impl MemoryManager {
             epoll_fd,
             epoll::ControlOptions::EPOLL_CTL_ADD,
             uffd_registry.added_uffd_evt.as_raw_fd(),
-            epoll::Event::new(epoll::Events::EPOLLIN, EVENT_ADDED_UFFD),
+            // Should never be read so that every handler see an event
+            epoll::Event::new(
+                epoll::Events::EPOLLIN | epoll::Events::EPOLLET,
+                EVENT_ADDED_UFFD,
+            ),
         )
         .map_err(io::Error::other)?;
 
@@ -1617,6 +1698,12 @@ impl MemoryManager {
 
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); uffds.len() + 2];
         loop {
+            if pages.remaining.load(Ordering::Relaxed) == 0 {
+                uffd_registry.stop()?;
+                info!("UFFD handler: all pages served, exiting");
+                return Ok(());
+            }
+
             // Block only when prefault is done; otherwise poll non-blocking
             // so we can advance prefault between faults.
             let timeout = if prefault_active { 0 } else { -1 };
@@ -1633,7 +1720,6 @@ impl MemoryManager {
                 .take(num_events)
                 .any(|event| event.data == EVENT_STOP)
             {
-                stop_event.read().ok();
                 info!("UFFD handler: received stop event, exiting");
                 return Ok(());
             }
@@ -1643,24 +1729,23 @@ impl MemoryManager {
                 .take(num_events)
                 .any(|event| event.data == EVENT_ADDED_UFFD)
             {
-                uffd_registry.added_uffd_evt.read().ok();
-                for (id, uffd) in uffd_registry.drain_added_uffds() {
-                    let idx =
-                        if let Some(idx) = uffds.iter().position(|(uffd_id, _)| *uffd_id == id) {
-                            // Its process remapped guest memory, as on a device reset
-                            epoll::ctl(
-                                epoll_fd,
-                                epoll::ControlOptions::EPOLL_CTL_DEL,
-                                uffds[idx].1.fd().as_raw_fd(),
-                                epoll::Event::new(epoll::Events::empty(), 0),
-                            )
-                            .map_err(io::Error::other)?;
-                            uffds[idx].1 = uffd;
-                            idx
-                        } else {
-                            uffds.push((id, uffd));
-                            uffds.len() - 1
-                        };
+                let registered = uffd_registry.uffds.lock().unwrap();
+                for (idx, entry) in registered.iter().enumerate() {
+                    if let Some((_, uffd)) = uffds.get(idx) {
+                        if Arc::ptr_eq(uffd, &entry.1) {
+                            continue;
+                        }
+                        epoll::ctl(
+                            epoll_fd,
+                            epoll::ControlOptions::EPOLL_CTL_DEL,
+                            uffd.fd().as_raw_fd(),
+                            epoll::Event::new(epoll::Events::empty(), 0),
+                        )
+                        .map_err(io::Error::other)?;
+                        uffds[idx] = entry.clone();
+                    } else {
+                        uffds.push(entry.clone());
+                    }
                     epoll::ctl(
                         epoll_fd,
                         epoll::ControlOptions::EPOLL_CTL_ADD,
@@ -1746,7 +1831,7 @@ impl MemoryManager {
                 // fault queued on another userfaultfd while the page was
                 // being resolved. Only the latter leaves the page present.
                 if !minor_fault
-                    && served_bitmap[range_idx].is_bit_set(page_idx as usize)
+                    && pages.served[range_idx].is_bit_set(page_idx as usize)
                     && uffd::page_present(ranges[range_idx].page_addr(page_idx))?
                 {
                     uffd::wake(fault_uffd.fd(), range.page_addr(page_idx), range.page_size)?;
@@ -1756,8 +1841,8 @@ impl MemoryManager {
                 let key = (range_idx, page_idx);
 
                 let (served_minor, discarded) = {
-                    let mut loading = pages_loading.lock().unwrap();
-                    let served = served_bitmap[range_idx].is_bit_set(page_idx as usize);
+                    let mut loading = pages.loading.lock().unwrap();
+                    let served = pages.served[range_idx].is_bit_set(page_idx as usize);
 
                     if served && minor_fault {
                         (true, false)
@@ -1826,27 +1911,34 @@ impl MemoryManager {
                 let result = source.resolve(fault_uffd.fd(), range, page_idx);
 
                 {
-                    let mut loading = pages_loading.lock().unwrap();
+                    let mut loading = pages.loading.lock().unwrap();
 
                     if result.is_ok() {
-                        served_bitmap[range_idx].set_bit(page_idx as usize);
+                        pages.served[range_idx].set_bit(page_idx as usize);
+                        pages.remaining.fetch_sub(1, Ordering::Relaxed);
                     }
 
                     loading.remove(&key);
                 }
 
-                if let Err(e) = result {
-                    error!(
-                        "UFFD handler: source error at {:#x}, poisoning unrestored guest memory: {e}",
-                        range.page_addr(page_idx)
-                    );
-                    exit_evt.write(1).ok();
-                    prefault_active = false;
-                    source_failed = true;
-                    Self::uffd_poison_page(fault_uffd.fd(), range, page_idx)?;
-                    continue;
+                match result {
+                    Err(_) if uffd_registry.is_stopped() => {
+                        info!("UFFD handler: stop received after source error, exiting");
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        error!(
+                            "UFFD handler: source error at {:#x}, poisoning unrestored guest memory: {e}",
+                            range.page_addr(page_idx)
+                        );
+                        exit_evt.write(1).ok();
+                        prefault_active = false;
+                        source_failed = true;
+                        Self::uffd_poison_page(fault_uffd.fd(), range, page_idx)?;
+                        continue;
+                    }
+                    _ => {}
                 }
-                pages_served += 1;
 
                 // preemptively fault that page in the guest, as it's very
                 // likely it's going to access it soon, causing minor fault
@@ -1874,39 +1966,8 @@ impl MemoryManager {
                 continue;
             }
 
-            match Self::uffd_prefault(
-                vmm_uffd.fd(),
-                &mut range_idx,
-                &mut page_idx,
-                ranges,
-                &mut source,
-                &served_bitmap,
-                &pages_loading,
-            ) {
-                Ok(0) => {
-                    let mut added_uffds = uffd_registry.added_uffds.lock().unwrap();
-                    uffds.append(&mut added_uffds);
-                    // Every page is present, so the faults still queued on
-                    // the userfaultfds only need waking up.
-                    for (_, uffd) in &uffds {
-                        for range in uffd.ranges() {
-                            uffd::wake(uffd.fd(), range.host_addr, range.length)?;
-                        }
-                        for hole in uffd.holes() {
-                            uffd::unregister(uffd.fd(), hole.host_addr, hole.length)?;
-                        }
-                    }
-                    uffd_registry.done.write(1)?;
-
-                    let elapsed = prefault_start.elapsed();
-                    info!(
-                        "UFFD handler: prefault done in {elapsed:.3?} — \
-                         prefaulted={pages_prefaulted} served={pages_served} \
-                         total={total_pages}"
-                    );
-                    return Ok(());
-                }
-                Ok(prefaulted) => pages_prefaulted += prefaulted,
+            match Self::uffd_prefault(vmm_uffd.fd(), ranges, &mut source, pages) {
+                Ok(prefaulted) => prefault_active = prefaulted,
                 Err(e) => {
                     // Give up prefaulting but continue serving demand faults.
                     warn!("UFFD prefault: abandoning background prefault after error: {e}");
@@ -1918,74 +1979,55 @@ impl MemoryManager {
 
     fn uffd_prefault(
         uffd_fd: BorrowedFd,
-        range_idx: &mut usize,
-        page_idx: &mut u64,
         ranges: &[UffdRange],
         source: &mut Box<dyn UffdMemorySource>,
-        served_bitmap: &[AtomicBitmap],
-        pages_loading: &Mutex<HashSet<(usize, u64)>>,
-    ) -> Result<u64, io::Error> {
-        let mut current_page_idx = *page_idx;
-        let mut current_range_idx = *range_idx;
-
-        'outer: loop {
-            'find_range: loop {
-                if current_page_idx >= ranges[current_range_idx].num_pages() {
-                    if current_range_idx + 1 < ranges.len() {
-                        current_range_idx += 1;
-                        current_page_idx = 0;
-                        continue 'find_range;
-                    }
-
-                    *range_idx = current_range_idx;
-                    *page_idx = current_page_idx;
-                    return Ok(0);
-                }
-                break 'find_range;
+        pages: &UffdPages,
+    ) -> Result<bool, io::Error> {
+        loop {
+            let mut page_idx = pages.prefault_cursor.fetch_add(1, Ordering::Relaxed);
+            let mut range_idx = 0;
+            while range_idx < ranges.len() && page_idx >= ranges[range_idx].num_pages() {
+                page_idx -= ranges[range_idx].num_pages();
+                range_idx += 1;
+            }
+            if range_idx == ranges.len() {
+                return Ok(false);
             }
 
-            let range = &ranges[current_range_idx];
-            let key = (current_range_idx, current_page_idx);
+            let range = &ranges[range_idx];
+            let key = (range_idx, page_idx);
             let claimed = {
-                let mut loading = pages_loading.lock().unwrap();
+                let mut loading = pages.loading.lock().unwrap();
 
-                if served_bitmap[current_range_idx].is_bit_set(current_page_idx as usize) {
-                    current_page_idx += 1;
-                    continue 'outer;
+                if pages.served[range_idx].is_bit_set(page_idx as usize) {
+                    continue;
                 }
 
                 loading.insert(key)
             };
 
             if !claimed {
-                // Do not advance the cursor until the page's owner publishes
-                // completion or makes the page available for another attempt.
-                thread::yield_now();
-                continue 'outer;
+                // Whoever loads a page also serves it.
+                continue;
             }
 
-            let result = source.resolve(uffd_fd, range, current_page_idx);
+            let result = source.resolve(uffd_fd, range, page_idx);
 
             {
-                let mut loading = pages_loading.lock().unwrap();
+                let mut loading = pages.loading.lock().unwrap();
 
                 if result.is_ok() {
-                    served_bitmap[current_range_idx].set_bit(current_page_idx as usize);
+                    pages.served[range_idx].set_bit(page_idx as usize);
+                    pages.remaining.fetch_sub(1, Ordering::Relaxed);
                 }
 
                 loading.remove(&key);
             }
 
             match result {
-                Ok(()) => {
-                    current_page_idx += 1;
-
-                    *range_idx = current_range_idx;
-                    *page_idx = current_page_idx;
-                    return Ok(1);
-                }
+                Ok(()) => return Ok(true),
                 Err(e) => {
-                    let page_addr = range.page_addr(current_page_idx);
+                    let page_addr = range.page_addr(page_idx);
                     warn!("UFFD prefault: source error at {page_addr:#x}: {e}");
                     return Err(e);
                 }
@@ -2504,6 +2546,7 @@ impl MemoryManager {
         source_url: Option<&str>,
         prefault: bool,
         memory_restore_mode: MemoryRestoreMode,
+        num_pagefault_handlers: NonZeroU32,
         phys_bits: u8,
         exit_evt: &EventFd,
         #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
@@ -2531,6 +2574,7 @@ impl MemoryManager {
                     MemoryRestoreMode::OnDemand => mm.lock().unwrap().restore_by_uffd(
                         &memory_file_path,
                         &mem_snapshot.memory_ranges,
+                        num_pagefault_handlers,
                         exit_evt,
                     )?,
                     MemoryRestoreMode::CopyOnWrite => mm
@@ -3716,7 +3760,9 @@ impl Pausable for MemoryManager {}
 
 impl Drop for MemoryManager {
     fn drop(&mut self) {
-        self.stop_uffd_handler();
+        if let Some(uffd_handler) = self.uffd_handler.take() {
+            Self::stop_uffd_workers(&uffd_handler.uffd_registry, uffd_handler.workers);
+        }
     }
 }
 
@@ -4147,20 +4193,8 @@ mod tests {
         }
     }
 
-    fn new_served_bitmap(ranges: &[UffdRange]) -> Vec<AtomicBitmap> {
-        ranges
-            .iter()
-            .map(|range| {
-                AtomicBitmap::new(
-                    range.length as usize,
-                    NonZeroUsize::new(range.page_size as usize).unwrap(),
-                )
-            })
-            .collect()
-    }
-
     #[test]
-    fn uffd_prefault_skips_present_pages_and_crosses_ranges() {
+    fn uffd_prefault_skips_served_and_loading_pages_across_ranges() {
         let page = get_page_size();
         let ranges = [
             UffdRange {
@@ -4176,9 +4210,10 @@ mod tests {
                 page_size: page,
             },
         ];
-        let served_bitmap = new_served_bitmap(&ranges);
-        served_bitmap[0].set_bit(0);
-        let pages_loading = Mutex::new(HashSet::new());
+        let pages = UffdPages::new(&ranges);
+        pages.served[0].set_bit(0);
+        pages.remaining.fetch_sub(1, Ordering::Relaxed);
+        pages.loading.lock().unwrap().insert((0, 1));
 
         let attempts = Arc::new(Mutex::new(Vec::new()));
         let mut source: Box<dyn UffdMemorySource> = Box::new(RecordingUffdMemorySource {
@@ -4186,114 +4221,16 @@ mod tests {
             fail_next: false,
         });
         let uffd_file = tempfile::tempfile().unwrap();
-        let mut range_idx = 0;
-        let mut page_idx = 0;
 
-        assert_eq!(
-            MemoryManager::uffd_prefault(
-                uffd_file.as_fd(),
-                &mut range_idx,
-                &mut page_idx,
-                &ranges,
-                &mut source,
-                &served_bitmap,
-                &pages_loading,
-            )
-            .unwrap(),
-            1
+        assert!(
+            MemoryManager::uffd_prefault(uffd_file.as_fd(), &ranges, &mut source, &pages).unwrap()
         );
-        assert_eq!((range_idx, page_idx), (0, 2));
-
-        assert_eq!(
-            MemoryManager::uffd_prefault(
-                uffd_file.as_fd(),
-                &mut range_idx,
-                &mut page_idx,
-                &ranges,
-                &mut source,
-                &served_bitmap,
-                &pages_loading,
-            )
-            .unwrap(),
-            1
+        assert!(
+            !MemoryManager::uffd_prefault(uffd_file.as_fd(), &ranges, &mut source, &pages).unwrap()
         );
-        assert_eq!((range_idx, page_idx), (1, 1));
-
-        assert_eq!(
-            MemoryManager::uffd_prefault(
-                uffd_file.as_fd(),
-                &mut range_idx,
-                &mut page_idx,
-                &ranges,
-                &mut source,
-                &served_bitmap,
-                &pages_loading,
-            )
-            .unwrap(),
-            0
-        );
-        assert_eq!((range_idx, page_idx), (1, 1));
-        assert_eq!(
-            *attempts.lock().unwrap(),
-            vec![(ranges[0].host_addr, 1), (ranges[1].host_addr, 0)]
-        );
-    }
-
-    #[test]
-    fn uffd_prefault_retries_page_after_source_failure() {
-        let page = get_page_size();
-        let ranges = [UffdRange {
-            host_addr: 0x10_0000,
-            length: page,
-            source_offset: 0,
-            page_size: page,
-        }];
-        let served_bitmap = new_served_bitmap(&ranges);
-        let pages_loading = Mutex::new(HashSet::new());
-        let attempts = Arc::new(Mutex::new(Vec::new()));
-        let mut source: Box<dyn UffdMemorySource> = Box::new(RecordingUffdMemorySource {
-            attempts: Arc::clone(&attempts),
-            fail_next: true,
-        });
-        let uffd_file = tempfile::tempfile().unwrap();
-        let mut range_idx = 0;
-        let mut page_idx = 0;
-
-        let error = MemoryManager::uffd_prefault(
-            uffd_file.as_fd(),
-            &mut range_idx,
-            &mut page_idx,
-            &ranges,
-            &mut source,
-            &served_bitmap,
-            &pages_loading,
-        )
-        .unwrap_err();
-        assert_eq!(error.to_string(), "test source failure");
-        assert_eq!((range_idx, page_idx), (0, 0));
-        assert!(pages_loading.lock().unwrap().is_empty());
-        assert!(!served_bitmap[0].is_bit_set(0));
-
-        assert_eq!(
-            MemoryManager::uffd_prefault(
-                uffd_file.as_fd(),
-                &mut range_idx,
-                &mut page_idx,
-                &ranges,
-                &mut source,
-                &served_bitmap,
-                &pages_loading,
-            )
-            .unwrap(),
-            1
-        );
-        assert_eq!((range_idx, page_idx), (0, 1));
-        assert!(pages_loading.lock().unwrap().is_empty());
-        assert!(served_bitmap[0].is_bit_set(0));
-        assert_eq!(
-            *attempts.lock().unwrap(),
-            vec![(ranges[0].host_addr, 0), (ranges[0].host_addr, 0)]
-        );
+        assert_eq!(*attempts.lock().unwrap(), vec![(ranges[1].host_addr, 0)]);
+        assert!(pages.served[1].is_bit_set(0));
+        assert_eq!(pages.remaining.load(Ordering::Relaxed), 1);
     }
 
     #[test]

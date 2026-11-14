@@ -19,6 +19,7 @@
 use std::ffi::{CString, NulError};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
+use std::num::NonZeroU32;
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::fs::FileExt;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -44,6 +45,7 @@ use vmm_sys_util::errno;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
 const MIGRATION_CONFIG_FILENAME: &str = "migration_config.json";
+const MAX_FAULT_CONNECTIONS: u32 = 128;
 
 #[derive(Debug, Error)]
 enum Error {
@@ -103,9 +105,9 @@ enum Error {
     GuestRegion,
     #[error("Cloning memfd for mmap")]
     CloneMemfd(#[source] io::Error),
-    #[error("Spawning the fault serve thread")]
+    #[error("Spawning a fault serve thread")]
     SpawnServeThread(#[source] io::Error),
-    #[error("The fault serve thread panicked")]
+    #[error("A fault serve thread panicked")]
     ServeThreadPanic,
     #[error("PageFault gpa={0:#x} len={1} is not within any slot")]
     PageFaultUnmapped(u64, u64),
@@ -134,6 +136,14 @@ struct Cli {
 enum Mode {
     /// Read a snapshot from disk and stream it to a listening CH instance.
     Restore {
+        /// Number of connections used for pagefaults.
+        #[arg(
+            long,
+            requires = "ondemand",
+            default_value_t = NonZeroU32::MIN,
+            value_parser = parse_connections
+        )]
+        connections: NonZeroU32,
         /// Directory to read snapshot artifacts from.
         #[arg(long)]
         input_dir: PathBuf,
@@ -159,6 +169,16 @@ enum Mode {
     },
 }
 
+fn parse_connections(value: &str) -> result::Result<NonZeroU32, String> {
+    let connections: NonZeroU32 = value.parse().map_err(|e| format!("{e}"))?;
+    if connections.get() > MAX_FAULT_CONNECTIONS {
+        return Err(format!(
+            "{connections} is not in 1..={MAX_FAULT_CONNECTIONS}"
+        ));
+    }
+    Ok(connections)
+}
+
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
@@ -170,7 +190,8 @@ fn main() -> Result<()> {
             input_dir,
             resume,
             ondemand,
-        } => run_restore(&socket, &input_dir, resume, ondemand),
+            connections,
+        } => run_restore(&socket, &input_dir, resume, ondemand, connections),
     }
 }
 
@@ -391,7 +412,13 @@ fn parse_guest_ram_mappings(value: &serde_json::Value) -> Result<Vec<(u32, u64, 
 }
 
 // Restore mode (migration sender).
-fn run_restore(socket_path: &Path, input_dir: &Path, resume: bool, ondemand: bool) -> Result<()> {
+fn run_restore(
+    socket_path: &Path,
+    input_dir: &Path,
+    resume: bool,
+    ondemand: bool,
+    connections: NonZeroU32,
+) -> Result<()> {
     let migration_config_bytes =
         fs::read(input_dir.join(MIGRATION_CONFIG_FILENAME)).map_err(Error::ReadFile)?;
     let mut migration_config: VmMigrationConfig = serde_json::from_slice(&migration_config_bytes)?;
@@ -403,6 +430,9 @@ fn run_restore(socket_path: &Path, input_dir: &Path, resume: bool, ondemand: boo
         // Ignored
         MigrationMode::default()
     });
+    if ondemand {
+        migration_config.set_postcopy_connections(connections);
+    }
     let migration_config_bytes = serde_json::to_vec(&migration_config)?;
 
     let mut stream = UnixStream::connect(socket_path).map_err(Error::Connect)?;
@@ -446,24 +476,29 @@ fn run_restore(socket_path: &Path, input_dir: &Path, resume: bool, ondemand: boo
         "Config",
     )?;
 
-    // For on demand (postcopy) restore the fault connection must be serving before
-    // CH processes State, so connect it here and serve on its own thread.
-    let serve_handle = if ondemand {
+    // For on demand (postcopy) restore the fault connections must be serving
+    // before CH processes State, so connect them here and serve each one on its
+    // own thread.
+    let serve_handles = if ondemand {
         let slots = Arc::new(ondemand_slots);
-        let mut fault_stream = UnixStream::connect(socket_path).map_err(Error::Connect)?;
-        ConnectionRole::Fault
-            .write_to(&mut fault_stream)
-            .map_err(Error::Protocol)?;
+        let mut handles = Vec::new();
+        for _ in 0..connections.get() {
+            let mut fault_stream = UnixStream::connect(socket_path).map_err(Error::Connect)?;
+            ConnectionRole::Fault
+                .write_to(&mut fault_stream)
+                .map_err(Error::Protocol)?;
+            let serve_slots = Arc::clone(&slots);
+            let handle = thread::Builder::new()
+                .name("offload-fault-serve".to_owned())
+                .spawn(move || serve_page_faults(&mut fault_stream, serve_slots.as_slice()))
+                .map_err(Error::SpawnServeThread)?;
+            handles.push(handle);
+        }
         info!(
-            "offload daemon: connected dedicated fault connection, serving {} slot(s)",
+            "offload daemon: connected {connections} dedicated fault connection(s), serving {} slot(s)",
             slots.len()
         );
-        let serve_slots = Arc::clone(&slots);
-        let handle = thread::Builder::new()
-            .name("offload-fault-serve".to_owned())
-            .spawn(move || serve_page_faults(&mut fault_stream, serve_slots.as_slice()))
-            .map_err(Error::SpawnServeThread)?;
-        Some(handle)
+        Some(handles)
     } else {
         None
     };
@@ -482,9 +517,19 @@ fn run_restore(socket_path: &Path, input_dir: &Path, resume: bool, ondemand: boo
     };
     send_request_expect_ok(&mut stream, final_req, "Complete")?;
 
-    if let Some(handle) = serve_handle {
+    if let Some(handles) = serve_handles {
         info!("Offload daemon: waiting for fault serving to finish");
-        handle.join().map_err(|_| Error::ServeThreadPanic)??;
+        let mut result = Ok(());
+        for handle in handles {
+            let thread_result = match handle.join() {
+                Ok(thread_result) => thread_result,
+                Err(_) => Err(Error::ServeThreadPanic),
+            };
+            if result.is_ok() {
+                result = thread_result;
+            }
+        }
+        result?;
     }
 
     info!("Restore replay finished");
