@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::num::Wrapping;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result, thread};
 
 use anyhow::anyhow;
@@ -19,7 +19,7 @@ use log::{error, info, warn};
 use seccompiler::SeccompAction;
 use virtio_bindings::virtio_config::VIRTIO_F_ACCESS_PLATFORM;
 use virtio_queue::Queue;
-use vm_memory::{GuestAddress, GuestMemoryAtomic};
+use vm_memory::GuestMemoryAtomic;
 use vm_migration::{MigratableError, Pausable};
 use vm_virtio::{AccessPlatform, VirtioDeviceType};
 use vmm_sys_util::eventfd::EventFd;
@@ -28,8 +28,7 @@ use crate::epoll_helper::EpollHelperError;
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::{
-    ActivateError, ActivateResult, Error, GuestMemory, GuestRegion, MmapRegion,
-    VIRTIO_F_RING_INDIRECT_DESC,
+    ActivateError, ActivateResult, Error, GuestMemory, GuestRegion, VIRTIO_F_RING_INDIRECT_DESC,
 };
 
 pub enum VirtioInterruptType {
@@ -58,9 +57,7 @@ pub struct VirtioSharedMemory {
 
 #[derive(Clone)]
 pub struct VirtioSharedMemoryList {
-    pub mem_slot: u32,
-    pub addr: GuestAddress,
-    pub mapping: Arc<MmapRegion>,
+    pub mapping: Arc<Mutex<GuestRegion>>,
     pub region_list: Vec<VirtioSharedMemory>,
 }
 
