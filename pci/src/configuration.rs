@@ -769,7 +769,29 @@ impl PciConfiguration {
             }
             p.bar_idx.is_some()
         });
+
+        for param in mem::take(&mut self.pending_bar_reprogram) {
+            self.enqueue_bar_reprogramming(param);
+        }
+
         self
+    }
+
+    fn enqueue_bar_reprogramming(&mut self, param: BarReprogrammingParams) {
+        if let Some(idx) = self
+            .pending_bar_reprogram
+            .iter()
+            .position(|pending| pending.bar_idx == param.bar_idx)
+        {
+            // The mapping is still at the first old_base while decoding is
+            // disabled. Only the most recent destination needs to be applied.
+            self.pending_bar_reprogram[idx].new_base = param.new_base;
+            if self.pending_bar_reprogram[idx].old_base == param.new_base {
+                self.pending_bar_reprogram.remove(idx);
+            }
+        } else if param.old_base != param.new_base {
+            self.pending_bar_reprogram.push(param);
+        }
     }
 
     fn find_bar_idx_by_addr(&self, base_addr: u64, region_type: PciBarRegionType) -> Option<usize> {
@@ -1081,6 +1103,11 @@ impl PciConfiguration {
                     .lock()
                     .unwrap()
                     .set_msg_ctl((u32::from_le_bytes(data) >> 16) as u16);
+            } else if msix_cap_reg_idx == reg_idx && offset == 3 && data.len() == 1 {
+                msix_config
+                    .lock()
+                    .unwrap()
+                    .set_msg_ctl(u16::from(data[0]) << 8);
             }
         }
 
@@ -1098,7 +1125,7 @@ impl PciConfiguration {
         }
 
         if let Some(param) = self.detect_bar_reprogramming(reg_idx, data) {
-            self.pending_bar_reprogram.push(param);
+            self.enqueue_bar_reprogramming(param);
         }
 
         if !self.pending_bar_reprogram.is_empty() {
@@ -1964,16 +1991,64 @@ mod tests {
         add_reloc_bar(&mut cfg, 1, 0xd000_0000);
         cfg.write_reg(COMMAND_REG, 0);
 
-        cfg.write_config_register(BAR0_REG + 1, 0, &0xe000_0000u32.to_le_bytes());
         cfg.write_config_register(BAR0_REG + 1, 0, &0xf000_0000u32.to_le_bytes());
+        let mut state = cfg.state();
+        let mut first = state.pending_bar_reprogram[0];
+        first.bar_idx = None;
+        first.new_base = 0xe000_0000;
+        let mut second = first;
+        second.old_base = first.new_base;
+        second.new_base = 0xf000_0000;
+        state.pending_bar_reprogram = vec![first, second];
 
-        let pending = restore_legacy(&cfg);
+        let pending = reloc_config(Some(state)).pending_bar_reprogram;
 
-        assert_eq!(pending.len(), 2);
+        assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].bar_idx, Some(1));
-        assert_eq!(pending[0].new_base, 0xe000_0000);
-        assert_eq!(pending[1].bar_idx, Some(1));
-        assert_eq!(pending[1].new_base, 0xf000_0000);
+        assert_eq!(pending[0].old_base, 0xd000_0000);
+        assert_eq!(pending[0].new_base, 0xf000_0000);
+    }
+
+    #[test]
+    fn deferred_bar_moves_preserve_the_mapped_address() {
+        let mut cfg = reloc_config(None);
+        add_reloc_bar(&mut cfg, 0, 0xc000_0000);
+        add_reloc_bar(&mut cfg, 1, 0xd000_0000);
+        cfg.write_reg(COMMAND_REG, 0);
+
+        for i in 1..=128u32 {
+            for idx in 0..2 {
+                let address = 0xe000_0000 + (idx as u32 * 0x100 + i) * RELOC_BAR_SIZE as u32;
+                assert!(
+                    cfg.write_config_register(BAR0_REG + idx, 0, &address.to_le_bytes())
+                        .is_empty()
+                );
+            }
+            assert_eq!(cfg.pending_bar_reprogram.len(), 2);
+        }
+        let pending =
+            cfg.write_config_register(COMMAND_REG, 0, &COMMAND_REG_MEMORY_SPACE_MASK.to_le_bytes());
+        assert_eq!(pending.len(), 2);
+        for (idx, param) in pending.iter().enumerate() {
+            assert_eq!(param.bar_idx, Some(idx));
+            assert_eq!(param.old_base, 0xc000_0000 + idx as u64 * 0x1000_0000);
+            assert_eq!(param.new_base, cfg.get_bar_addr(idx));
+            cfg.restore_bar_addr(param);
+            assert_eq!(cfg.get_bar_addr(idx), param.old_base);
+        }
+    }
+
+    #[test]
+    fn deferred_bar_move_back_to_mapped_address_is_a_noop() {
+        let mut cfg = reloc_config(None);
+        add_reloc_bar(&mut cfg, 0, 0xc000_0000);
+        cfg.write_reg(COMMAND_REG, 0);
+        cfg.write_config_register(BAR0_REG, 0, &0xd000_0000u32.to_le_bytes());
+        cfg.write_config_register(BAR0_REG, 0, &0xc000_0000u32.to_le_bytes());
+        assert!(cfg.pending_bar_reprogram.is_empty());
+        assert!(cfg.write_config_register(
+            COMMAND_REG, 0, &COMMAND_REG_MEMORY_SPACE_MASK.to_le_bytes(),
+        ).is_empty());
     }
 
     #[test]
