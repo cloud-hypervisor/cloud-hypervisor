@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::mem::offset_of;
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Mutex};
 use std::{io, result};
 
 use block::VirtioBlockConfig;
@@ -214,24 +213,23 @@ impl Blk {
             vu.start_postcopy(id.clone(), postcopy_handler)?;
         }
 
+        let virtio_common = VirtioCommon {
+            device_type: VirtioDeviceType::Block as u32,
+            queue_sizes: vec![vu_cfg.queue_size; num_queues as usize],
+            avail_features,
+            acked_features,
+            min_queues: DEFAULT_QUEUE_NUMBER,
+            ..VirtioCommon::new(paused).map_err(Error::CreateEventFd)?
+        };
+
         Ok(Blk {
             vu_common: VhostUserCommon {
-                virtio_common: VirtioCommon {
-                    device_type: VirtioDeviceType::Block as u32,
-                    queue_sizes: vec![vu_cfg.queue_size; num_queues as usize],
-                    avail_features,
-                    acked_features,
-                    paused_sync: Some(Arc::new(Barrier::new(2))),
-                    min_queues: DEFAULT_QUEUE_NUMBER,
-                    paused: Arc::new(AtomicBool::new(paused)),
-                    ..Default::default()
-                },
                 vu: Some(Arc::new(Mutex::new(vu))),
                 acked_protocol_features,
                 socket_path: vu_cfg.socket,
                 vu_num_queues,
                 vring_bases,
-                ..Default::default()
+                ..VhostUserCommon::new(virtio_common)
             },
             id,
             config: Arc::new(Mutex::new(config)),
@@ -362,9 +360,6 @@ impl VirtioDevice for Blk {
             pause_evt,
         )?;
 
-        let paused = Arc::clone(&self.vu_common.virtio_common.paused);
-        let paused_sync = self.vu_common.virtio_common.paused_sync.clone();
-
         self.vu_common.spawn_worker(
             &self.id,
             &self.seccomp_action,
@@ -372,7 +367,7 @@ impl VirtioDevice for Blk {
             &self.exit_evt,
             Arc::clone(&device_status),
             Arc::clone(&interrupt_cb),
-            move || handler.run(&paused, paused_sync.as_ref().unwrap()),
+            move |pause_common| handler.run(pause_common),
         )?;
 
         Ok(())

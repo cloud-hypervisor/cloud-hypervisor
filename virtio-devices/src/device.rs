@@ -9,8 +9,8 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::num::Wrapping;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::sync::{Arc, Barrier};
+use std::sync::Arc;
+use std::sync::atomic::AtomicU8;
 use std::{cmp, io, result, thread};
 
 use anyhow::anyhow;
@@ -28,7 +28,7 @@ use crate::epoll_helper::EpollHelperError;
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::{
-    ActivateError, ActivateResult, Error, GuestMemory, GuestRegion, MmapRegion,
+    ActivateError, ActivateResult, Error, GuestMemory, GuestRegion, MmapRegion, PauseCommon,
     VIRTIO_F_RING_INDIRECT_DESC,
 };
 
@@ -211,22 +211,19 @@ pub trait DmaRemapping {
 }
 
 /// Owns a device's worker threads plus the kill event that stops them.
-///
-/// Dropping signals every worker to exit, unparks any that are parked, and joins them.
 pub struct WorkerThreads {
     /// shared kill event, a single write wakes all of them.
     kill_evt: EventFd,
-    // true if the device is paused.
-    paused: Arc<AtomicBool>,
+    pause_common: Arc<PauseCommon>,
     // The running worker thread's handles.
     threads: Vec<thread::JoinHandle<()>>,
 }
 
 impl WorkerThreads {
-    fn new(kill_evt: EventFd, paused: Arc<AtomicBool>) -> Self {
+    fn new(kill_evt: EventFd, pause_common: Arc<PauseCommon>) -> Self {
         WorkerThreads {
             kill_evt,
-            paused,
+            pause_common,
             threads: Vec::new(),
         }
     }
@@ -239,23 +236,15 @@ impl WorkerThreads {
     /// Signal the workers to exit without joining; they are joined later when
     /// this is dropped.
     pub(crate) fn signal_exit(&self) -> io::Result<()> {
-        self.kill_evt.write(1)
-    }
-
-    /// Unpark every worker so threads parked while paused resume their loop.
-    fn unpark(&self) {
-        for t in &self.threads {
-            t.thread().unpark();
-        }
+        let result = self.kill_evt.write(1);
+        self.pause_common.resume();
+        result
     }
 }
 
 impl Drop for WorkerThreads {
     fn drop(&mut self) {
-        // Signal the workers to exit, wake any parked so they observe it, then join.
-        let _ = self.kill_evt.write(1);
-        self.paused.store(false, Ordering::SeqCst);
-        self.unpark();
+        let _ = self.signal_exit();
         for t in self.threads.drain(..) {
             if let Err(e) = t.join() {
                 error!("Error joining thread: {e:?}");
@@ -265,14 +254,11 @@ impl Drop for WorkerThreads {
 }
 
 /// Structure to handle device state common to all devices
-#[derive(Default)]
 pub struct VirtioCommon {
     pub avail_features: u64,
     pub acked_features: u64,
     pub interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
-    pub pause_evt: Option<EventFd>,
-    pub paused: Arc<AtomicBool>,
-    pub paused_sync: Option<Arc<Barrier>>,
+    pub pause_common: Arc<PauseCommon>,
     pub workers: Option<WorkerThreads>,
     pub queue_sizes: Vec<u16>,
     pub queue_evts: Vec<(u16, EventFd)>,
@@ -282,6 +268,21 @@ pub struct VirtioCommon {
 }
 
 impl VirtioCommon {
+    pub fn new(pause_requested: bool) -> io::Result<Self> {
+        Ok(Self {
+            avail_features: 0,
+            acked_features: 0,
+            interrupt_cb: None,
+            pause_common: Arc::new(PauseCommon::new(pause_requested)?),
+            workers: None,
+            queue_sizes: Vec::new(),
+            queue_evts: Vec::new(),
+            device_type: 0,
+            min_queues: 0,
+            access_platform: None,
+        })
+    }
+
     pub fn feature_acked(&self, feature: u64) -> bool {
         self.acked_features & (1 << feature) == 1 << feature
     }
@@ -343,13 +344,7 @@ impl VirtioCommon {
         })?;
         // Create the worker collection up front so it owns the kill event;
         // handlers clone it via dup_eventfds() before any worker is spawned.
-        self.workers = Some(WorkerThreads::new(kill_evt, Arc::clone(&self.paused)));
-
-        let pause_evt = EventFd::new(EFD_NONBLOCK).map_err(|e| {
-            error!("failed creating pause EventFd: {e}");
-            ActivateError::BadActivate
-        })?;
-        self.pause_evt = Some(pause_evt);
+        self.workers = Some(WorkerThreads::new(kill_evt, Arc::clone(&self.pause_common)));
 
         // Save the interrupt EventFD as we need to return it on reset
         // but clone it to pass into the thread.
@@ -360,15 +355,8 @@ impl VirtioCommon {
 
     pub fn reset(&mut self) {
         self.queue_evts.clear();
-        self.pause_evt = None;
-
-        // Clear paused explicitly; the workers' Drop does so too, but only
-        // when they exist, and reset may run before activate().
-        self.paused.store(false, Ordering::SeqCst);
-
-        // Dropping the workers signals kill_evt, unparks any thread parked
-        // for migration, and joins them.
         self.workers = None;
+        self.pause_common.reset();
 
         // Drop the interrupt callback clone
         self.interrupt_cb = None;
@@ -387,7 +375,7 @@ impl VirtioCommon {
         f: F,
     ) -> Result<(), ActivateError>
     where
-        F: FnOnce() -> Result<(), EpollHelperError> + Send + 'static,
+        F: FnOnce(&PauseCommon) -> Result<(), EpollHelperError> + Send + 'static,
     {
         // Scope the borrow of `workers` so it ends before the reset() below.
         let res = {
@@ -403,6 +391,7 @@ impl VirtioCommon {
                 exit_evt,
                 device_status,
                 interrupt_cb,
+                Arc::clone(&self.pause_common),
                 f,
             )
         };
@@ -421,7 +410,6 @@ impl VirtioCommon {
         }
     }
 
-    // Dropping the workers signals, unparks, and joins them. Idempotent.
     pub fn wait_for_epoll_threads(&mut self) {
         self.workers = None;
     }
@@ -435,9 +423,8 @@ impl VirtioCommon {
             .try_clone()
             .map_err(ActivateError::CloneEventFd)?;
         let pause_evt = self
-            .pause_evt
-            .as_ref()
-            .ok_or(ActivateError::BadActivate)?
+            .pause_common
+            .pause_evt()
             .try_clone()
             .map_err(ActivateError::CloneEventFd)?;
         Ok((kill_evt, pause_evt))
@@ -467,26 +454,9 @@ impl Pausable for VirtioCommon {
             VirtioDeviceType::from(self.device_type)
         );
 
-        // If already paused, return early to avoid deadlock waiting on barrier
-        // for worker threads that are already parked.
-        if self.paused.swap(true, Ordering::SeqCst) {
-            return Ok(());
-        }
-
-        if let Some(pause_evt) = &self.pause_evt {
-            pause_evt
-                .write(1)
-                .map_err(|e| MigratableError::Pause(e.into()))?;
-
-            // Wait for all threads to acknowledge the pause before going
-            // any further. This is exclusively performed when pause_evt
-            // eventfd is Some(), as this means the virtio device has been
-            // activated. One specific case where the device can be paused
-            // while it hasn't been yet activated is snapshot/restore.
-            self.paused_sync.as_ref().unwrap().wait();
-        }
-
-        Ok(())
+        self.pause_common
+            .pause()
+            .map_err(|e| MigratableError::Pause(e.into()))
     }
 
     fn resume(&mut self) -> result::Result<(), MigratableError> {
@@ -494,10 +464,7 @@ impl Pausable for VirtioCommon {
             "Resuming virtio-{}",
             VirtioDeviceType::from(self.device_type)
         );
-        self.paused.store(false, Ordering::SeqCst);
-        if let Some(workers) = &self.workers {
-            workers.unpark();
-        }
+        self.pause_common.resume();
 
         // Signal each activated queue eventfd so workers process restored queues
         // that may already contain pending requests.
@@ -521,13 +488,17 @@ impl Pausable for VirtioCommon {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
+    use std::os::fd::AsRawFd;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Mutex, mpsc};
+    use std::time::Duration;
 
     use virtio_queue::QueueT;
     use vmm_sys_util::eventfd::EFD_NONBLOCK;
 
     use super::*;
+    use crate::epoll_helper::EPOLL_HELPER_EVENT_PAUSE;
+    use crate::{EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperHandler};
 
     #[derive(Default)]
     struct RecordingInterrupt {
@@ -567,13 +538,46 @@ mod tests {
         }
     }
 
+    struct QueueEventHandler {
+        queue_evt: EventFd,
+        entered: mpsc::Sender<()>,
+        ready: mpsc::Receiver<()>,
+        processed: mpsc::Sender<u64>,
+    }
+
+    impl QueueEventHandler {
+        fn run(
+            &mut self,
+            kill_evt: &EventFd,
+            pause_evt: &EventFd,
+            pause_common: &PauseCommon,
+        ) -> Result<(), EpollHelperError> {
+            self.entered.send(()).unwrap();
+            self.ready.recv().unwrap();
+            let mut helper = EpollHelper::new(kill_evt, pause_evt)?;
+            helper.add_event(self.queue_evt.as_raw_fd(), EPOLL_HELPER_EVENT_LAST + 1)?;
+            helper.run(pause_common, self)
+        }
+    }
+
+    impl EpollHelperHandler for QueueEventHandler {
+        fn handle_event(
+            &mut self,
+            _: &mut EpollHelper,
+            _: &epoll::Event,
+        ) -> Result<(), EpollHelperError> {
+            self.processed.send(self.queue_evt.read().unwrap()).unwrap();
+            Ok(())
+        }
+    }
+
     /// VirtioCommon with its worker collection created (as activate() does)
     /// and a kill_evt clone for the spawned worker to watch.
     fn make_common_with_workers() -> (VirtioCommon, EventFd) {
         let kill_evt = EventFd::new(EFD_NONBLOCK).unwrap();
         let kill_evt_clone = kill_evt.try_clone().unwrap();
-        let common = VirtioCommon::default();
-        let workers = WorkerThreads::new(kill_evt, Arc::clone(&common.paused));
+        let common = VirtioCommon::new(false).unwrap();
+        let workers = WorkerThreads::new(kill_evt, Arc::clone(&common.pause_common));
         let common = VirtioCommon {
             workers: Some(workers),
             ..common
@@ -593,7 +597,7 @@ mod tests {
         ] {
             let mut common = VirtioCommon {
                 avail_features: if offered { access_platform } else { 0 },
-                ..Default::default()
+                ..VirtioCommon::new(false).unwrap()
             };
             if acknowledged {
                 common.ack_features(access_platform);
@@ -611,7 +615,6 @@ mod tests {
                     Err(ActivateError::AccessPlatformNotAcknowledged)
                 ));
                 assert!(common.workers.is_none());
-                assert!(common.pause_evt.is_none());
             }
         }
     }
@@ -633,7 +636,7 @@ mod tests {
                 &exit_evt,
                 status,
                 Arc::new(NoopInterrupt),
-                move || {
+                move |_| {
                     started_clone.fetch_add(1, Ordering::SeqCst);
                     let _ = kill_evt_clone.read();
                     Ok(())
@@ -668,7 +671,7 @@ mod tests {
                 &exit_evt,
                 status,
                 Arc::new(NoopInterrupt),
-                move || {
+                move |_| {
                     started_clone.fetch_add(1, Ordering::SeqCst);
                     let _ = kill_evt_clone.read();
                     Ok(())
@@ -696,7 +699,7 @@ mod tests {
                 EventFd::new(EFD_NONBLOCK).unwrap(),
             ),
         ];
-        let mut common = VirtioCommon::default();
+        let mut common = VirtioCommon::new(false).unwrap();
         let interrupt_cb = Arc::clone(&interrupt) as Arc<dyn VirtioInterrupt>;
 
         common.activate(&queues, interrupt_cb).unwrap();
@@ -711,16 +714,116 @@ mod tests {
     fn reset_clears_paused_without_workers() {
         // reset() before any worker was spawned must still clear paused, or
         // the next activation's workers would park immediately and never run.
-        let mut common = VirtioCommon {
-            pause_evt: Some(EventFd::new(EFD_NONBLOCK).unwrap()),
-            ..Default::default()
-        };
-        common.paused.store(true, Ordering::SeqCst);
+        let mut common = VirtioCommon::new(false).unwrap();
+        common.pause_common.pause().unwrap();
         assert!(common.workers.is_none());
 
         common.reset();
 
-        assert!(!common.paused.load(Ordering::SeqCst));
-        assert!(common.pause_evt.is_none());
+        assert!(!common.pause_common.is_pause_requested());
+    }
+
+    #[test]
+    fn pause_handles_late_threads_and_immediate_resume() {
+        let timeout = Duration::from_secs(5);
+        let exit_evt = EventFd::new(EFD_NONBLOCK).unwrap();
+        let status = Arc::new(AtomicU8::new(0));
+        let mut common = VirtioCommon {
+            device_type: VirtioDeviceType::Block as u32,
+            ..VirtioCommon::new(true).unwrap()
+        };
+        common.activate(&[], Arc::new(NoopInterrupt)).unwrap();
+        let pause_common = Arc::clone(&common.pause_common);
+        let (entered, entering) = mpsc::channel();
+        let (processed, requests) = mpsc::channel();
+        let mut releases = Vec::new();
+        let mut queue_kicks = Vec::new();
+
+        for index in 0..2 {
+            let queue_evt = EventFd::new(EFD_NONBLOCK).unwrap();
+            queue_kicks.push(queue_evt.try_clone().unwrap());
+            let (release, ready) = mpsc::channel();
+            releases.push(release);
+            let mut handler = QueueEventHandler {
+                queue_evt,
+                entered: entered.clone(),
+                ready,
+                processed: processed.clone(),
+            };
+            let (kill_evt, pause_evt) = common.dup_eventfds().unwrap();
+            common
+                .spawn_worker(
+                    &format!("pause_test_{index}"),
+                    &SeccompAction::Allow,
+                    Thread::VirtioBlock,
+                    &exit_evt,
+                    Arc::clone(&status),
+                    Arc::new(NoopInterrupt),
+                    move |pause_common| handler.run(&kill_evt, &pause_evt, pause_common),
+                )
+                .unwrap();
+        }
+
+        common.resume().unwrap();
+        for _ in 0..2 {
+            entering
+                .recv_timeout(timeout)
+                .expect("Thread did not enter handler startup");
+        }
+        let pause_evt = common.pause_common.pause_evt();
+        let pause_monitor = EpollHelper::new(&exit_evt, pause_evt).unwrap();
+        let (paused, completed) = mpsc::channel();
+        let pausing = thread::spawn(move || {
+            common.pause().unwrap();
+            paused.send(common).unwrap();
+        });
+        let mut events = [epoll::Event::new(epoll::Events::empty(), 0)];
+        assert_eq!(
+            epoll::wait(
+                pause_monitor.as_raw_fd(),
+                timeout.as_millis() as i32,
+                &mut events,
+            )
+            .unwrap(),
+            1
+        );
+        let event_id = events[0].data;
+        assert_eq!(event_id, u64::from(EPOLL_HELPER_EVENT_PAUSE));
+        assert!(pause_common.is_pause_requested());
+        for release in releases {
+            release.send(()).unwrap();
+        }
+        let mut common = completed
+            .recv_timeout(timeout)
+            .expect("Late threads did not acknowledge pause");
+        pausing.join().unwrap();
+
+        for (index, queue_evt) in queue_kicks.iter().enumerate() {
+            queue_evt.write(index as u64 + 1).unwrap();
+        }
+        assert!(matches!(
+            requests.recv_timeout(Duration::from_millis(20)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+
+        let (paused, completed) = mpsc::channel();
+        let pausing = thread::spawn(move || {
+            common.resume().unwrap();
+            common.pause().unwrap();
+            paused.send(common).unwrap();
+        });
+        let mut common = completed
+            .recv_timeout(timeout)
+            .expect("Pause after immediate resume did not complete");
+        pausing.join().unwrap();
+        common.resume().unwrap();
+        let mut values = vec![
+            requests.recv_timeout(timeout).unwrap(),
+            requests.recv_timeout(timeout).unwrap(),
+        ];
+        values.sort_unstable();
+        assert_eq!(values, vec![1, 2]);
+        common.reset();
+        assert_eq!(status.load(Ordering::SeqCst), 0);
     }
 }

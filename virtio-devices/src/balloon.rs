@@ -17,9 +17,8 @@
 use std::io::{self, Write};
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
-use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{cmp, mem, result};
 
@@ -45,6 +44,7 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
+use crate::thread_helper::PauseCommon;
 use crate::{
     ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
     GuestMemory, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice,
@@ -670,11 +670,7 @@ impl BalloonEpollHandler {
         }
     }
 
-    fn run(
-        &mut self,
-        paused: &AtomicBool,
-        paused_sync: &Barrier,
-    ) -> result::Result<(), EpollHelperError> {
+    fn run(&mut self, pause_common: &PauseCommon) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.inflate_queue_evt.as_raw_fd(), INFLATE_QUEUE_EVENT)?;
         helper.add_event(self.deflate_queue_evt.as_raw_fd(), DEFLATE_QUEUE_EVENT)?;
@@ -692,7 +688,7 @@ impl BalloonEpollHandler {
             self.process_stats_queue()
                 .map_err(|e| EpollHelperError::HandleEvent(anyhow!(e)))?;
         }
-        helper.run(paused, paused_sync, self)?;
+        helper.run(pause_common, self)?;
 
         Ok(())
     }
@@ -878,11 +874,9 @@ impl Balloon {
                 device_type: VirtioDeviceType::Balloon as u32,
                 avail_features,
                 acked_features,
-                paused_sync: Some(Arc::new(Barrier::new(2))),
                 queue_sizes,
                 min_queues: MIN_NUM_QUEUES,
-                paused: Arc::new(AtomicBool::new(paused)),
-                ..Default::default()
+                ..VirtioCommon::new(paused)?
             },
             id,
             config,
@@ -1075,9 +1069,6 @@ impl VirtioDevice for Balloon {
             access_platform: self.common.access_platform(),
         };
 
-        let paused = Arc::clone(&self.common.paused);
-        let paused_sync = self.common.paused_sync.clone();
-
         if let Err(e) = self.common.spawn_worker(
             &self.id,
             &self.seccomp_action,
@@ -1085,7 +1076,7 @@ impl VirtioDevice for Balloon {
             &self.exit_evt,
             Arc::clone(&device_status),
             Arc::clone(&interrupt_cb),
-            move || handler.run(&paused, paused_sync.as_ref().unwrap()),
+            move |pause_common| handler.run(pause_common),
         ) {
             self.stats_request_sender = None;
             return Err(e);

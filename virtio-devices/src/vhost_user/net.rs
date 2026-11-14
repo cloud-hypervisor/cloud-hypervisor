@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::result;
-use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::{Arc, Mutex};
 
 use log::{error, info};
 use net_util::{CtrlQueue, MacAddr, VirtioNetConfig};
@@ -277,26 +277,25 @@ impl Net {
             vu.start_postcopy(id.clone(), postcopy_handler)?;
         }
 
+        let virtio_common = VirtioCommon {
+            device_type: VirtioDeviceType::Net as u32,
+            queue_sizes: vec![vu_cfg.queue_size; num_queues as usize],
+            avail_features,
+            acked_features,
+            min_queues: DEFAULT_QUEUE_NUMBER,
+            ..VirtioCommon::new(paused).map_err(Error::CreateEventFd)?
+        };
+
         Ok(Net {
             id,
             vu_common: VhostUserCommon {
-                virtio_common: VirtioCommon {
-                    device_type: VirtioDeviceType::Net as u32,
-                    queue_sizes: vec![vu_cfg.queue_size; num_queues as usize],
-                    avail_features,
-                    acked_features,
-                    paused_sync: Some(Arc::new(Barrier::new(2))),
-                    min_queues: DEFAULT_QUEUE_NUMBER,
-                    paused: Arc::new(AtomicBool::new(paused)),
-                    ..Default::default()
-                },
                 vu: Some(Arc::new(Mutex::new(vu))),
                 acked_protocol_features,
                 socket_path: vu_cfg.socket,
                 vu_num_queues,
                 server,
                 vring_bases,
-                ..Default::default()
+                ..VhostUserCommon::new(virtio_common)
             },
             config,
             seccomp_action,
@@ -430,13 +429,6 @@ impl VirtioDevice for Net {
                 announcer,
             };
 
-            let paused = Arc::clone(&self.vu_common.virtio_common.paused);
-            // Let's update the barrier as we need 1 for the control queue
-            // thread + 1 for the common vhost-user thread + 1 for the main
-            // thread signalling the pause.
-            self.vu_common.virtio_common.paused_sync = Some(Arc::new(Barrier::new(3)));
-            let paused_sync = self.vu_common.virtio_common.paused_sync.clone();
-
             self.vu_common.virtio_common.spawn_worker(
                 &format!("{}_ctrl", self.id),
                 &self.seccomp_action,
@@ -444,7 +436,7 @@ impl VirtioDevice for Net {
                 &self.exit_evt,
                 Arc::clone(&device_status),
                 Arc::clone(&interrupt_cb),
-                move || ctrl_handler.run_ctrl(&paused, paused_sync.as_ref().unwrap()),
+                move |pause_common| ctrl_handler.run_ctrl(pause_common),
             )?;
         }
 
@@ -464,9 +456,6 @@ impl VirtioDevice for Net {
             pause_evt,
         )?;
 
-        let paused = Arc::clone(&self.vu_common.virtio_common.paused);
-        let paused_sync = self.vu_common.virtio_common.paused_sync.clone();
-
         self.vu_common.spawn_worker(
             &self.id,
             &self.seccomp_action,
@@ -474,7 +463,7 @@ impl VirtioDevice for Net {
             &self.exit_evt,
             Arc::clone(&device_status),
             Arc::clone(&interrupt_cb),
-            move || handler.run(&paused, paused_sync.as_ref().unwrap()),
+            move |pause_common| handler.run(pause_common),
         )?;
 
         self.announce.notify(
@@ -572,15 +561,14 @@ mod tests {
         acked_features: u64,
         interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     ) -> Result<Net> {
+        let virtio_common = VirtioCommon {
+            acked_features,
+            interrupt_cb,
+            ..VirtioCommon::new(false).unwrap()
+        };
+
         Ok(Net {
-            vu_common: VhostUserCommon {
-                virtio_common: VirtioCommon {
-                    acked_features,
-                    interrupt_cb,
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
+            vu_common: VhostUserCommon::new(virtio_common),
             id: "test-vu-net".to_string(),
             config: VirtioNetConfig::default(),
             seccomp_action: SeccompAction::Allow,

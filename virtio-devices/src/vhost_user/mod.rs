@@ -6,7 +6,7 @@ use std::io::ErrorKind;
 use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, OwnedFd};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Mutex};
 use std::{io, result};
 
 use anyhow::anyhow;
@@ -30,6 +30,7 @@ use vmm_sys_util::eventfd::EventFd;
 use vu_common_ctrl::VhostUserHandle;
 
 use crate::seccomp_filters::Thread;
+use crate::thread_helper::PauseCommon;
 use crate::{
     ActivateError, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
     GuestMemory, GuestRegion, VIRTIO_F_IN_ORDER, VIRTIO_F_NOTIFICATION_DATA,
@@ -311,11 +312,7 @@ pub struct VhostUserEpollHandler<S: VhostUserFrontendReqHandler> {
 }
 
 impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
-    pub fn run(
-        &mut self,
-        paused: &AtomicBool,
-        paused_sync: &Barrier,
-    ) -> result::Result<(), EpollHelperError> {
+    pub fn run(&mut self, pause_common: &PauseCommon) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event_custom(
             self.vu.lock().unwrap().socket_handle().as_raw_fd(),
@@ -339,7 +336,7 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
             )?;
         }
 
-        helper.run(paused, paused_sync, self)?;
+        helper.run(pause_common, self)?;
 
         Ok(())
     }
@@ -522,7 +519,6 @@ impl<C> VhostUserState<C> {
     }
 }
 
-#[derive(Default)]
 pub struct VhostUserCommon {
     pub virtio_common: VirtioCommon,
     pub vu: Option<Arc<Mutex<VhostUserHandle>>>,
@@ -541,6 +537,24 @@ pub struct VhostUserCommon {
 }
 
 impl VhostUserCommon {
+    pub fn new(virtio_common: VirtioCommon) -> Self {
+        Self {
+            virtio_common,
+            vu: None,
+            guest_memory: None,
+            acked_protocol_features: 0,
+            socket_path: String::new(),
+            vu_num_queues: 0,
+            migration_started: false,
+            server: false,
+            vring_bases: None,
+            disconnected: Arc::new(AtomicBool::new(false)),
+            saved_dirty_log: None,
+            dirty_logging: false,
+            resume_evt: None,
+        }
+    }
+
     #[expect(clippy::too_many_arguments)]
     pub fn activate<T: VhostUserFrontendReqHandler>(
         &mut self,
@@ -631,7 +645,7 @@ impl VhostUserCommon {
         f: F,
     ) -> result::Result<(), ActivateError>
     where
-        F: FnOnce() -> result::Result<(), EpollHelperError> + Send + 'static,
+        F: FnOnce(&PauseCommon) -> result::Result<(), EpollHelperError> + Send + 'static,
     {
         if let Err(e) = self.virtio_common.spawn_worker(
             id,
@@ -652,7 +666,7 @@ impl VhostUserCommon {
         // Resume the virtio thread if it was paused. Reset must always
         // converge to fresh state, so backend resume / reset failures are
         // logged but don't skip the rest of the teardown.
-        if self.virtio_common.pause_evt.take().is_some()
+        if self.virtio_common.pause_common.is_pause_requested()
             && let Err(e) = self.virtio_common.resume()
         {
             error!("Failed to resume paused device during reset: {e:?}");
@@ -1267,7 +1281,7 @@ mod tests {
         let mut common = VhostUserCommon {
             vu: Some(Arc::new(Mutex::new(vu))),
             acked_protocol_features: VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits(),
-            ..Default::default()
+            ..VhostUserCommon::new(VirtioCommon::new(false).unwrap())
         };
         common.disconnected.store(true, Ordering::Relaxed);
 

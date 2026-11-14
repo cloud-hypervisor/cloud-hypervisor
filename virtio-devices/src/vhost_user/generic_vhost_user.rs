@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Mutex};
 use std::{io, result};
 
 use event_monitor::event;
@@ -164,24 +164,23 @@ since the backend only supports {backend_num_queues}\n",
             vu.start_postcopy(id.clone(), postcopy_handler)?;
         }
 
+        let virtio_common = VirtioCommon {
+            device_type,
+            avail_features,
+            acked_features,
+            queue_sizes: request_queue_sizes,
+            min_queues: 1,
+            ..VirtioCommon::new(paused).map_err(Error::CreateEventFd)?
+        };
+
         Ok(GenericVhostUser {
             vu_common: VhostUserCommon {
-                virtio_common: VirtioCommon {
-                    device_type,
-                    avail_features,
-                    acked_features,
-                    queue_sizes: request_queue_sizes,
-                    paused_sync: Some(Arc::new(Barrier::new(2))),
-                    min_queues: 1,
-                    paused: Arc::new(AtomicBool::new(paused)),
-                    ..Default::default()
-                },
                 vu: Some(Arc::new(Mutex::new(vu))),
                 acked_protocol_features,
                 socket_path: path.to_string(),
                 vu_num_queues,
                 vring_bases,
-                ..Default::default()
+                ..VhostUserCommon::new(virtio_common)
             },
             id,
             cache,
@@ -339,9 +338,6 @@ impl VirtioDevice for GenericVhostUser {
             pause_evt,
         )?;
 
-        let paused = Arc::clone(&self.vu_common.virtio_common.paused);
-        let paused_sync = self.vu_common.virtio_common.paused_sync.clone();
-
         self.vu_common.spawn_worker(
             &self.id,
             &self.seccomp_action,
@@ -349,7 +345,7 @@ impl VirtioDevice for GenericVhostUser {
             &self.exit_evt,
             Arc::clone(&device_status),
             Arc::clone(&interrupt_cb),
-            move || handler.run(&paused, paused_sync.as_ref().unwrap()),
+            move |pause_common| handler.run(pause_common),
         )?;
 
         event!("virtio-device", "activated", "id", &self.id);
