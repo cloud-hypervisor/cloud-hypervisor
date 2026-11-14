@@ -862,6 +862,7 @@ pub(crate) struct VfioCommon {
     pub(crate) legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
     pub(crate) vfio_wrapper: Arc<dyn Vfio>,
     pub(crate) patches: HashMap<usize, ConfigPatch>,
+    pub(crate) vendor_id: u16,
     x_nv_gpudirect_clique: Option<u8>,
     x_exclude_mmap_bars: Vec<u8>,
     pub(crate) migration_flags: Option<u64>,
@@ -925,6 +926,8 @@ impl VfioCommon {
             }
         };
 
+        let vendor_id = vfio_wrapper.read_config_word(PCI_CONFIG_VENDOR_ID_OFFSET);
+
         let mut vfio_common = VfioCommon {
             mmio_regions: Vec::new(),
             configuration,
@@ -937,6 +940,7 @@ impl VfioCommon {
             legacy_interrupt_group,
             vfio_wrapper,
             patches: HashMap::new(),
+            vendor_id,
             x_nv_gpudirect_clique: config.x_nv_gpudirect_clique,
             x_exclude_mmap_bars: config.x_exclude_mmap_bars,
             migration_flags,
@@ -1742,6 +1746,14 @@ impl VfioCommon {
         None
     }
 
+    fn is_nvidia_bar0_config_mirror(&self, region_index: u32, offset: u64) -> bool {
+        self.vendor_id == VENDOR_NVIDIA
+            && region_index == VFIO_PCI_BAR0_REGION_INDEX
+            && (NVIDIA_BAR0_CONFIG_MIRROR_OFFSET
+                ..NVIDIA_BAR0_CONFIG_MIRROR_OFFSET + NVIDIA_BAR0_CONFIG_MIRROR_SIZE)
+                .contains(&offset)
+    }
+
     pub(crate) fn read_bar(&mut self, base: u64, offset: u64, data: &mut [u8]) {
         let addr = base + offset;
         if let Some(region) = self.find_region(addr) {
@@ -1749,6 +1761,16 @@ impl VfioCommon {
 
             if self.interrupt.msix_table_accessed(region.index, offset) {
                 self.interrupt.msix_read_table(offset, data);
+            } else if self.is_nvidia_bar0_config_mirror(region.index, offset) {
+                let config_offset = offset - NVIDIA_BAR0_CONFIG_MIRROR_OFFSET;
+                let reg_idx = (config_offset / PCI_CONFIG_REGISTER_SIZE as u64) as usize;
+                let reg_off = (config_offset % PCI_CONFIG_REGISTER_SIZE as u64) as usize;
+                if matches!(data.len(), 1 | 2 | 4)
+                    && reg_off + data.len() <= PCI_CONFIG_REGISTER_SIZE
+                {
+                    let val = self.read_config_register(reg_idx).to_le_bytes();
+                    data.copy_from_slice(&val[reg_off..reg_off + data.len()]);
+                }
             } else {
                 self.vfio_wrapper.region_read(region.index, offset, data);
             }
@@ -1777,6 +1799,22 @@ impl VfioCommon {
             // If the MSI-X table is written to, we need to update our cache.
             if self.interrupt.msix_table_accessed(region.index, offset) {
                 self.interrupt.msix_write_table(offset, data);
+            } else if self.is_nvidia_bar0_config_mirror(region.index, offset) {
+                // Route writes to the NVIDIA BAR0 config space mirror through
+                // write_config_register() so config patches, MSI/MSI-X updates,
+                // and shadow synchronization apply consistently, while ignoring
+                // writes to BAR registers to prevent guest BAR reprogramming via
+                // the mirror.
+                let config_offset = offset - NVIDIA_BAR0_CONFIG_MIRROR_OFFSET;
+                let reg_idx = (config_offset / PCI_CONFIG_REGISTER_SIZE as u64) as usize;
+                let reg_off = config_offset % PCI_CONFIG_REGISTER_SIZE as u64;
+                if matches!(data.len(), 1 | 2 | 4)
+                    && reg_off as usize + data.len() <= PCI_CONFIG_REGISTER_SIZE
+                    && !(PCI_CONFIG_BAR0_INDEX..PCI_CONFIG_BAR0_INDEX + BAR_NUMS).contains(&reg_idx)
+                    && reg_idx != PCI_ROM_EXP_BAR_INDEX
+                {
+                    let _ = self.write_config_register(reg_idx, reg_off, data);
+                }
             } else {
                 self.vfio_wrapper.region_write(region.index, offset, data);
             }
@@ -2314,98 +2352,143 @@ impl VfioPciDevice {
         region_start: u64,
         region_size: u64,
         vfio_msix: Option<&VfioMsix>,
+        vendor_id: u16,
     ) -> Result<Vec<VfioRegionSparseMmapArea>, VfioPciError> {
+        let mut base_areas = None;
+        let mut msix_mappable = false;
+
         for cap in caps {
             match cap {
-                VfioRegionInfoCap::SparseMmap(sparse_mmap) => return Ok(sparse_mmap.areas.clone()),
+                VfioRegionInfoCap::SparseMmap(sparse_mmap) => {
+                    base_areas = Some(sparse_mmap.areas.clone());
+                }
                 VfioRegionInfoCap::MsixMappable => {
-                    if !is_4k_aligned(region_start) {
-                        error!(
-                            "Region start address 0x{region_start:x} must be at least aligned on 4KiB"
-                        );
-                        return Err(VfioPciError::RegionAlignment);
-                    }
-                    if !is_4k_multiple(region_size) {
-                        error!("Region size 0x{region_size:x} must be at least a multiple of 4KiB");
-                        return Err(VfioPciError::RegionSize);
-                    }
-
-                    // In case the region contains the MSI-X vectors table or
-                    // the MSI-X PBA table, we must calculate the subregions
-                    // around them, leading to a list of sparse areas.
-                    // We want to make sure we will still trap MMIO accesses
-                    // to these MSI-X specific ranges. If these region don't align
-                    // with pagesize, we can achieve it by enlarging its range.
-                    //
-                    // Using a BtreeMap as the list provided through the iterator is sorted
-                    // by key. This ensures proper split of the whole region.
-                    let mut inter_ranges = BTreeMap::new();
-                    if let Some(msix) = vfio_msix {
-                        if region_index == msix.cap.table_bir() {
-                            let (offset, size) = msix.cap.table_range();
-                            let offset = align_page_size_down(offset);
-                            let size = align_page_size_up(size);
-                            // MSI-X mmap region safety: when a device has a non page
-                            // aligned MSI-X offset, fixup_msix_region() relocates MSI-X
-                            // to the upper half of an enlarged virtual BAR, causing the
-                            // offsets in msix.cap to exceed the physical BAR size. This
-                            // check skips carving a hole, preventing invalid offsets from
-                            // reaching the mmap path. With no holes,
-                            // generate_sparse_areas() returns a single sparse region
-                            // covering the entire physical BAR. The relocated MSI-X in
-                            // the virtual BAR remains trapped because its upper half has
-                            // no mmap backing. Exposing the physical MSI-X region through
-                            // mmap is safe when the kernel advertises
-                            // VFIO_REGION_INFO_CAP_MSIX_MAPPABLE. When MSI-X offsets are
-                            // already page aligned, fixup_msix_region() does not relocate
-                            // and this check is satisfied, so a hole is carved at the
-                            // intended offset as before.
-                            if offset < region_size {
-                                inter_ranges.insert(offset, size);
-                            }
-                        }
-                        if region_index == msix.cap.pba_bir() {
-                            let (offset, size) = msix.cap.pba_range();
-                            let offset = align_page_size_down(offset);
-                            let size = align_page_size_up(size);
-                            // See MSI-X mmap safety comment above.
-                            if offset < region_size {
-                                inter_ranges.insert(offset, size);
-                            }
-                        }
-                    }
-
-                    let mut sparse_areas = Vec::new();
-                    let mut current_offset = 0;
-                    for (range_offset, range_size) in inter_ranges {
-                        if range_offset > current_offset {
-                            sparse_areas.push(VfioRegionSparseMmapArea {
-                                offset: current_offset,
-                                size: range_offset - current_offset,
-                            });
-                        }
-                        current_offset = align_page_size_down(range_offset + range_size);
-                    }
-
-                    if region_size > current_offset {
-                        sparse_areas.push(VfioRegionSparseMmapArea {
-                            offset: current_offset,
-                            size: region_size - current_offset,
-                        });
-                    }
-
-                    return Ok(sparse_areas);
+                    msix_mappable = true;
                 }
                 _ => {}
             }
         }
 
-        // In case no relevant capabilities have been found, create a single
-        // sparse area corresponding to the entire MMIO region.
-        Ok(vec![VfioRegionSparseMmapArea {
-            offset: 0,
-            size: region_size,
-        }])
+        let carve_nvidia_bar0_mirror =
+            vendor_id == VENDOR_NVIDIA && region_index == VFIO_PCI_BAR0_REGION_INDEX;
+
+        if !msix_mappable && !carve_nvidia_bar0_mirror {
+            return Ok(base_areas.unwrap_or_else(|| {
+                vec![VfioRegionSparseMmapArea {
+                    offset: 0,
+                    size: region_size,
+                }]
+            }));
+        }
+
+        if !is_4k_aligned(region_start) {
+            error!("Region start address 0x{region_start:x} must be at least aligned on 4KiB");
+            return Err(VfioPciError::RegionAlignment);
+        }
+        if !is_4k_multiple(region_size) {
+            error!("Region size 0x{region_size:x} must be at least a multiple of 4KiB");
+            return Err(VfioPciError::RegionSize);
+        }
+
+        // In case the region contains the MSI-X vectors table, the MSI-X PBA
+        // table, or the NVIDIA BAR0 self-mirroring PCI config space window, we
+        // must calculate the subregions around them, leading to a list of
+        // sparse areas. We want to make sure we will still trap MMIO accesses
+        // to these specific ranges. If these regions don't align with pagesize,
+        // we can achieve it by enlarging their range.
+        //
+        // Using a BTreeMap as the list provided through the iterator is sorted
+        // by key. This ensures proper split of the whole region.
+        let mut inter_ranges = BTreeMap::new();
+        if msix_mappable && let Some(msix) = vfio_msix {
+            if region_index == msix.cap.table_bir() {
+                let (offset, size) = msix.cap.table_range();
+                let offset = align_page_size_down(offset);
+                let size = align_page_size_up(size);
+                // MSI-X mmap region safety: when a device has a non page
+                // aligned MSI-X offset, fixup_msix_region() relocates MSI-X
+                // to the upper half of an enlarged virtual BAR, causing the
+                // offsets in msix.cap to exceed the physical BAR size. This
+                // check skips carving a hole, preventing invalid offsets from
+                // reaching the mmap path. With no holes,
+                // generate_sparse_areas() returns a single sparse region
+                // covering the entire physical BAR. The relocated MSI-X in
+                // the virtual BAR remains trapped because its upper half has
+                // no mmap backing. Exposing the physical MSI-X region through
+                // mmap is safe when the kernel advertises
+                // VFIO_REGION_INFO_CAP_MSIX_MAPPABLE. When MSI-X offsets are
+                // already page aligned, fixup_msix_region() does not relocate
+                // and this check is satisfied, so a hole is carved at the
+                // intended offset as before.
+                if offset < region_size {
+                    inter_ranges.insert(offset, size);
+                }
+            }
+            if region_index == msix.cap.pba_bir() {
+                let (offset, size) = msix.cap.pba_range();
+                let offset = align_page_size_down(offset);
+                let size = align_page_size_up(size);
+                // See MSI-X mmap safety comment above.
+                if offset < region_size {
+                    inter_ranges.insert(offset, size);
+                }
+            }
+        }
+
+        if carve_nvidia_bar0_mirror {
+            let start = align_page_size_down(NVIDIA_BAR0_CONFIG_MIRROR_OFFSET);
+            let end = align_page_size_up(
+                NVIDIA_BAR0_CONFIG_MIRROR_OFFSET + NVIDIA_BAR0_CONFIG_MIRROR_SIZE,
+            );
+            if start < region_size {
+                let aligned_size = end - start;
+                inter_ranges
+                    .entry(start)
+                    .and_modify(|s: &mut u64| *s = (*s).max(aligned_size))
+                    .or_insert(aligned_size);
+            }
+        }
+
+        let base_areas = base_areas.unwrap_or_else(|| {
+            vec![VfioRegionSparseMmapArea {
+                offset: 0,
+                size: region_size,
+            }]
+        });
+
+        let mut sparse_areas = Vec::new();
+        for area in base_areas {
+            let area_start = area.offset;
+            let area_end = area.offset + area.size;
+            let mut current_offset = area_start;
+
+            for (&range_offset, &range_size) in &inter_ranges {
+                let hole_start = range_offset;
+                let hole_end = align_page_size_down(range_offset + range_size);
+                if hole_end <= current_offset {
+                    continue;
+                }
+                if hole_start >= area_end {
+                    break;
+                }
+                if hole_start > current_offset {
+                    sparse_areas.push(VfioRegionSparseMmapArea {
+                        offset: current_offset,
+                        size: hole_start - current_offset,
+                    });
+                }
+                current_offset = cmp::min(area_end, hole_end);
+            }
+
+            if area_end > current_offset {
+                sparse_areas.push(VfioRegionSparseMmapArea {
+                    offset: current_offset,
+                    size: area_end - current_offset,
+                });
+            }
+        }
+
+        Ok(sparse_areas)
     }
 
     /// Map MMIO regions into the guest, and avoid VM exits when the guest tries
@@ -2472,6 +2555,7 @@ impl VfioPciDevice {
                     region.start.0,
                     mmap_size,
                     self.common.interrupt.msix.as_ref(),
+                    self.common.vendor_id,
                 )?;
 
                 let page_size = get_page_size();
@@ -2690,6 +2774,8 @@ impl BusDevice for VfioPciDevice {
     }
 }
 
+// Offset of the 16-bit vendor ID register in the PCI configuration space.
+const PCI_CONFIG_VENDOR_ID_OFFSET: u32 = 0x00;
 // Offset of the 16-bit status register in the PCI configuration space.
 const PCI_CONFIG_STATUS_OFFSET: u32 = 0x06;
 // Status bit indicating the presence of a capabilities list.
@@ -2718,6 +2804,12 @@ const PCI_HEADER_TYPE_REG_INDEX: usize = 3;
 const PCI_CONFIG_BAR0_INDEX: usize = 4;
 // PCI ROM expansion BAR register index
 const PCI_ROM_EXP_BAR_INDEX: usize = 12;
+// NVIDIA PCI Vendor ID.
+const VENDOR_NVIDIA: u16 = 0x10de;
+// Offset of the self-mirroring PCI configuration space window within NVIDIA BAR0.
+const NVIDIA_BAR0_CONFIG_MIRROR_OFFSET: u64 = 0x88000;
+// Size of the self-mirroring PCI configuration space window within NVIDIA BAR0.
+const NVIDIA_BAR0_CONFIG_MIRROR_SIZE: u64 = 0x1000;
 
 impl PciDevice for VfioPciDevice {
     fn allocate_bars(
@@ -3542,6 +3634,7 @@ mod tests {
             legacy_interrupt_group: None,
             vfio_wrapper,
             patches: HashMap::new(),
+            vendor_id: 0,
             x_nv_gpudirect_clique: None,
             x_exclude_mmap_bars: Vec::new(),
             migration_flags,
@@ -4018,5 +4111,208 @@ mod tests {
         restored.set_state(&state, None, None, None).unwrap();
 
         assert_eq!(restored.read_config_register(0x40 / 4), 0x0000_1234);
+    }
+
+    struct MockNvidiaDevice {
+        config_space: Mutex<Vec<u8>>,
+        bar0: Mutex<Vec<u8>>,
+    }
+
+    impl MockNvidiaDevice {
+        fn new() -> Arc<Self> {
+            let mut config_space = vec![0u8; PCIE_CONFIG_SPACE_SIZE as usize];
+            // Vendor ID = 0x10de (NVIDIA), Device ID = 0x307e
+            config_space[0..4].copy_from_slice(&0x307e_10deu32.to_le_bytes());
+            // Physical BAR0 in hardware config space (different from guest virtual BAR0)
+            config_space[0x10..0x14].copy_from_slice(&0xdead_0000u32.to_le_bytes());
+
+            let mut bar0 = vec![0u8; 0x10_0000];
+            // Put raw physical BAR0 values in the 0x88000 window and neighboring offsets
+            bar0[0x80000..0x80004].copy_from_slice(&0x1122_3344u32.to_le_bytes());
+            bar0[0x88010..0x88014].copy_from_slice(&0xdead_0000u32.to_le_bytes());
+            bar0[0x89000..0x89004].copy_from_slice(&0x5566_7788u32.to_le_bytes());
+
+            Arc::new(Self {
+                config_space: Mutex::new(config_space),
+                bar0: Mutex::new(bar0),
+            })
+        }
+
+        fn config_dword(&self, offset: usize) -> u32 {
+            let space = self.config_space.lock().unwrap();
+            u32::from_le_bytes(space[offset..offset + 4].try_into().unwrap())
+        }
+
+        fn bar0_dword(&self, offset: usize) -> u32 {
+            let bar0 = self.bar0.lock().unwrap();
+            u32::from_le_bytes(bar0[offset..offset + 4].try_into().unwrap())
+        }
+    }
+
+    impl Vfio for MockNvidiaDevice {
+        fn region_read(&self, index: u32, offset: u64, data: &mut [u8]) {
+            let start = offset as usize;
+            if index == VFIO_PCI_CONFIG_REGION_INDEX {
+                let space = self.config_space.lock().unwrap();
+                data.copy_from_slice(&space[start..start + data.len()]);
+            } else if index == VFIO_PCI_BAR0_REGION_INDEX {
+                let bar0 = self.bar0.lock().unwrap();
+                data.copy_from_slice(&bar0[start..start + data.len()]);
+            }
+        }
+
+        fn region_write(&self, index: u32, offset: u64, data: &[u8]) {
+            let start = offset as usize;
+            if index == VFIO_PCI_CONFIG_REGION_INDEX {
+                let mut space = self.config_space.lock().unwrap();
+                space[start..start + data.len()].copy_from_slice(data);
+            } else if index == VFIO_PCI_BAR0_REGION_INDEX {
+                let mut bar0 = self.bar0.lock().unwrap();
+                bar0[start..start + data.len()].copy_from_slice(data);
+            }
+        }
+    }
+
+    #[test]
+    fn nvidia_bar0_config_mirror_mediates_reads_and_writes() {
+        let mock = MockNvidiaDevice::new();
+        let mut common = test_vfio_common(Arc::clone(&mock), None);
+        common.vendor_id = VENDOR_NVIDIA;
+
+        let bar0_gpa: u64 = 0xc000_0000;
+        let bar0_size: u64 = 0x10_0000;
+        let bar_cfg = PciBarConfiguration::default()
+            .set_index(VFIO_PCI_BAR0_REGION_INDEX as usize)
+            .set_address(bar0_gpa)
+            .set_size(bar0_size)
+            .set_region_type(PciBarRegionType::Memory32BitRegion)
+            .set_prefetchable(PciBarPrefetchable::NotPrefetchable);
+        common.configuration.add_pci_bar(&bar_cfg).unwrap();
+        common.mmio_regions.push(MmioRegion {
+            start: GuestAddress(bar0_gpa),
+            length: bar0_size,
+            type_: PciBarRegionType::Memory32BitRegion,
+            index: VFIO_PCI_BAR0_REGION_INDEX,
+            user_memory_regions: Vec::new(),
+        });
+
+        // Add a read-only config patch at offset 0x50
+        common.patch_reg(0x50 / 4, 0xffff_ffff, 0xcafe_babe, 0xffff_ffff);
+
+        // 1. Reading BAR0 + 0x88010 (BAR0 config register) returns the virtualized
+        // guest BAR0 GPA (0xc000_0000), not the physical BAR0 (0xdead_0000).
+        let mut buf = [0u8; 4];
+        common.read_bar(bar0_gpa, 0x88010, &mut buf);
+        assert_eq!(u32::from_le_bytes(buf), bar0_gpa as u32);
+
+        // 2. Reading BAR0 + 0x88050 returns the patched virtual capability value.
+        common.read_bar(bar0_gpa, 0x88050, &mut buf);
+        assert_eq!(u32::from_le_bytes(buf), 0xcafe_babe);
+
+        // 3. Writing to BAR0 + 0x88010 (a BAR register) is ignored and never
+        // modifies the virtualized BAR0, physical BAR0 register, or physical BAR0 MMIO.
+        common.write_bar(bar0_gpa, 0x88010, &0xbeef_0000u32.to_le_bytes());
+        assert_eq!(mock.config_dword(0x10), 0xdead_0000);
+        assert_eq!(mock.bar0_dword(0x88010), 0xdead_0000);
+        common.read_bar(bar0_gpa, 0x88010, &mut buf);
+        assert_eq!(u32::from_le_bytes(buf), bar0_gpa as u32);
+
+        // 4. Writing to a read-only patched capability at BAR0 + 0x88050 is blocked.
+        common.write_bar(bar0_gpa, 0x88050, &0x1234_5678u32.to_le_bytes());
+        assert_eq!(mock.config_dword(0x50), 0);
+        common.read_bar(bar0_gpa, 0x88050, &mut buf);
+        assert_eq!(u32::from_le_bytes(buf), 0xcafe_babe);
+
+        // 5. Writing to a writable non-BAR config register at BAR0 + 0x88040 is
+        // routed through write_config_register() to the VFIO config region.
+        common.write_bar(bar0_gpa, 0x88040, &0xabcd_ef01u32.to_le_bytes());
+        assert_eq!(mock.config_dword(0x40), 0xabcd_ef01);
+        assert_eq!(mock.bar0_dword(0x88040), 0);
+        common.read_bar(bar0_gpa, 0x88040, &mut buf);
+        assert_eq!(u32::from_le_bytes(buf), 0xabcd_ef01);
+
+        // 6. Neighboring offsets on the same 64 KiB page (0x80000 and 0x89000)
+        // continue to fall through to BAR0 region_read / region_write.
+        common.read_bar(bar0_gpa, 0x80000, &mut buf);
+        assert_eq!(u32::from_le_bytes(buf), 0x1122_3344);
+        common.read_bar(bar0_gpa, 0x89000, &mut buf);
+        assert_eq!(u32::from_le_bytes(buf), 0x5566_7788);
+
+        common.write_bar(bar0_gpa, 0x80000, &0x99aa_bbccu32.to_le_bytes());
+        assert_eq!(mock.bar0_dword(0x80000), 0x99aa_bbcc);
+    }
+
+    #[test]
+    fn generate_sparse_areas_carves_out_nvidia_bar0_config_mirror() {
+        let region_size: u64 = 0x400_0000; // 64 MiB BAR0
+        let hole_start = align_page_size_down(NVIDIA_BAR0_CONFIG_MIRROR_OFFSET);
+        let hole_end =
+            align_page_size_up(NVIDIA_BAR0_CONFIG_MIRROR_OFFSET + NVIDIA_BAR0_CONFIG_MIRROR_SIZE);
+
+        // 1. NVIDIA BAR0 without capabilities still carves out the mirror window.
+        let areas = VfioPciDevice::generate_sparse_areas(
+            &[],
+            VFIO_PCI_BAR0_REGION_INDEX,
+            0x1_0000_0000,
+            region_size,
+            None,
+            VENDOR_NVIDIA,
+        )
+        .unwrap();
+        assert_eq!(areas.len(), 2);
+        assert_eq!(areas[0].offset, 0);
+        assert_eq!(areas[0].size, hole_start);
+        assert_eq!(areas[1].offset, hole_end);
+        assert_eq!(areas[1].size, region_size - hole_end);
+
+        // 2. Non-NVIDIA BAR0 without capabilities maps the entire region.
+        let non_nv = VfioPciDevice::generate_sparse_areas(
+            &[],
+            VFIO_PCI_BAR0_REGION_INDEX,
+            0x1_0000_0000,
+            region_size,
+            None,
+            0x8086,
+        )
+        .unwrap();
+        assert_eq!(non_nv.len(), 1);
+        assert_eq!(non_nv[0].offset, 0);
+        assert_eq!(non_nv[0].size, region_size);
+
+        // 3. NVIDIA non-BAR0 (e.g. BAR2) without capabilities maps the entire region.
+        let nv_bar2 = VfioPciDevice::generate_sparse_areas(
+            &[],
+            VFIO_PCI_BAR2_REGION_INDEX,
+            0x1_0000_0000,
+            region_size,
+            None,
+            VENDOR_NVIDIA,
+        )
+        .unwrap();
+        assert_eq!(nv_bar2.len(), 1);
+        assert_eq!(nv_bar2[0].offset, 0);
+        assert_eq!(nv_bar2[0].size, region_size);
+
+        // 4. NVIDIA BAR0 with SparseMmap capability still carves out the mirror window.
+        let sparse_cap = VfioRegionInfoCap::SparseMmap(vfio_ioctls::VfioRegionInfoCapSparseMmap {
+            areas: vec![VfioRegionSparseMmapArea {
+                offset: 0,
+                size: region_size,
+            }],
+        });
+        let sparse_areas = VfioPciDevice::generate_sparse_areas(
+            &[sparse_cap],
+            VFIO_PCI_BAR0_REGION_INDEX,
+            0x1_0000_0000,
+            region_size,
+            None,
+            VENDOR_NVIDIA,
+        )
+        .unwrap();
+        assert_eq!(sparse_areas.len(), 2);
+        assert_eq!(sparse_areas[0].offset, 0);
+        assert_eq!(sparse_areas[0].size, hole_start);
+        assert_eq!(sparse_areas[1].offset, hole_end);
+        assert_eq!(sparse_areas[1].size, region_size - hole_end);
     }
 }
