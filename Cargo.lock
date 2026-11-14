@@ -2469,6 +2469,7 @@ dependencies = [
  "smallvec",
  "thiserror",
  "vhost",
+ "vhost-user-backend",
  "virtio-bindings",
  "virtio-queue",
  "vm-allocator",
