@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 use std::{io, mem, result, thread};
 
 use anyhow::anyhow;
-use block::async_io::AsyncIo;
+use block::async_io::{AsyncIo, AsyncIoResult};
 use block::disk_file::AsyncFullDiskFile;
 use block::error::BlockError;
 use block::fcntl::{LockError, LockGranularity, LockGranularityChoice, LockType, get_lock_state};
@@ -783,6 +783,11 @@ pub struct Block {
     common: VirtioCommon,
     id: String,
     disk_image: Box<dyn AsyncFullDiskFile>,
+    // Syncs the disk from pause() and notify_started_migration(). They can run
+    // on a migration thread, whose seccomp filter does not allow setting up an
+    // I/O ring, so this is created in activate(). A device that was never
+    // activated has no writes to sync.
+    sync_io: Option<Box<dyn AsyncIo>>,
     disk_path: PathBuf,
     disk_nsectors: Arc<AtomicU64>,
     config: VirtioBlockConfig,
@@ -949,6 +954,7 @@ impl Block {
             },
             id,
             disk_image,
+            sync_io: None,
             disk_path,
             disk_nsectors: Arc::new(AtomicU64::new(disk_nsectors)),
             config,
@@ -964,6 +970,13 @@ impl Block {
             active_request_count: Arc::new(AtomicUsize::new(0)),
             draining_active_requests: Arc::new(AtomicBool::new(false)),
         })
+    }
+
+    fn sync_disk(&mut self) -> AsyncIoResult<()> {
+        match self.sync_io.as_mut() {
+            Some(sync_io) => sync_io.fsync(None),
+            None => Ok(()),
+        }
     }
 
     fn wait_for_active_requests(&self) -> result::Result<(), anyhow::Error> {
@@ -1204,6 +1217,11 @@ impl VirtioDevice for Block {
 
         let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());
 
+        self.sync_io = Some(self.disk_image.create_async_io(1).map_err(|e| {
+            error!("failed to create AsyncIo to sync the disk: {e}");
+            ActivateError::BadActivate
+        })?);
+
         // `queue_idx` is the virtqueue number the driver configured. It differs from
         // the position in `queues`, which only holds the enabled queues.
         for (queue_idx, mut queue, queue_evt) in queues.drain(..) {
@@ -1356,6 +1374,13 @@ impl Pausable for Block {
                     MigratableError::Pause(anyhow::Error::new(e).context("sync disk metadata"))
                 })
             })
+            .and_then(|()| {
+                // Completed writes may only be in the host's page cache. Anything
+                // that reads the disk while the VM is paused, such as a migration's
+                // destination on shared storage, must find them on the disk.
+                self.sync_disk()
+                    .map_err(|e| MigratableError::Pause(anyhow::Error::new(e).context("sync disk")))
+            })
             .and_then(|()| self.common.pause());
 
         self.draining_active_requests.store(false, Ordering::SeqCst);
@@ -1383,6 +1408,10 @@ impl Migratable for Block {
         if let Err(e) = self.disk_image.sync_metadata() {
             warn!("Failed to flush disk {} before migration: {e}", self.id);
         }
+        // Leave pause() only what the guest writes during the migration.
+        if let Err(e) = self.sync_disk() {
+            warn!("Failed to sync disk {} before migration: {e}", self.id);
+        }
         Ok(())
     }
 }
@@ -1394,7 +1423,7 @@ mod tests {
     use std::path::Path;
     use std::sync::{Mutex, mpsc};
 
-    use block::async_io::{AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
+    use block::async_io::{AsyncIoCompletion, AsyncIoError, AsyncIoOperation};
     use hypervisor::Vm;
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::desc::split::Descriptor;
@@ -1777,6 +1806,71 @@ mod tests {
         assert_eq!(vq.used.idx.get(), 1);
         let status: u8 = mem.read_obj(GuestAddress(REQ_STATUS_ADDR)).unwrap();
         assert_eq!(status, VIRTIO_BLK_S_IOERR as u8);
+    }
+
+    // Fails every fsync, or counts it when given a counter.
+    struct SyncIo(EventFd, Option<Arc<AtomicUsize>>);
+    impl AsyncIo for SyncIo {
+        fn notifier(&self) -> &EventFd {
+            &self.0
+        }
+        fn submit_data_operation(&mut self, _: AsyncIoOperation) -> AsyncIoResult<()> {
+            unreachable!()
+        }
+        fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
+            assert_eq!(user_data, None);
+            match &self.1 {
+                Some(count) => {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                }
+                None => Err(AsyncIoError::Fsync(io::Error::from_raw_os_error(libc::EIO))),
+            }
+        }
+        fn punch_hole(&mut self, _: u64, _: u64, _: u64) -> AsyncIoResult<()> {
+            unreachable!()
+        }
+        fn write_zeroes(&mut self, _: u64, _: u64, _: u64) -> AsyncIoResult<()> {
+            unreachable!()
+        }
+        fn next_completed_request(&mut self) -> Option<AsyncIoCompletion> {
+            None
+        }
+    }
+
+    #[test]
+    fn pause_and_migration_start_sync_the_disk() {
+        use vmm_sys_util::tempdir::TempDir;
+
+        let dir = TempDir::new_with_prefix("/dev/shm/ch-sync-disk").unwrap();
+        let mut block = make_block_with_serial(dir.as_path(), None, 1);
+        // Never activated: nothing to sync, and nothing to sync with.
+        block.pause().unwrap();
+        block.resume().unwrap();
+
+        let count = Arc::new(AtomicUsize::new(0));
+        block.sync_io = Some(Box::new(SyncIo(
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+            Some(Arc::clone(&count)),
+        )));
+        block.notify_started_migration().unwrap();
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        block.pause().unwrap();
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+        block.resume().unwrap();
+    }
+
+    #[test]
+    fn pause_fails_when_the_disk_sync_fails() {
+        use vmm_sys_util::tempdir::TempDir;
+
+        let dir = TempDir::new_with_prefix("/dev/shm/ch-sync-disk").unwrap();
+        let mut block = make_block_with_serial(dir.as_path(), None, 1);
+        block.sync_io = Some(Box::new(SyncIo(EventFd::new(EFD_NONBLOCK).unwrap(), None)));
+
+        // Best effort at the start of a migration, required for the pause.
+        block.notify_started_migration().unwrap();
+        block.pause().unwrap_err();
     }
 
     #[test]
