@@ -320,8 +320,8 @@ fn run_watchdog_case(bytes: &[u8], mode: usize) -> Result<(), ()> {
     let _ = watchdog.device_type();
     let _ = watchdog.queue_max_sizes();
     let features = watchdog.features();
-    watchdog.ack_features(features);
-    watchdog.ack_features(u64::from(cursor.next_u8()) << 56);
+    // Unknown high feature bits exercise the filtering in ack_features.
+    watchdog.ack_features(features | (u64::from(cursor.next_u8()) << 56));
 
     if config.pre_activate_pause_resume {
         let _ = watchdog.pause();
