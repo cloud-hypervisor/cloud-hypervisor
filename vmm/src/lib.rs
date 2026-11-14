@@ -1336,11 +1336,25 @@ impl Vmm {
 
         let config = Arc::clone(&vm_migration_config.vm_config);
         self.vm_config = Some(vm_migration_config.vm_config);
-        self.console_info = Some(
-            pre_create_console_devices(self)
-                .context("Error creating console devices")
-                .map_err(MigratableError::MigrateReceive)?,
-        );
+
+        // Console setup
+        {
+            config
+                .lock()
+                .unwrap()
+                .update_console_outputs(
+                    receive_data_migration.serial.as_ref(),
+                    receive_data_migration.console.as_ref(),
+                )
+                .context("Error updating console outputs")
+                .map_err(MigratableError::MigrateReceive)?;
+
+            self.console_info = Some(
+                pre_create_console_devices(self)
+                    .context("Error creating console devices")
+                    .map_err(MigratableError::MigrateReceive)?,
+            );
+        }
 
         let mut vm_config = config.lock().unwrap();
 
@@ -2631,6 +2645,15 @@ impl RequestHandler for Vmm {
                     .validate(&vm_config.lock().unwrap().clone())
                     .map_err(VmError::ConfigValidation)?;
 
+                vm_config
+                    .lock()
+                    .unwrap()
+                    .update_console_outputs(
+                        restore_cfg.serial.as_ref(),
+                        restore_cfg.console.as_ref(),
+                    )
+                    .map_err(VmError::ConfigValidation)?;
+
                 // Update VM's net configurations with new fds received for restore operation
                 if let (Some(restored_nets), Some(vm_net_configs)) =
                     (restore_cfg.net_fds, &mut vm_config.lock().unwrap().net)
@@ -3746,6 +3769,43 @@ mod tests {
 
     pub(crate) fn test_fd() -> File {
         File::open("/dev/null").unwrap()
+    }
+
+    #[test]
+    fn test_update_console_outputs() {
+        let file = |path: &str| ConsoleOutput::File {
+            file: PathBuf::from(path),
+        };
+        let mut config = create_dummy_vm_config();
+        config.serial.output = file("/tmp/serial-old");
+        config.console.output = file("/tmp/console-old");
+
+        // `None` must keep the output of the respective console.
+        config
+            .update_console_outputs(Some(&file("/tmp/serial-new")), None)
+            .expect("should update only the serial console");
+        assert_eq!(config.serial.output, file("/tmp/serial-new"));
+        assert_eq!(config.console.output, file("/tmp/console-old"));
+
+        config
+            .update_console_outputs(None, Some(&file("/tmp/console-new")))
+            .expect("should update only the virtio console");
+        assert_eq!(config.serial.output, file("/tmp/serial-new"));
+        assert_eq!(config.console.output, file("/tmp/console-new"));
+
+        config
+            .update_console_outputs(Some(&file("/tmp/s")), Some(&file("/tmp/c")))
+            .expect("should update both consoles");
+        assert_eq!(config.serial.output, file("/tmp/s"));
+        assert_eq!(config.console.output, file("/tmp/c"));
+
+        assert_eq!(
+            config.update_console_outputs(None, Some(&ConsoleOutput::Null)),
+            Err(ValidationError::ConsoleOutputUpdateModeMismatch(
+                file("/tmp/c"),
+                ConsoleOutput::Null
+            ))
+        );
     }
 
     #[test]

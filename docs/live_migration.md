@@ -325,6 +325,14 @@ following parameters. Unless marked otherwise, they apply to
   For postcopy migration and on-demand restore, keep fetching the remaining
   guest pages in the background after the VM resumed. With `off`, only the
   pages that the guest or the VMM access are fetched. Defaults to `on`.
+- `serial_file <path>`, `serial_socket <path>`, or `serial_tcp <ip>:<port>`
+  (`receive-migration`): \
+  New output of the serial port on the destination, for example if the output
+  of the source is not available there. It must use the same mode as the output
+  of the source VM. At most one of these options can be set.
+- `console_file <path>`, `console_socket <path>`, or `console_tcp <ip>:<port>`
+  (`receive-migration`): \
+  The same for the `virtio-console` device.
 
 ## Connection Timeouts
 

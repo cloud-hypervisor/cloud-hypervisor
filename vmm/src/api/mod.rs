@@ -65,8 +65,8 @@ use crate::migration::transport::{
 };
 use crate::vm::{Error as VmError, VmState};
 use crate::vm_config::{
-    DeviceConfig, DiskConfig, ExternalFd, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
-    UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
+    ConsoleOutput, DeviceConfig, DiskConfig, ExternalFd, FsConfig, GenericVhostUserConfig,
+    NetConfig, PmemConfig, UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
 };
 
 /// API errors are sent back from the VMM API server through the ApiResponse.
@@ -336,6 +336,12 @@ pub struct VmReceiveMigrationData {
     /// Enable the background thread for faulting all remaining pages.
     #[serde(default = "default_receive_migration_background_fetch_pages")]
     pub background_fetch_pages: bool,
+    /// New output of the serial console, in the mode of the source VM.
+    #[serde(default)]
+    pub serial: Option<ConsoleOutput>,
+    /// New output of the virtio console, in the mode of the source VM.
+    #[serde(default)]
+    pub console: Option<ConsoleOutput>,
 }
 
 fn default_receive_migration_background_fetch_pages() -> bool {
@@ -387,13 +393,18 @@ pub enum VmReceiveMigrationConfigError {
     /// An update with an empty memory zone ID was specified.
     #[error("One or more memory zone updates contained an empty ID")]
     MemoryZoneUpdatesEmptyId,
+    /// A new console output is invalid.
+    #[error("Invalid console output for receive-migration")]
+    InvalidConsoleOutput(#[source] ConfigError),
 }
 
 impl VmReceiveMigrationData {
     pub const SYNTAX: &'static str = "VM receive migration parameters \
         \"<receiver_url>\" or \"receiver_url=<url>[,tls_dir=<path>]\
         [,vfio_fds=<list_of_vfio_ids_with_their_associated_fd>][,iommufd_fd=<fd>]\
-        [,zone_updates=[<id@host_numa_node>]][,background_fetch_pages=on|off]\"";
+        [,zone_updates=[<id@host_numa_node>]][,background_fetch_pages=on|off]\
+        [,serial_file=<path>|serial_socket=<path>|serial_tcp=<ip>:<port>]\
+        [,console_file=<path>|console_socket=<path>|console_tcp=<ip>:<port>]\"";
 
     /// # Safety
     /// Live FDs named in the input must be exclusively owned by the caller.
@@ -407,7 +418,8 @@ impl VmReceiveMigrationData {
             .add("vfio_fds")
             .add("iommufd_fd")
             .add("zone_updates")
-            .add("background_fetch_pages");
+            .add("background_fetch_pages")
+            .add_all(ConsoleOutput::UPDATE_OPTIONS);
         parser
             .parse(migration)
             .map_err(VmReceiveMigrationConfigError::ParseError)?;
@@ -458,6 +470,10 @@ impl VmReceiveMigrationData {
             .map_err(VmReceiveMigrationConfigError::ParseError)?
             .unwrap_or(Toggle(true))
             .0;
+        let serial = ConsoleOutput::parse_update(&parser, "serial")
+            .map_err(VmReceiveMigrationConfigError::InvalidConsoleOutput)?;
+        let console = ConsoleOutput::parse_update(&parser, "console")
+            .map_err(VmReceiveMigrationConfigError::InvalidConsoleOutput)?;
 
         let data = Self {
             receiver_url,
@@ -466,6 +482,8 @@ impl VmReceiveMigrationData {
             iommufd_fd,
             zone_updates,
             background_fetch_pages,
+            serial,
+            console,
         };
 
         data.validate()?;
@@ -2230,6 +2248,7 @@ mod tests {
 
     use super::*;
     use crate::tests::test_fd;
+    use crate::vm_config::TcpConsoleConfig;
 
     struct TestDir {
         path: PathBuf,
@@ -2324,6 +2343,61 @@ mod tests {
     }
 
     #[test]
+    fn test_vm_receive_migration_data_console_outputs_serde() {
+        let data = serde_json::from_str::<VmReceiveMigrationData>(
+            r#"{"receiver_url":"tcp:127.0.0.1:1234",
+                "serial":{"mode":"Tcp","tcp":{"address":"127.0.0.1:4444"}},
+                "console":{"mode":"File","file":"/tmp/console.log"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            data.serial,
+            Some(ConsoleOutput::Tcp {
+                tcp: TcpConsoleConfig {
+                    address: "127.0.0.1:4444".parse().unwrap(),
+                    server: true,
+                },
+            })
+        );
+        assert_eq!(
+            data.console,
+            Some(ConsoleOutput::File {
+                file: PathBuf::from("/tmp/console.log"),
+            })
+        );
+        // ch-remote serializes the data and the VMM deserializes it again.
+        assert_eq!(
+            serde_json::from_str::<VmReceiveMigrationData>(&serde_json::to_string(&data).unwrap())
+                .unwrap(),
+            data
+        );
+
+        let data = serde_json::from_str::<VmReceiveMigrationData>(
+            r#"{"receiver_url":"tcp:127.0.0.1:1234"}"#,
+        )
+        .unwrap();
+        assert_eq!(data.serial, None);
+        assert_eq!(data.console, None);
+    }
+
+    #[test]
+    fn test_vm_receive_migration_data_invalid_console_output() {
+        for options in [
+            "serial_file=/tmp/a,serial_tcp=127.0.0.1:4444",
+            "console_tcp=localhost:4444",
+        ] {
+            // SAFETY: This test input contains no inherited descriptors.
+            let result = unsafe {
+                VmReceiveMigrationData::parse(&format!("receiver_url=tcp:127.0.0.1:1234,{options}"))
+            };
+            assert!(matches!(
+                result,
+                Err(VmReceiveMigrationConfigError::InvalidConsoleOutput(_))
+            ));
+        }
+    }
+
+    #[test]
     fn test_vm_receive_migration_data_parse() {
         let data =
             // SAFETY: This test input contains no inherited descriptors.
@@ -2337,6 +2411,8 @@ mod tests {
                 iommufd_fd: Default::default(),
                 zone_updates: vec![],
                 background_fetch_pages: true,
+                serial: None,
+                console: None,
             }
         );
 
@@ -2363,7 +2439,7 @@ mod tests {
         // SAFETY: This test input contains no inherited descriptors.
         let data = unsafe {
             VmReceiveMigrationData::parse(&format!(
-                "receiver_url=tcp:192.168.1.1:8080,tls_dir={}",
+                "receiver_url=tcp:192.168.1.1:8080,tls_dir={},serial_tcp=1.2.3.4:6789,console_file=/tmp/c",
                 tls_dir_path.display()
             ))
         }
@@ -2377,6 +2453,15 @@ mod tests {
                 iommufd_fd: Default::default(),
                 zone_updates: vec![],
                 background_fetch_pages: true,
+                serial: Some(ConsoleOutput::Tcp {
+                    tcp: TcpConsoleConfig {
+                        address: "1.2.3.4:6789".parse().unwrap(),
+                        server: true,
+                    },
+                }),
+                console: Some(ConsoleOutput::File {
+                    file: PathBuf::from("/tmp/c"),
+                }),
             }
         );
 

@@ -6,6 +6,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 #[cfg(feature = "ivshmem")]
 use std::fs;
+use std::mem::discriminant;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -235,6 +236,12 @@ pub enum ValidationError {
     ConsoleTcpClientUnsupported,
     #[error("TCP console port must not be zero")]
     ConsoleTcpPortZero,
+    /// More than one new output was given for the same console
+    #[error("More than one new output given for console {0}")]
+    ConsoleOutputUpdateAmbiguous(String),
+    /// A new console output must keep the mode of the current one
+    #[error("Cannot change console output {0:?} to {1:?} with a different mode")]
+    ConsoleOutputUpdateModeMismatch(ConsoleOutput, ConsoleOutput),
     /// Boot has no vCPUs
     #[error("Number of boot vCPUs must be greater than 0")]
     CpusBootZero,
@@ -2580,6 +2587,62 @@ impl ConsoleOutput {
         }
         Ok(())
     }
+
+    /// Options that select a new output when restoring or migrating a VM.
+    pub(crate) const UPDATE_OPTIONS: &[&str] = &[
+        "serial_file",
+        "serial_socket",
+        "serial_tcp",
+        "console_file",
+        "console_socket",
+        "console_tcp",
+    ];
+
+    /// Parses the new output of `device` from the [`Self::UPDATE_OPTIONS`] set
+    /// in `parser`, where `device` is the prefix of the option names.
+    pub(crate) fn parse_update(parser: &OptionParser, device: &str) -> Result<Option<Self>> {
+        let file = parser.get(&format!("{device}_file"));
+        let socket = parser.get(&format!("{device}_socket"));
+        let tcp = parser.get(&format!("{device}_tcp"));
+
+        let output = match (file, socket, tcp) {
+            (None, None, None) => return Ok(None),
+            (Some(file), None, None) => Self::File {
+                file: PathBuf::from(file),
+            },
+            (None, Some(socket), None) => Self::Socket {
+                socket: PathBuf::from(socket),
+            },
+            (None, None, Some(address)) => Self::Tcp {
+                tcp: TcpConsoleConfig {
+                    address: parse_tcp_address(&address)
+                        .map_err(|source| Error::ResolveConsoleTcpAddress { address, source })?,
+                    server: true,
+                },
+            },
+            _ => {
+                return Err(Error::Validation(
+                    ValidationError::ConsoleOutputUpdateAmbiguous(device.to_owned()),
+                ));
+            }
+        };
+
+        Ok(Some(output))
+    }
+
+    /// Replaces the output with `new`. The mode must stay the same because it
+    /// affects the devices of the VM: for example, `Off` creates no device.
+    fn update(&mut self, new: &Self) -> ValidationResult<()> {
+        if discriminant(self) != discriminant(new) {
+            return Err(ValidationError::ConsoleOutputUpdateModeMismatch(
+                self.clone(),
+                new.clone(),
+            ));
+        }
+        new.validate()?;
+        self.clone_from(new);
+        Ok(())
+    }
 }
 
 impl ConsoleConfig {
@@ -3057,6 +3120,12 @@ pub struct RestoreConfig {
     pub resume: bool,
     #[serde(default)]
     pub zone_updates: Vec<VmMemoryZoneUpdateData>,
+    /// New output of the serial console, in the mode of the snapshot.
+    #[serde(default)]
+    pub serial: Option<ConsoleOutput>,
+    /// New output of the virtio console, in the mode of the snapshot.
+    #[serde(default)]
+    pub console: Option<ConsoleOutput>,
 }
 
 impl RestoreConfig {
@@ -3065,7 +3134,10 @@ impl RestoreConfig {
         memory_restore_mode=copy|ondemand|copyonwrite,\
         net_fds=<list_of_net_ids_with_their_associated_fds>,\
         vfio_fds=<list_of_vfio_ids_with_their_associated_fd>,iommufd_fd=<fd>,resume=true|false,\
-        zone_updates=<list_of_updates>\"\n\
+        zone_updates=<list_of_updates>,\
+        serial_file=<path>|serial_socket=<path>|serial_tcp=<ip>:<port>,\
+        console_file=<path>|console_socket=<path>|console_tcp=<ip>:<port>\"
+        \"\n\
         \n`source_url` should be a valid URL (e.g file:///foo/bar or tcp://192.168.1.10/foo)\
         \n`prefault` controls eager prefaulting for the copy-based restore path \
         (disabled by default)\
@@ -3082,7 +3154,8 @@ impl RestoreConfig {
         The one saved in the snapshot does not survive serialization.\
         \n`resume` controls whether the VM will be directly resumed after restore\
         \n`zone_updates` can be used to update NUMA memory zones. \
-        Expects a list of elements in the form `id@host_numa_node`";
+        Expects a list of elements in the form `id@host_numa_node` \
+        \n`serial_*` and `console_*` set a new output for the respective console and must use the mode of the snapshot";
 
     /// # Safety
     /// Live FDs named in the input must be exclusively owned by the caller.
@@ -3098,7 +3171,8 @@ impl RestoreConfig {
             .add("vfio_fds")
             .add("iommufd_fd")
             .add("resume")
-            .add("zone_updates");
+            .add("zone_updates")
+            .add_all(ConsoleOutput::UPDATE_OPTIONS);
         parser.parse(restore).map_err(Error::ParseRestore)?;
 
         let source_url = parser
@@ -3173,6 +3247,9 @@ impl RestoreConfig {
                     .collect()
             });
 
+        let serial = ConsoleOutput::parse_update(&parser, "serial")?;
+        let console = ConsoleOutput::parse_update(&parser, "console")?;
+
         Ok(RestoreConfig {
             source_url,
             prefault,
@@ -3182,6 +3259,8 @@ impl RestoreConfig {
             iommufd_fd,
             resume,
             zone_updates,
+            serial,
+            console,
         })
     }
 
@@ -3406,6 +3485,21 @@ impl IvshmemConfig {
 }
 
 impl VmConfig {
+    /// Applies the new console outputs of a restore or migration.
+    pub(crate) fn update_console_outputs(
+        &mut self,
+        serial: Option<&ConsoleOutput>,
+        console: Option<&ConsoleOutput>,
+    ) -> ValidationResult<()> {
+        if let Some(serial) = serial {
+            self.serial.output.update(serial)?;
+        }
+        if let Some(console) = console {
+            self.console.output.update(console)?;
+        }
+        Ok(())
+    }
+
     fn validate_identifier(
         id_list: &mut BTreeSet<String>,
         id: &Option<String>,
@@ -6179,6 +6273,127 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
     }
 
     #[test]
+    fn test_console_output_parse_update() {
+        let parse = |input: &str, device: &str| {
+            let mut parser = OptionParser::new();
+            parser.add_all(ConsoleOutput::UPDATE_OPTIONS);
+            parser.parse(input).unwrap();
+            ConsoleOutput::parse_update(&parser, device)
+        };
+
+        assert_eq!(parse("", "serial").unwrap(), None);
+        assert_eq!(
+            parse("serial_file=/tmp/serial.log", "serial").unwrap(),
+            Some(ConsoleOutput::File {
+                file: PathBuf::from("/tmp/serial.log"),
+            })
+        );
+        assert_eq!(
+            parse("console_socket=/tmp/console.sock", "console").unwrap(),
+            Some(ConsoleOutput::Socket {
+                socket: PathBuf::from("/tmp/console.sock"),
+            })
+        );
+        assert_eq!(
+            parse("serial_tcp=127.0.0.1:4444", "serial").unwrap(),
+            Some(ConsoleOutput::Tcp {
+                tcp: TcpConsoleConfig {
+                    address: "127.0.0.1:4444".parse().unwrap(),
+                    server: true,
+                },
+            })
+        );
+
+        // Options of the other console must not leak into this one.
+        assert_eq!(parse("console_tcp=127.0.0.1:4444", "serial").unwrap(), None);
+        // Two outputs for different consoles are fine, two for one are not.
+        parse("serial_file=/tmp/a,console_file=/tmp/b", "serial").unwrap();
+        assert!(matches!(
+            parse("serial_file=/tmp/a,serial_tcp=127.0.0.1:4444", "serial"),
+            Err(Error::Validation(
+                ValidationError::ConsoleOutputUpdateAmbiguous(_)
+            ))
+        ));
+        assert!(matches!(
+            parse("serial_tcp=localhost:4444", "serial"),
+            Err(Error::ResolveConsoleTcpAddress { .. })
+        ));
+    }
+
+    #[test]
+    fn test_console_output_update() {
+        let tcp = |address: &str| ConsoleOutput::Tcp {
+            tcp: TcpConsoleConfig {
+                address: address.parse().unwrap(),
+                server: true,
+            },
+        };
+        let file = ConsoleOutput::File {
+            file: PathBuf::from("/tmp/console.log"),
+        };
+
+        let mut output = tcp("127.0.0.1:4444");
+        output
+            .update(&tcp("127.0.0.1:5555"))
+            .expect("should accept a new address in the same mode");
+        assert_eq!(output, tcp("127.0.0.1:5555"));
+
+        // Rejected updates must leave the output unchanged.
+        assert_eq!(
+            output.update(&file),
+            Err(ValidationError::ConsoleOutputUpdateModeMismatch(
+                tcp("127.0.0.1:5555"),
+                file.clone()
+            ))
+        );
+        assert_eq!(
+            output.update(&tcp("127.0.0.1:0")),
+            Err(ValidationError::ConsoleTcpPortZero)
+        );
+        assert_eq!(output, tcp("127.0.0.1:5555"));
+    }
+
+    #[test]
+    fn test_console_output_update_requires_same_mode() {
+        let outputs = [
+            ConsoleOutput::Off,
+            ConsoleOutput::Pty { file: None },
+            ConsoleOutput::Tty,
+            ConsoleOutput::File {
+                file: PathBuf::from("/tmp/console.log"),
+            },
+            ConsoleOutput::Socket {
+                socket: PathBuf::from("/tmp/console.sock"),
+            },
+            ConsoleOutput::Tcp {
+                tcp: TcpConsoleConfig {
+                    address: "127.0.0.1:4444".parse().unwrap(),
+                    server: true,
+                },
+            },
+            ConsoleOutput::Null,
+        ];
+
+        for (current_index, current) in outputs.iter().enumerate() {
+            for (new_index, new) in outputs.iter().enumerate() {
+                let mut output = current.clone();
+                if current_index == new_index {
+                    assert_eq!(output.update(new), Ok(()));
+                } else {
+                    assert_eq!(
+                        output.update(new),
+                        Err(ValidationError::ConsoleOutputUpdateModeMismatch(
+                            current.clone(),
+                            new.clone()
+                        ))
+                    );
+                    assert_eq!(output, *current);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn test_tcp_console_port_zero_validation() {
         for address in ["127.0.0.1:0", "[::1]:0"] {
             let options = format!("tcp={address}");
@@ -6743,6 +6958,38 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 ..Default::default()
             }
         );
+        assert_eq!(
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe {
+                RestoreConfig::parse(
+                    "source_url=/path/to/snapshot,serial_file=/tmp/s,console_socket=/tmp/c",
+                )
+            }?,
+            RestoreConfig {
+                source_url: PathBuf::from("/path/to/snapshot"),
+                serial: Some(ConsoleOutput::File {
+                    file: PathBuf::from("/tmp/s"),
+                }),
+                console: Some(ConsoleOutput::Socket {
+                    socket: PathBuf::from("/tmp/c"),
+                }),
+                ..Default::default()
+            }
+        );
+        assert!(matches!(
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe {
+                RestoreConfig::parse("source_url=/path/to/snapshot,serial_file=/a,serial_socket=/b")
+            },
+            Err(Error::Validation(
+                ValidationError::ConsoleOutputUpdateAmbiguous(_)
+            ))
+        ));
+        assert!(matches!(
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe { RestoreConfig::parse("source_url=/path/to/snapshot,console_tcp=localhost:1") },
+            Err(Error::ResolveConsoleTcpAddress { .. })
+        ));
         let files: [File; 6] = array::from_fn(|_| test_fd());
         let [fd0, fd1, fd2, fd3, fd4, fd5] = files.map(IntoRawFd::into_raw_fd);
         // SAFETY: The files transferred exclusive ownership to us.
@@ -6900,6 +7147,34 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                     host_numa_node: 1,
                     id: "zone1".to_string(),
                 }],
+        );
+
+        let config = serde_json::from_str::<RestoreConfig>(
+            r#"{"source_url":"/path/to/snapshot",
+                "serial":{"mode":"Tcp","tcp":{"address":"127.0.0.1:4444"}},
+                "console":{"mode":"File","file":"/tmp/console.log"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            config.serial,
+            Some(ConsoleOutput::Tcp {
+                tcp: TcpConsoleConfig {
+                    address: "127.0.0.1:4444".parse().unwrap(),
+                    server: true,
+                },
+            })
+        );
+        assert_eq!(
+            config.console,
+            Some(ConsoleOutput::File {
+                file: PathBuf::from("/tmp/console.log"),
+            })
+        );
+        // ch-remote serializes the config and the VMM deserializes it again.
+        assert_eq!(
+            serde_json::from_str::<RestoreConfig>(&serde_json::to_string(&config).unwrap())
+                .unwrap(),
+            config
         );
     }
 
