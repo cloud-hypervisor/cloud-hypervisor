@@ -416,6 +416,8 @@ mod tests {
     use std::fs;
     use std::os::unix::fs::FileExt;
 
+    use vmm_sys_util::tempfile::TempFile;
+
     use super::*;
     use crate::formats::vhdx::bat::PAYLOAD_BLOCK_FULLY_PRESENT;
     use crate::formats::vhdx::test_util::{create_dynamic_vhdx, edit_header, open_vhdx};
@@ -424,6 +426,71 @@ mod tests {
     const VHDX_HEADER_2_OFFSET: u64 = 0x20000;
     const VHDX_HEADER_SIZE: usize = 4096;
     const VHDX_LOG_GUID_OFFSET: usize = 48;
+
+    /// Generate a 16 MiB dynamic VHDX whose metadata virtual disk size is `size`.
+    fn dynamic_vhdx_with_virtual_disk_size(size: u64) -> TempFile {
+        const METADATA_VIRTUAL_DISK_SIZE: [u8; 16] = [
+            0x24, 0x42, 0xa5, 0x2f, 0x1b, 0xcd, 0x76, 0x48, 0xb2, 0x11, 0x5d, 0xbe, 0xd8, 0x3b,
+            0xf4, 0xb8,
+        ];
+
+        let tf = create_dynamic_vhdx(16, None);
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(tf.as_path())
+            .unwrap();
+        let aligned = AlignedFile::new(file.try_clone().unwrap(), false);
+        let vhdx_header = VhdxHeader::new(&aligned).unwrap();
+        let regions = RegionInfo::new(
+            &aligned,
+            header::REGION_TABLE_1_START,
+            vhdx_header.region_entry_count(),
+        )
+        .unwrap();
+
+        // MetadataTableHeader is 32 bytes and each entry is 32 bytes.
+        let mut metadata = [0u8; 64 * 1024];
+        aligned
+            .read_exact_at(&mut metadata, regions.mdr_entry.file_offset)
+            .unwrap();
+        let entry_count = u16::from_le_bytes(metadata[10..12].try_into().unwrap());
+        let item_offset = (0..entry_count as usize)
+            .find_map(|index| {
+                let offset = 32 + index * 32;
+                (metadata[offset..offset + 16] == METADATA_VIRTUAL_DISK_SIZE).then(|| {
+                    u32::from_le_bytes(metadata[offset + 16..offset + 20].try_into().unwrap())
+                })
+            })
+            .unwrap();
+
+        file.write_all_at(
+            &size.to_le_bytes(),
+            regions.mdr_entry.file_offset + item_offset as u64,
+        )
+        .unwrap();
+        file.sync_all().unwrap();
+        tf
+    }
+
+    #[test]
+    fn virtual_disk_size_limit() {
+        use super::metadata::VHDX_MAX_IMAGE_SIZE;
+
+        let tf = dynamic_vhdx_with_virtual_disk_size(VHDX_MAX_IMAGE_SIZE - 512);
+        let err = open_vhdx(tf.as_path()).unwrap_err();
+        assert!(matches!(err, VhdxError::ReadBatEntry(_)), "{err}");
+
+        let tf = dynamic_vhdx_with_virtual_disk_size(VHDX_MAX_IMAGE_SIZE + 512);
+        let err = open_vhdx(tf.as_path()).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                VhdxError::ParseVhdxMetadata(VhdxMetadataError::InvalidDiskSize(_))
+            ),
+            "{err}"
+        );
+    }
 
     /// A VHDX image with an active log must be rejected until replay is
     /// supported; opening it would silently use a stale BAT.
