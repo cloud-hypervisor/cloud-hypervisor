@@ -598,7 +598,7 @@ pub enum DeviceManagerError {
 
     /// Failed to DMA map VFIO user device.
     #[error("Failed to DMA map VFIO user device")]
-    VfioUserDmaMap(#[source] VfioUserPciDeviceError),
+    VfioUserDmaMap(#[source] ExternalDmaMappingError),
 
     /// Failed to update memory mappings for VFIO user device
     #[error("Failed to update memory mappings for VFIO user device")]
@@ -4851,7 +4851,7 @@ impl DeviceManager {
 
         let memory_manager = Arc::clone(&self.memory_manager);
 
-        let mut vfio_user_pci_device = VfioUserPciDevice::new(
+        let vfio_user_pci_device = VfioUserPciDevice::new(
             vfio_user_name.clone(),
             Arc::clone(&self.address_manager.vm),
             Arc::clone(&client),
@@ -4880,9 +4880,12 @@ impl DeviceManager {
 
         for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
             for region in zone.regions() {
-                vfio_user_pci_device
-                    .dma_map(region)
-                    .map_err(DeviceManagerError::VfioUserDmaMap)?;
+                if region.file_offset().is_some() {
+                    let gpa = region.start_addr().raw_value();
+                    vfio_user_mapping
+                        .map(gpa, gpa, region.len())
+                        .map_err(DeviceManagerError::VfioUserDmaMap)?;
+                }
             }
         }
 
