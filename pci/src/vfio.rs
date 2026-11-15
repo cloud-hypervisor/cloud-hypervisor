@@ -2998,15 +2998,12 @@ where
     M::M: GuestMemoryBackend,
 {
     fn map(&self, iova: u64, gpa: u64, size: u64) -> result::Result<(), io::Error> {
-        let Ok(usize_size): Result<usize, _> = size.try_into() else {
-            return Err(io::Error::other(format!("size {size} overflows usize")));
-        };
         let mem = self.memory.memory();
         let guest_addr = GuestAddress(gpa);
-        let user_addr = if mem.check_range(guest_addr, usize_size) {
-            match mem.get_slice(guest_addr, usize_size) {
+        let user_addr = if mem.check_range(guest_addr, size as usize) {
+            match mem.get_slice(guest_addr, size as usize) {
                 Ok(t) => {
-                    assert!(t.len() >= usize_size);
+                    assert!(t.len() >= size as usize);
                     Ok(t.ptr_guard_mut())
                 }
                 Err(e) => {
@@ -3032,8 +3029,7 @@ where
 
         // vfio_dma_map is unsound and ought to be marked as unsafe
         // SAFETY: find_user_address and GuestMemoryBackend::get_slice() guarantee that
-        // the returned pointer is valid for up to `usize_size` bytes.
-        // `usize_size` is always equal to `size` due to the above `try_into()` call.
+        // the returned pointer is valid for up to `size` bytes.
         unsafe { self.vfio_ops.vfio_dma_map(iova, size as usize, user_addr) }.map_err(|e| {
             io::Error::other(format!(
                 "failed to map memory into the host IOMMU address space, \

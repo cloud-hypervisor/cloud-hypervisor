@@ -601,10 +601,9 @@ where
     M::M: GuestMemoryBackend,
 {
     fn map(&self, iova: u64, gpa: u64, size: u64) -> result::Result<(), io::Error> {
-        let usize_size = size.try_into().unwrap();
         let mem = self.memory.memory();
         let guest_addr = GuestAddress(gpa);
-        let Some(user_addr) = get_host_address_range(&*mem, guest_addr, usize_size) else {
+        let Some(user_addr) = get_host_address_range(&*mem, guest_addr, size as usize) else {
             return Err(io::Error::other(format!(
                 "failed to convert guest address 0x{gpa:x} into \
                      host user virtual address"
