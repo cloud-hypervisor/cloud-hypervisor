@@ -32,7 +32,7 @@ use vu_common_ctrl::VhostUserHandle;
 use crate::seccomp_filters::Thread;
 use crate::{
     ActivateError, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
-    GuestMemory, GuestRegion, VIRTIO_F_IN_ORDER, VIRTIO_F_NOTIFICATION_DATA,
+    GuestMemory, GuestRegion, HostAddressRangeError, VIRTIO_F_IN_ORDER, VIRTIO_F_NOTIFICATION_DATA,
     VIRTIO_F_ORDER_PLATFORM, VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_RING_INDIRECT_DESC,
     VIRTIO_F_VERSION_1, VirtioCommon, VirtioInterrupt,
 };
@@ -72,7 +72,7 @@ pub enum Error {
     #[error("Failed accepting connection")]
     AcceptConnection(#[source] io::Error),
     #[error("Invalid available address")]
-    AvailAddress,
+    AvailAddress(#[source] HostAddressRangeError),
     #[error("Queue number  is not correct")]
     BadQueueNum,
     #[error("Failed binding vhost-user socket")]
@@ -80,7 +80,7 @@ pub enum Error {
     #[error("Creating eventfd failed")]
     CreateEventFd(#[source] io::Error),
     #[error("Invalid descriptor table address")]
-    DescriptorTableAddress,
+    DescriptorTableAddress(#[source] HostAddressRangeError),
     #[error("Signal used queue failed")]
     FailedSignalingUsedQueue(#[source] io::Error),
     #[error("Failed removing socket path")]
@@ -156,7 +156,7 @@ pub enum Error {
     #[error("Failed setting the log base")]
     VhostUserSetLogBase(#[source] VhostError),
     #[error("Invalid used address")]
-    UsedAddress,
+    UsedAddress(#[source] HostAddressRangeError),
     #[error("Missing file descriptor for the region")]
     MissingRegionFd,
     #[error("Failed getting the available index")]

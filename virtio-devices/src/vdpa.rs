@@ -603,12 +603,8 @@ where
     fn map(&self, iova: u64, gpa: u64, size: u64) -> result::Result<(), io::Error> {
         let mem = self.memory.memory();
         let guest_addr = GuestAddress(gpa);
-        let Some(user_addr) = get_host_address_range(&*mem, guest_addr, size as usize) else {
-            return Err(io::Error::other(format!(
-                "failed to convert guest address 0x{gpa:x} into \
-                     host user virtual address"
-            )));
-        };
+        let user_addr =
+            get_host_address_range(&*mem, guest_addr, size as usize).map_err(io::Error::other)?;
 
         debug!(
             "DMA map iova 0x{:x}, gpa 0x{:x}, size 0x{:x}, host_addr 0x{:x}",
