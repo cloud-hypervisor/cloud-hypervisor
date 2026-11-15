@@ -15,10 +15,12 @@ use linux_loader::bootparam::boot_params;
 use log::error;
 use sha2::{Digest, Sha256};
 use uuid::{Uuid, uuid};
-use vm_device::dma_mapping::ExternalDmaMapping;
+use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
 use vm_memory::ByteValued;
 use vmm_sys_util::errno;
 use zerocopy::{Immutable, IntoBytes};
+
+use crate::util::flatten_error_chain_to_string;
 
 pub(crate) type Result<T> = result::Result<T, errno::Error>;
 
@@ -255,7 +257,7 @@ impl SevSnpSharedPageTracker {
     pub(crate) fn add_dma_mapping_handler(
         &self,
         handler: Arc<dyn ExternalDmaMapping>,
-    ) -> anyhow::Result<()> {
+    ) -> result::Result<(), ExternalDmaMappingError> {
         let mut inner = self.inner.lock().unwrap();
         assert!(
             inner.handler.is_none(),
@@ -268,7 +270,7 @@ impl SevSnpSharedPageTracker {
                 // The handler stays unregistered, so no later conversion would
                 // ever unmap what the replay already mapped.
                 Self::undo_replay(handler.as_ref(), &inner.regions, mapped);
-                return Err(anyhow::anyhow!("VFIO replay map failed gpa={gpa:#x}: {e}"));
+                return Err(e);
             }
         }
 
@@ -280,7 +282,10 @@ impl SevSnpSharedPageTracker {
         let shared = regions.iter().flat_map(TrackedRegion::shared_gpas);
         for gpa in shared.take(count) {
             if let Err(e) = handler.unmap(gpa, PAGE_SIZE_4K) {
-                error!("VFIO replay rollback failed gpa={gpa:#x}: {e}");
+                error!(
+                    "VFIO replay rollback failed gpa={gpa:#x}: {}",
+                    flatten_error_chain_to_string(&e)
+                );
             }
         }
     }
@@ -292,7 +297,12 @@ impl SevSnpSharedPageTracker {
 
     /// Flip `[gpa, gpa + size)` shared/private in the tracker, driving the
     /// handler so the device IOMMU maps the shared pages only.
-    fn set_shared(&self, gpa: u64, size: u64, shared: bool) -> io::Result<()> {
+    fn set_shared(
+        &self,
+        gpa: u64,
+        size: u64,
+        shared: bool,
+    ) -> result::Result<(), ExternalDmaMappingError> {
         let mut inner = self.inner.lock().unwrap();
         let Inner { regions, handler } = &mut *inner;
         let req_end = gpa.saturating_add(size);
@@ -324,7 +334,7 @@ impl SevSnpSharedPageTracker {
         region: &mut TrackedRegion,
         first_page: usize,
         end_page: usize,
-    ) -> io::Result<()> {
+    ) -> result::Result<(), ExternalDmaMappingError> {
         assert!(end_page <= region.num_pages);
         for i in first_page..end_page {
             if region.is_shared(i) {
@@ -332,9 +342,7 @@ impl SevSnpSharedPageTracker {
             }
             let gpa = region.base + i as u64 * PAGE_SIZE_4K;
             if let Some(handler) = handler {
-                handler
-                    .map(gpa, gpa, PAGE_SIZE_4K)
-                    .map_err(|e| io::Error::other(format!("DMA map failed gpa={gpa:#x}: {e}")))?;
+                handler.map(gpa, gpa, PAGE_SIZE_4K)?;
             }
             region.shared[i / BITS_PER_U64] |= 1 << (i % BITS_PER_U64);
         }
@@ -348,7 +356,7 @@ impl SevSnpSharedPageTracker {
         region: &mut TrackedRegion,
         first_page: usize,
         end_page: usize,
-    ) -> io::Result<()> {
+    ) -> result::Result<(), ExternalDmaMappingError> {
         assert!(end_page <= region.num_pages);
         let mut i = first_page;
         while i < end_page {
@@ -363,9 +371,7 @@ impl SevSnpSharedPageTracker {
             let gpa = region.base + run as u64 * PAGE_SIZE_4K;
             let len = (i - run) as u64 * PAGE_SIZE_4K;
             if let Some(handler) = handler {
-                handler.unmap(gpa, len).map_err(|e| {
-                    io::Error::other(format!("DMA unmap failed gpa={gpa:#x} len={len:#x}: {e}"))
-                })?;
+                handler.unmap(gpa, len)?;
             }
             for page in run..i {
                 region.shared[page / BITS_PER_U64] &= !(1 << (page % BITS_PER_U64));
@@ -377,8 +383,8 @@ impl SevSnpSharedPageTracker {
 
 impl MemoryConversionHandler for SevSnpSharedPageTracker {
     fn handle_conversion(&self, gpa: u64, size: u64, to_shared: bool) -> anyhow::Result<()> {
-        self.set_shared(gpa, size, to_shared)
-            .map_err(|e| anyhow::anyhow!("confidential VFIO conversion failed: {e}"))
+        self.set_shared(gpa, size, to_shared)?;
+        Ok(())
     }
 }
 
@@ -386,8 +392,6 @@ impl MemoryConversionHandler for SevSnpSharedPageTracker {
 mod tests {
     use std::cmp;
     use std::io::Write;
-
-    use vm_device::dma_mapping::ExternalDmaMappingError;
 
     use super::*;
 

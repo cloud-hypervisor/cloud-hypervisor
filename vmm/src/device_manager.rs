@@ -582,7 +582,7 @@ pub enum DeviceManagerError {
     /// Failed to add a DMA mapping handler to the SEV-SNP shared-page tracker.
     #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
     #[error("Failed to add DMA mapping handler to SEV-SNP shared-page tracker")]
-    AddDmaMappingHandlerSevSnp(#[source] anyhow::Error),
+    AddDmaMappingHandlerSevSnp(#[source] ExternalDmaMappingError),
 
     /// Failed to create vfio-user client
     #[error("Failed to create vfio-user client")]
