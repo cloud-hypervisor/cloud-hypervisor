@@ -453,13 +453,23 @@ impl MmioRegion {
     }
 }
 
+#[derive(Debug, Error)]
+enum MmioRegionRangeError {
+    #[error("User mapping not found: gpa={gpa:#x}, size={size:#x}")]
+    UserMappingNotFound { gpa: u64, size: u64 },
+}
+
 /// # Safety
 ///
 /// [`Self::find_user_address`] must always either return `Err`
 /// or a pointer to `size` bytes of valid memory.
 unsafe trait MmioRegionRange {
     fn check_range(&self, guest_addr: u64, size: u64) -> bool;
-    fn find_user_address(&self, guest_addr: u64, size: u64) -> Result<*mut u8, io::Error>;
+    fn find_user_address(
+        &self,
+        guest_addr: u64,
+        size: u64,
+    ) -> Result<*mut u8, MmioRegionRangeError>;
 }
 
 // SAFETY: See the comment in `find_user_address`.
@@ -487,7 +497,11 @@ unsafe impl MmioRegionRange for Vec<MmioRegion> {
     }
 
     // Locate the user region address for a guest address within all mmio regions
-    fn find_user_address(&self, guest_addr: u64, size: u64) -> Result<*mut u8, io::Error> {
+    fn find_user_address(
+        &self,
+        guest_addr: u64,
+        size: u64,
+    ) -> Result<*mut u8, MmioRegionRangeError> {
         for region in self.iter() {
             for user_region in region.user_memory_regions.iter() {
                 let mapping = user_region.mapping.lock().unwrap();
@@ -514,10 +528,10 @@ unsafe impl MmioRegionRange for Vec<MmioRegion> {
             }
         }
 
-        Err(io::Error::other(format!(
-            "unable to find user mapping for DMA range \
-             (gpa 0x{guest_addr:x}, size 0x{size:x})"
-        )))
+        Err(MmioRegionRangeError::UserMappingNotFound {
+            gpa: guest_addr,
+            size,
+        })
     }
 }
 
@@ -3015,7 +3029,9 @@ where
         } else {
             let mmio_regions = self.mmio_regions.lock().unwrap();
             if mmio_regions.check_range(gpa, size) {
-                Err(mmio_regions.find_user_address(gpa, size)?)
+                Err(mmio_regions
+                    .find_user_address(gpa, size)
+                    .map_err(io::Error::other)?)
             } else {
                 return Err(io::Error::other(format!(
                     "failed to locate guest address 0x{gpa:x} in guest memory"
