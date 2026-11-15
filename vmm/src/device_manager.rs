@@ -507,7 +507,7 @@ pub enum DeviceManagerError {
 
     /// Failed to update guest memory for VFIO PCI device.
     #[error("Failed to update guest memory for VFIO PCI device")]
-    UpdateMemoryForVfioPciDevice(#[source] vfio_ioctls::VfioError),
+    UpdateMemoryForVfioPciDevice(#[source] ExternalDmaMappingError),
 
     /// Trying to use a directory for pmem but no size specified
     #[error("Trying to use a directory for pmem but no size specified")]
@@ -5400,19 +5400,11 @@ impl DeviceManager {
 
         // Take care of updating the memory for VFIO PCI devices.
         if let Some(vfio_context) = self.vfio_context.upgrade() {
-            // vfio_dma_map is unsound and ought to be marked as unsafe
-            #[allow(unused_unsafe)]
-            // SAFETY: GuestMemory guarantees that region points
-            // to len bytes of valid memory starting at as_ptr()
-            // that will only be freed with munmap().
-            unsafe {
-                vfio_context.ops.vfio_dma_map(
-                    new_region.start_addr().raw_value(),
-                    new_region.len() as usize,
-                    new_region.as_ptr(),
-                )
-            }
-            .map_err(DeviceManagerError::UpdateMemoryForVfioPciDevice)?;
+            let gpa = new_region.start_addr().raw_value();
+            vfio_context
+                .dma_mapping
+                .map(gpa, gpa, new_region.len())
+                .map_err(DeviceManagerError::UpdateMemoryForVfioPciDevice)?;
         }
 
         // Take care of updating the memory for vfio-user devices.
