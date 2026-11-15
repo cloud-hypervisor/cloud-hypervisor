@@ -36,16 +36,7 @@ Now that we have identified the device, we must unbind it from its native driver
 First we add VFIO support to the host:
 
 ```
-# modprobe -r vfio_pci
-# modprobe -r vfio_iommu_type1
-# modprobe vfio_iommu_type1 allow_unsafe_interrupts
 # modprobe vfio_pci
-```
-
-In case the VFIO drivers are built-in, enable unsafe interrupts with:
-
-```
-# echo 1 > /sys/module/vfio_iommu_type1/parameters/allow_unsafe_interrupts
 ```
 
 Then we unbind it from its native driver:
@@ -87,6 +78,7 @@ takes the device's sysfs path as an argument. In our example it is
     --cmdline "console=ttyS0 root=/dev/vda1 rw" \
     --cpus boot=4 \
     --memory size=512M \
+    --platform iommufd=on \
     --device path=/sys/bus/pci/devices/0000:01:00.0/
 ```
 
@@ -190,7 +182,7 @@ demonstrates a guest with two PCI segments. 2/3 of the 32-bit mmio address
 space is available for use by devices on PCI segment 0 and 1/3 of the 32-bit
 mmio address space is available for use by devices on PCI segment 1.
 ```
---platform num_pci_segments=2
+--platform iommufd=on,num_pci_segments=2
 --pci-segment pci_segment=0,mmio32_aperture_weight=2
 --pci-segment pci_segment=1,mmio32_aperture_weight=1
 ```

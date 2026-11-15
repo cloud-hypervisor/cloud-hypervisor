@@ -4177,7 +4177,10 @@ impl DeviceManager {
             #[cfg(not(feature = "kvm"))]
             Err(DeviceManagerError::IommufdNotSupported)
         } else {
-            info!("Using vfio legacy mode with vfio container/group.");
+            warn!(
+                "Legacy VFIO container/group support is deprecated and will be removed in a future release. \
+                 Use --platform iommufd=on instead (requires KVM)."
+            );
             Ok(Arc::new(
                 VfioContainer::new(Some(Arc::new(dup))).map_err(DeviceManagerError::VfioCreate)?,
             ))
