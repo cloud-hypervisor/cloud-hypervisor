@@ -27,7 +27,7 @@ use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
-use vm_device::dma_mapping::ExternalDmaMapping;
+use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
     GuestMemoryBackend, GuestMemoryError, GuestMemoryLoadGuard, GuestMemoryRegion,
@@ -121,9 +121,9 @@ pub enum Error {
     #[error("Failed discarding memory range")]
     DiscardMemoryRange(#[source] io::Error),
     #[error("Failed DMA mapping")]
-    DmaMap(#[source] io::Error),
+    DmaMap(#[source] ExternalDmaMappingError),
     #[error("Failed DMA unmapping")]
-    DmaUnmap(#[source] io::Error),
+    DmaUnmap(#[source] ExternalDmaMappingError),
     #[error("Invalid DMA mapping handler")]
     InvalidDmaMappingHandler,
     #[error("Failed adding used index")]

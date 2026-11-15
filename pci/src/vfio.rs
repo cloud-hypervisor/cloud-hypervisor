@@ -42,7 +42,7 @@ use vm_allocator::{
     AddressAllocator, GuestMemory, GuestRegion, GuestRegionError, MemorySlotAllocator,
     SystemAllocator,
 };
-use vm_device::dma_mapping::ExternalDmaMapping;
+use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
@@ -3011,31 +3011,33 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M
 where
     M::M: GuestMemoryBackend,
 {
-    fn map(&self, iova: u64, gpa: u64, size: u64) -> result::Result<(), io::Error> {
+    fn map(&self, iova: u64, gpa: u64, size: u64) -> result::Result<(), ExternalDmaMappingError> {
         let mem = self.memory.memory();
         let guest_addr = GuestAddress(gpa);
         let user_addr = if mem.check_range(guest_addr, size as usize) {
-            match mem.get_slice(guest_addr, size as usize) {
-                Ok(t) => {
-                    assert!(t.len() >= size as usize);
-                    Ok(t.ptr_guard_mut())
+            let slice = mem.get_slice(guest_addr, size as usize).map_err(|e| {
+                ExternalDmaMappingError::Map {
+                    iova,
+                    gpa,
+                    size,
+                    source: e.into(),
                 }
-                Err(e) => {
-                    return Err(io::Error::other(format!(
-                        "unable to retrieve user address for gpa 0x{gpa:x} from guest memory region: {e}"
-                    )));
-                }
-            }
+            })?;
+            assert!(slice.len() >= size as usize);
+            Ok(slice.ptr_guard_mut())
         } else {
             let mmio_regions = self.mmio_regions.lock().unwrap();
             if mmio_regions.check_range(gpa, size) {
-                Err(mmio_regions
-                    .find_user_address(gpa, size)
-                    .map_err(io::Error::other)?)
+                Err(mmio_regions.find_user_address(gpa, size).map_err(|e| {
+                    ExternalDmaMappingError::Map {
+                        iova,
+                        gpa,
+                        size,
+                        source: e.into(),
+                    }
+                })?)
             } else {
-                return Err(io::Error::other(format!(
-                    "failed to locate guest address 0x{gpa:x} in guest memory"
-                )));
+                return Err(ExternalDmaMappingError::InvalidGuestRange { gpa, size });
             }
         };
         let user_addr = match user_addr {
@@ -3047,21 +3049,22 @@ where
         // SAFETY: find_user_address and GuestMemoryBackend::get_slice() guarantee that
         // the returned pointer is valid for up to `size` bytes.
         unsafe { self.vfio_ops.vfio_dma_map(iova, size as usize, user_addr) }.map_err(|e| {
-            io::Error::other(format!(
-                "failed to map memory into the host IOMMU address space, \
-                         iova 0x{iova:x}, gpa 0x{gpa:x}, size 0x{size:x}: {e:?}"
-            ))
+            ExternalDmaMappingError::Map {
+                iova,
+                gpa,
+                size,
+                source: e.into(),
+            }
         })
     }
 
-    fn unmap(&self, iova: u64, size: u64) -> result::Result<(), io::Error> {
+    fn unmap(&self, iova: u64, size: u64) -> result::Result<(), ExternalDmaMappingError> {
         self.vfio_ops
             .vfio_dma_unmap(iova, size as usize)
-            .map_err(|e| {
-                io::Error::other(format!(
-                    "failed to unmap memory from the host IOMMU address space, \
-                     iova 0x{iova:x}, size 0x{size:x}: {e:?}"
-                ))
+            .map_err(|e| ExternalDmaMappingError::Unmap {
+                iova,
+                size,
+                source: e.into(),
             })
     }
 }

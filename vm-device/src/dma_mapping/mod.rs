@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 
 use std::error::Error as StdError;
-use std::io;
 
 use thiserror::Error;
 
@@ -52,8 +51,8 @@ pub enum ExternalDmaMappingError {
 /// guest.
 pub trait ExternalDmaMapping: Send + Sync {
     /// Map a memory range
-    fn map(&self, iova: u64, gpa: u64, size: u64) -> io::Result<()>;
+    fn map(&self, iova: u64, gpa: u64, size: u64) -> Result<(), ExternalDmaMappingError>;
 
     /// Unmap a memory range
-    fn unmap(&self, iova: u64, size: u64) -> io::Result<()>;
+    fn unmap(&self, iova: u64, size: u64) -> Result<(), ExternalDmaMappingError>;
 }

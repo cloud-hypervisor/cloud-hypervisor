@@ -16,7 +16,7 @@ use virtio_devices::{
 };
 use virtio_queue::{Queue, QueueT};
 use vm_allocator::GuestMemory;
-use vm_device::dma_mapping::ExternalDmaMapping;
+use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
 use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
 use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::AccessPlatform;
@@ -231,17 +231,26 @@ impl FuzzExternalMapping {
 }
 
 impl ExternalDmaMapping for FuzzExternalMapping {
-    fn map(&self, _iova: u64, _gpa: u64, _size: u64) -> io::Result<()> {
+    fn map(&self, iova: u64, gpa: u64, size: u64) -> Result<(), ExternalDmaMappingError> {
         if self.fail_on_map {
-            Err(io::Error::other("fuzz map failure"))
+            Err(ExternalDmaMappingError::Map {
+                iova,
+                gpa,
+                size,
+                source: io::Error::from_raw_os_error(libc::EIO).into(),
+            })
         } else {
             Ok(())
         }
     }
 
-    fn unmap(&self, _iova: u64, _size: u64) -> io::Result<()> {
+    fn unmap(&self, iova: u64, size: u64) -> Result<(), ExternalDmaMappingError> {
         if self.fail_on_unmap {
-            Err(io::Error::other("fuzz unmap failure"))
+            Err(ExternalDmaMappingError::Unmap {
+                iova,
+                size,
+                source: io::Error::from_raw_os_error(libc::EIO).into(),
+            })
         } else {
             Ok(())
         }
