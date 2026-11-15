@@ -5715,6 +5715,9 @@ impl DeviceManager {
                 let mut dev = vfio_user_pci_device.lock().unwrap();
                 for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
                     for region in zone.regions() {
+                        if region.file_offset().is_none() {
+                            continue;
+                        }
                         // On error, log, but continue so the loop below removing the mapping from
                         // the devices runs.
                         if let Err(e) = dev.dma_unmap(region) {
