@@ -850,7 +850,10 @@ impl Clone for PtyPair {
 pub enum PciDeviceHandle {
     Vfio(Arc<Mutex<VfioPciDevice>>),
     Virtio(Arc<Mutex<VirtioPciDevice>>),
-    VfioUser(Arc<Mutex<VfioUserPciDevice>>),
+    VfioUser {
+        device: Arc<Mutex<VfioUserPciDevice>>,
+        dma_mapping: Arc<dyn ExternalDmaMapping>,
+    },
 }
 
 #[derive(Clone)]
@@ -4884,14 +4887,15 @@ impl DeviceManager {
         .map_err(DeviceManagerError::VfioUserCreate)?;
 
         let memory = self.memory_manager.lock().unwrap().guest_memory();
-        let vfio_user_mapping = Arc::new(VfioUserDmaMapping::new(client, Arc::new(memory)));
+        let vfio_user_mapping: Arc<dyn ExternalDmaMapping> =
+            Arc::new(VfioUserDmaMapping::new(client, Arc::new(memory)));
         for virtio_mem_device in self.virtio_mem_devices.iter() {
             virtio_mem_device
                 .lock()
                 .unwrap()
                 .add_dma_mapping_handler(
                     VirtioMemMappingSource::Device(pci_device_bdf.into()),
-                    Arc::clone(&vfio_user_mapping) as Arc<dyn ExternalDmaMapping>,
+                    Arc::clone(&vfio_user_mapping),
                 )
                 .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
         }
@@ -4925,7 +4929,10 @@ impl DeviceManager {
         // Update the device tree with correct resource information.
         node.resources = new_resources;
         node.pci_bdf = Some(pci_device_bdf);
-        node.pci_device_handle = Some(PciDeviceHandle::VfioUser(Arc::clone(&vfio_user_pci_device)));
+        node.pci_device_handle = Some(PciDeviceHandle::VfioUser {
+            device: Arc::clone(&vfio_user_pci_device),
+            dma_mapping: vfio_user_mapping,
+        });
 
         self.device_tree
             .lock()
@@ -5419,7 +5426,10 @@ impl DeviceManager {
         {
             let device_tree = self.device_tree.lock().unwrap();
             for pci_device_node in device_tree.pci_devices() {
-                if let PciDeviceHandle::VfioUser(vfio_user_pci_device) = pci_device_node
+                if let PciDeviceHandle::VfioUser {
+                    device: vfio_user_pci_device,
+                    ..
+                } = pci_device_node
                     .pci_device_handle
                     .as_ref()
                     .ok_or(DeviceManagerError::MissingPciDevice)?
@@ -5730,7 +5740,10 @@ impl DeviceManager {
                             dev.dma_handler().is_some() && !iommu_attached,
                         )
                     }
-                    PciDeviceHandle::VfioUser(vfio_user_pci_device) => {
+                    PciDeviceHandle::VfioUser {
+                        device: vfio_user_pci_device,
+                        ..
+                    } => {
                         let mut dev = vfio_user_pci_device.lock().unwrap();
                         for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
                             for region in zone.regions() {
