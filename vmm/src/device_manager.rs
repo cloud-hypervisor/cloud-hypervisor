@@ -4269,9 +4269,6 @@ impl DeviceManager {
         .map_err(DeviceManagerError::Smmuv3)?;
         let smmuv3_device = Arc::clone(smmu.device());
 
-        self.bus_devices
-            .push(Arc::clone(&smmuv3_device) as Arc<dyn BusDeviceSync>);
-
         self.address_manager
             .mmio_bus
             .insert(
@@ -4281,6 +4278,8 @@ impl DeviceManager {
             )
             .map_err(DeviceManagerError::BusError)?;
 
+        self.bus_devices
+            .push(Arc::clone(&smmuv3_device) as Arc<dyn BusDeviceSync>);
         self.device_tree
             .lock()
             .unwrap()
