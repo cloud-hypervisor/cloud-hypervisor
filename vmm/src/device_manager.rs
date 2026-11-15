@@ -5703,9 +5703,8 @@ impl DeviceManager {
                     }
                     PciDeviceHandle::VfioUser {
                         device: vfio_user_pci_device,
-                        ..
+                        dma_mapping,
                     } => {
-                        let mut dev = vfio_user_pci_device.lock().unwrap();
                         for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
                             for region in zone.regions() {
                                 if region.file_offset().is_none() {
@@ -5713,8 +5712,13 @@ impl DeviceManager {
                                 }
                                 // On error, log, but continue so the loop below removing the mapping from
                                 // the devices runs.
-                                if let Err(e) = dev.dma_unmap(region) {
-                                    warn!("vfio-user dma_unmap failed during eject: {e}");
+                                if let Err(e) =
+                                    dma_mapping.unmap(region.start_addr().raw_value(), region.len())
+                                {
+                                    warn!(
+                                        "vfio-user dma_unmap failed during eject: {}",
+                                        flatten_error_chain_to_string(&e)
+                                    );
                                 }
                             }
                         }
