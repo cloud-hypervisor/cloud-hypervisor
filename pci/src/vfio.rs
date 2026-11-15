@@ -2326,10 +2326,6 @@ impl VfioPciDevice {
         Ok(vfio_pci_device)
     }
 
-    pub fn iommu_attached(&self) -> bool {
-        self.iommu_attached
-    }
-
     fn generate_sparse_areas(
         caps: &[VfioRegionInfoCap],
         region_index: u32,
