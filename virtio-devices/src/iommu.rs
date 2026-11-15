@@ -15,7 +15,7 @@ use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
-use vm_device::dma_mapping::ExternalDmaMapping;
+use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
 use vm_device::interrupt::{InterruptRemapping, MsiIrqSourceConfig};
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
@@ -328,9 +328,9 @@ enum Error {
     #[error("Guest sent us invalid PROBE request")]
     InvalidProbeRequest,
     #[error("Failed to perform external mapping")]
-    ExternalMapping(#[source] io::Error),
+    ExternalMapping(#[source] ExternalDmaMappingError),
     #[error("Failed to perform external unmapping")]
-    ExternalUnmapping(#[source] io::Error),
+    ExternalUnmapping(#[source] ExternalDmaMappingError),
     #[error("Failed adding used index")]
     QueueAddUsed(#[source] virtio_queue::Error),
 }
@@ -1486,7 +1486,7 @@ mod tests {
     use seccompiler::SeccompAction;
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::QueueT;
-    use vm_device::dma_mapping::ExternalDmaMapping;
+    use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
     use vm_memory::{ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
     use vm_virtio::queue::testing::VirtQueue;
     use vmm_sys_util::eventfd::{EFD_NONBLOCK, EventFd};
@@ -1504,11 +1504,11 @@ mod tests {
     struct MockMapping;
 
     impl ExternalDmaMapping for MockMapping {
-        fn map(&self, _iova: u64, _gpa: u64, _size: u64) -> Result<(), io::Error> {
+        fn map(&self, _iova: u64, _gpa: u64, _size: u64) -> Result<(), ExternalDmaMappingError> {
             Ok(())
         }
 
-        fn unmap(&self, _iova: u64, _size: u64) -> Result<(), io::Error> {
+        fn unmap(&self, _iova: u64, _size: u64) -> Result<(), ExternalDmaMappingError> {
             Ok(())
         }
     }
@@ -1734,12 +1734,21 @@ mod tests {
     struct FailingMapping;
 
     impl ExternalDmaMapping for FailingMapping {
-        fn map(&self, _iova: u64, _gpa: u64, _size: u64) -> Result<(), io::Error> {
-            Err(io::Error::other("map failed"))
+        fn map(&self, iova: u64, gpa: u64, size: u64) -> Result<(), ExternalDmaMappingError> {
+            Err(ExternalDmaMappingError::Map {
+                iova,
+                gpa,
+                size,
+                source: io::Error::from_raw_os_error(libc::EIO).into(),
+            })
         }
 
-        fn unmap(&self, _iova: u64, _size: u64) -> Result<(), io::Error> {
-            Err(io::Error::other("unmap failed"))
+        fn unmap(&self, iova: u64, size: u64) -> Result<(), ExternalDmaMappingError> {
+            Err(ExternalDmaMappingError::Unmap {
+                iova,
+                size,
+                source: io::Error::from_raw_os_error(libc::EIO).into(),
+            })
         }
     }
 

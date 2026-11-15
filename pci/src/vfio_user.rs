@@ -16,7 +16,7 @@ use vfio_user::{Client, Error as VfioUserError};
 use vm_allocator::{
     AddressAllocator, GuestRegion, GuestRegionError, MemorySlotAllocator, SystemAllocator,
 };
-use vm_device::dma_mapping::ExternalDmaMapping;
+use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
 use vm_device::interrupt::{InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig};
 use vm_device::{BusDevice, Resource};
 use vm_memory::{Address, GuestAddress, GuestAddressSpace, GuestMemoryBackend, GuestMemoryRegion};
@@ -528,45 +528,55 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioUserDmaMappi
 where
     M::M: GuestMemoryBackend,
 {
-    fn map(&self, iova: u64, gpa: u64, size: u64) -> result::Result<(), io::Error> {
+    fn map(&self, iova: u64, gpa: u64, size: u64) -> result::Result<(), ExternalDmaMappingError> {
         let mem = self.memory.memory();
         let guest_addr = GuestAddress(gpa);
-        let Some(region) = mem.find_region(guest_addr) else {
-            return Err(io::Error::other(format!("Region not found for 0x{gpa:x}")));
-        };
+        let region = mem
+            .find_region(guest_addr)
+            .ok_or(ExternalDmaMappingError::RegionNotFound { gpa })?;
 
         // Check that the range fits in the region.
         let region_offset = guest_addr
             .checked_offset_from(region.start_addr())
-            .ok_or_else(|| io::Error::other(format!("gpa 0x{gpa:x} below region start")))?;
+            .ok_or(ExternalDmaMappingError::InvalidGuestRange { gpa, size })?;
         let region_remaining = (region.len())
             .checked_sub(region_offset)
-            .ok_or_else(|| io::Error::other(format!("gpa 0x{gpa:x} past region end")))?;
+            .ok_or(ExternalDmaMappingError::InvalidGuestRange { gpa, size })?;
         if size > region_remaining {
-            return Err(io::Error::other(format!(
-                "DMA map (gpa 0x{gpa:x}, size 0x{size:x}) extends past region end"
-            )));
+            return Err(ExternalDmaMappingError::InvalidGuestRange { gpa, size });
         }
 
-        let file_offset = region.file_offset().ok_or_else(|| {
-            io::Error::other(format!("region for gpa 0x{gpa:x} has no backing file"))
-        })?;
-        let offset = region_offset
-            .checked_add(file_offset.start())
-            .ok_or_else(|| io::Error::other("offset overflow in DMA map"))?;
+        let file_offset = region
+            .file_offset()
+            .ok_or(ExternalDmaMappingError::MissingBackingFile { gpa })?;
+        let offset = region_offset.checked_add(file_offset.start()).ok_or(
+            ExternalDmaMappingError::FileOffsetOverflow {
+                file_offset: file_offset.start(),
+                region_offset,
+            },
+        )?;
 
         self.client
             .lock()
             .unwrap()
             .dma_map(offset, iova, size, file_offset.file().as_raw_fd())
-            .map_err(|e| io::Error::other(format!("Error mapping region: {e}")))
+            .map_err(|e| ExternalDmaMappingError::Map {
+                iova,
+                gpa,
+                size,
+                source: e.into(),
+            })
     }
 
-    fn unmap(&self, iova: u64, size: u64) -> result::Result<(), io::Error> {
+    fn unmap(&self, iova: u64, size: u64) -> result::Result<(), ExternalDmaMappingError> {
         self.client
             .lock()
             .unwrap()
             .dma_unmap(iova, size)
-            .map_err(|e| io::Error::other(format!("Error unmapping region: {e}")))
+            .map_err(|e| ExternalDmaMappingError::Unmap {
+                iova,
+                size,
+                source: e.into(),
+            })
     }
 }

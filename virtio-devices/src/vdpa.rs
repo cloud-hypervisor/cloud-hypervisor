@@ -20,7 +20,7 @@ use vhost::vhost_kern::vhost_binding::{VHOST, VHOST_BACKEND_F_SUSPEND};
 use vhost::{VhostBackend, VringConfigData};
 use virtio_queue::desc::RawDescriptor;
 use virtio_queue::{Queue, QueueT};
-use vm_device::dma_mapping::ExternalDmaMapping;
+use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
 use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::{AccessPlatform, Translatable};
@@ -600,11 +600,17 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VdpaDmaMapping<M
 where
     M::M: GuestMemoryBackend,
 {
-    fn map(&self, iova: u64, gpa: u64, size: u64) -> result::Result<(), io::Error> {
+    fn map(&self, iova: u64, gpa: u64, size: u64) -> result::Result<(), ExternalDmaMappingError> {
         let mem = self.memory.memory();
         let guest_addr = GuestAddress(gpa);
-        let user_addr =
-            get_host_address_range(&*mem, guest_addr, size as usize).map_err(io::Error::other)?;
+        let user_addr = get_host_address_range(&*mem, guest_addr, size as usize).map_err(|e| {
+            ExternalDmaMappingError::Map {
+                iova,
+                gpa,
+                size,
+                source: e.into(),
+            }
+        })?;
 
         debug!(
             "DMA map iova 0x{:x}, gpa 0x{:x}, size 0x{:x}, host_addr 0x{:x}",
@@ -617,26 +623,25 @@ where
                 .lock()
                 .unwrap()
                 .dma_map(iova, size, user_addr, false)
-                .map_err(|e| {
-                    io::Error::other(format!(
-                        "failed to map memory for vDPA device, \
-                         iova 0x{iova:x}, gpa 0x{gpa:x}, size 0x{size:x}: {e:?}"
-                    ))
+                .map_err(|e| ExternalDmaMappingError::Map {
+                    iova,
+                    gpa,
+                    size,
+                    source: e.into(),
                 })
         }
     }
 
-    fn unmap(&self, iova: u64, size: u64) -> io::Result<()> {
+    fn unmap(&self, iova: u64, size: u64) -> result::Result<(), ExternalDmaMappingError> {
         debug!("DMA unmap iova 0x{iova:x} size 0x{size:x}");
         self.device
             .lock()
             .unwrap()
             .dma_unmap(iova, size)
-            .map_err(|e| {
-                io::Error::other(format!(
-                    "failed to unmap memory for vDPA device, \
-                     iova 0x{iova:x}, size 0x{size:x}: {e:?}"
-                ))
+            .map_err(|e| ExternalDmaMappingError::Unmap {
+                iova,
+                size,
+                source: e.into(),
             })
     }
 }

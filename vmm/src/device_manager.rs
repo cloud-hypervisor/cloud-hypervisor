@@ -122,7 +122,7 @@ use virtio_devices::{
 };
 use vm_allocator::page_size::get_page_size;
 use vm_allocator::{AddressAllocator, GuestRegionError, InterruptAllocError, SystemAllocator};
-use vm_device::dma_mapping::ExternalDmaMapping;
+use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptRemapping, LegacyIrqGroupConfig, MsiIrqGroupConfig,
 };
@@ -618,11 +618,11 @@ pub enum DeviceManagerError {
 
     /// Failed to DMA map virtio device.
     #[error("Failed to DMA map virtio device")]
-    VirtioDmaMap(#[source] io::Error),
+    VirtioDmaMap(#[source] ExternalDmaMappingError),
 
     /// Failed to DMA unmap virtio device.
     #[error("Failed to DMA unmap virtio device")]
-    VirtioDmaUnmap(#[source] io::Error),
+    VirtioDmaUnmap(#[source] ExternalDmaMappingError),
 
     /// Cannot hotplug device behind vIOMMU
     #[error("Cannot hotplug device behind vIOMMU")]

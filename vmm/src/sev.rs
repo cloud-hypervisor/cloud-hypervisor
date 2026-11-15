@@ -387,6 +387,8 @@ mod tests {
     use std::cmp;
     use std::io::Write;
 
+    use vm_device::dma_mapping::ExternalDmaMappingError;
+
     use super::*;
 
     fn make_tempfile(data: &[u8]) -> File {
@@ -578,15 +580,25 @@ mod tests {
     }
 
     impl ExternalDmaMapping for Recorder {
-        fn map(&self, iova: u64, gpa: u64, size: u64) -> io::Result<()> {
+        fn map(
+            &self,
+            iova: u64,
+            gpa: u64,
+            size: u64,
+        ) -> result::Result<(), ExternalDmaMappingError> {
             assert_eq!(iova, gpa, "tracker must identity-map (iova == gpa)");
             if self.fail_map_gpa == Some(gpa) {
-                return Err(io::Error::other("injected map failure"));
+                return Err(ExternalDmaMappingError::Map {
+                    iova,
+                    gpa,
+                    size,
+                    source: io::Error::from_raw_os_error(libc::EIO).into(),
+                });
             }
             self.maps.lock().unwrap().push((gpa, size));
             Ok(())
         }
-        fn unmap(&self, iova: u64, size: u64) -> io::Result<()> {
+        fn unmap(&self, iova: u64, size: u64) -> result::Result<(), ExternalDmaMappingError> {
             self.unmaps.lock().unwrap().push((iova, size));
             Ok(())
         }
