@@ -58,10 +58,6 @@ pub enum VfioUserPciDeviceError {
         size: u64,
         region_size: u64,
     },
-    #[error("Failed to DMA map")]
-    DmaMap(#[source] VfioUserError),
-    #[error("Failed to DMA unmap")]
-    DmaUnmap(#[source] VfioUserError),
     #[error("Failed to create VfioCommon")]
     CreateVfioCommon(#[source] VfioPciError),
     #[error("Other OS error")]
@@ -219,27 +215,6 @@ impl VfioUserPciDevice {
         for mmio_region in &mut self.common.mmio_regions {
             mmio_region.user_memory_regions.clear();
         }
-    }
-
-    pub fn dma_map(&mut self, region: &GuestRegion) -> Result<(), VfioUserPciDeviceError> {
-        let (fd, offset) = match region.file_offset() {
-            Some(_file_offset) => (_file_offset.file().as_raw_fd(), _file_offset.start()),
-            None => return Ok(()),
-        };
-
-        self.client
-            .lock()
-            .unwrap()
-            .dma_map(offset, region.start_addr().raw_value(), region.len(), fd)
-            .map_err(VfioUserPciDeviceError::DmaMap)
-    }
-
-    pub fn dma_unmap(&mut self, region: &GuestRegion) -> Result<(), VfioUserPciDeviceError> {
-        self.client
-            .lock()
-            .unwrap()
-            .dma_unmap(region.start_addr().raw_value(), region.len())
-            .map_err(VfioUserPciDeviceError::DmaUnmap)
     }
 }
 
