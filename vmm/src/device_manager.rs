@@ -5598,19 +5598,14 @@ impl DeviceManager {
             return Err(DeviceManagerError::InvalidIommuRemove(pci_device_bdf));
         }
 
-        // Give the PCI device ID back to the PCI bus.
-        self.pci_segments[pci_segment_id as usize]
-            .pci_bus
-            .lock()
-            .unwrap()
-            .free_device_id(device_id)
-            .map_err(DeviceManagerError::FreePciDeviceId)?;
-
         let (pci_device_handle, id, pci_bar_resources) = {
-            // Remove the device from the device tree along with its children.
-            let mut device_tree = self.device_tree.lock().unwrap();
+            // Clone the node so a failed bus removal leaves it in the device tree.
+            let device_tree = self.device_tree.lock().unwrap();
             let pci_device_node = device_tree
-                .remove_node_by_pci_bdf(pci_device_bdf)
+                .pci_devices()
+                .into_iter()
+                .find(|node| node.pci_bdf == Some(pci_device_bdf))
+                .cloned()
                 .ok_or(DeviceManagerError::MissingPciDevice)?;
 
             // For VFIO and vfio-user the PCI device id is the id.
@@ -5628,10 +5623,6 @@ impl DeviceManager {
                     id.clone_from(child_id);
                 }
             }
-            for child in pci_device_node.children.iter() {
-                device_tree.remove(child);
-            }
-
             (pci_device_handle, id, pci_device_node.resources)
         };
 
@@ -5821,6 +5812,23 @@ impl DeviceManager {
                     let mem_dyn = Arc::clone(mem) as Arc<Mutex<dyn virtio_devices::VirtioDevice>>;
                     !Arc::ptr_eq(&mem_dyn, &virtio_device)
                 });
+            }
+        }
+
+        // Give the PCI device ID back to the PCI bus.
+        self.pci_segments[pci_segment_id as usize]
+            .pci_bus
+            .lock()
+            .unwrap()
+            .free_device_id(device_id)
+            .map_err(DeviceManagerError::FreePciDeviceId)?;
+
+        {
+            let mut device_tree = self.device_tree.lock().unwrap();
+            if let Some(node) = device_tree.remove_node_by_pci_bdf(pci_device_bdf) {
+                for child in &node.children {
+                    device_tree.remove(child);
+                }
             }
         }
 
