@@ -4488,15 +4488,6 @@ impl DeviceManager {
             device_cfg.iommufd_dev_id = Some(dev_id);
         }
 
-        #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
-        let pasid_cap = if smmuv3_attached {
-            self.attach_vfio_to_smmuv3(device_cfg, &vfio_ops, &vfio_device, pci_device_bdf)?
-        } else {
-            None
-        };
-        #[cfg(not(all(target_arch = "aarch64", feature = "kvm")))]
-        let pasid_cap: Option<PasidCap> = None;
-
         if needs_dma_mapping {
             let vfio_mapping = Arc::new(VfioDmaMapping::new(
                 Arc::clone(&vfio_ops),
@@ -4572,6 +4563,15 @@ impl DeviceManager {
                     .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
             }
         }
+
+        #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+        let pasid_cap = if smmuv3_attached {
+            self.attach_vfio_to_smmuv3(device_cfg, &vfio_ops, &vfio_device, pci_device_bdf)?
+        } else {
+            None
+        };
+        #[cfg(not(all(target_arch = "aarch64", feature = "kvm")))]
+        let pasid_cap: Option<PasidCap> = None;
 
         let legacy_interrupt_group =
             if let Some(legacy_interrupt_manager) = &self.legacy_interrupt_manager {
