@@ -528,7 +528,7 @@ impl MemEpollHandler {
                 for handler in handlers.values() {
                     if let Err(e) = handler.map(gpa, gpa, config.block_size) {
                         error!(
-                            "failed DMA mapping addr 0x{:x} size 0x{:x}: {}",
+                            "Failed DMA mapping addr 0x{:x} size 0x{:x}: {:?}",
                             gpa, config.block_size, e
                         );
                         return VIRTIO_MEM_RESP_ERROR;
@@ -542,7 +542,7 @@ impl MemEpollHandler {
         } else {
             for handler in handlers.values() {
                 if let Err(e) = handler.unmap(addr, size) {
-                    error!("failed DMA unmapping addr 0x{addr:x} size 0x{size:x}: {e}");
+                    error!("Failed DMA unmapping addr 0x{addr:x} size 0x{size:x}: {e:?}");
                     return VIRTIO_MEM_RESP_ERROR;
                 }
             }
@@ -569,7 +569,7 @@ impl MemEpollHandler {
                     for handler in handlers.values() {
                         if let Err(e) = handler.unmap(gpa, config.block_size) {
                             error!(
-                                "failed DMA unmapping addr 0x{:x} size 0x{:x}: {}",
+                                "Failed DMA unmapping addr 0x{:x} size 0x{:x}: {:?}",
                                 gpa, config.block_size, e
                             );
                             return VIRTIO_MEM_RESP_ERROR;
