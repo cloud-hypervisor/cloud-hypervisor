@@ -407,7 +407,7 @@ pub enum DeviceManagerError {
 
     /// Failed to DMA map guest RAM for a VFIO device.
     #[error("Failed to DMA map guest RAM at {1:#x} length {2:#x}")]
-    VfioDmaMap(#[source] vfio_ioctls::VfioError, u64, u64),
+    VfioDmaMap(#[source] ExternalDmaMappingError, u64, u64),
 
     /// Failed to create the passthrough device.
     #[error("Failed to create the passthrough device")]
@@ -4553,25 +4553,10 @@ impl DeviceManager {
                 // virtio-mem device itself.
                 for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
                     for region in zone.regions() {
-                        // vfio_dma_map is unsound and ought to be marked as unsafe
-                        #[allow(unused_unsafe)]
-                        // SAFETY: GuestMemory guarantees that region points
-                        // to len bytes of valid memory starting at as_ptr()
-                        // that will only be freed with munmap().
-                        unsafe {
-                            vfio_ops.vfio_dma_map(
-                                region.start_addr().raw_value(),
-                                region.len() as usize,
-                                region.as_ptr(),
-                            )
-                        }
-                        .map_err(|e| {
-                            DeviceManagerError::VfioDmaMap(
-                                e,
-                                region.start_addr().raw_value(),
-                                region.len(),
-                            )
-                        })?;
+                        let gpa = region.start_addr().raw_value();
+                        vfio_mapping
+                            .map(gpa, gpa, region.len())
+                            .map_err(|e| DeviceManagerError::VfioDmaMap(e, gpa, region.len()))?;
                     }
                 }
             }
