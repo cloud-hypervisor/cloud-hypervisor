@@ -329,7 +329,7 @@ impl VhostUserHandle {
                     GuestAddress(queue.desc_table()),
                     actual_size * size_of::<RawDescriptor>(),
                 )
-                .ok_or(Error::DescriptorTableAddress)? as u64,
+                .map_err(Error::DescriptorTableAddress)? as u64,
                 // The used ring is {flags: u16; idx: u16; virtq_used_elem [{id: u16, len: u16}; actual_size]},
                 // i.e. 4 + (4 + 4) * actual_size.
                 used_ring_addr: get_host_address_range(
@@ -337,7 +337,7 @@ impl VhostUserHandle {
                     GuestAddress(queue.used_ring()),
                     4 + actual_size * 8,
                 )
-                .ok_or(Error::UsedAddress)? as u64,
+                .map_err(Error::UsedAddress)? as u64,
                 // The used ring is {flags: u16; idx: u16; elem [u16; actual_size]},
                 // i.e. 4 + (2) * actual_size.
                 avail_ring_addr: get_host_address_range(
@@ -345,7 +345,7 @@ impl VhostUserHandle {
                     GuestAddress(queue.avail_ring()),
                     4 + actual_size * 2,
                 )
-                .ok_or(Error::AvailAddress)? as u64,
+                .map_err(Error::AvailAddress)? as u64,
                 log_addr: None,
             };
 

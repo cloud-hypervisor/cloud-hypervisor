@@ -39,7 +39,7 @@ pub mod watchdog;
 
 use vm_allocator::{GuestMemory, GuestRegion};
 use vm_memory::bitmap::AtomicBitmap;
-use vm_memory::{GuestAddress, GuestMemoryBackend};
+use vm_memory::{GuestAddress, GuestMemoryBackend, GuestMemoryError};
 use vm_virtio::VirtioDeviceType;
 
 pub use self::balloon::{Balloon, BalloonStats, BalloonStatsSnapshot};
@@ -180,24 +180,45 @@ impl TryInto<rate_limiter::RateLimiter> for RateLimiterConfig {
     }
 }
 
+/// Failure to resolve a guest range to a host address.
+#[derive(Debug, Error)]
+pub enum HostAddressRangeError {
+    /// An empty range has no usable host pointer.
+    #[error("Zero size guest range: gpa={gpa:#x}")]
+    ZeroSize { gpa: u64 },
+    /// The guest memory backend could not provide the range.
+    #[error("Failed to access guest range: gpa={gpa:#x}, size={size:#x}")]
+    GuestMemory {
+        gpa: u64,
+        size: usize,
+        #[source]
+        source: GuestMemoryError,
+    },
+}
+
 /// Return the host virtual address corresponding to the given guest address range
 ///
 /// Convert an absolute address into an address space (GuestMemoryBackend)
 /// to a host pointer and verify that the provided size defines a valid
 /// range within a single memory region.
-/// Return None if it is out of bounds, spans multiple regions, or has
-/// zero size at an unmapped GPA.
+/// Return an error if the range is empty or the backend cannot provide it.
 pub fn get_host_address_range<M: GuestMemoryBackend + ?Sized>(
     mem: &M,
     addr: GuestAddress,
     size: usize,
-) -> Option<*mut u8> {
+) -> Result<*mut u8, HostAddressRangeError> {
     // Reject zero-length, no use of a pointer to an empty range.
     if size == 0 {
-        return None;
+        return Err(HostAddressRangeError::ZeroSize { gpa: addr.0 });
     }
-    let slice = mem.get_slice(addr, size).ok()?;
-    Some(slice.ptr_guard_mut().as_ptr())
+    let slice = mem
+        .get_slice(addr, size)
+        .map_err(|source| HostAddressRangeError::GuestMemory {
+            gpa: addr.0,
+            size,
+            source,
+        })?;
+    Ok(slice.ptr_guard_mut().as_ptr())
 }
 
 /// Marks a virtio device as `NEEDS_RESET` and notifies the guest via a config
