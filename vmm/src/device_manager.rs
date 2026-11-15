@@ -602,7 +602,7 @@ pub enum DeviceManagerError {
 
     /// Failed to update memory mappings for VFIO user device
     #[error("Failed to update memory mappings for VFIO user device")]
-    UpdateMemoryForVfioUserPciDevice(#[source] VfioUserPciDeviceError),
+    UpdateMemoryForVfioUserPciDevice(#[source] ExternalDmaMappingError),
 
     /// vfio-user cannot be hot-added while SEV-SNP shared-page tracking is active
     #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
@@ -5393,21 +5393,17 @@ impl DeviceManager {
         }
 
         // Take care of updating the memory for vfio-user devices.
-        {
+        if new_region.file_offset().is_some() {
             let device_tree = self.device_tree.lock().unwrap();
             for pci_device_node in device_tree.pci_devices() {
-                if let PciDeviceHandle::VfioUser {
-                    device: vfio_user_pci_device,
-                    ..
-                } = pci_device_node
+                if let PciDeviceHandle::VfioUser { dma_mapping, .. } = pci_device_node
                     .pci_device_handle
                     .as_ref()
                     .ok_or(DeviceManagerError::MissingPciDevice)?
                 {
-                    vfio_user_pci_device
-                        .lock()
-                        .unwrap()
-                        .dma_map(new_region)
+                    let gpa = new_region.start_addr().raw_value();
+                    dma_mapping
+                        .map(gpa, gpa, new_region.len())
                         .map_err(DeviceManagerError::UpdateMemoryForVfioUserPciDevice)?;
                 }
             }
