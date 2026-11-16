@@ -17,11 +17,18 @@ use log::info;
 use pci::{DeviceRelocation, PciBdf, PciBus, PciConfigMmio, PciRoot};
 #[cfg(target_arch = "x86_64")]
 use pci::{PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE, PciConfigIo, PciConfigIoState};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use vm_allocator::AddressAllocator;
 use vm_device::BusDeviceSync;
 
 use crate::device_manager::{AddressManager, DeviceManagerError, DeviceManagerResult};
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub(crate) struct PciSegmentState {
+    pci_devices_up: u32,
+    pci_devices_down: u32,
+}
 
 pub(crate) struct PciSegment {
     pub(crate) id: u16,
@@ -52,6 +59,13 @@ pub(crate) struct PciSegment {
 }
 
 impl PciSegment {
+    pub(crate) fn state(&self) -> PciSegmentState {
+        PciSegmentState {
+            pci_devices_up: self.pci_devices_up,
+            pci_devices_down: self.pci_devices_down,
+        }
+    }
+
     pub(crate) fn new(
         id: u16,
         numa_node: u32,
@@ -59,7 +73,9 @@ impl PciSegment {
         mem32_allocator: Arc<Mutex<AddressAllocator>>,
         mem64_allocator: Arc<Mutex<AddressAllocator>>,
         pci_irq_slots: &[u8; 32],
+        state: Option<PciSegmentState>,
     ) -> DeviceManagerResult<PciSegment> {
+        let state = state.unwrap_or_default();
         let pci_root = (id == 0).then(|| PciRoot::new(None));
         let pci_bus = Arc::new(Mutex::new(PciBus::new(
             pci_root,
@@ -95,8 +111,8 @@ impl PciSegment {
             pci_config_mmio,
             mmio_config_address,
             proximity_domain: numa_node,
-            pci_devices_up: 0,
-            pci_devices_down: 0,
+            pci_devices_up: state.pci_devices_up,
+            pci_devices_down: state.pci_devices_down,
             #[cfg(target_arch = "x86_64")]
             pci_config_io: None,
             mem32_allocator,
@@ -127,6 +143,7 @@ impl PciSegment {
         mem64_allocator: Arc<Mutex<AddressAllocator>>,
         pci_irq_slots: &[u8; 32],
         pci_config_io_state: Option<PciConfigIoState>,
+        state: Option<PciSegmentState>,
     ) -> DeviceManagerResult<PciSegment> {
         let mut segment = Self::new(
             0,
@@ -135,6 +152,7 @@ impl PciSegment {
             mem32_allocator,
             mem64_allocator,
             pci_irq_slots,
+            state,
         )?;
         let pci_config_io = Arc::new(Mutex::new(PciConfigIo::new(
             Arc::clone(&segment.pci_bus),
@@ -161,6 +179,7 @@ impl PciSegment {
         mem32_allocator: Arc<Mutex<AddressAllocator>>,
         mem64_allocator: Arc<Mutex<AddressAllocator>>,
         pci_irq_slots: &[u8; 32],
+        state: Option<PciSegmentState>,
     ) -> DeviceManagerResult<PciSegment> {
         Self::new(
             0,
@@ -169,6 +188,7 @@ impl PciSegment {
             mem32_allocator,
             mem64_allocator,
             pci_irq_slots,
+            state,
         )
     }
 
