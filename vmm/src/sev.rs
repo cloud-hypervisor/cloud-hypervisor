@@ -683,6 +683,26 @@ mod tests {
     }
 
     #[test]
+    fn replacing_handler_replays_shared_pages() {
+        let (t, previous) = tracker_with_region(page(0), 4 * PAGE_SIZE_4K);
+        t.set_shared(page(1), PAGE_SIZE_4K, true).unwrap();
+
+        // An operation on another memory device can still hold the old handler.
+        let next = Arc::new(Recorder::default());
+        t.add_dma_mapping_handler(&(Arc::clone(&next) as Arc<dyn ExternalDmaMapping>))
+            .unwrap();
+        t.set_shared(page(2), PAGE_SIZE_4K, true).unwrap();
+        assert_eq!(
+            *previous.maps.lock().unwrap(),
+            vec![(page(1), PAGE_SIZE_4K)]
+        );
+        assert_eq!(
+            *next.maps.lock().unwrap(),
+            vec![(page(1), PAGE_SIZE_4K), (page(2), PAGE_SIZE_4K)]
+        );
+    }
+
+    #[test]
     fn replay_failure_rolls_back_partial_maps() {
         // Pages shared before any attach, as a guest converts them.
         let t = SevSnpSharedPageTracker::new();
