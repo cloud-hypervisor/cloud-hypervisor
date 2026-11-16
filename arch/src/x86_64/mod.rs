@@ -77,6 +77,7 @@ const KVM_FEATURE_MSI_EXT_DEST_ID: u8 = 15;
 // KVM hint bits (EDX of leaf 0x4000_0001)
 const KVM_HINTS_REALTIME: u8 = 0;
 
+const SVM_FEATURES_LEAF: u32 = 0x8000_000a;
 const EXTENDED_FEATURE_IDENTIFICATION2_LEAF: u32 = 0x8000_0021;
 
 pub const _NSIG: i32 = 65;
@@ -588,6 +589,12 @@ impl CpuidFeatureEntry {
                 feature_reg: CpuidReg::ECX,
                 compatible_check: CpuidCompatibleCheck::BitwiseSubset,
             },
+            CpuidFeatureEntry {
+                function: SVM_FEATURES_LEAF,
+                index: 0,
+                feature_reg: CpuidReg::EDX,
+                compatible_check: CpuidCompatibleCheck::BitwiseSubset,
+            },
             // KVM CPUID bits: https://www.kernel.org/doc/html/latest/virt/kvm/x86/cpuid.html
             // Leaf 0x4000_0000, EAX/EBX/ECX/EDX, KVM CPUID SIGNATURE
             CpuidFeatureEntry {
@@ -680,12 +687,14 @@ impl CpuidFeatureEntry {
     pub fn check_cpuid_compatibility(
         src_vm_cpuid: &[CpuIdEntry],
         dest_vm_cpuid: &[CpuIdEntry],
+        nested: bool,
     ) -> Result<(), Error> {
         Self::check_cpuid_compatibility_with_descriptions(
             src_vm_cpuid,
             "source VM",
             dest_vm_cpuid,
             "destination VM",
+            nested,
         )
     }
 
@@ -768,6 +777,7 @@ impl CpuidFeatureEntry {
         src_description: &str,
         dest_vm_cpuid: &[CpuIdEntry],
         dest_description: &str,
+        nested: bool,
     ) -> Result<(), Error> {
         let feature_entry_list = &Self::checked_feature_entry_list();
         let src_vm_features = Self::get_features_from_cpuid(src_vm_cpuid, feature_entry_list);
@@ -782,6 +792,11 @@ impl CpuidFeatureEntry {
             .enumerate()
         {
             let entry = &feature_entry_list[i];
+
+            if entry.function == SVM_FEATURES_LEAF && (!nested) {
+                // This leaf is only relevant in the case of nested virtualization
+                continue;
+            }
 
             let entry_compatible = match entry.compatible_check {
                 CpuidCompatibleCheck::BitwiseSubset => {
@@ -925,6 +940,7 @@ pub fn generate_common_cpuid(
             "CPU Profile",
             &cpuid_host,
             "Host VM",
+            config.nested,
         )
         .map_err(|_| Error::CpuProfileCpuidIncompatibility)?;
         cpuid_profile
