@@ -2469,12 +2469,29 @@ impl VfioPciDevice {
         Self::carve_out_sparse_areas(sparse_areas, region_start, region_size, &inter_ranges)
     }
 
+    fn update_sparse_areas_nvidia_mirror(
+        sparse_areas: &mut Vec<VfioRegionSparseMmapArea>,
+        region_start: u64,
+        region_size: u64,
+    ) -> Result<(), VfioPciError> {
+        let start = align_page_size_down(NVIDIA_BAR0_CONFIG_MIRROR_OFFSET);
+        let end =
+            align_page_size_up(NVIDIA_BAR0_CONFIG_MIRROR_OFFSET + NVIDIA_BAR0_CONFIG_MIRROR_SIZE);
+        let mut inter_ranges = BTreeMap::new();
+        if start < region_size {
+            inter_ranges.insert(start, end - start);
+        }
+
+        Self::carve_out_sparse_areas(sparse_areas, region_start, region_size, &inter_ranges)
+    }
+
     fn generate_sparse_areas(
         caps: &[VfioRegionInfoCap],
         region_index: u32,
         region_start: u64,
         region_size: u64,
         vfio_msix: Option<&VfioMsix>,
+        vendor_id: u16,
     ) -> Result<Vec<VfioRegionSparseMmapArea>, VfioPciError> {
         let mut sparse_areas = vec![VfioRegionSparseMmapArea {
             offset: 0,
@@ -2502,6 +2519,10 @@ impl VfioPciDevice {
                 region_size,
                 vfio_msix,
             )?;
+        }
+
+        if vendor_id == VENDOR_NVIDIA && region_index == VFIO_PCI_BAR0_REGION_INDEX {
+            Self::update_sparse_areas_nvidia_mirror(&mut sparse_areas, region_start, region_size)?;
         }
 
         Ok(sparse_areas)
@@ -2571,6 +2592,7 @@ impl VfioPciDevice {
                     region.start.0,
                     mmap_size,
                     self.common.interrupt.msix.as_ref(),
+                    self.common.vendor_id,
                 )?;
 
                 let page_size = get_page_size();
@@ -4258,5 +4280,79 @@ mod tests {
 
         common.write_bar(bar0_gpa, 0x80000, &0x99aa_bbccu32.to_le_bytes());
         assert_eq!(mock.bar0_dword(0x80000), 0x99aa_bbcc);
+    }
+
+    #[test]
+    fn generate_sparse_areas_carves_out_nvidia_bar0_config_mirror() {
+        let region_size: u64 = 0x400_0000; // 64 MiB BAR0
+        let hole_start = align_page_size_down(NVIDIA_BAR0_CONFIG_MIRROR_OFFSET);
+        let hole_end =
+            align_page_size_up(NVIDIA_BAR0_CONFIG_MIRROR_OFFSET + NVIDIA_BAR0_CONFIG_MIRROR_SIZE);
+
+        // 1. NVIDIA BAR0 without capabilities still carves out the mirror window.
+        let areas = VfioPciDevice::generate_sparse_areas(
+            &[],
+            VFIO_PCI_BAR0_REGION_INDEX,
+            0x1_0000_0000,
+            region_size,
+            None,
+            VENDOR_NVIDIA,
+        )
+        .unwrap();
+        assert_eq!(areas.len(), 2);
+        assert_eq!(areas[0].offset, 0);
+        assert_eq!(areas[0].size, hole_start);
+        assert_eq!(areas[1].offset, hole_end);
+        assert_eq!(areas[1].size, region_size - hole_end);
+
+        // 2. Non-NVIDIA BAR0 without capabilities maps the entire region.
+        let non_nv = VfioPciDevice::generate_sparse_areas(
+            &[],
+            VFIO_PCI_BAR0_REGION_INDEX,
+            0x1_0000_0000,
+            region_size,
+            None,
+            0x8086,
+        )
+        .unwrap();
+        assert_eq!(non_nv.len(), 1);
+        assert_eq!(non_nv[0].offset, 0);
+        assert_eq!(non_nv[0].size, region_size);
+
+        // 3. NVIDIA non-BAR0 (e.g. BAR2) without capabilities maps the entire region.
+        let nv_bar2 = VfioPciDevice::generate_sparse_areas(
+            &[],
+            VFIO_PCI_BAR2_REGION_INDEX,
+            0x1_0000_0000,
+            region_size,
+            None,
+            VENDOR_NVIDIA,
+        )
+        .unwrap();
+        assert_eq!(nv_bar2.len(), 1);
+        assert_eq!(nv_bar2[0].offset, 0);
+        assert_eq!(nv_bar2[0].size, region_size);
+
+        // 4. NVIDIA BAR0 with SparseMmap capability still carves out the mirror window.
+        let sparse_cap = VfioRegionInfoCap::SparseMmap(vfio_ioctls::VfioRegionInfoCapSparseMmap {
+            areas: vec![VfioRegionSparseMmapArea {
+                offset: 0,
+                size: region_size,
+            }],
+        });
+        let sparse_areas = VfioPciDevice::generate_sparse_areas(
+            &[sparse_cap],
+            VFIO_PCI_BAR0_REGION_INDEX,
+            0x1_0000_0000,
+            region_size,
+            None,
+            VENDOR_NVIDIA,
+        )
+        .unwrap();
+        assert_eq!(sparse_areas.len(), 2);
+        assert_eq!(sparse_areas[0].offset, 0);
+        assert_eq!(sparse_areas[0].size, hole_start);
+        assert_eq!(sparse_areas[1].offset, hole_end);
+        assert_eq!(sparse_areas[1].size, region_size - hole_end);
     }
 }
