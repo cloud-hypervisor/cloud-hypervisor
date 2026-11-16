@@ -851,9 +851,9 @@ impl DeviceRelocation for AddressManager {
     ) -> result::Result<(), io::Error> {
         self.update_ranges(pci_dev, old_base, new_base, len, region_type)?;
 
-        self.update_device_tree(pci_dev, bar_idx, new_base)?;
+        self.update_device(pci_dev, bar_idx, old_base, new_base)?;
 
-        self.update_device(pci_dev, bar_idx, old_base, new_base)
+        self.update_device_tree(pci_dev, bar_idx, new_base)
     }
 }
 
