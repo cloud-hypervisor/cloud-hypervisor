@@ -8,6 +8,13 @@ lto = true
 opt-level = "s"
 strip = true
 
+# Optimize CPU-bound data path for speed.
+[profile.release.package.virtio-devices]
+opt-level = 3
+
+[profile.release.package.vm-memory]
+opt-level = 3
+
 [profile.profiling]
 debug = true
 inherits = "release"
