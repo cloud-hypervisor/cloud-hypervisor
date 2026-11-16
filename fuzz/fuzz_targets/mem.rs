@@ -283,10 +283,8 @@ fn exercise_constructor_paths(stream: &mut FuzzCursor) {
         let _ = virtio_mem.resize(MEM_SIZE as u64 + BLOCK_SIZE);
         let _ = virtio_mem.resize(BLOCK_SIZE * (1 + u64::from(stream.next_u8() % 8)));
 
-        let _ = virtio_mem.add_dma_mapping_handler(
-            VirtioMemMappingSource::Device(7),
-            Arc::new(FuzzDmaMapping::new(false, false)),
-        );
+        let dma_handler: Arc<dyn ExternalDmaMapping> = Arc::new(FuzzDmaMapping::new(false, false));
+        let _ = virtio_mem.add_dma_mapping_handler(VirtioMemMappingSource::Device(7), &dma_handler);
         let _ = virtio_mem.remove_dma_mapping_handler(&VirtioMemMappingSource::Device(7));
         let _ = virtio_mem.remove_dma_mapping_handler(&VirtioMemMappingSource::Device(8));
 
@@ -349,8 +347,8 @@ fn run_device_scenario(stream: &mut FuzzCursor, kind: ScenarioKind) -> Result<()
         ScenarioKind::UnmapFailure => FuzzDmaMapping::new(false, true),
         _ => FuzzDmaMapping::new(false, false),
     };
-    let _ = virtio_mem
-        .add_dma_mapping_handler(VirtioMemMappingSource::Container, Arc::new(dma_handler));
+    let dma_handler: Arc<dyn ExternalDmaMapping> = Arc::new(dma_handler);
+    let _ = virtio_mem.add_dma_mapping_handler(VirtioMemMappingSource::Container, &dma_handler);
 
     let guest_memory = GuestMemoryAtomic::new(mem);
 
@@ -397,11 +395,13 @@ fn run_device_scenario(stream: &mut FuzzCursor, kind: ScenarioKind) -> Result<()
     if kind == ScenarioKind::UnmapFailure {
         let source_id = u32::from(stream.next_u8());
         let source = VirtioMemMappingSource::Device(source_id);
-        let _ =
-            virtio_mem.add_dma_mapping_handler(source, Arc::new(FuzzDmaMapping::new(false, false)));
+        let handler: Arc<dyn ExternalDmaMapping> = Arc::new(FuzzDmaMapping::new(false, false));
+        let map_failing_handler: Arc<dyn ExternalDmaMapping> =
+            Arc::new(FuzzDmaMapping::new(true, false));
+        let _ = virtio_mem.add_dma_mapping_handler(source, &handler);
         let _ = virtio_mem.add_dma_mapping_handler(
             VirtioMemMappingSource::Device(source_id + 1),
-            Arc::new(FuzzDmaMapping::new(true, false)),
+            &map_failing_handler,
         );
         let _ = virtio_mem.remove_dma_mapping_handler(&VirtioMemMappingSource::Device(source_id));
     }
