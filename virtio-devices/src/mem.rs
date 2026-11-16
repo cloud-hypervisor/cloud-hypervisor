@@ -1028,3 +1028,92 @@ impl Snapshottable for Mem {
 }
 impl Transportable for Mem {}
 impl Migratable for Mem {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Default)]
+    struct RecordingDmaMapping {
+        maps: Mutex<Vec<(u64, u64)>>,
+        unmaps: Mutex<Vec<(u64, u64)>>,
+    }
+
+    impl ExternalDmaMapping for RecordingDmaMapping {
+        fn map(
+            &self,
+            iova: u64,
+            _gpa: u64,
+            size: u64,
+        ) -> result::Result<(), ExternalDmaMappingError> {
+            self.maps.lock().unwrap().push((iova, size));
+            Ok(())
+        }
+
+        fn unmap(&self, iova: u64, size: u64) -> result::Result<(), ExternalDmaMappingError> {
+            self.unmaps.lock().unwrap().push((iova, size));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn dma_registration_does_not_retain_handler() {
+        let region = Arc::new(
+            vm_memory::GuestRegionMmap::from_range(
+                GuestAddress(0),
+                VIRTIO_MEM_ALIGN_SIZE as usize,
+                None,
+            )
+            .unwrap()
+            .into(),
+        );
+        let blocks_state = Arc::new(Mutex::new(BlocksState::new(VIRTIO_MEM_ALIGN_SIZE)));
+        let mut mem = Mem::new(
+            "mem".to_owned(),
+            &region,
+            SeccompAction::Allow,
+            None,
+            VIRTIO_MEM_DEFAULT_BLOCK_SIZE,
+            false,
+            EventFd::new(0).unwrap(),
+            Arc::clone(&blocks_state),
+            None,
+        )
+        .unwrap();
+        blocks_state.lock().unwrap().set_range(0, 1, true);
+        mem.config.lock().unwrap().plugged_size = VIRTIO_MEM_DEFAULT_BLOCK_SIZE;
+
+        let first = Arc::new(RecordingDmaMapping::default());
+        mem.add_dma_mapping_handler(
+            VirtioMemMappingSource::Container,
+            &(Arc::clone(&first) as Arc<dyn ExternalDmaMapping>),
+        )
+        .unwrap();
+        assert_eq!(
+            *first.maps.lock().unwrap(),
+            vec![(0, VIRTIO_MEM_DEFAULT_BLOCK_SIZE)]
+        );
+        let weak = Arc::downgrade(&first);
+        drop(first);
+        assert!(weak.upgrade().is_none());
+        mem.remove_dma_mapping_handler(&VirtioMemMappingSource::Container)
+            .unwrap();
+
+        let second = Arc::new(RecordingDmaMapping::default());
+        mem.add_dma_mapping_handler(
+            VirtioMemMappingSource::Container,
+            &(Arc::clone(&second) as Arc<dyn ExternalDmaMapping>),
+        )
+        .unwrap();
+        assert_eq!(
+            *second.maps.lock().unwrap(),
+            vec![(0, VIRTIO_MEM_DEFAULT_BLOCK_SIZE)]
+        );
+        mem.remove_dma_mapping_handler(&VirtioMemMappingSource::Container)
+            .unwrap();
+        assert_eq!(
+            *second.unmaps.lock().unwrap(),
+            vec![(0, VIRTIO_MEM_DEFAULT_BLOCK_SIZE)]
+        );
+    }
+}
