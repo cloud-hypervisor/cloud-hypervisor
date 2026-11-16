@@ -16,7 +16,7 @@ use arch::layout;
 use log::info;
 use pci::{DeviceRelocation, PciBdf, PciBus, PciConfigMmio, PciRoot};
 #[cfg(target_arch = "x86_64")]
-use pci::{PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE, PciConfigIo};
+use pci::{PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE, PciConfigIo, PciConfigIoState};
 use uuid::Uuid;
 use vm_allocator::AddressAllocator;
 use vm_device::BusDeviceSync;
@@ -126,6 +126,7 @@ impl PciSegment {
         mem32_allocator: Arc<Mutex<AddressAllocator>>,
         mem64_allocator: Arc<Mutex<AddressAllocator>>,
         pci_irq_slots: &[u8; 32],
+        pci_config_io_state: Option<PciConfigIoState>,
     ) -> DeviceManagerResult<PciSegment> {
         let mut segment = Self::new(
             0,
@@ -137,7 +138,7 @@ impl PciSegment {
         )?;
         let pci_config_io = Arc::new(Mutex::new(PciConfigIo::new(
             Arc::clone(&segment.pci_bus),
-            None,
+            pci_config_io_state,
         )));
 
         address_manager
