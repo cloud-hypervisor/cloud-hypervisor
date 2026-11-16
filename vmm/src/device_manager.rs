@@ -28,7 +28,7 @@ use std::os::unix::io::{AsFd, AsRawFd, FromRawFd};
 #[cfg(not(target_arch = "riscv64"))]
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 #[cfg(not(target_arch = "riscv64"))]
 use std::time::Instant;
 use std::{iter, path, result, sync};
@@ -998,11 +998,7 @@ pub struct DeviceManager {
     // Passthrough device handle
     passthrough_device: Option<VfioDeviceFd>,
 
-    vfio_context: Option<Arc<VfioContext>>,
-
-    // Number of active VFIO devices sharing `vfio_context`.
-    #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
-    shared_vfio_devices: usize,
+    vfio_context: Weak<VfioContext>,
 
     // Paravirtualized IOMMU
     iommu_device: Option<Arc<Mutex<virtio_devices::Iommu>>>,
@@ -1396,9 +1392,7 @@ impl DeviceManager {
             msi_interrupt_manager,
             legacy_interrupt_manager: None,
             passthrough_device: None,
-            vfio_context: None,
-            #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
-            shared_vfio_devices: 0,
+            vfio_context: Weak::new(),
             iommu_device: None,
             iommu_mapping: None,
             iommu_attached_devices: None,
@@ -4099,7 +4093,6 @@ impl DeviceManager {
         }
 
         self.add_vfio_device(device_cfg, snapshot)
-            .inspect_err(|_| self.cleanup_vfio_ops())
     }
 
     fn create_vfio_context(&self) -> DeviceManagerResult<Arc<VfioContext>> {
@@ -4479,12 +4472,12 @@ impl DeviceManager {
             }
 
             vfio_context
-        } else if let Some(vfio_context) = &self.vfio_context {
-            Arc::clone(vfio_context)
+        } else if let Some(vfio_context) = self.vfio_context.upgrade() {
+            vfio_context
         } else {
             let vfio_context = self.create_vfio_context()?;
             needs_dma_mapping = true;
-            self.vfio_context = Some(Arc::clone(&vfio_context));
+            self.vfio_context = Arc::downgrade(&vfio_context);
 
             vfio_context
         };
@@ -4711,11 +4704,6 @@ impl DeviceManager {
             pci_device_bdf,
             bars,
         )?;
-
-        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
-        if !device_cfg.pci_common.iommu.attached() {
-            self.shared_vfio_devices += 1;
-        }
 
         Ok((pci_device_bdf, vfio_name))
     }
@@ -5411,7 +5399,7 @@ impl DeviceManager {
         }
 
         // Take care of updating the memory for VFIO PCI devices.
-        if let Some(vfio_context) = &self.vfio_context {
+        if let Some(vfio_context) = self.vfio_context.upgrade() {
             // vfio_dma_map is unsound and ought to be marked as unsafe
             #[allow(unused_unsafe)]
             // SAFETY: GuestMemory guarantees that region points
@@ -5671,9 +5659,6 @@ impl DeviceManager {
             iommu_attached = true;
         }
 
-        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
-        let mut removed_shared_vfio_device = false;
-
         // Release local device references before removing the node that owns
         // their DMA handler.
         {
@@ -5683,12 +5668,6 @@ impl DeviceManager {
                         device: vfio_pci_device,
                         ..
                     } => {
-                        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
-                        {
-                            removed_shared_vfio_device =
-                                !vfio_pci_device.lock().unwrap().iommu_attached();
-                        }
-
                         // Remove this device's MMIO regions from the DeviceManager's
                         // mmio_regions list. The shared backing identifies each BAR
                         // even when its guest address changes.
@@ -5882,14 +5861,6 @@ impl DeviceManager {
             "bdf",
             pci_device_bdf.to_string()
         );
-
-        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
-        if removed_shared_vfio_device {
-            if self.shared_vfio_devices == 0 {
-                error!("shared VFIO device count underflow on eject, falling to 0");
-            }
-            self.shared_vfio_devices = self.shared_vfio_devices.saturating_sub(1);
-        }
 
         Ok(())
     }
@@ -6174,28 +6145,6 @@ impl DeviceManager {
 
     pub(crate) fn acpi_platform_addresses(&self) -> &AcpiPlatformAddresses {
         &self.acpi_platform_addresses
-    }
-
-    fn cleanup_vfio_ops(&mut self) {
-        // We need to release every other container reference before dropping
-        // `self.vfio_context`, so its drop closes the container fd and unpins
-        // the shared pages.
-        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
-        if let Some(tracker) = &self.sev_snp_shared_page_tracker {
-            if self.vfio_context.is_some() && self.shared_vfio_devices == 0 {
-                // Drop the tracker's handler. The tracker itself persists so a
-                // later VFIO attach replays the current shared set.
-                tracker.clear_dma_mapping_handler();
-                self.vfio_context = None;
-            }
-            return;
-        }
-
-        // Drop the VFIO context when "Self" is the only reference.
-        if let Some(1) = self.vfio_context.as_ref().map(Arc::strong_count) {
-            debug!("Drop VFIO context given no active VFIO devices.");
-            self.vfio_context = None;
-        }
     }
 
     #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
@@ -6716,7 +6665,6 @@ impl BusDevice for DeviceManager {
                     if let Err(e) = self.eject_device(self.selected_segment as u16, slot_id as u8) {
                         error!("Failed ejecting device {slot_id}: {e:?}");
                     }
-                    self.cleanup_vfio_ops();
                     slot_bitmap &= !(1 << slot_id);
                 }
             }
@@ -6756,12 +6704,6 @@ impl Drop for DeviceManager {
 
         for handle in self.virtio_devices.drain(..) {
             handle.virtio_device.lock().unwrap().shutdown();
-        }
-
-        // Release the DMA handler's guest memory references.
-        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
-        if let Some(tracker) = &self.sev_snp_shared_page_tracker {
-            tracker.clear_dma_mapping_handler();
         }
 
         if let Some(termios) = *self.original_termios_opt.lock().unwrap() {

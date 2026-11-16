@@ -286,11 +286,6 @@ impl SevSnpSharedPageTracker {
         }
     }
 
-    /// Drop the registered DMA handler.
-    pub(crate) fn clear_dma_mapping_handler(&self) {
-        self.inner.lock().unwrap().handler = None;
-    }
-
     /// Flip `[gpa, gpa + size)` shared/private in the tracker, driving the
     /// handler so the device IOMMU maps the shared pages only.
     fn set_shared(
