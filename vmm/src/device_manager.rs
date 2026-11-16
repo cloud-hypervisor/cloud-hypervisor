@@ -148,7 +148,7 @@ use crate::device_tree::{DeviceNode, DeviceTree};
 use crate::interrupt::{LegacyUserspaceInterruptManager, MsiInterruptManager};
 use crate::locked_unix_listener::LockedUnixListener;
 use crate::memory_manager::{Error as MemoryManagerError, MEMORY_MANAGER_ACPI_SIZE, MemoryManager};
-use crate::pci_segment::PciSegment;
+use crate::pci_segment::{PciSegment, PciSegmentState};
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
 #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
 use crate::sev::SevSnpSharedPageTracker;
@@ -825,6 +825,10 @@ impl DeviceRelocation for AddressManager {
 struct DeviceManagerState {
     device_tree: DeviceTree,
     device_id_cnt: Wrapping<usize>,
+    #[serde(default)]
+    pci_segments: Vec<PciSegmentState>,
+    #[serde(default)]
+    selected_segment: usize,
 }
 
 #[derive(Debug)]
@@ -1172,8 +1176,11 @@ impl DeviceManager {
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
         trace_scoped!("DeviceManager::new");
 
-        let (device_tree, device_id_cnt) = if let Some(snapshot) = snapshot.as_ref() {
-            let state: DeviceManagerState = snapshot.to_state().unwrap();
+        let state: Option<DeviceManagerState> = snapshot
+            .map(Snapshot::to_state)
+            .transpose()
+            .map_err(DeviceManagerError::RestoreGetState)?;
+        let (device_tree, device_id_cnt) = if let Some(state) = &state {
             (
                 Arc::new(Mutex::new(state.device_tree.clone())),
                 state.device_id_cnt,
@@ -1279,6 +1286,10 @@ impl DeviceManager {
             #[cfg(target_arch = "x86_64")]
             state_from_id(snapshot, pci::PCI_CONFIG_IO_SNAPSHOT_ID)
                 .map_err(DeviceManagerError::RestoreGetState)?,
+            state
+                .as_ref()
+                .and_then(|state| state.pci_segments.first())
+                .cloned(),
         )?];
 
         for i in 1..num_pci_segments as usize {
@@ -1289,6 +1300,10 @@ impl DeviceManager {
                 Arc::clone(&address_manager.pci_mmio32_allocators[i]),
                 Arc::clone(&address_manager.pci_mmio64_allocators[i]),
                 &pci_irq_slots,
+                state
+                    .as_ref()
+                    .and_then(|state| state.pci_segments.get(i))
+                    .cloned(),
             )?);
         }
 
@@ -1395,7 +1410,7 @@ impl DeviceManager {
                 .try_clone()
                 .map_err(DeviceManagerError::EventFd)?,
             acpi_address,
-            selected_segment: 0,
+            selected_segment: state.as_ref().map_or(0, |state| state.selected_segment),
             serial_manager: None,
             original_termios_opt: Arc::new(Mutex::new(None)),
             virtio_mem_devices: Vec::new(),
@@ -1626,6 +1641,8 @@ impl DeviceManager {
         DeviceManagerState {
             device_tree: self.device_tree.lock().unwrap().clone(),
             device_id_cnt: self.device_id_cnt,
+            pci_segments: self.pci_segments.iter().map(PciSegment::state).collect(),
+            selected_segment: self.selected_segment,
         }
     }
 
@@ -6734,6 +6751,68 @@ impl Drop for DeviceManager {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn restore_preserves_pci_hotplug_flags() {
+        let allocator = Arc::new(Mutex::new(
+            AddressAllocator::new(GuestAddress(0x1000_0000), 0x1000_0000).unwrap(),
+        ));
+        let address_manager = Arc::new(AddressManager {
+            allocator: Arc::new(Mutex::new(
+                SystemAllocator::new(
+                    GuestAddress(0),
+                    0x10000,
+                    GuestAddress(0x2000_0000),
+                    0x1000_0000,
+                    #[cfg(target_arch = "x86_64")]
+                    &[vm_allocator::GsiApic::new(5, 19)],
+                    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+                    arch::IRQ_BASE,
+                )
+                .unwrap(),
+            )),
+            io_bus: Arc::new(Bus::new()),
+            mmio_bus: Arc::new(Bus::new()),
+            vm: hypervisor::new()
+                .unwrap()
+                .create_vm(hypervisor::HypervisorVmConfig::default())
+                .unwrap(),
+            device_tree: Arc::new(Mutex::new(DeviceTree::new())),
+            pci_mmio32_allocators: Box::new([]),
+            pci_mmio64_allocators: Box::new([]),
+        });
+        let mut segment = PciSegment::new(
+            1,
+            0,
+            &address_manager,
+            Arc::clone(&allocator),
+            Arc::clone(&allocator),
+            &[0; 32],
+            None,
+        )
+        .unwrap();
+        assert_eq!(segment.pci_devices_up, 0);
+        assert_eq!(segment.pci_devices_down, 0);
+        segment.pci_devices_up = 1 << 2;
+        segment.pci_devices_down = 1 << 3;
+        let state = Snapshot::new_from_state(&segment.state())
+            .unwrap()
+            .to_state()
+            .unwrap();
+
+        let restored = PciSegment::new_default_segment(
+            &address_manager,
+            Arc::clone(&allocator),
+            allocator,
+            &[0; 32],
+            #[cfg(target_arch = "x86_64")]
+            None,
+            Some(state),
+        )
+        .unwrap();
+        assert_eq!(restored.pci_devices_up, 1 << 2);
+        assert_eq!(restored.pci_devices_down, 1 << 3);
+    }
+
     #[test]
     fn claim_reserved_keeps_bars_off_the_range() {
         use vm_allocator::AddressAllocator;
