@@ -2030,6 +2030,7 @@ impl Vmm {
                     kvm_hyperv: vm_config.cpus.kvm_hyperv,
                     kvm_hint_realtime: vm_config.cpus.kvm_hint_realtime,
                     amx: vm_config.cpus.features.amx,
+                    nested: vm_config.cpus.nested,
                     cpuid_overrides: vm_config.cpus.cpuid_overrides.clone(),
                 },
                 None,

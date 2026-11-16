@@ -1009,6 +1009,7 @@ impl CpuManager {
                     kvm_hyperv: config.kvm_hyperv,
                     kvm_hint_realtime: config.kvm_hint_realtime,
                     amx: config.features.amx,
+                    nested: config.nested,
                     cpuid_overrides: config.cpuid_overrides.clone(),
                 },
                 cpu_profile_data.as_ref(),
