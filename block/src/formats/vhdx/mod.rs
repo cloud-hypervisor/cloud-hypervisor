@@ -20,7 +20,7 @@ mod test_util;
 use std::fs::File;
 use std::io::Error as IoError;
 use std::os::fd::AsRawFd;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 
 pub use dynamic::VhdxError;
 
@@ -32,21 +32,15 @@ use crate::{Error, disk_file};
 
 #[derive(Debug)]
 pub struct VhdxDisk {
-    // FIXME: The Mutex serializes all VHDX I/O operations across queues, which
-    // is necessary for correctness but eliminates any parallelism benefit from
-    // multiqueue. Vhdx::clone() shares the underlying file description across
-    // threads, so concurrent I/O from multiple queues races on the file offset
-    // causing data corruption.
-    //
-    // A proper fix would require restructuring the VHDX I/O path so that data
-    // operations can proceed in parallel with independent file descriptors.
-    vhdx_file: Arc<Mutex<Vhdx>>,
+    // Reads take the read lock; writes take the write lock because
+    // `write_all_at` mutates the BAT and header.
+    vhdx_file: Arc<RwLock<Vhdx>>,
 }
 
 impl VhdxDisk {
     pub fn new(f: File, direct_io: bool) -> BlockResult<Self> {
         Ok(VhdxDisk {
-            vhdx_file: Arc::new(Mutex::new(Vhdx::new(f, direct_io).map_err(|e| {
+            vhdx_file: Arc::new(RwLock::new(Vhdx::new(f, direct_io).map_err(|e| {
                 let kind = match &e {
                     VhdxError::ParseVhdxHeader(_)
                     | VhdxError::ParseVhdxMetadata(_)
@@ -62,14 +56,14 @@ impl VhdxDisk {
 
 impl disk_file::DiskSize for VhdxDisk {
     fn logical_size(&self) -> BlockResult<u64> {
-        Ok(self.vhdx_file.lock().unwrap().virtual_disk_size())
+        Ok(self.vhdx_file.read().unwrap().virtual_disk_size())
     }
 }
 
 impl disk_file::PhysicalSize for VhdxDisk {
     fn physical_size(&self) -> BlockResult<u64> {
         self.vhdx_file
-            .lock()
+            .read()
             .unwrap()
             .physical_size()
             .map_err(|e| match e {
@@ -83,7 +77,7 @@ impl disk_file::PhysicalSize for VhdxDisk {
 
 impl disk_file::DiskFd for VhdxDisk {
     fn fd(&self) -> BorrowedDiskFd<'_> {
-        BorrowedDiskFd::new(self.vhdx_file.lock().unwrap().as_raw_fd())
+        BorrowedDiskFd::new(self.vhdx_file.read().unwrap().as_raw_fd())
     }
 }
 
@@ -113,7 +107,7 @@ impl disk_file::AsyncDiskFile for VhdxDisk {
     }
 
     fn create_async_io(&self, _ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
-        let size = self.vhdx_file.lock().unwrap().virtual_disk_size();
+        let size = self.vhdx_file.read().unwrap().virtual_disk_size();
         Ok(Box::new(VhdxSync::new(Arc::clone(&self.vhdx_file), size)))
     }
 }

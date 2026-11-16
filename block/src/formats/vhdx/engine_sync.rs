@@ -5,7 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::io;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 
 use vmm_sys_util::eventfd::EventFd;
 
@@ -15,13 +15,13 @@ use crate::async_io::{
 };
 
 pub(super) struct VhdxSync {
-    vhdx_file: Arc<Mutex<Vhdx>>,
+    vhdx_file: Arc<RwLock<Vhdx>>,
     completions: CompletionCommon,
     size: u64,
 }
 
 impl VhdxSync {
-    pub(super) fn new(vhdx_file: Arc<Mutex<Vhdx>>, size: u64) -> Self {
+    pub(super) fn new(vhdx_file: Arc<RwLock<Vhdx>>, size: u64) -> Self {
         VhdxSync {
             vhdx_file,
             completions: CompletionCommon::new(),
@@ -32,7 +32,7 @@ impl VhdxSync {
     fn read_operation(&mut self, op: &mut AsyncIoOperation) -> AsyncIoResult<usize> {
         let offset = op.offset();
         let mut buf = vec![0u8; op.total_len()];
-        let vhdx = self.vhdx_file.lock().unwrap();
+        let vhdx = self.vhdx_file.read().unwrap();
         let result = vhdx
             .read_at(&mut buf, offset as u64)
             .map_err(AsyncIoError::ReadVectored)?;
@@ -49,7 +49,7 @@ impl VhdxSync {
         op.read_bytes_at(0, &mut buf)
             .map_err(AsyncIoError::WriteVectored)?;
 
-        let mut vhdx = self.vhdx_file.lock().unwrap();
+        let mut vhdx = self.vhdx_file.write().unwrap();
         vhdx.write_all_at(&buf, offset as u64)
             .map_err(AsyncIoError::WriteVectored)?;
         Ok(buf.len())
@@ -78,7 +78,7 @@ impl AsyncIo for VhdxSync {
 
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
         self.vhdx_file
-            .lock()
+            .read()
             .unwrap()
             .flush()
             .map_err(AsyncIoError::Fsync)?;
@@ -108,7 +108,7 @@ impl AsyncIo for VhdxSync {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, RwLock};
 
     use vmm_sys_util::tempfile::TempFile;
 
@@ -119,7 +119,7 @@ mod tests {
     fn make_vhdx_sync(tf: &TempFile) -> (VhdxSync, u64) {
         let vhdx = open_vhdx(tf.as_path()).unwrap();
         let size = vhdx.virtual_disk_size();
-        let sync = VhdxSync::new(Arc::new(Mutex::new(vhdx)), size);
+        let sync = VhdxSync::new(Arc::new(RwLock::new(vhdx)), size);
         (sync, size)
     }
 
