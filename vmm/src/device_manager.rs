@@ -5378,7 +5378,7 @@ impl DeviceManager {
         self.cmdline_additions.as_slice()
     }
 
-    pub fn update_memory(&self, new_region: &Arc<GuestRegion>) -> DeviceManagerResult<()> {
+    pub fn add_memory_region(&self, new_region: &Arc<GuestRegion>) -> DeviceManagerResult<()> {
         for handle in self.virtio_devices.iter() {
             handle
                 .virtio_device

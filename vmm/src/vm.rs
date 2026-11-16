@@ -2106,7 +2106,7 @@ impl Vm {
             if let Some(new_region) = &new_region {
                 let device_manager = self.device_manager.lock().unwrap();
                 device_manager
-                    .update_memory(new_region)
+                    .add_memory_region(new_region)
                     .map_err(Error::DeviceManager)?;
 
                 match hotplug_method {
