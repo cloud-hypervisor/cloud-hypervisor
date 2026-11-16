@@ -1276,6 +1276,9 @@ impl DeviceManager {
             Arc::clone(&address_manager.pci_mmio32_allocators[0]),
             Arc::clone(&address_manager.pci_mmio64_allocators[0]),
             &pci_irq_slots,
+            #[cfg(target_arch = "x86_64")]
+            state_from_id(snapshot, pci::PCI_CONFIG_IO_SNAPSHOT_ID)
+                .map_err(DeviceManagerError::RestoreGetState)?,
         )?];
 
         for i in 1..num_pci_segments as usize {
@@ -6499,6 +6502,14 @@ impl Snapshottable for DeviceManager {
 
     fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         let mut snapshot = Snapshot::from_data(SnapshotData::new_from_state(&self.state())?);
+
+        // PciConfigIo refers back to the device tree through its bus and
+        // AddressManager, so adding it to the tree would create a cycle.
+        #[cfg(target_arch = "x86_64")]
+        if let Some(pci_config_io) = &self.pci_segments[0].pci_config_io {
+            let mut pci_config_io = pci_config_io.lock().unwrap();
+            snapshot.add_snapshot(pci_config_io.id(), pci_config_io.snapshot()?);
+        }
 
         // We aggregate all devices snapshots.
         for (_, device_node) in self.device_tree.lock().unwrap().iter() {
