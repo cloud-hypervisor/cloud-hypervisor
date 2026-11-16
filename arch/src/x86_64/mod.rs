@@ -100,6 +100,7 @@ pub struct CpuidConfig {
     pub kvm_hyperv: bool,
     pub kvm_hint_realtime: bool,
     pub amx: bool,
+    pub nested: bool,
     pub cpuid_overrides: Vec<CpuidOverride>,
 }
 
@@ -2412,6 +2413,7 @@ mod tests {
                 kvm_hyperv: false,
                 kvm_hint_realtime,
                 amx: false,
+                nested: false,
                 cpuid_overrides: Vec::new(),
             };
             let updated = required_common_cpuid_updates(
