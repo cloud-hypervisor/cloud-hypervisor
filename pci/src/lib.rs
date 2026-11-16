@@ -21,7 +21,8 @@ use std::str::FromStr;
 use serde::de::{self, Visitor};
 
 pub use self::bus::{
-    NUM_DEVICE_IDS, PCI_ROOT_DEVICE_ID, PciBus, PciConfigIo, PciConfigMmio, PciRoot, PciRootError,
+    NUM_DEVICE_IDS, PCI_CONFIG_IO_SNAPSHOT_ID, PCI_ROOT_DEVICE_ID, PciBus, PciConfigIo,
+    PciConfigIoState, PciConfigMmio, PciRoot, PciRootError,
 };
 pub use self::configuration::{
     PCI_CONFIGURATION_ID, PasidCap, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType,

@@ -135,7 +135,10 @@ impl PciSegment {
             mem64_allocator,
             pci_irq_slots,
         )?;
-        let pci_config_io = Arc::new(Mutex::new(PciConfigIo::new(Arc::clone(&segment.pci_bus))));
+        let pci_config_io = Arc::new(Mutex::new(PciConfigIo::new(
+            Arc::clone(&segment.pci_bus),
+            None,
+        )));
 
         address_manager
             .io_bus

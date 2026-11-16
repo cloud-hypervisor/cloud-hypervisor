@@ -11,8 +11,10 @@ use std::result;
 use std::sync::{Arc, Barrier, Mutex};
 
 use log::warn;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_device::BusDevice;
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 
 use crate::PciBdf;
 use crate::configuration::{PciBridgeSubclass, PciClassCode, PciConfiguration, PciHeaderType};
@@ -247,6 +249,13 @@ impl PciBus {
     }
 }
 
+pub const PCI_CONFIG_IO_SNAPSHOT_ID: &str = "__pci_config_io";
+
+#[derive(Default, Serialize, Deserialize)]
+pub struct PciConfigIoState {
+    config_address: u32,
+}
+
 pub struct PciConfigIo {
     /// Config space register.
     config_address: u32,
@@ -254,9 +263,9 @@ pub struct PciConfigIo {
 }
 
 impl PciConfigIo {
-    pub fn new(pci_bus: Arc<Mutex<PciBus>>) -> Self {
+    pub fn new(pci_bus: Arc<Mutex<PciBus>>, state: Option<PciConfigIoState>) -> Self {
         PciConfigIo {
-            config_address: 0,
+            config_address: state.unwrap_or_default().config_address,
             pci_bus,
         }
     }
@@ -383,6 +392,22 @@ impl BusDevice for PciConfigIo {
         }
     }
 }
+
+impl Snapshottable for PciConfigIo {
+    fn id(&self) -> String {
+        PCI_CONFIG_IO_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
+        Snapshot::new_from_state(&PciConfigIoState {
+            config_address: self.config_address,
+        })
+    }
+}
+
+impl Pausable for PciConfigIo {}
+impl Transportable for PciConfigIo {}
+impl Migratable for PciConfigIo {}
 
 /// Emulates PCI memory-mapped configuration access mechanism.
 pub struct PciConfigMmio {
@@ -568,7 +593,7 @@ mod tests {
 
         for (offset, data, expected) in test_cases {
             let pci_bus = Arc::new(Mutex::new(setup_bus()));
-            let mut config_io = PciConfigIo::new(pci_bus);
+            let mut config_io = PciConfigIo::new(pci_bus, None);
             config_io.config_address = 0x1122_3344;
 
             config_io.write(0, *offset, data);
