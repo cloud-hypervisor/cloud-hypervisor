@@ -2009,8 +2009,9 @@ impl Vmm {
     ) -> result::Result<(), MigratableError> {
         // We check the `CPUID` compatibility of between the source vm and destination, which is
         // mostly about feature compatibility.
-        let dest_cpuid = &{
+        let (dest_cpuid, nested) = {
             let vm_config = &src_vm_config.lock().unwrap();
+            let nested = vm_config.cpus.nested;
 
             if vm_config.cpus.features.amx {
                 // Need to enable AMX tile state components before generating common cpuid
@@ -2023,22 +2024,25 @@ impl Vmm {
             let phys_bits =
                 vm::physical_bits(self.hypervisor.as_ref(), vm_config.cpus.max_phys_bits);
 
-            arch::generate_common_cpuid(
-                self.hypervisor.as_ref(),
-                &arch::CpuidConfig {
-                    phys_bits,
-                    kvm_hyperv: vm_config.cpus.kvm_hyperv,
-                    kvm_hint_realtime: vm_config.cpus.kvm_hint_realtime,
-                    amx: vm_config.cpus.features.amx,
-                    nested: vm_config.cpus.nested,
-                    cpuid_overrides: vm_config.cpus.cpuid_overrides.clone(),
-                },
-                None,
+            (
+                arch::generate_common_cpuid(
+                    self.hypervisor.as_ref(),
+                    &arch::CpuidConfig {
+                        phys_bits,
+                        kvm_hyperv: vm_config.cpus.kvm_hyperv,
+                        kvm_hint_realtime: vm_config.cpus.kvm_hint_realtime,
+                        amx: vm_config.cpus.features.amx,
+                        nested: vm_config.cpus.nested,
+                        cpuid_overrides: vm_config.cpus.cpuid_overrides.clone(),
+                    },
+                    None,
+                )
+                .context("Error generating common cpuid")
+                .map_err(MigratableError::MigrateReceive)?,
+                nested,
             )
-            .context("Error generating common cpuid")
-            .map_err(MigratableError::MigrateReceive)?
         };
-        arch::CpuidFeatureEntry::check_cpuid_compatibility(src_vm_cpuid, dest_cpuid)
+        arch::CpuidFeatureEntry::check_cpuid_compatibility(src_vm_cpuid, &dest_cpuid, nested)
             .context("Error checking cpu feature compatibility")
             .map_err(MigratableError::MigrateReceive)
     }
