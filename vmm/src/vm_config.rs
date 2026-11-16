@@ -919,8 +919,9 @@ impl ApplyLandlock for DeviceConfig {
         let Some(path) = self.path.as_deref() else {
             return Ok(());
         };
-        let device_path = fs::read_link(path).map_err(LandlockError::OpenPath)?;
-        let iommu_group = device_path.file_name();
+        let iommu_group_path =
+            fs::read_link(path.join("iommu_group")).map_err(LandlockError::OpenPath)?;
+        let iommu_group = iommu_group_path.file_name();
         let iommu_group_str = iommu_group
             .ok_or(LandlockError::InvalidPath)?
             .to_str()
