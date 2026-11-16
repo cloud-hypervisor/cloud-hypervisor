@@ -846,9 +846,18 @@ impl Clone for PtyPair {
     }
 }
 
+/// VFIO backend and DMA handler kept alive by VFIO devices and SMMUv3 entries.
+pub struct VfioContext {
+    ops: Arc<dyn VfioOps>,
+    dma_mapping: Arc<dyn ExternalDmaMapping>,
+}
+
 #[derive(Clone)]
 pub enum PciDeviceHandle {
-    Vfio(Arc<Mutex<VfioPciDevice>>),
+    Vfio {
+        device: Arc<Mutex<VfioPciDevice>>,
+        vfio_context: Arc<VfioContext>,
+    },
     Virtio(Arc<Mutex<VirtioPciDevice>>),
     VfioUser {
         device: Arc<Mutex<VfioUserPciDevice>>,
@@ -989,12 +998,9 @@ pub struct DeviceManager {
     // Passthrough device handle
     passthrough_device: Option<VfioDeviceFd>,
 
-    // VFIO operation instance
-    // Only one can be created, therefore it is stored as part of the
-    // DeviceManager to be reused.
-    vfio_ops: Option<Arc<dyn VfioOps>>,
+    vfio_context: Option<Arc<VfioContext>>,
 
-    // Number of active VFIO devices sharing `vfio_ops`.
+    // Number of active VFIO devices sharing `vfio_context`.
     #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
     shared_vfio_devices: usize,
 
@@ -1011,7 +1017,7 @@ pub struct DeviceManager {
     // Emulated SMMUv3s, keyed by the physical SMMUv3 they sit on top of, as
     // one is created per physical SMMUv3.
     #[cfg(target_arch = "aarch64")]
-    smmuv3s: BTreeMap<String, Smmuv3Iommufd>,
+    smmuv3s: BTreeMap<String, (Smmuv3Iommufd, Arc<VfioContext>)>,
 
     // Tree of devices, representing the dependencies between devices.
     // Useful for introspection, snapshot and restore.
@@ -1390,7 +1396,7 @@ impl DeviceManager {
             msi_interrupt_manager,
             legacy_interrupt_manager: None,
             passthrough_device: None,
-            vfio_ops: None,
+            vfio_context: None,
             #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
             shared_vfio_devices: 0,
             iommu_device: None,
@@ -4096,7 +4102,7 @@ impl DeviceManager {
             .inspect_err(|_| self.cleanup_vfio_ops())
     }
 
-    fn create_vfio_ops(&self) -> DeviceManagerResult<Arc<dyn VfioOps>> {
+    fn create_vfio_context(&self) -> DeviceManagerResult<Arc<VfioContext>> {
         let passthrough_device = self
             .passthrough_device
             .as_ref()
@@ -4114,7 +4120,7 @@ impl DeviceManager {
             .as_ref()
             .is_some_and(|p| p.iommufd);
 
-        if iommufd_on {
+        let ops: Arc<dyn VfioOps> = if iommufd_on {
             #[cfg(feature = "kvm")]
             {
                 let iommufd_fd = self
@@ -4145,19 +4151,25 @@ impl DeviceManager {
                 };
                 let vfio_iommufd = VfioIommufd::new(Arc::new(iommufd), None, Some(Arc::new(dup)))
                     .map_err(DeviceManagerError::VfioCreate)?;
-                Ok(Arc::new(vfio_iommufd))
+                Arc::new(vfio_iommufd)
             }
             #[cfg(not(feature = "kvm"))]
-            Err(DeviceManagerError::IommufdNotSupported)
+            return Err(DeviceManagerError::IommufdNotSupported);
         } else {
             warn!(
                 "Legacy VFIO container/group support is deprecated and will be removed in a future release. \
                  Use --platform iommufd=on instead (requires KVM)."
             );
-            Ok(Arc::new(
+            Arc::new(
                 VfioContainer::new(Some(Arc::new(dup))).map_err(DeviceManagerError::VfioCreate)?,
-            ))
-        }
+            )
+        };
+        let dma_mapping = Arc::new(VfioDmaMapping::new(
+            Arc::clone(&ops),
+            Arc::new(self.memory_manager.lock().unwrap().guest_memory()),
+            Arc::clone(&self.mmio_regions),
+        ));
+        Ok(Arc::new(VfioContext { ops, dma_mapping }))
     }
 
     // Build a VfioDevice from an externally-opened vfio cdev FD:
@@ -4220,10 +4232,10 @@ impl DeviceManager {
     fn add_smmuv3(
         &mut self,
         key: &str,
-        vfio_ops: &Arc<dyn VfioOps>,
+        vfio_context: &Arc<VfioContext>,
         dev_id: u32,
     ) -> DeviceManagerResult<&Smmuv3Iommufd> {
-        let vfio_iommufd = (Arc::clone(vfio_ops) as Arc<dyn Any + Send + Sync>)
+        let vfio_iommufd = (Arc::clone(&vfio_context.ops) as Arc<dyn Any + Send + Sync>)
             .downcast::<VfioIommufd>()
             .map_err(|_| DeviceManagerError::ExpectedIommufdBackend)?;
         let viommu = Arc::new(
@@ -4311,7 +4323,11 @@ impl DeviceManager {
             .unwrap()
             .insert(smmuv3_id.clone(), device_node!(smmuv3_id, smmuv3_device));
 
-        Ok(self.smmuv3s.entry(key.to_string()).or_insert(smmu))
+        Ok(&self
+            .smmuv3s
+            .entry(key.to_string())
+            .or_insert((smmu, Arc::clone(vfio_context)))
+            .0)
     }
 
     #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
@@ -4373,7 +4389,7 @@ impl DeviceManager {
     fn attach_vfio_to_smmuv3(
         &mut self,
         device_cfg: &DeviceConfig,
-        vfio_ops: &Arc<dyn VfioOps>,
+        vfio_context: &Arc<VfioContext>,
         device: &Arc<VfioDevice>,
         bdf: PciBdf,
     ) -> DeviceManagerResult<Option<PasidCap>> {
@@ -4383,8 +4399,8 @@ impl DeviceManager {
             .iommufd_dev_id
             .ok_or(DeviceManagerError::IommufdDevIdMissing)?;
         let smmuv3 = match self.smmuv3s.get(&key) {
-            Some(smmuv3) => smmuv3,
-            None => self.add_smmuv3(&key, vfio_ops, dev_id)?,
+            Some((smmuv3, _)) => smmuv3,
+            None => self.add_smmuv3(&key, vfio_context, dev_id)?,
         };
         let viommu = Arc::clone(smmuv3.backend());
         let endpoint = Arc::clone(device) as Arc<dyn AttachHwpt>;
@@ -4443,20 +4459,14 @@ impl DeviceManager {
         // iommufd support. Devices behind an emulated SMMUv3 already share a
         // single VfioOps, whichever instance they are attached to, since
         // their translation is programmed through iommufd.
-        let vfio_ops = if device_cfg.pci_common.iommu.attached() && !smmuv3_attached {
-            let vfio_ops = self.create_vfio_ops()?;
-
-            let vfio_mapping = Arc::new(VfioDmaMapping::new(
-                Arc::clone(&vfio_ops),
-                Arc::new(self.memory_manager.lock().unwrap().guest_memory()),
-                Arc::clone(&self.mmio_regions),
-            ));
+        let vfio_context = if device_cfg.pci_common.iommu == IommuType::Virtio {
+            let vfio_context = self.create_vfio_context()?;
 
             if let Some(iommu) = &self.iommu_device {
-                iommu
-                    .lock()
-                    .unwrap()
-                    .add_external_mapping(pci_device_bdf.into(), vfio_mapping);
+                iommu.lock().unwrap().add_external_mapping(
+                    pci_device_bdf.into(),
+                    Arc::clone(&vfio_context.dma_mapping),
+                );
             } else {
                 return Err(DeviceManagerError::MissingVirtualIommu);
             }
@@ -4468,16 +4478,17 @@ impl DeviceManager {
                 );
             }
 
-            vfio_ops
-        } else if let Some(vfio_ops) = &self.vfio_ops {
-            Arc::clone(vfio_ops)
+            vfio_context
+        } else if let Some(vfio_context) = &self.vfio_context {
+            Arc::clone(vfio_context)
         } else {
-            let vfio_ops = self.create_vfio_ops()?;
+            let vfio_context = self.create_vfio_context()?;
             needs_dma_mapping = true;
-            self.vfio_ops = Some(Arc::clone(&vfio_ops));
+            self.vfio_context = Some(Arc::clone(&vfio_context));
 
-            vfio_ops
+            vfio_context
         };
+        let vfio_ops = Arc::clone(&vfio_context.ops);
 
         // Devices behind an emulated SMMUv3 are attached to its vIOMMU, not the IOAS.
         let (vfio_device, device_path) = match (&device_cfg.path, device_cfg.fd.as_ref()) {
@@ -4515,20 +4526,14 @@ impl DeviceManager {
         }
 
         if needs_dma_mapping {
-            let vfio_mapping = Arc::new(VfioDmaMapping::new(
-                Arc::clone(&vfio_ops),
-                Arc::new(self.memory_manager.lock().unwrap().guest_memory()),
-                Arc::clone(&self.mmio_regions),
-            ));
+            let vfio_mapping = &vfio_context.dma_mapping;
 
             #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
             let static_map_all_ram = match self.sev_snp_shared_page_tracker.as_ref() {
                 // Confidential VM over iommufd supports shared/private tracking.
                 Some(tracker) => {
                     tracker
-                        .add_dma_mapping_handler(
-                            Arc::clone(&vfio_mapping) as Arc<dyn ExternalDmaMapping>
-                        )
+                        .add_dma_mapping_handler(Arc::clone(vfio_mapping))
                         .map_err(DeviceManagerError::AddDmaMappingHandlerSevSnp)?;
                     false
                 }
@@ -4584,7 +4589,7 @@ impl DeviceManager {
                     .unwrap()
                     .add_dma_mapping_handler(
                         VirtioMemMappingSource::Container,
-                        Arc::clone(&vfio_mapping) as Arc<dyn ExternalDmaMapping>,
+                        Arc::clone(vfio_mapping),
                     )
                     .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
             }
@@ -4592,7 +4597,7 @@ impl DeviceManager {
 
         #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
         let pasid_cap = if smmuv3_attached {
-            self.attach_vfio_to_smmuv3(device_cfg, &vfio_ops, &vfio_device, pci_device_bdf)?
+            self.attach_vfio_to_smmuv3(device_cfg, &vfio_context, &vfio_device, pci_device_bdf)?
         } else {
             None
         };
@@ -4688,7 +4693,10 @@ impl DeviceManager {
         // Update the device tree with correct resource information.
         node.resources = new_resources;
         node.pci_bdf = Some(pci_device_bdf);
-        node.pci_device_handle = Some(PciDeviceHandle::Vfio(Arc::clone(&vfio_pci_device)));
+        node.pci_device_handle = Some(PciDeviceHandle::Vfio {
+            device: Arc::clone(&vfio_pci_device),
+            vfio_context,
+        });
 
         self.device_tree
             .lock()
@@ -5406,14 +5414,14 @@ impl DeviceManager {
         }
 
         // Take care of updating the memory for VFIO PCI devices.
-        if let Some(vfio_ops) = &self.vfio_ops {
+        if let Some(vfio_context) = &self.vfio_context {
             // vfio_dma_map is unsound and ought to be marked as unsafe
             #[allow(unused_unsafe)]
             // SAFETY: GuestMemory guarantees that region points
             // to len bytes of valid memory starting at as_ptr()
             // that will only be freed with munmap().
             unsafe {
-                vfio_ops.vfio_dma_map(
+                vfio_context.ops.vfio_dma_map(
                     new_region.start_addr().raw_value(),
                     new_region.len() as usize,
                     new_region.as_ptr(),
@@ -5669,14 +5677,15 @@ impl DeviceManager {
         #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
         let mut removed_shared_vfio_device = false;
 
+        // Release local device references before removing the node that owns
+        // their DMA handler.
         {
             let (pci_device, bus_device, virtio_device, remove_dma_handler) =
                 match pci_device_handle {
-                    // The container-wide VirtioMemMappingSource::Container mapping is
-                    // shared across VFIO devices, so it is not removed per-device here.
-                    // It goes away when cleanup_vfio_ops drops the container after the
-                    // last shared VFIO device is removed.
-                    PciDeviceHandle::Vfio(vfio_pci_device) => {
+                    PciDeviceHandle::Vfio {
+                        device: vfio_pci_device,
+                        ..
+                    } => {
                         #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
                         {
                             removed_shared_vfio_device =
@@ -6148,7 +6157,7 @@ impl DeviceManager {
     pub fn smmuv3_acpi_infos(&self) -> Vec<Smmuv3AcpiInfo> {
         self.smmuv3s
             .values()
-            .map(Smmuv3Iommufd::acpi_info)
+            .map(|(smmu, _)| smmu.acpi_info())
             .collect()
     }
 
@@ -6172,23 +6181,23 @@ impl DeviceManager {
 
     fn cleanup_vfio_ops(&mut self) {
         // We need to release every other container reference before dropping
-        // `self.vfio_ops`, so its drop closes the container fd and unpins
+        // `self.vfio_context`, so its drop closes the container fd and unpins
         // the shared pages.
         #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
         if let Some(tracker) = &self.sev_snp_shared_page_tracker {
-            if self.vfio_ops.is_some() && self.shared_vfio_devices == 0 {
+            if self.vfio_context.is_some() && self.shared_vfio_devices == 0 {
                 // Drop the tracker's handler. The tracker itself persists so a
                 // later VFIO attach replays the current shared set.
                 tracker.clear_dma_mapping_handler();
-                self.vfio_ops = None;
+                self.vfio_context = None;
             }
             return;
         }
 
-        // Drop the VfioOps instance when "Self" is the only reference.
-        if let Some(1) = self.vfio_ops.as_ref().map(Arc::strong_count) {
-            debug!("Drop VfioOps given no active VFIO devices.");
-            self.vfio_ops = None;
+        // Drop the VFIO context when "Self" is the only reference.
+        if let Some(1) = self.vfio_context.as_ref().map(Arc::strong_count) {
+            debug!("Drop VFIO context given no active VFIO devices.");
+            self.vfio_context = None;
         }
     }
 
