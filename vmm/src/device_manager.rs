@@ -4587,10 +4587,7 @@ impl DeviceManager {
                 virtio_mem_device
                     .lock()
                     .unwrap()
-                    .add_dma_mapping_handler(
-                        VirtioMemMappingSource::Container,
-                        Arc::clone(vfio_mapping),
-                    )
+                    .add_dma_mapping_handler(VirtioMemMappingSource::Container, vfio_mapping)
                     .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
             }
         }
@@ -4903,7 +4900,7 @@ impl DeviceManager {
                 .unwrap()
                 .add_dma_mapping_handler(
                     VirtioMemMappingSource::Device(pci_device_bdf.into()),
-                    Arc::clone(&vfio_user_mapping),
+                    &vfio_user_mapping,
                 )
                 .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
         }
@@ -5064,7 +5061,7 @@ impl DeviceManager {
                         .unwrap()
                         .add_dma_mapping_handler(
                             VirtioMemMappingSource::Device(pci_device_bdf.into()),
-                            Arc::clone(dma_handler),
+                            dma_handler,
                         )
                         .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
                 }

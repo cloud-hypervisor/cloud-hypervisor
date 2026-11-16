@@ -16,7 +16,7 @@
 
 use std::collections::BTreeMap;
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::{io, result};
 
 use anyhow::anyhow;
@@ -405,7 +405,8 @@ struct MemEpollHandler {
     kill_evt: EventFd,
     pause_evt: EventFd,
     hugepages: bool,
-    dma_mapping_handlers: Arc<Mutex<BTreeMap<VirtioMemMappingSource, Arc<dyn ExternalDmaMapping>>>>,
+    dma_mapping_handlers:
+        Arc<Mutex<BTreeMap<VirtioMemMappingSource, Weak<dyn ExternalDmaMapping>>>>,
 }
 
 fn usize_to_u64(i: usize) -> u64 {
@@ -521,11 +522,17 @@ impl MemEpollHandler {
             .unwrap()
             .set_range(first_block_index, nb_blocks as usize, plug);
 
-        let handlers = self.dma_mapping_handlers.lock().unwrap();
+        let handlers: Vec<_> = self
+            .dma_mapping_handlers
+            .lock()
+            .unwrap()
+            .values()
+            .filter_map(Weak::upgrade)
+            .collect();
         if plug {
             let mut gpa = addr;
             for _ in 0..nb_blocks {
-                for handler in handlers.values() {
+                for handler in &handlers {
                     if let Err(e) = handler.map(gpa, gpa, config.block_size) {
                         error!(
                             "Failed DMA mapping addr 0x{:x} size 0x{:x}: {:?}",
@@ -540,7 +547,7 @@ impl MemEpollHandler {
 
             config.plugged_size += size;
         } else {
-            for handler in handlers.values() {
+            for handler in &handlers {
                 if let Err(e) = handler.unmap(addr, size) {
                     error!("Failed DMA unmapping addr 0x{addr:x} size 0x{size:x}: {e:?}");
                     return VIRTIO_MEM_RESP_ERROR;
@@ -562,11 +569,17 @@ impl MemEpollHandler {
 
         // Remaining plugged blocks are unmapped.
         if config.plugged_size > 0 {
-            let handlers = self.dma_mapping_handlers.lock().unwrap();
+            let handlers: Vec<_> = self
+                .dma_mapping_handlers
+                .lock()
+                .unwrap()
+                .values()
+                .filter_map(Weak::upgrade)
+                .collect();
             for (idx, plugged) in self.blocks_state.lock().unwrap().inner().iter().enumerate() {
                 if *plugged {
                     let gpa = config.addr + (idx as u64 * config.block_size);
-                    for handler in handlers.values() {
+                    for handler in &handlers {
                         if let Err(e) = handler.unmap(gpa, config.block_size) {
                             error!(
                                 "Failed DMA unmapping addr 0x{:x} size 0x{:x}: {:?}",
@@ -724,7 +737,8 @@ pub struct Mem {
     config: Arc<Mutex<VirtioMemConfig>>,
     seccomp_action: SeccompAction,
     hugepages: bool,
-    dma_mapping_handlers: Arc<Mutex<BTreeMap<VirtioMemMappingSource, Arc<dyn ExternalDmaMapping>>>>,
+    dma_mapping_handlers:
+        Arc<Mutex<BTreeMap<VirtioMemMappingSource, Weak<dyn ExternalDmaMapping>>>>,
     blocks_state: Arc<Mutex<BlocksState>>,
     exit_evt: EventFd,
 }
@@ -837,10 +851,12 @@ impl Mem {
             })
     }
 
+    /// Register a weak reference and map any already plugged blocks.
+    /// The caller must retain the handler while DMA mapping is needed.
     pub fn add_dma_mapping_handler(
         &mut self,
         source: VirtioMemMappingSource,
-        handler: Arc<dyn ExternalDmaMapping>,
+        handler: &Arc<dyn ExternalDmaMapping>,
     ) -> result::Result<(), Error> {
         let config = self.config.lock().unwrap();
 
@@ -858,7 +874,7 @@ impl Mem {
         self.dma_mapping_handlers
             .lock()
             .unwrap()
-            .insert(source, handler);
+            .insert(source, Arc::downgrade(handler));
 
         Ok(())
     }
@@ -875,6 +891,9 @@ impl Mem {
             .unwrap()
             .remove(source)
             .ok_or(Error::InvalidDmaMappingHandler)?;
+        let Some(handler) = handler.upgrade() else {
+            return Ok(());
+        };
 
         if config.plugged_size > 0 {
             for (idx, plugged) in self.blocks_state.lock().unwrap().inner().iter().enumerate() {
