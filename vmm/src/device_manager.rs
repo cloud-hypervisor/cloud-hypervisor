@@ -4533,7 +4533,7 @@ impl DeviceManager {
                 // Confidential VM over iommufd supports shared/private tracking.
                 Some(tracker) => {
                     tracker
-                        .add_dma_mapping_handler(Arc::clone(vfio_mapping))
+                        .add_dma_mapping_handler(vfio_mapping)
                         .map_err(DeviceManagerError::AddDmaMappingHandlerSevSnp)?;
                     false
                 }
