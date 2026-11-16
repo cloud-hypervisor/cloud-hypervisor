@@ -87,6 +87,20 @@ layer resides under `/var/lib/containerd` should add that path:
 --landlock-rules path="/var/lib/containerd",access="rw"
 ```
 
+### Net device hotplug
+
+Landlock grants access to `/dev/net/tun` only when the VM is created with a
+net device. For a VM created without one, add the rule when creating it, via
+`--landlock-rules` (or the `landlock_rules` API field), so that a net device
+can be added later:
+
+```
+--landlock-rules path="/dev/net/tun",access="rw"
+```
+
+Net devices passed with `fd=` or using `vhost_user=true` do not open
+`/dev/net/tun` and do not need this rule.
+
 
 ## Usage Examples
 
