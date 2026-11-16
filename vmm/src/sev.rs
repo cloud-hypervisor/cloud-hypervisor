@@ -8,7 +8,7 @@ use std::fs::File;
 use std::io::{self, Cursor, Read, Seek, SeekFrom};
 use std::os::unix::fs::FileExt;
 use std::result;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use hypervisor::MemoryConversionHandler;
 use linux_loader::bootparam::boot_params;
@@ -227,7 +227,7 @@ impl TrackedRegion {
 #[derive(Default)]
 struct Inner {
     regions: Vec<TrackedRegion>,
-    handler: Option<Arc<dyn ExternalDmaMapping>>,
+    handler: Option<Weak<dyn ExternalDmaMapping>>,
 }
 
 /// Tracks which confidential guest pages are shared and keeps the device
@@ -251,19 +251,15 @@ impl SevSnpSharedPageTracker {
             .push(TrackedRegion::new(base, size));
     }
 
-    /// Register a VFIO DMA handler, replaying the currently shared pages into it.
+    /// Register a weak reference to a VFIO DMA handler and replay shared pages.
+    /// The caller must retain the handler while DMA mapping is needed.
     /// A partial replay is rolled back, so a failed registration leaves nothing
     /// mapped in the IOMMU.
     pub(crate) fn add_dma_mapping_handler(
         &self,
-        handler: Arc<dyn ExternalDmaMapping>,
+        handler: &Arc<dyn ExternalDmaMapping>,
     ) -> result::Result<(), ExternalDmaMappingError> {
         let mut inner = self.inner.lock().unwrap();
-        assert!(
-            inner.handler.is_none(),
-            "DMA mapping handler already registered"
-        );
-
         let shared = inner.regions.iter().flat_map(TrackedRegion::shared_gpas);
         for (mapped, gpa) in shared.enumerate() {
             if let Err(e) = handler.map(gpa, gpa, PAGE_SIZE_4K) {
@@ -274,7 +270,7 @@ impl SevSnpSharedPageTracker {
             }
         }
 
-        inner.handler = Some(handler);
+        inner.handler = Some(Arc::downgrade(handler));
         Ok(())
     }
 
@@ -305,6 +301,7 @@ impl SevSnpSharedPageTracker {
     ) -> result::Result<(), ExternalDmaMappingError> {
         let mut inner = self.inner.lock().unwrap();
         let Inner { regions, handler } = &mut *inner;
+        let handler = handler.as_ref().and_then(Weak::upgrade);
         let req_end = gpa.saturating_add(size);
 
         for region in regions.iter_mut() {
@@ -616,7 +613,7 @@ mod tests {
         let t = SevSnpSharedPageTracker::new();
         t.register_region(base, size);
         let rec = Arc::new(Recorder::default());
-        t.add_dma_mapping_handler(Arc::clone(&rec) as Arc<dyn ExternalDmaMapping>)
+        t.add_dma_mapping_handler(&(Arc::clone(&rec) as Arc<dyn ExternalDmaMapping>))
             .unwrap();
         (t, rec)
     }
@@ -670,11 +667,14 @@ mod tests {
 
     #[test]
     fn add_handler_replays_shared_set() {
-        let (t, _first) = tracker_with_region(page(0), 4 * PAGE_SIZE_4K);
-        t.set_shared(page(1), 2 * PAGE_SIZE_4K, true).unwrap();
-        t.clear_dma_mapping_handler();
+        let (t, first) = tracker_with_region(page(0), 4 * PAGE_SIZE_4K);
+        t.set_shared(page(1), PAGE_SIZE_4K, true).unwrap();
+        let weak = Arc::downgrade(&first);
+        drop(first);
+        assert!(weak.upgrade().is_none());
+        t.set_shared(page(2), PAGE_SIZE_4K, true).unwrap();
         let late = Arc::new(Recorder::default());
-        t.add_dma_mapping_handler(Arc::clone(&late) as Arc<dyn ExternalDmaMapping>)
+        t.add_dma_mapping_handler(&(Arc::clone(&late) as Arc<dyn ExternalDmaMapping>))
             .unwrap();
         assert_eq!(
             *late.maps.lock().unwrap(),
@@ -698,7 +698,7 @@ mod tests {
             ..Default::default()
         });
         assert!(
-            t.add_dma_mapping_handler(Arc::clone(&failed) as Arc<dyn ExternalDmaMapping>)
+            t.add_dma_mapping_handler(&(Arc::clone(&failed) as Arc<dyn ExternalDmaMapping>))
                 .is_err()
         );
         assert_eq!(
@@ -708,7 +708,7 @@ mod tests {
 
         // The shared set is untouched, so a later attach replays all of it.
         let late = Arc::new(Recorder::default());
-        t.add_dma_mapping_handler(Arc::clone(&late) as Arc<dyn ExternalDmaMapping>)
+        t.add_dma_mapping_handler(&(Arc::clone(&late) as Arc<dyn ExternalDmaMapping>))
             .unwrap();
         assert_eq!(late.maps.lock().unwrap().len(), 4);
     }
