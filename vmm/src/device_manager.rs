@@ -744,16 +744,13 @@ impl AddressManager {
 
         Ok(())
     }
-}
 
-impl DeviceRelocation for AddressManager {
-    fn move_bar(
+    fn update_ranges(
         &self,
-        bar_idx: usize,
+        pci_dev: &dyn PciDevice,
         old_base: u64,
         new_base: u64,
         len: u64,
-        pci_dev: &mut dyn PciDevice,
         region_type: PciBarRegionType,
     ) -> result::Result<(), io::Error> {
         // Keep allocators locked until the BAR has fully moved to protect
@@ -813,6 +810,22 @@ impl DeviceRelocation for AddressManager {
                     .map_err(io::Error::other)?;
             }
         }
+
+        Ok(())
+    }
+}
+
+impl DeviceRelocation for AddressManager {
+    fn move_bar(
+        &self,
+        bar_idx: usize,
+        old_base: u64,
+        new_base: u64,
+        len: u64,
+        pci_dev: &mut dyn PciDevice,
+        region_type: PciBarRegionType,
+    ) -> result::Result<(), io::Error> {
+        self.update_ranges(pci_dev, old_base, new_base, len, region_type)?;
 
         self.update_device_tree(pci_dev, bar_idx, new_base)?;
 
