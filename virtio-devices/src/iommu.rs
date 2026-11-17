@@ -673,6 +673,7 @@ impl Request {
                         Mapping {
                             gpa: req.phys_start,
                             size,
+                            flags: req.flags,
                         },
                     );
                 }
@@ -995,6 +996,21 @@ impl EpollHelperHandler for IommuEpollHandler {
 struct Mapping {
     gpa: u64,
     size: u64,
+    #[serde(default = "Mapping::unrestricted_flags")]
+    flags: u32,
+}
+
+impl Mapping {
+    fn unrestricted_flags() -> u32 {
+        VIRTIO_IOMMU_MAP_F_READ | VIRTIO_IOMMU_MAP_F_WRITE
+    }
+
+    fn allows(&self, access_type: AccessType) -> bool {
+        match access_type {
+            AccessType::Read => self.flags & VIRTIO_IOMMU_MAP_F_READ != 0,
+            AccessType::Write => self.flags & VIRTIO_IOMMU_MAP_F_WRITE != 0,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1036,16 +1052,18 @@ fn span_end(addr: u64, size: u64) -> io::Result<u64> {
 /// may cross more than one mapping as long as those mappings are adjacent in
 /// IOVA space and contiguous in GPA space, so a buffer the guest mapped with
 /// several mappings still resolves to a single physical range. Returns None
-/// when `addr` is unmapped, a gap is hit before `end`, or the covered range is
-/// not physically contiguous.
+/// when `addr` is unmapped, a gap is hit before `end`, the covered range is
+/// not physically contiguous, or a covering mapping doesn't allow
+/// `access_type`.
 fn translate_contiguous_range(
     mappings: &BTreeMap<u64, Mapping>,
     addr: u64,
     end: u64,
+    access_type: AccessType,
 ) -> Option<u64> {
     // The mapping containing `addr` is the one with the greatest start <= addr.
     let (&start_key, start) = mappings.range(..=addr).next_back()?;
-    if addr > inclusive_end(start_key, start.size)? {
+    if addr > inclusive_end(start_key, start.size)? || !start.allows(access_type) {
         return None;
     }
     let base_gpa = addr - start_key + start.gpa;
@@ -1058,7 +1076,7 @@ fn translate_contiguous_range(
         if end < covered {
             break;
         }
-        if key != covered || value.gpa != next_gpa {
+        if key != covered || value.gpa != next_gpa || !value.allows(access_type) {
             return None;
         }
         covered = key.checked_add(value.size)?;
@@ -1074,9 +1092,9 @@ impl DmaRemapping for IommuMapping {
         id: u32,
         addr: u64,
         size: u64,
-        _access_type: AccessType,
+        access_type: AccessType,
     ) -> io::Result<u64> {
-        debug!("Translate GVA addr 0x{addr:x} size 0x{size:x}");
+        debug!("Translate GVA addr 0x{addr:x} size 0x{size:x} access {access_type:?}");
         let end = span_end(addr, size)?;
         if let Some(domain_id) = self.endpoints.read().unwrap().get(&id) {
             if let Some(domain) = self.domains.read().unwrap().get(domain_id) {
@@ -1086,7 +1104,9 @@ impl DmaRemapping for IommuMapping {
                     return Ok(addr);
                 }
 
-                if let Some(new_addr) = translate_contiguous_range(&domain.mappings, addr, end) {
+                if let Some(new_addr) =
+                    translate_contiguous_range(&domain.mappings, addr, end, access_type)
+                {
                     debug!("Into GPA addr 0x{new_addr:x}");
                     return Ok(new_addr);
                 }
@@ -1096,7 +1116,7 @@ impl DmaRemapping for IommuMapping {
         }
 
         Err(io::Error::other(format!(
-            "failed to translate GVA addr 0x{addr:x} size 0x{size:x}"
+            "failed to translate GVA addr 0x{addr:x} size 0x{size:x} access {access_type:?}"
         )))
     }
 
@@ -1565,7 +1585,8 @@ mod tests {
     fn iommu_mapping(entries: &[(u64, u64, u64)]) -> IommuMapping {
         let mut mappings = BTreeMap::new();
         for &(iova, gpa, size) in entries {
-            mappings.insert(iova, Mapping { gpa, size });
+            let flags = Mapping::unrestricted_flags();
+            mappings.insert(iova, Mapping { gpa, size, flags });
         }
         let mut domains = BTreeMap::new();
         domains.insert(
@@ -1632,6 +1653,43 @@ mod tests {
         let m = iommu_mapping(&[(0x1000, 0x4000, 0x1000)]);
         m.translate_gva(0, 0x2500, 0x10, AccessType::Read)
             .unwrap_err();
+    }
+
+    #[test]
+    fn device_writes_require_map_write_flag() {
+        let mapping = Arc::new(iommu_mapping(&[]));
+        for (virt_start, phys_start, flags) in [
+            (
+                0x1000,
+                0x4000,
+                super::VIRTIO_IOMMU_MAP_F_READ | super::VIRTIO_IOMMU_MAP_F_WRITE,
+            ),
+            (0x2000, 0x5000, super::VIRTIO_IOMMU_MAP_F_READ),
+        ] {
+            let request = VirtioIommuReqMap {
+                domain: 0,
+                virt_start,
+                virt_end: virt_start + 0xfff,
+                phys_start,
+                flags,
+            };
+            let (_, status) =
+                process_request(VIRTIO_IOMMU_T_MAP, request, &mapping, &BTreeMap::new());
+            assert_eq!(status, VIRTIO_IOMMU_S_OK);
+        }
+
+        let write = |addr, size| mapping.translate_gva(0, addr, size, AccessType::Write);
+        assert_eq!(write(0x1000, 0x100).unwrap(), 0x4000);
+        write(0x2000, 0x100).unwrap_err();
+        // A write spanning both mappings needs both to allow writes.
+        write(0x1f00, 0x200).unwrap_err();
+        // Both mappings allow reads.
+        assert_eq!(
+            mapping
+                .translate_gva(0, 0x1f00, 0x200, AccessType::Read)
+                .unwrap(),
+            0x4f00
+        );
     }
 
     const TAIL_LEN: usize = size_of::<VirtioIommuReqTail>();
