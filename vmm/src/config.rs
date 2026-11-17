@@ -22,7 +22,7 @@ use option_parser::split_commas;
 use option_parser::{
     ByteSized, IntegerList, OptionParser, OptionParserError, StringList, Toggle, Tuple, TupleList,
 };
-use pci::NUM_DEVICE_IDS;
+use pci::{MAX_MSIX_VECTORS_PER_DEVICE, NUM_DEVICE_IDS};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_bindings::virtio_blk::VIRTIO_BLK_ID_BYTES;
@@ -354,6 +354,11 @@ pub enum ValidationError {
     /// Invalid VFIO excluded-mmap BAR index
     #[error("Invalid VFIO excluded-mmap BAR index: {0}")]
     InvalidDeviceExcludeMmapBar(u64),
+    /// Invalid VFIO MSI-X vector count
+    #[error(
+        "Invalid VFIO num_msix_vectors ({0}): must be between 1 and {MAX_MSIX_VECTORS_PER_DEVICE}"
+    )]
+    InvalidDeviceNumMsixVectors(u16),
     /// Invalid IOMMU address width in bits
     #[error(
         "IOMMU address width in bits ({0}) should be less than or equal to {MAX_IOMMU_ADDRESS_WIDTH_BITS}"
@@ -2733,7 +2738,8 @@ impl DeviceConfig {
         id=<device_id>,\
         pci_segment=<segment_id>,pci_device_id=<pci_slot>,\
         x_nv_gpudirect_clique=<clique_id>,\
-        x_exclude_mmap_bars=[<bar>...]\"";
+        x_exclude_mmap_bars=[<bar>...],\
+        num_msix_vectors=<count>\"";
 
     /// # Safety
     /// Live FDs named in the input must be exclusively owned by the caller.
@@ -2746,7 +2752,8 @@ impl DeviceConfig {
             .add("fd")
             .add_all(PciDeviceCommonConfig::OPTIONS_IOMMU)
             .add("x_nv_gpudirect_clique")
-            .add("x_exclude_mmap_bars");
+            .add("x_exclude_mmap_bars")
+            .add("num_msix_vectors");
         parser.parse(device).map_err(Error::ParseDevice)?;
 
         let pci_common = PciDeviceCommonConfig::parse(device)?;
@@ -2766,6 +2773,9 @@ impl DeviceConfig {
             .map_err(Error::ParseDevice)?
             .map(|bars| bars.0)
             .unwrap_or_default();
+        let num_msix_vectors = parser
+            .convert::<u16>("num_msix_vectors")
+            .map_err(Error::ParseDevice)?;
         Ok(DeviceConfig {
             pci_common,
             path,
@@ -2773,6 +2783,7 @@ impl DeviceConfig {
             x_nv_gpudirect_clique,
             x_exclude_mmap_bars,
             iommufd_dev_id: None,
+            num_msix_vectors,
         })
     }
 
@@ -2817,6 +2828,12 @@ impl DeviceConfig {
             if *bar > 5 {
                 return Err(ValidationError::InvalidDeviceExcludeMmapBar(*bar));
             }
+        }
+
+        if let Some(num_vecs) = self.num_msix_vectors
+            && (num_vecs == 0 || num_vecs > MAX_MSIX_VECTORS_PER_DEVICE)
+        {
+            return Err(ValidationError::InvalidDeviceNumMsixVectors(num_vecs));
         }
 
         Ok(())
@@ -6595,6 +6612,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             x_nv_gpudirect_clique: None,
             x_exclude_mmap_bars: Vec::new(),
             iommufd_dev_id: None,
+            num_msix_vectors: None,
         }
     }
 
@@ -6642,6 +6660,37 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 ..device_fixture()
             }
         );
+
+        assert_eq!(
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe { DeviceConfig::parse("path=/path/to/device,num_msix_vectors=128") }?,
+            DeviceConfig {
+                num_msix_vectors: Some(128),
+                ..device_fixture()
+            }
+        );
+        // Out-of-range u16 values are rejected by DeviceConfig::validate, not the parser.
+        assert_eq!(
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe { DeviceConfig::parse("path=/path/to/device,num_msix_vectors=0") }?,
+            DeviceConfig {
+                num_msix_vectors: Some(0),
+                ..device_fixture()
+            }
+        );
+        assert_eq!(
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe { DeviceConfig::parse("path=/path/to/device,num_msix_vectors=2049") }?,
+            DeviceConfig {
+                num_msix_vectors: Some(2049),
+                ..device_fixture()
+            }
+        );
+        // SAFETY: This input contains no inherited descriptors.
+        unsafe { DeviceConfig::parse("path=/path/to/device,num_msi_vectors=64") }.unwrap_err();
+        // SAFETY: This input contains no inherited descriptors.
+        unsafe { DeviceConfig::parse("path=/path/to/device,num_msix_vectors=notanint") }
+            .unwrap_err();
 
         assert_eq!(
             // SAFETY: This input contains no inherited descriptors.
@@ -7467,6 +7516,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 x_nv_gpudirect_clique: None,
                 x_exclude_mmap_bars: Vec::new(),
                 iommufd_dev_id: None,
+                num_msix_vectors: None,
             }]),
             user_devices: None,
             vdpa: None,
@@ -9131,6 +9181,38 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             invalid_config.validate(),
             Err(ValidationError::InvalidDeviceExcludeMmapBar(6))
         );
+
+        // num_msix_vectors only accepts values in 1..=MAX_MSIX_VECTORS_PER_DEVICE
+        let mut invalid_config = valid_config.clone();
+        invalid_config.devices = Some(vec![DeviceConfig {
+            num_msix_vectors: Some(0),
+            ..device_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::InvalidDeviceNumMsixVectors(0))
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.devices = Some(vec![DeviceConfig {
+            num_msix_vectors: Some(MAX_MSIX_VECTORS_PER_DEVICE + 1),
+            ..device_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::InvalidDeviceNumMsixVectors(
+                MAX_MSIX_VECTORS_PER_DEVICE + 1
+            ))
+        );
+
+        for valid_count in [1, MAX_MSIX_VECTORS_PER_DEVICE] {
+            let mut still_valid_config = valid_config.clone();
+            still_valid_config.devices = Some(vec![DeviceConfig {
+                num_msix_vectors: Some(valid_count),
+                ..device_fixture()
+            }]);
+            still_valid_config.validate().unwrap();
+        }
 
         // Valid BDF test
         let mut still_valid_config = valid_config.clone();

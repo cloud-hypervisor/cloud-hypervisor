@@ -1657,6 +1657,11 @@ components:
           items:
             type: integer
             format: int64
+        num_msix_vectors:
+          type: integer
+          format: uint16
+          minimum: 1
+          maximum: 2048
 
     UserDeviceConfig:
       required:

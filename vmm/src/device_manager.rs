@@ -4646,6 +4646,7 @@ impl DeviceManager {
                 .collect(),
             device_path,
             extended_caps,
+            device_cfg.num_msix_vectors,
         )
         .map_err(DeviceManagerError::VfioPciCreate)?;
 

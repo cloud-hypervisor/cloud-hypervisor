@@ -18,7 +18,7 @@ use vmm_sys_util::eventfd::EventFd;
 
 use crate::{PciCapability, PciCapabilityId};
 
-const MAX_MSIX_VECTORS_PER_DEVICE: u16 = 2048;
+pub const MAX_MSIX_VECTORS_PER_DEVICE: u16 = 2048;
 const MSIX_TABLE_ENTRIES_MODULO: u64 = 16;
 const MSIX_PBA_ENTRIES_MODULO: u64 = 8;
 const BITS_PER_PBA_ENTRY: usize = 64;
@@ -624,6 +624,10 @@ impl MsixCap {
 
     pub fn pba_bir(&self) -> u32 {
         self.pba & 0x7
+    }
+
+    pub fn set_table_size(&mut self, table_size: u16) {
+        self.msg_ctl = (self.msg_ctl & !0x7ff) | ((table_size.saturating_sub(1)) & 0x7ff);
     }
 
     pub fn table_size(&self) -> u16 {

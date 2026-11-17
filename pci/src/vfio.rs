@@ -196,11 +196,16 @@ struct MsixState {
     cap: MsixCap,
     cap_offset: u32,
     bdf: u32,
+    #[serde(default)]
+    hw_table_size: Option<u16>,
 }
 
 pub(crate) struct VfioMsix {
     pub(crate) bar: MsixConfig,
     cap: MsixCap,
+    // Physical MSI-X table entry count reported by the device before any
+    // num_msix_vectors override. May exceed cap.table_size().
+    hw_table_size: u16,
     cap_offset: u32,
     interrupt_source_group: Arc<dyn InterruptSourceGroup>,
 }
@@ -242,9 +247,18 @@ impl VfioMsix {
         None
     }
 
+    fn hw_table_range(&self) -> (u64, u64) {
+        let size = u64::from(self.hw_table_size) * (MSIX_TABLE_ENTRY_SIZE as u64);
+        (u64::from(self.cap.table_offset()), size)
+    }
+
+    fn hw_pba_range(&self) -> (u64, u64) {
+        let size = ((u64::from(self.hw_table_size) / 64) + 1) * 8;
+        (u64::from(self.cap.pba_offset()), size)
+    }
+
     fn table_accessed(&self, bar_index: u32, offset: u64) -> bool {
-        let table_offset: u64 = u64::from(self.cap.table_offset());
-        let table_size: u64 = u64::from(self.cap.table_size()) * (MSIX_TABLE_ENTRY_SIZE as u64);
+        let (table_offset, table_size) = self.hw_table_range();
         let table_bir: u32 = self.cap.table_bir();
 
         bar_index == table_bir && offset >= table_offset && offset < table_offset + table_size
@@ -883,6 +897,7 @@ pub(crate) struct VfioCommon {
     pub(crate) vendor_id: u16,
     x_nv_gpudirect_clique: Option<u8>,
     x_exclude_mmap_bars: Vec<u8>,
+    num_msix_vectors: Option<u16>,
     pub(crate) migration_flags: Option<u64>,
     // Negotiated dirty bitmap granularity while DMA logging is active.
     dma_logging_page_size: Option<u64>,
@@ -893,6 +908,7 @@ pub(crate) struct VfioCommon {
 pub(crate) struct VfioCommonConfig {
     pub(crate) x_nv_gpudirect_clique: Option<u8>,
     pub(crate) x_exclude_mmap_bars: Vec<u8>,
+    pub(crate) num_msix_vectors: Option<u16>,
     pub(crate) extended_caps: Vec<Arc<dyn PciExpressCapability + Send + Sync>>,
 }
 
@@ -961,6 +977,7 @@ impl VfioCommon {
             vendor_id,
             x_nv_gpudirect_clique: config.x_nv_gpudirect_clique,
             x_exclude_mmap_bars: config.x_exclude_mmap_bars,
+            num_msix_vectors: config.num_msix_vectors,
             migration_flags,
             dma_logging_page_size: None,
             extended_caps: config.extended_caps,
@@ -1266,6 +1283,7 @@ impl VfioCommon {
     fn initialize_msix(
         &mut self,
         msix_cap: MsixCap,
+        hw_table_size: u16,
         cap_offset: u32,
         bdf: PciBdf,
         state: Option<MsixConfigState>,
@@ -1289,6 +1307,7 @@ impl VfioCommon {
         self.interrupt.msix = Some(VfioMsix {
             bar: msix_config,
             cap: msix_cap,
+            hw_table_size: hw_table_size.max(msix_cap.table_size()),
             cap_offset,
             interrupt_source_group,
         });
@@ -1391,8 +1410,18 @@ impl VfioCommon {
                     {
                         // Parse capability only if the VFIO device
                         // supports MSI-X.
-                        let msix_cap = self.parse_msix_capabilities(cap_iter);
-                        self.initialize_msix(msix_cap, cap_iter as u32, bdf, None)?;
+                        let mut msix_cap = self.parse_msix_capabilities(cap_iter);
+                        let hw_table_size = msix_cap.table_size();
+                        if let Some(num_vecs) = self.num_msix_vectors {
+                            if num_vecs > hw_table_size {
+                                warn!(
+                                    "num_msix_vectors {num_vecs} exceeds actual MSI-X table size {hw_table_size}"
+                                );
+                            } else {
+                                msix_cap.set_table_size(num_vecs);
+                            }
+                        }
+                        self.initialize_msix(msix_cap, hw_table_size, cap_iter as u32, bdf, None)?;
                     }
                 }
                 PciCapabilityId::PciExpress => {
@@ -1424,6 +1453,13 @@ impl VfioCommon {
             }
 
             cap_iter = cap_next;
+        }
+
+        if self.num_msix_vectors.is_some() && self.interrupt.msix.is_none() {
+            warn!(
+                "num_msix_vectors specified for device {bdf}, \
+                 but the device does not support MSI-X"
+            );
         }
 
         if let Some(clique_id) = self.x_nv_gpudirect_clique {
@@ -1976,16 +2012,6 @@ impl VfioCommon {
             return self.configuration.read_reg(reg_idx);
         }
 
-        if let Some(id) = self.get_msix_cap_idx()
-            && let Some(msix) = &self.interrupt.msix
-        {
-            if reg_idx * 4 == id + 4 {
-                return msix.cap.table;
-            } else if reg_idx * 4 == id + 8 {
-                return msix.cap.pba;
-            }
-        }
-
         // Since we don't support passing multi-functions devices, we should
         // mask the multi-function bit, bit 7 of the Header Type byte on the
         // register 3.
@@ -2000,6 +2026,21 @@ impl VfioCommon {
 
         if let Some(config_patch) = self.patches.get(&reg_idx) {
             value = (value & !config_patch.mask) | config_patch.patch;
+        }
+
+        if let Some(msix) = &self.interrupt.msix
+            && let Some(id) = self.get_msix_cap_idx()
+        {
+            if reg_idx * 4 == id {
+                // Virtualize the MSI-X Message Control register so the guest sees
+                // the overridden table size while preserving any patched header
+                // bytes (such as next_ptr).
+                value = (value & 0x0000_ffff) | (u32::from(msix.cap.msg_ctl) << 16);
+            } else if reg_idx * 4 == id + 4 {
+                value = msix.cap.table;
+            } else if reg_idx * 4 == id + 8 {
+                value = msix.cap.pba;
+            }
         }
 
         value
@@ -2019,6 +2060,7 @@ impl VfioCommon {
             cap: msix.cap,
             cap_offset: msix.cap_offset,
             bdf: msix.bar.devid,
+            hw_table_size: Some(msix.hw_table_size),
         });
 
         VfioCommonState {
@@ -2062,7 +2104,14 @@ impl VfioCommon {
         }
 
         if let Some(msix) = &state.msix_state {
-            self.initialize_msix(msix.cap, msix.cap_offset, msix.bdf.into(), msix_state)?;
+            let hw_table_size = msix.hw_table_size.unwrap_or_else(|| msix.cap.table_size());
+            self.initialize_msix(
+                msix.cap,
+                hw_table_size,
+                msix.cap_offset,
+                msix.bdf.into(),
+                msix_state,
+            )?;
         }
 
         // Replay the opaque device state captured at snapshot. The kernel walks
@@ -2330,6 +2379,7 @@ impl VfioPciDevice {
         x_exclude_mmap_bars: Vec<u8>,
         device_path: PathBuf,
         extended_caps: Vec<Arc<dyn PciExpressCapability + Send + Sync>>,
+        num_msix_vectors: Option<u16>,
     ) -> Result<Self, VfioPciError> {
         let vfio_wrapper = VfioDeviceWrapper::new(Arc::clone(&device));
 
@@ -2343,6 +2393,7 @@ impl VfioPciDevice {
             VfioCommonConfig {
                 x_nv_gpudirect_clique,
                 x_exclude_mmap_bars,
+                num_msix_vectors,
                 extended_caps,
             },
         )?;
@@ -2433,7 +2484,7 @@ impl VfioPciDevice {
         let mut inter_ranges = BTreeMap::new();
         if let Some(msix) = vfio_msix {
             if region_index == msix.cap.table_bir() {
-                let (offset, size) = msix.cap.table_range();
+                let (offset, size) = msix.hw_table_range();
                 let offset = align_page_size_down(offset);
                 let size = align_page_size_up(size);
                 // MSI-X mmap region safety: when a device has a non page
@@ -2456,7 +2507,7 @@ impl VfioPciDevice {
                 }
             }
             if region_index == msix.cap.pba_bir() {
-                let (offset, size) = msix.cap.pba_range();
+                let (offset, size) = msix.hw_pba_range();
                 let offset = align_page_size_down(offset);
                 let size = align_page_size_up(size);
                 // See MSI-X mmap safety comment above.
@@ -3185,6 +3236,7 @@ mod tests {
     #[cfg(feature = "kvm")]
     use std::sync::atomic::AtomicU32;
 
+    use vm_device::interrupt::InterruptSourceConfig;
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
@@ -3637,11 +3689,33 @@ mod tests {
         fn region_write(&self, _index: u32, _offset: u64, _data: &[u8]) {}
     }
 
+    struct DummyInterruptSourceGroup;
+    impl InterruptSourceGroup for DummyInterruptSourceGroup {
+        fn trigger(&self, _index: InterruptIndex) -> io::Result<()> {
+            unreachable!()
+        }
+        fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {
+            unreachable!()
+        }
+        fn update(
+            &self,
+            _index: InterruptIndex,
+            _config: InterruptSourceConfig,
+            _masked: bool,
+            _set_gsi: bool,
+        ) -> io::Result<()> {
+            unreachable!()
+        }
+        fn set_gsi(&self) -> io::Result<()> {
+            unreachable!()
+        }
+    }
+
     struct MockMsiInterruptManager;
     impl InterruptManager for MockMsiInterruptManager {
         type GroupConfig = MsiIrqGroupConfig;
         fn create_group(&self, _: MsiIrqGroupConfig) -> io::Result<Arc<dyn InterruptSourceGroup>> {
-            unimplemented!("not exercised by the migration-helper tests")
+            Ok(Arc::new(DummyInterruptSourceGroup))
         }
     }
 
@@ -3677,6 +3751,7 @@ mod tests {
             vendor_id: 0,
             x_nv_gpudirect_clique: None,
             x_exclude_mmap_bars: Vec::new(),
+            num_msix_vectors: None,
             migration_flags,
             dma_logging_page_size: None,
             extended_caps: Vec::new(),
@@ -4354,5 +4429,241 @@ mod tests {
         assert_eq!(sparse_areas[0].size, hole_start);
         assert_eq!(sparse_areas[1].offset, hole_end);
         assert_eq!(sparse_areas[1].size, region_size - hole_end);
+    }
+
+    struct MockMsixVfio {
+        config: Mutex<[u8; 256]>,
+        msix_count: u32,
+        bar_reads: Mutex<Vec<(u32, u64)>>,
+        bar_writes: Mutex<Vec<(u32, u64)>>,
+    }
+
+    impl MockMsixVfio {
+        fn new(hw_vectors: u16, table_offset: u32, pba_offset: u32) -> Arc<Self> {
+            let mut config = [0u8; 256];
+            config[PCI_CONFIG_STATUS_OFFSET as usize..PCI_CONFIG_STATUS_OFFSET as usize + 2]
+                .copy_from_slice(&PCI_CONFIG_STATUS_CAPABILITIES_LIST.to_le_bytes());
+            config[PCI_CONFIG_CAPABILITY_OFFSET as usize] = 0xb0;
+
+            // MSI-X capability at 0xB0: cap_id=0x11, next_ptr=0x00,
+            // msg_ctl = hw_vectors - 1, table/pba in BAR 0.
+            config[0xb0] = PciCapabilityId::MsiX as u8;
+            config[0xb1] = 0x00;
+            config[0xb2..0xb4].copy_from_slice(&(hw_vectors - 1).to_le_bytes());
+            config[0xb4..0xb8].copy_from_slice(&table_offset.to_le_bytes());
+            config[0xb8..0xbc].copy_from_slice(&pba_offset.to_le_bytes());
+
+            Arc::new(Self {
+                config: Mutex::new(config),
+                msix_count: u32::from(hw_vectors),
+                bar_reads: Mutex::new(Vec::new()),
+                bar_writes: Mutex::new(Vec::new()),
+            })
+        }
+
+        fn bar_reads(&self) -> Vec<(u32, u64)> {
+            self.bar_reads.lock().unwrap().clone()
+        }
+
+        fn bar_writes(&self) -> Vec<(u32, u64)> {
+            self.bar_writes.lock().unwrap().clone()
+        }
+    }
+
+    impl Vfio for MockMsixVfio {
+        fn region_read(&self, index: u32, offset: u64, data: &mut [u8]) {
+            if index == VFIO_PCI_CONFIG_REGION_INDEX {
+                let config = self.config.lock().unwrap();
+                let start = offset as usize;
+                data.copy_from_slice(&config[start..start + data.len()]);
+            } else {
+                self.bar_reads.lock().unwrap().push((index, offset));
+                data.fill(0x5a);
+            }
+        }
+
+        fn region_write(&self, index: u32, offset: u64, data: &[u8]) {
+            if index == VFIO_PCI_CONFIG_REGION_INDEX {
+                let mut config = self.config.lock().unwrap();
+                let start = offset as usize;
+                config[start..start + data.len()].copy_from_slice(data);
+            } else {
+                self.bar_writes.lock().unwrap().push((index, offset));
+            }
+        }
+
+        fn get_irq_info(&self, irq_index: u32) -> Option<VfioIrq> {
+            if irq_index == VFIO_PCI_MSIX_IRQ_INDEX {
+                Some(VfioIrq {
+                    flags: 0,
+                    index: irq_index,
+                    count: self.msix_count,
+                })
+            } else {
+                None
+            }
+        }
+    }
+
+    fn msix_common_with_override(
+        hw_vectors: u16,
+        override_vectors: Option<u16>,
+        table_offset: u32,
+        pba_offset: u32,
+    ) -> (VfioCommon, Arc<MockMsixVfio>) {
+        let mock = MockMsixVfio::new(hw_vectors, table_offset, pba_offset);
+        let mut common = test_vfio_common(Arc::clone(&mock), None);
+        common.num_msix_vectors = override_vectors;
+        common.parse_capabilities(PciBdf::new(0, 0, 0, 0)).unwrap();
+        (common, mock)
+    }
+
+    #[test]
+    fn msix_override_carves_full_hw_table_in_sparse_areas() {
+        let page_size = get_page_size();
+        let table_offset = 2 * page_size;
+        let hw_table_bytes = 2048 * (MSIX_TABLE_ENTRY_SIZE as u64);
+        let hw_table_aligned = align_page_size_up(hw_table_bytes);
+        let pba_offset = table_offset + hw_table_aligned;
+        let region_size = pba_offset + 2 * page_size;
+
+        let (common, mock) =
+            msix_common_with_override(2048, Some(32), table_offset as u32, pba_offset as u32);
+        let msix = common.interrupt.msix.as_ref().unwrap();
+        assert_eq!(msix.cap.table_size(), 32);
+        assert_eq!(msix.hw_table_size, 2048);
+
+        let expected = vec![
+            VfioRegionSparseMmapArea {
+                offset: 0,
+                size: table_offset,
+            },
+            VfioRegionSparseMmapArea {
+                offset: pba_offset + page_size,
+                size: page_size,
+            },
+        ];
+
+        // Even though the virtual table is only 32 vectors (512B), all physical
+        // MSI-X table pages (32 KiB for 2048 vectors) and the PBA page must
+        // remain carved out from direct mmap.
+        let areas = VfioPciDevice::generate_sparse_areas(
+            &[VfioRegionInfoCap::MsixMappable],
+            VFIO_PCI_BAR0_REGION_INDEX,
+            0,
+            region_size,
+            Some(msix),
+            common.vendor_id,
+        )
+        .unwrap();
+        assert_eq!(areas, expected);
+
+        // Snapshot/restore must preserve hw_table_size so sparse carving stays intact.
+        let snapshot = Snapshot::new_from_state(&common.state()).unwrap();
+        let state: VfioCommonState = snapshot.to_state().unwrap();
+        let mut restored = test_vfio_common(mock, None);
+        restored.set_state(&state, None, None, None).unwrap();
+
+        let restored_areas = VfioPciDevice::generate_sparse_areas(
+            &[VfioRegionInfoCap::MsixMappable],
+            VFIO_PCI_BAR0_REGION_INDEX,
+            0,
+            region_size,
+            restored.interrupt.msix.as_ref(),
+            restored.vendor_id,
+        )
+        .unwrap();
+        assert_eq!(restored_areas, expected);
+    }
+
+    #[test]
+    fn msix_override_traps_hidden_hw_table_tail() {
+        let bar_base: u64 = 0x1000_0000;
+        let table_offset: u64 = 0x2000;
+        let pba_offset: u64 = 0xa000;
+
+        let (mut common, mock) =
+            msix_common_with_override(2048, Some(32), table_offset as u32, pba_offset as u32);
+        common.mmio_regions.push(MmioRegion {
+            start: GuestAddress(bar_base),
+            length: 0x1_0000,
+            type_: PciBarRegionType::Memory64BitRegion,
+            index: VFIO_PCI_BAR0_REGION_INDEX,
+            user_memory_regions: Vec::new(),
+        });
+
+        // Access within virtual table [0..32) is emulated by MsixConfig.
+        let val = 0x1234_5678u32.to_le_bytes();
+        common.write_bar(bar_base, table_offset, &val);
+        let mut buf = [0u8; 4];
+        common.read_bar(bar_base, table_offset, &mut buf);
+        assert_eq!(buf, val);
+        assert!(mock.bar_reads().is_empty());
+        assert!(mock.bar_writes().is_empty());
+
+        // Accesses to the hidden hardware tail [32..2048) must be absorbed in
+        // software (reads return 0xff, writes dropped) and never forwarded to VFIO.
+        for hidden_idx in [32u64, 256, 2047] {
+            let hidden_off = table_offset + hidden_idx * (MSIX_TABLE_ENTRY_SIZE as u64);
+            common.write_bar(bar_base, hidden_off, &val);
+            buf = [0u8; 4];
+            common.read_bar(bar_base, hidden_off, &mut buf);
+            assert_eq!(buf, [0xff; 4]);
+        }
+        assert!(mock.bar_reads().is_empty());
+        assert!(mock.bar_writes().is_empty());
+
+        // Accesses outside the physical MSI-X table still reach the device BAR.
+        for normal_off in [0x1000u64, pba_offset] {
+            common.write_bar(bar_base, normal_off, &val);
+            buf = [0u8; 4];
+            common.read_bar(bar_base, normal_off, &mut buf);
+            assert_eq!(buf, [0x5a; 4]);
+        }
+        assert_eq!(
+            mock.bar_reads(),
+            vec![
+                (VFIO_PCI_BAR0_REGION_INDEX, 0x1000),
+                (VFIO_PCI_BAR0_REGION_INDEX, pba_offset),
+            ]
+        );
+        assert_eq!(
+            mock.bar_writes(),
+            vec![
+                (VFIO_PCI_BAR0_REGION_INDEX, 0x1000),
+                (VFIO_PCI_BAR0_REGION_INDEX, pba_offset),
+            ]
+        );
+    }
+
+    #[test]
+    fn msix_override_preserves_config_patches() {
+        let mock = MockMsixVfio::new(64, 0x2000, 0x4000);
+        let mut common = test_vfio_common(mock, None);
+        common.num_msix_vectors = Some(16);
+        common.x_nv_gpudirect_clique = Some(1);
+
+        // parse_capabilities overrides MSI-X table size to 16 and appends the
+        // GPUDirect capability at 0xD4 by patching byte 1 (next_ptr) of the
+        // last hardware capability (MSI-X at 0xB0) from 0x00 to 0xD4.
+        common.parse_capabilities(PciBdf::new(0, 0, 0, 0)).unwrap();
+
+        let dword = common.read_config_register(0xb0 / 4);
+        let cap_id = (dword & 0xff) as u8;
+        let next_ptr = ((dword >> 8) & 0xff) as u8;
+        let msg_ctl = (dword >> 16) as u16;
+        let table_size = (msg_ctl & 0x7ff) + 1;
+
+        assert_eq!(cap_id, PciCapabilityId::MsiX as u8);
+        assert_eq!(next_ptr, 0xd4);
+        assert_eq!(table_size, 16);
+
+        // Following next_ptr (0xD4) reaches the patched GPUDirect Vendor-Specific cap.
+        assert_eq!(common.read_config_register(0xd4 / 4), 0x5008_0009);
+
+        // Specifying more vectors than hardware supports leaves hardware size unchanged.
+        let (mut uncapped, _) = msix_common_with_override(64, Some(128), 0x2000, 0x4000);
+        let uncapped_msg_ctl = (uncapped.read_config_register(0xb0 / 4) >> 16) as u16;
+        assert_eq!((uncapped_msg_ctl & 0x7ff) + 1, 64);
     }
 }

@@ -910,6 +910,8 @@ pub struct DeviceConfig {
     pub x_exclude_mmap_bars: Vec<u64>,
     #[serde(skip)]
     pub iommufd_dev_id: Option<u32>,
+    #[serde(default)]
+    pub num_msix_vectors: Option<u16>,
 }
 
 impl ApplyLandlock for DeviceConfig {
