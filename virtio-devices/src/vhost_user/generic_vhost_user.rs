@@ -9,9 +9,7 @@ use std::{io, result};
 use event_monitor::event;
 use log::{error, info, warn};
 use seccompiler::SeccompAction;
-use vhost::vhost_user::message::{
-    VhostUserConfigFlags, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
-};
+use vhost::vhost_user::message::{VhostUserConfigFlags, VhostUserProtocolFeatures};
 use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler};
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -147,11 +145,7 @@ since the backend only supports {backend_num_queues}\n",
 
             (
                 avail_features,
-                // If part of the available features that have been acked, the
-                // PROTOCOL_FEATURES bit must be already set through the VIRTIO
-                // acked features as we know the guest would never ack it, thus
-                // the feature would be lost.
-                acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits(),
+                0,
                 acked_protocol_features,
                 num_queues,
                 false,
