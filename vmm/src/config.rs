@@ -236,6 +236,9 @@ pub enum ValidationError {
     ConsoleTcpClientUnsupported,
     #[error("TCP console port must not be zero")]
     ConsoleTcpPortZero,
+    /// More than one new output was given for the same console
+    #[error("More than one new output given for console {0}")]
+    ConsoleOutputUpdateAmbiguous(String),
     /// A new console output must keep the mode of the current one
     #[error("Cannot change console output {0:?} to {1:?} with a different mode")]
     ConsoleOutputUpdateModeMismatch(ConsoleOutput, ConsoleOutput),
@@ -2583,6 +2586,57 @@ impl ConsoleOutput {
             }
         }
         Ok(())
+    }
+
+    #[cfg_attr(not(test), expect(dead_code, reason = "next commit uses them"))]
+    pub(crate) const UPDATE_OPTIONS: &[&str] = &[
+        "console_file",
+        "console_socket",
+        "console_tcp",
+        "serial_file",
+        "serial_socket",
+        "serial_tcp",
+    ];
+
+    #[cfg_attr(not(test), expect(dead_code, reason = "next commit uses them"))]
+    pub(crate) fn parse_update(parser: &OptionParser, component: &str) -> Result<Option<Self>> {
+        let get_if_set = |mode: &str, missing: ValidationError| -> Result<Option<String>> {
+            let option = format!("{component}_{mode}");
+            if !parser.is_set(&option) {
+                return Ok(None);
+            }
+            parser
+                .get(&option)
+                .map(Some)
+                .ok_or(Error::Validation(missing))
+        };
+        let file = get_if_set("file", ValidationError::ConsoleFileMissing)?;
+        let socket = get_if_set("socket", ValidationError::ConsoleSocketPathMissing)?;
+        let tcp = get_if_set("tcp", ValidationError::ConsoleTcpAddressMissing)?;
+
+        let output = match (file, socket, tcp) {
+            (None, None, None) => return Ok(None),
+            (Some(file), None, None) => Self::File {
+                file: PathBuf::from(file),
+            },
+            (None, Some(socket), None) => Self::Socket {
+                socket: PathBuf::from(socket),
+            },
+            (None, None, Some(address)) => Self::Tcp {
+                tcp: TcpConsoleConfig {
+                    address: parse_tcp_address(&address)
+                        .map_err(|source| Error::ResolveConsoleTcpAddress { address, source })?,
+                    server: true,
+                },
+            },
+            _ => {
+                return Err(Error::Validation(
+                    ValidationError::ConsoleOutputUpdateAmbiguous(component.to_owned()),
+                ));
+            }
+        };
+
+        Ok(Some(output))
     }
 
     fn update(&mut self, new: &Self) -> ValidationResult<()> {
@@ -6206,6 +6260,68 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ))
         ));
         Ok(())
+    }
+
+    #[test]
+    fn test_console_output_parse_update() {
+        let parse = |input: &str, device: &str| {
+            let mut parser = OptionParser::new();
+            parser.add_all(ConsoleOutput::UPDATE_OPTIONS);
+            parser.parse(input).unwrap();
+            ConsoleOutput::parse_update(&parser, device)
+        };
+
+        assert_eq!(parse("", "serial").unwrap(), None);
+        assert_eq!(
+            parse("serial_file=/tmp/serial.log", "serial").unwrap(),
+            Some(ConsoleOutput::File {
+                file: PathBuf::from("/tmp/serial.log"),
+            })
+        );
+        assert_eq!(
+            parse("console_socket=/tmp/console.sock", "console").unwrap(),
+            Some(ConsoleOutput::Socket {
+                socket: PathBuf::from("/tmp/console.sock"),
+            })
+        );
+        assert_eq!(
+            parse("serial_tcp=127.0.0.1:4444", "serial").unwrap(),
+            Some(ConsoleOutput::Tcp {
+                tcp: TcpConsoleConfig {
+                    address: "127.0.0.1:4444".parse().unwrap(),
+                    server: true,
+                },
+            })
+        );
+
+        // Options of the other console must not leak into this one.
+        assert_eq!(parse("console_tcp=127.0.0.1:4444", "serial").unwrap(), None);
+        // Two outputs for different consoles are fine, two for one are not.
+        parse("serial_file=/tmp/a,console_file=/tmp/b", "serial").unwrap();
+        assert!(matches!(
+            parse("serial_file=/tmp/a,serial_tcp=127.0.0.1:4444", "serial"),
+            Err(Error::Validation(
+                ValidationError::ConsoleOutputUpdateAmbiguous(_)
+            ))
+        ));
+        assert!(matches!(
+            parse("serial_tcp=localhost:4444", "serial"),
+            Err(Error::ResolveConsoleTcpAddress { .. })
+        ));
+
+        // An option without a value must be rejected.
+        assert!(matches!(
+            parse("serial_file=", "serial"),
+            Err(Error::Validation(ValidationError::ConsoleFileMissing))
+        ));
+        assert!(matches!(
+            parse("console_socket=", "console"),
+            Err(Error::Validation(ValidationError::ConsoleSocketPathMissing))
+        ));
+        assert!(matches!(
+            parse("serial_tcp=", "serial"),
+            Err(Error::Validation(ValidationError::ConsoleTcpAddressMissing))
+        ));
     }
 
     #[test]
