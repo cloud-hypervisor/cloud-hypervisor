@@ -5,7 +5,7 @@
 
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use std::collections::BTreeMap;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom};
 use std::mem::{MaybeUninit, zeroed};
@@ -81,7 +81,7 @@ struct UffdPages {
     // on-demand fault handler. Lets the prefault cursor skip them without
     // doing a wasted file read + UFFDIO_COPY.
     served: Box<[AtomicBitmap]>,
-    loading: Mutex<HashSet<(usize /* range index */, u64 /* page index */)>>,
+    loading: Mutex<BTreeSet<(usize /* range index */, u64 /* page index */)>>,
 }
 
 impl UffdPages {
@@ -97,7 +97,7 @@ impl UffdPages {
             .collect();
         UffdPages {
             served,
-            loading: Mutex::new(HashSet::new()),
+            loading: Mutex::new(BTreeSet::new()),
         }
     }
 }
@@ -1992,7 +1992,7 @@ impl MemoryManager {
         ranges: &[UffdRange],
         source: &mut Box<dyn UffdMemorySource>,
         served_bitmap: &[AtomicBitmap],
-        pages_loading: &Mutex<HashSet<(usize, u64)>>,
+        pages_loading: &Mutex<BTreeSet<(usize, u64)>>,
     ) -> Result<u64, io::Error> {
         loop {
             let mut page_idx = *prefault_cursor;
@@ -4259,7 +4259,7 @@ mod tests {
         ];
         let served_bitmap = new_served_bitmap(&ranges);
         served_bitmap[0].set_bit(0);
-        let pages_loading = Mutex::new(HashSet::new());
+        let pages_loading = Mutex::new(BTreeSet::new());
 
         let attempts = Arc::new(Mutex::new(Vec::new()));
         let mut source: Box<dyn UffdMemorySource> = Box::new(RecordingUffdMemorySource {
@@ -4326,7 +4326,7 @@ mod tests {
             page_size: page,
         }];
         let served_bitmap = new_served_bitmap(&ranges);
-        let pages_loading = Mutex::new(HashSet::new());
+        let pages_loading = Mutex::new(BTreeSet::new());
         let attempts = Arc::new(Mutex::new(Vec::new()));
         let mut source: Box<dyn UffdMemorySource> = Box::new(RecordingUffdMemorySource {
             attempts: Arc::clone(&attempts),
