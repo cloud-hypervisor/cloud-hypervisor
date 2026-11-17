@@ -65,8 +65,8 @@ use crate::migration::transport::{
 };
 use crate::vm::{Error as VmError, VmState};
 use crate::vm_config::{
-    DeviceConfig, DiskConfig, ExternalFd, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
-    UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
+    ConsoleOutput, DeviceConfig, DiskConfig, ExternalFd, FsConfig, GenericVhostUserConfig,
+    NetConfig, PmemConfig, UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
 };
 
 /// API errors are sent back from the VMM API server through the ApiResponse.
@@ -336,6 +336,12 @@ pub struct VmReceiveMigrationData {
     /// Enable the background thread for faulting all remaining pages.
     #[serde(default = "default_receive_migration_background_fetch_pages")]
     pub background_fetch_pages: bool,
+    /// New output of the serial console, in the mode of the source VM.
+    #[serde(default)]
+    pub serial: Option<ConsoleOutput>,
+    /// New output of the virtio console, in the mode of the source VM.
+    #[serde(default)]
+    pub console: Option<ConsoleOutput>,
 }
 
 fn default_receive_migration_background_fetch_pages() -> bool {
@@ -466,6 +472,8 @@ impl VmReceiveMigrationData {
             iommufd_fd,
             zone_updates,
             background_fetch_pages,
+            serial: None,
+            console: None,
         };
 
         data.validate()?;
@@ -2337,6 +2345,8 @@ mod tests {
                 iommufd_fd: Default::default(),
                 zone_updates: vec![],
                 background_fetch_pages: true,
+                serial: None,
+                console: None,
             }
         );
 
@@ -2377,6 +2387,8 @@ mod tests {
                 iommufd_fd: Default::default(),
                 zone_updates: vec![],
                 background_fetch_pages: true,
+                serial: None,
+                console: None,
             }
         );
 
