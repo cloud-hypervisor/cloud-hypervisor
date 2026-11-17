@@ -3811,8 +3811,8 @@ mod tests {
         assert_eq!(
             config.update_console_outputs(None, Some(&ConsoleOutput::Null)),
             Err(ValidationError::ConsoleOutputUpdateModeMismatch(
-                file("/tmp/c"),
-                ConsoleOutput::Null
+                Box::new(file("/tmp/c")),
+                Box::new(ConsoleOutput::Null),
             ))
         );
     }

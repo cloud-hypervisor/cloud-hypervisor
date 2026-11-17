@@ -19,7 +19,7 @@ use devices::legacy::Serial;
 use libc::EFD_NONBLOCK;
 use log::{error, info, warn};
 use seccompiler::{SeccompAction, apply_filter};
-use serial_buffer::{SerialBuffer, SocketConsole};
+use serial_buffer::{SerialBuffer, SocketConsole, Tee};
 use thiserror::Error;
 use vmm_sys_util::errno;
 use vmm_sys_util::eventfd::EventFd;
@@ -171,7 +171,7 @@ impl SerialManager {
             ConsoleTransport::Socket(ref listener) => {
                 Some((listener.as_raw_fd(), EpollDispatch::Socket))
             }
-            ConsoleTransport::TcpListen(ref listener) => {
+            ConsoleTransport::TcpListen { ref listener, .. } => {
                 Some((listener.as_raw_fd(), EpollDispatch::Socket))
             }
             _ => return Ok(None),
@@ -205,14 +205,18 @@ impl SerialManager {
         let mut socket_console = None;
         if matches!(
             transport,
-            ConsoleTransport::Socket(_) | ConsoleTransport::TcpListen(_)
+            ConsoleTransport::Socket(_) | ConsoleTransport::TcpListen { .. }
         ) {
             let console = SocketConsole::new();
-            serial
-                .as_ref()
-                .lock()
-                .unwrap()
-                .set_out(Some(console.out_sink()));
+            let mut out = console.out_sink();
+            if let ConsoleTransport::TcpListen {
+                file: Some(ref file),
+                ..
+            } = transport
+            {
+                out = Box::new(Tee::new(out, Arc::clone(file)));
+            }
+            serial.as_ref().lock().unwrap().set_out(Some(out));
             socket_console = Some(console);
         }
 
@@ -332,7 +336,7 @@ impl SerialManager {
                                 }
                                 EpollDispatch::Socket => {
                                     if let Some(console) = socket_console.as_mut() {
-                                        if let ConsoleTransport::TcpListen(ref listener) = transport {
+                                        if let ConsoleTransport::TcpListen { ref listener, .. } = transport {
                                             if console.accept_tcp(listener).map_err(Error::AcceptConnection)?
                                                 && let Some(fd) = console.client_fd()
                                             {
@@ -396,13 +400,13 @@ impl SerialManager {
                                 }
                                 EpollDispatch::File => {
                                     if event.events & libc::EPOLLIN as u32 != 0
-                                        || matches!(transport, ConsoleTransport::TcpListen(_))
+                                        || matches!(transport, ConsoleTransport::TcpListen { .. })
                                             && event.events & (libc::EPOLLHUP | libc::EPOLLERR) as u32 != 0
                                     {
                                         let mut input = [0u8; 64];
                                         let count = match &transport {
                                             ConsoleTransport::Socket(_)
-                                            | ConsoleTransport::TcpListen(_) => {
+                                            | ConsoleTransport::TcpListen { .. } => {
                                                 if let Some(console) = socket_console.as_mut() {
                                                     let was_connected = console.client_fd().is_some();
                                                     let count = match console.read(&mut input) {
@@ -416,7 +420,7 @@ impl SerialManager {
                                                     };
                                                     if was_connected
                                                             && console.client_fd().is_none()
-                                                            && let ConsoleTransport::TcpListen(ref listener) = transport
+                                                            && let ConsoleTransport::TcpListen { ref listener, .. } = transport
                                                         {
                                                             epoll::ctl(
                                                                 epoll_fd.as_raw_fd(),
@@ -453,7 +457,7 @@ impl SerialManager {
                                             .queue_input_bytes(&input[..count])
                                             .map_err(Error::QueueInput)?;
                                     }
-                                    if matches!(transport, ConsoleTransport::TcpListen(_)) {
+                                    if matches!(transport, ConsoleTransport::TcpListen { .. }) {
                                         continue;
                                     }
                                     if event.events & libc::EPOLLHUP as u32 != 0 {
@@ -497,5 +501,152 @@ impl Drop for SerialManager {
         if let Some(handle) = self.handle.take() {
             handle.join().ok();
         }
+    }
+}
+
+// The tests drive the 16550 UART. On aarch64, the PL011 goes through the same
+// serial manager code.
+#[cfg(test)]
+#[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))]
+mod tests {
+    use std::io::{Seek, SeekFrom};
+    use std::net::{SocketAddr, TcpListener, TcpStream};
+    use std::time::Duration;
+
+    use vm_device::BusDevice;
+    use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig, InterruptSourceGroup};
+
+    use super::*;
+
+    /// Offset of the 16550 transmit holding register.
+    const UART_DATA: u64 = 0;
+
+    /// Bytes a late client gets replayed (`MAX_BUFFER_SIZE` in `serial_buffer`).
+    const REPLAY_LIMIT: usize = 1 << 20;
+
+    struct NoopInterrupt;
+
+    impl InterruptSourceGroup for NoopInterrupt {
+        fn trigger(&self, _index: InterruptIndex) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {
+            None
+        }
+
+        fn update(
+            &self,
+            _index: InterruptIndex,
+            _config: InterruptSourceConfig,
+            _masked: bool,
+            _set_gsi: bool,
+        ) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn set_gsi(&self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// A serial port on a TCP console with a log file, with a running serial
+    /// manager thread.
+    struct TcpConsoleWithLog {
+        serial: Arc<Mutex<Serial>>,
+        address: SocketAddr,
+        log: File,
+        // Dropping the manager stops its thread.
+        _manager: SerialManager,
+    }
+
+    impl TcpConsoleWithLog {
+        fn new() -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let log = tempfile::tempfile().unwrap();
+            let transport = ConsoleTransport::TcpListen {
+                listener: Arc::new(listener),
+                file: Some(Arc::new(log.try_clone().unwrap())),
+            };
+            let serial = Arc::new(Mutex::new(Serial::new_sink(
+                "serial".to_owned(),
+                Arc::new(NoopInterrupt),
+                None,
+            )));
+            let mut manager = SerialManager::new(Arc::clone(&serial), transport)
+                .unwrap()
+                .expect("should create a manager for a TCP console");
+            manager
+                .start_thread(EventFd::new(0).unwrap(), &SeccompAction::Allow)
+                .unwrap();
+            Self {
+                serial,
+                address,
+                log,
+                _manager: manager,
+            }
+        }
+
+        /// Writes `data` to the UART like a guest driver, one byte at a time.
+        fn guest_writes(&self, data: &[u8]) {
+            let mut serial = self.serial.lock().unwrap();
+            for &byte in data {
+                serial.write(0, UART_DATA, &[byte]);
+            }
+        }
+
+        fn connect_tcp_client(&self) -> TcpStream {
+            let client = TcpStream::connect(self.address).unwrap();
+            // Fail instead of hanging if the serial manager never sends.
+            client
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            client
+        }
+
+        fn read_log_file(&self) -> Vec<u8> {
+            // The serial manager writes through a clone of this fd, and both
+            // share one file offset.
+            let mut log = &self.log;
+            log.seek(SeekFrom::Start(0)).unwrap();
+            let mut contents = Vec::new();
+            log.read_to_end(&mut contents).unwrap();
+            contents
+        }
+    }
+
+    fn read_from_tcp_client(client: &mut TcpStream, len: usize) -> Vec<u8> {
+        let mut buf = vec![0; len];
+        client.read_exact(&mut buf).unwrap();
+        buf
+    }
+
+    #[test]
+    fn late_client_gets_replay_and_log_file_has_each_byte_once() {
+        let console = TcpConsoleWithLog::new();
+
+        console.guest_writes(b"boot\n");
+        let mut tcp_client = console.connect_tcp_client();
+        assert_eq!(read_from_tcp_client(&mut tcp_client, 5), b"boot\n");
+
+        console.guest_writes(b"login: ");
+        assert_eq!(read_from_tcp_client(&mut tcp_client, 7), b"login: ");
+
+        // The replay to the client bypasses the log file.
+        assert_eq!(console.read_log_file(), b"boot\nlogin: ");
+    }
+
+    #[test]
+    fn log_file_keeps_output_beyond_replay_limit() {
+        let console = TcpConsoleWithLog::new();
+        let mut output = b"first line\n".to_vec();
+        output.resize(REPLAY_LIMIT, b'x');
+        output.extend_from_slice(b"\nlast line\n");
+
+        console.guest_writes(&output);
+
+        // Not assert_eq!(), which would print 1 MiB on failure.
+        assert!(console.read_log_file() == output);
     }
 }

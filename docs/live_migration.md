@@ -329,7 +329,9 @@ following parameters. Unless marked otherwise, they apply to
   (`receive-migration`): \
   New output of the serial port on the destination, for example if the output
   of the source is not available there. It must use the same mode as the output
-  of the source VM.
+  of the source VM. With `serial_tcp`, `serial_file` sets the log file of the
+  new TCP output. The new output replaces the old one, so without `serial_file`
+  the destination writes no log file.
 - `console_file <path>`, `console_socket <path>`, or `console_tcp <ip>:<port>`
   (`receive-migration`): \
   The same for the `virtio-console` device.

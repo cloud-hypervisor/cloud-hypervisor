@@ -1573,8 +1573,9 @@ components:
         file:
           type: string
           description: |
-            Required if `mode` is `File`. For `Pty`, it holds the path of the
-            PTY once the device has been created.
+            With mode File, the output file. With mode Pty, the PTY path.
+            With mode Tcp, an optional file that receives a copy of all
+            output. It is never read.
         socket:
           type: string
           description: Required if `mode` is `Socket`.
@@ -1603,8 +1604,9 @@ components:
         file:
           type: string
           description: |
-            Required if `mode` is `File`. For `Pty`, it holds the path of the
-            PTY once the device has been created.
+            With mode File, the output file. With mode Pty, the PTY path.
+            With mode Tcp, an optional file that receives a copy of all
+            output. It is never read.
         socket:
           type: string
           description: Required if `mode` is `Socket`.

@@ -17,7 +17,7 @@ use libc::{EFD_NONBLOCK, TIOCGWINSZ};
 use log::{error, info, warn};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
-use serial_buffer::{SerialBuffer, SocketConsole};
+use serial_buffer::{SerialBuffer, SocketConsole, Tee};
 use smallvec::SmallVec;
 use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
@@ -112,7 +112,10 @@ pub enum Endpoint {
     FilePair(Arc<File>, Arc<File>),
     PtyPair(Arc<File>, Arc<File>),
     Socket(Arc<UnixListener>),
-    TcpListen(Arc<TcpListener>),
+    TcpListen {
+        listener: Arc<TcpListener>,
+        file: Option<Arc<File>>,
+    },
     Null,
 }
 
@@ -123,7 +126,7 @@ impl Endpoint {
             Self::FilePair(f, _) => Some(f),
             Self::PtyPair(f, _) => Some(f),
             Self::Socket(..) => None,
-            Self::TcpListen(..) => None,
+            Self::TcpListen { .. } => None,
             Self::Null => None,
         }
     }
@@ -134,7 +137,7 @@ impl Endpoint {
             Self::FilePair(_, f) => Some(f),
             Self::PtyPair(_, f) => Some(f),
             Self::Socket(..) => None,
-            Self::TcpListen(..) => None,
+            Self::TcpListen { .. } => None,
             Self::Null => None,
         }
     }
@@ -144,7 +147,7 @@ impl Endpoint {
     }
 
     fn is_socket(&self) -> bool {
-        matches!(self, Self::Socket(..) | Self::TcpListen(..))
+        matches!(self, Self::Socket(..) | Self::TcpListen { .. })
     }
 }
 
@@ -168,7 +171,13 @@ impl ConsoleEpollHandler {
     ) -> Self {
         let (socket_console, out, write_out) = if endpoint.is_socket() {
             let console = SocketConsole::new();
-            let out = console.out_sink();
+            let mut out = console.out_sink();
+            if let Endpoint::TcpListen {
+                file: Some(file), ..
+            } = &endpoint
+            {
+                out = Box::new(Tee::new(out, Arc::clone(file)));
+            }
             (Some(console), Some(out), None)
         } else if let Some(out_file) = endpoint.out_file() {
             let writer = out_file.try_clone().unwrap();
@@ -350,7 +359,7 @@ impl ConsoleEpollHandler {
             Endpoint::Socket(listener) => {
                 helper.add_event(listener.as_raw_fd(), SOCKET_EVENT)?;
             }
-            Endpoint::TcpListen(listener) => {
+            Endpoint::TcpListen { listener, .. } => {
                 helper.add_event(listener.as_raw_fd(), SOCKET_EVENT)?;
             }
             _ => {}
@@ -468,7 +477,7 @@ impl EpollHelperHandler for ConsoleEpollHandler {
             }
             SOCKET_EVENT => {
                 if let Some(console) = self.socket_console.as_mut() {
-                    if let Endpoint::TcpListen(listener) = &self.endpoint {
+                    if let Endpoint::TcpListen { listener, .. } = &self.endpoint {
                         if console
                             .accept_tcp(listener)
                             .map_err(EpollHelperError::IoError)?
@@ -499,7 +508,7 @@ impl EpollHelperHandler for ConsoleEpollHandler {
             }
             FILE_EVENT => {
                 if event.events & libc::EPOLLIN as u32 != 0
-                    || matches!(self.endpoint, Endpoint::TcpListen(_))
+                    || matches!(self.endpoint, Endpoint::TcpListen { .. })
                         && event.events & (libc::EPOLLHUP | libc::EPOLLERR) as u32 != 0
                 {
                     let mut input = [0u8; 64];
@@ -511,7 +520,7 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                         });
                         if was_connected
                             && console.client_fd().is_none()
-                            && let Endpoint::TcpListen(listener) = &self.endpoint
+                            && let Endpoint::TcpListen { listener, .. } = &self.endpoint
                         {
                             helper.add_event(listener.as_raw_fd(), SOCKET_EVENT)?;
                         }

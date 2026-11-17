@@ -787,6 +787,8 @@ pub enum ConsoleOutput {
     },
     Tcp {
         tcp: TcpConsoleConfig,
+        /// Optional file that receives a copy of all output.
+        file: Option<PathBuf>,
     },
     Null,
 }
@@ -803,9 +805,12 @@ impl ApplyLandlock for ConsoleOutput {
             }
             ConsoleOutput::File { file } => landlock.add_rule_with_access(file, "rw")?,
             ConsoleOutput::Socket { socket } => landlock.add_rule_with_access(socket, "rw")?,
+            ConsoleOutput::Tcp {
+                file: Some(file), ..
+            } => landlock.add_rule_with_access(file, "w")?,
             ConsoleOutput::Off
             | ConsoleOutput::Tty
-            | ConsoleOutput::Tcp { .. }
+            | ConsoleOutput::Tcp { file: None, .. }
             | ConsoleOutput::Null => {}
         }
         Ok(())
@@ -821,7 +826,7 @@ pub struct SerialConfig {
 
 impl SerialConfig {
     pub const SYNTAX: &'static str = "Control serial port: \
-        \"off|null|pty|tty|file=<path>|socket=<path>|tcp=<loopback_ip>:<port>,server=on\"";
+        \"off|null|pty|tty|file=<path>|socket=<path>|tcp=<loopback_ip>:<port>,server=on,file=<log_path>\"";
 }
 
 impl Default for SerialConfig {
@@ -849,7 +854,7 @@ pub struct ConsoleConfig {
 
 impl ConsoleConfig {
     pub const SYNTAX: &'static str = "Control (virtio) console: \
-        \"off|null|pty|tty|file=<path>|socket=<path>|tcp=<loopback_ip>:<port>,server=on,\
+        \"off|null|pty|tty|file=<path>|socket=<path>|tcp=<loopback_ip>:<port>,server=on,file=<log_path>,\
         iommu=off|virtio,id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 }
 

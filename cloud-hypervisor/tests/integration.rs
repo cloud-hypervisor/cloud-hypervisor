@@ -9235,15 +9235,17 @@ mod common_parallel {
         );
     }
 
-    /// Migrates `guest` over TCP with `console_update` and runs `check` on the
-    /// destination. Both VMMs run on one host, so a destination that ignores a
-    /// new TCP or socket output cannot bind the one that the source holds.
+    /// Runs `before_migration` on the source, migrates `guest` over TCP with
+    /// `console_update`, and runs `after_migration` on the destination. Both
+    /// VMMs run on one host, so a destination that ignores a new TCP or socket
+    /// output cannot bind the one that the source holds.
     fn _test_live_migration_console_update(
         guest: &Guest,
         (serial, console): (String, String),
         extra_args: &[&str],
+        before_migration: impl FnOnce() + panic::UnwindSafe,
         console_update: String,
-        check: impl FnOnce() -> thread::Result<()>,
+        after_migration: impl FnOnce() -> thread::Result<()>,
     ) {
         let dest_event_path = temp_event_monitor_path(&guest.tmp_dir);
         let src_api_socket = temp_api_path(&guest.tmp_dir);
@@ -9272,6 +9274,7 @@ mod common_parallel {
 
         let r = panic::catch_unwind(|| {
             guest.wait_vm_boot().unwrap();
+            before_migration();
             assert!(
                 start_live_migration_tcp_with_flags(
                     &src_api_socket,
@@ -9297,7 +9300,7 @@ mod common_parallel {
         let _ = src_child.kill();
         let _ = src_child.wait();
 
-        let r = check();
+        let r = after_migration();
 
         let _ = dest_child.kill();
         let dest_output = dest_child.wait_with_output().unwrap();
@@ -9320,6 +9323,7 @@ mod common_parallel {
                 format!("socket={}", old_socket.display()),
             ),
             &[],
+            || {},
             format!(
                 "serial_tcp=127.0.0.1:{new_port},console_socket={}",
                 new_socket.display()
@@ -9340,6 +9344,60 @@ mod common_parallel {
         );
     }
 
+    /// Migrates a console with tcp+file config and updates both on the dest.
+    fn _test_live_migration_console_tcp_file(kind: ConsoleKind) {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let old_file = guest.tmp_dir.as_path().join("old.log");
+        let new_file = guest.tmp_dir.as_path().join("new.log");
+        let new_port = get_available_port();
+
+        let old_output = format!(
+            "tcp=127.0.0.1:{},server=on,file={}",
+            get_available_port(),
+            old_file.display()
+        );
+        let (outputs, component, device) = match kind {
+            ConsoleKind::Serial => ((old_output, "null".to_string()), "serial", SERIAL_DEVICE),
+            ConsoleKind::Console => (("null".to_string(), old_output), "console", "/dev/hvc0"),
+        };
+
+        _test_live_migration_console_update(
+            &guest,
+            outputs,
+            &[],
+            || {
+                write_console_marker(&guest, &[device]);
+                assert_file_has_console_marker(&old_file);
+            },
+            format!(
+                "{component}_tcp=127.0.0.1:{new_port},{component}_file={}",
+                new_file.display()
+            ),
+            || {
+                panic::catch_unwind(|| {
+                    // The file must get the marker without a connected
+                    // client. The late client then gets it from the backlog.
+                    write_console_marker(&guest, &[device]);
+                    assert_file_has_console_marker(&new_file);
+
+                    let tcp = TcpStream::connect(("127.0.0.1", new_port)).unwrap();
+                    tcp.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
+                    assert_stream_has_console_marker(tcp);
+                })
+            },
+        );
+    }
+
+    #[test]
+    fn test_live_migration_serial_tcp_file() {
+        _test_live_migration_console_tcp_file(ConsoleKind::Serial);
+    }
+
+    #[test]
+    fn test_live_migration_console_tcp_file() {
+        _test_live_migration_console_tcp_file(ConsoleKind::Console);
+    }
+
     /// A reboot creates the file output again, which under Landlock needs a
     /// rule for the new path. The update must therefore happen before Landlock.
     #[test]
@@ -9357,6 +9415,7 @@ mod common_parallel {
             &guest,
             (format!("file={}", old_file.display()), "null".to_string()),
             &["--landlock", "--landlock-rules", &landlock_rules],
+            || {},
             format!("serial_file={}", new_file.display()),
             || {
                 panic::catch_unwind(|| {
