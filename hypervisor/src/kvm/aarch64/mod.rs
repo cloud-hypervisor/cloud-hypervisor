@@ -108,7 +108,7 @@ pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
     check_extension!(Cap::IrqRouting);
     check_extension!(Cap::MpState);
     check_extension!(Cap::OneReg);
-    check_extension!(Cap::UserMemory);
+    check_extension!(Cap::UserMemory2);
     Ok(())
 }
 
