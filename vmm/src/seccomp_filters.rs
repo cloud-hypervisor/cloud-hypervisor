@@ -105,7 +105,6 @@ mod kvm {
     pub(super) const KVM_SET_DEVICE_ATTR: u64 = 0x4018_aee1;
     pub(super) const KVM_HAS_DEVICE_ATTR: u64 = 0x4018_aee3;
     pub(super) const KVM_SET_ONE_REG: u64 = 0x4010_aeac;
-    pub(super) const KVM_SET_USER_MEMORY_REGION: u64 = 0x4020_ae46;
     pub(super) const KVM_SET_USER_MEMORY_REGION2: u64 = 0x40a0_ae49;
     pub(super) const KVM_SET_MEMORY_ATTRIBUTES: u64 = 0x4020_aed2;
     pub(super) const KVM_CREATE_GUEST_MEMFD: u64 = 0xc040_aed4;
@@ -282,7 +281,6 @@ fn create_vmm_ioctl_seccomp_rule_common_kvm() -> Result<Vec<SeccompRule>, Backen
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_MP_STATE)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_ONE_REG)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_REGS)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_USER_MEMORY_REGION,)?],
         and![Cond::new(
             1,
             ArgLen::Dword,
@@ -886,7 +884,6 @@ fn create_vcpu_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_IRQFD,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_DEVICE_ATTR,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_GSI_ROUTING,)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_USER_MEMORY_REGION,)?],
         and![Cond::new(
             1,
             ArgLen::Dword,

@@ -66,8 +66,6 @@ const IOMMU_IOAS_UNMAP: u64 = 0x3b86;
 
 // See include/uapi/linux/kvm.h in the kernel code.
 #[cfg(feature = "kvm")]
-const KVM_SET_USER_MEMORY_REGION: u64 = 0x4020_ae46;
-#[cfg(feature = "kvm")]
 const KVM_SET_USER_MEMORY_REGION2: u64 = 0x40a0_ae49;
 
 #[cfg(feature = "sev_snp")]
@@ -113,8 +111,6 @@ fn create_virtio_mem_ioctl_seccomp_rule() -> Vec<SeccompRule> {
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_IOMMU_UNMAP_DMA).unwrap()],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_MAP).unwrap()],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_UNMAP).unwrap()],
-        #[cfg(feature = "kvm")]
-        and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_USER_MEMORY_REGION).unwrap()],
         #[cfg(feature = "kvm")]
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_USER_MEMORY_REGION2).unwrap()],
         #[cfg(feature = "mshv")]

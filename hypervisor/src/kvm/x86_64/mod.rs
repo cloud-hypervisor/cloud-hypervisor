@@ -60,7 +60,7 @@ pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
     check_extension!(kvm, Cap::SetTssAddr);
     check_extension!(kvm, Cap::SplitIrqchip);
     check_extension!(kvm, Cap::TscDeadlineTimer);
-    check_extension!(kvm, Cap::UserMemory);
+    check_extension!(kvm, Cap::UserMemory2);
     check_extension!(kvm, Cap::UserNmi);
     check_extension!(kvm, Cap::VcpuEvents);
     check_extension!(kvm, Cap::Xsave2);
@@ -80,7 +80,6 @@ pub fn check_required_sev_snp_extensions(vm: &VmFd) -> KvmResult<()> {
     if memory_attributes & KVM_MEMORY_ATTRIBUTE_PRIVATE == 0 {
         return Err(KvmError::MemoryAttributePrivateMissing(memory_attributes));
     }
-    check_extension!(vm, Cap::UserMemory2);
     Ok(())
 }
 

@@ -43,7 +43,6 @@ use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 use log::debug;
 #[cfg(target_arch = "x86_64")]
 use log::warn;
-use vmm_sys_util::errno;
 use vmm_sys_util::eventfd::EventFd;
 
 #[cfg(target_arch = "aarch64")]
@@ -118,8 +117,7 @@ pub use kvm_bindings::{
     KVM_IRQ_ROUTING_MSI, KVM_MEM_GUEST_MEMFD, KVM_MEM_LOG_DIRTY_PAGES, KVM_MEM_READONLY,
     KVM_MSI_VALID_DEVID, kvm_clock_data, kvm_create_device, kvm_create_device as CreateDevice,
     kvm_device_attr as DeviceAttr, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_guest_debug,
-    kvm_irq_routing, kvm_irq_routing_entry, kvm_mp_state, kvm_run, kvm_userspace_memory_region,
-    kvm_userspace_memory_region2,
+    kvm_irq_routing, kvm_irq_routing_entry, kvm_mp_state, kvm_run, kvm_userspace_memory_region2,
 };
 #[cfg(target_arch = "aarch64")]
 use kvm_bindings::{
@@ -599,38 +597,6 @@ impl KvmVm {
     fn translate_msi_ext_dest_id(address_lo: u32, address_hi: u32) -> (u32, u32) {
         (address_lo, address_hi)
     }
-
-    /// Set user memory region to use guest_memfd when available.
-    /// guest_memfd is available on host linux kernel v6.8+
-    ///
-    /// # Safety
-    ///
-    /// `region.userspace_addr` must point to `region.memory_size` bytes of
-    /// memory that will stay mapped until the slot is removed via
-    /// `remove_user_memory_region`. The memory region must
-    /// be uniquely owned by the caller, as mapping it into the guest
-    /// effectively creates a long-lived mutable reference.
-    unsafe fn set_user_memory_region(
-        &self,
-        region: kvm_userspace_memory_region2,
-    ) -> Result<(), errno::Error> {
-        if self.memory_slots.is_some() {
-            // SAFETY: Safe as the caller guarantees that region is safe to map
-            // the guest and is non-overlapping.
-            unsafe { self.fd.set_user_memory_region2(region) }
-        } else {
-            // SAFETY: Safe because guest regions are guaranteed not to overlap.
-            unsafe {
-                self.fd.set_user_memory_region(kvm_userspace_memory_region {
-                    slot: region.slot,
-                    guest_phys_addr: region.guest_phys_addr,
-                    userspace_addr: region.userspace_addr,
-                    flags: region.flags,
-                    memory_size: region.memory_size,
-                })
-            }
-        }
-    }
 }
 
 /// Implementation of Vm trait for KVM
@@ -1066,9 +1032,10 @@ impl vm::Vm for KvmVm {
             )));
         }
 
-        // SAFETY: Safe because caller promised this is safe.
+        // SAFETY: Safe because guest regions are guaranteed not to overlap.
         unsafe {
-            self.set_user_memory_region(region)
+            self.fd
+                .set_user_memory_region2(region)
                 .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))?;
         }
 
@@ -1087,7 +1054,7 @@ impl vm::Vm for KvmVm {
                 ..region
             };
             // SAFETY: the region was installed above and its backing is still alive.
-            if let Err(rollback) = unsafe { self.set_user_memory_region(removed) } {
+            if let Err(rollback) = unsafe { self.fd.set_user_memory_region2(removed) } {
                 error!("Failed to roll back memory slot {slot}: {rollback}");
                 process::exit(1);
             }
@@ -1150,9 +1117,10 @@ impl vm::Vm for KvmVm {
 
         // Setting the size to 0 means "remove"
         region.memory_size = 0;
-        // SAFETY: Safe because caller promised this is safe.
+        // SAFETY: Safe because guest regions are guaranteed not to overlap.
         unsafe {
-            self.set_user_memory_region(region)
+            self.fd
+                .set_user_memory_region2(region)
                 .map_err(|e| vm::HypervisorVmError::RemoveUserMemory(e.into()))?;
         }
 
@@ -1400,7 +1368,8 @@ impl vm::Vm for KvmVm {
             };
             // SAFETY: Safe because guest regions are guaranteed not to overlap.
             unsafe {
-                self.set_user_memory_region(region)
+                self.fd
+                    .set_user_memory_region2(region)
                     .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))?;
             }
         }
@@ -1424,7 +1393,8 @@ impl vm::Vm for KvmVm {
             };
             // SAFETY: Safe because guest regions are guaranteed not to overlap.
             unsafe {
-                self.set_user_memory_region(region)
+                self.fd
+                    .set_user_memory_region2(region)
                     .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))?;
             }
         }
