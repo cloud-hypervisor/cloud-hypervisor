@@ -96,8 +96,8 @@ pub enum Error {
     VhostUserGetProtocolFeatures(#[source] VhostError),
     #[error("Backend does not support protocol features {0:#x}")]
     UnsupportedProtocolFeatures(u64),
-    #[error("Protocol features {0:#x} saved without PROTOCOL_FEATURES acknowledged")]
-    InconsistentProtocolFeatures(u64),
+    #[error("Backend does not support VHOST_USER_F_PROTOCOL_FEATURES")]
+    ProtocolFeaturesUnsupported,
     #[error(
         "The backend does not support PAGEFAULT, which postcopy migration and on-demand restore require"
     )]
@@ -1042,7 +1042,11 @@ mod tests {
             reply.extend_from_slice(&u32::from(FrontendReq::GET_FEATURES).to_ne_bytes());
             reply.extend_from_slice(&(VhostUserHeaderFlag::REPLY.bits() | 1).to_ne_bytes());
             reply.extend_from_slice(&8u32.to_ne_bytes());
-            reply.extend_from_slice(&0u64.to_ne_bytes());
+            reply.extend_from_slice(
+                &VhostUserVirtioFeatures::PROTOCOL_FEATURES
+                    .bits()
+                    .to_ne_bytes(),
+            );
             second.write_all(&reply).unwrap();
         });
 
@@ -1063,8 +1067,9 @@ mod tests {
     #[test]
     fn access_platform_is_preserved_in_guest_features() {
         let access_platform = 1u64 << VIRTIO_F_ACCESS_PLATFORM;
+        let protocol_features = VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
         for enabled in [false, true] {
-            for backend_features in [0, access_platform] {
+            for backend_features in [protocol_features, protocol_features | access_platform] {
                 let temp_dir = TempDir::new_with_prefix("/tmp/vhost-user-features-").unwrap();
                 let socket_path = temp_dir.as_path().join("backend.sock");
                 let listener = UnixListener::bind(&socket_path).unwrap();
@@ -1080,6 +1085,14 @@ mod tests {
                         stream.write_all(&value.to_ne_bytes()).unwrap();
                     }
                     stream.write_all(&backend_features.to_ne_bytes()).unwrap();
+                    assert!(
+                        read_request(&mut stream, FrontendReq::GET_PROTOCOL_FEATURES).is_empty()
+                    );
+                    write_reply(&mut stream, FrontendReq::GET_PROTOCOL_FEATURES, 0);
+                    assert_eq!(
+                        read_request(&mut stream, FrontendReq::SET_PROTOCOL_FEATURES),
+                        0u64.to_ne_bytes()
+                    );
                 });
 
                 let mut device = GenericVhostUser::new(
@@ -1121,7 +1134,9 @@ mod tests {
             ] {
                 stream.write_all(&value.to_ne_bytes()).unwrap();
             }
-            let features = (1u64 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_F_ACCESS_PLATFORM);
+            let features = (1u64 << VIRTIO_F_VERSION_1)
+                | (1u64 << VIRTIO_F_ACCESS_PLATFORM)
+                | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
             stream.write_all(&features.to_ne_bytes()).unwrap();
             assert_eq!(
                 read_request(&mut stream, FrontendReq::SET_FEATURES),
@@ -1212,7 +1227,7 @@ mod tests {
                 1,
                 false,
                 &kill_evt,
-                |vu| vu.set_protocol_features_vhost_user(protocol_features, saved, false),
+                |vu| vu.set_protocol_features_vhost_user(saved, false),
             );
             match result {
                 Ok(vu) => {
@@ -1230,54 +1245,34 @@ mod tests {
     }
 
     #[test]
-    fn restored_protocol_features_require_protocol_features_bit() {
-        for saved in [0, VhostUserProtocolFeatures::MQ.bits()] {
-            let temp_dir = TempDir::new_with_prefix("/tmp/vhost-user-protocol-").unwrap();
-            let socket_path = temp_dir.as_path().join("backend.sock");
-            let listener = UnixListener::bind(&socket_path).unwrap();
-            let backend = thread::spawn(move || {
-                let (mut stream, _) = listener.accept().unwrap();
-                assert!(read_request(&mut stream, FrontendReq::SET_OWNER).is_empty());
-                assert!(read_request(&mut stream, FrontendReq::GET_FEATURES).is_empty());
-                for field in [
-                    u32::from(FrontendReq::GET_FEATURES),
-                    VhostUserHeaderFlag::REPLY.bits() | 1,
-                    8,
-                ] {
-                    stream.write_all(&field.to_ne_bytes()).unwrap();
-                }
-                stream.write_all(&0u64.to_ne_bytes()).unwrap();
-                // Protocol negotiation must not occur without PROTOCOL_FEATURES.
-                assert_eq!(stream.read(&mut [0u8; 1]).unwrap(), 0);
-            });
+    fn connect_rejects_backend_without_protocol_features() {
+        let temp_dir = TempDir::new_with_prefix("/tmp/vhost-user-protocol-").unwrap();
+        let socket_path = temp_dir.as_path().join("backend.sock");
+        let listener = UnixListener::bind(&socket_path).unwrap();
+        let backend = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            assert!(read_request(&mut stream, FrontendReq::SET_OWNER).is_empty());
+            assert!(read_request(&mut stream, FrontendReq::GET_FEATURES).is_empty());
+            write_reply(&mut stream, FrontendReq::GET_FEATURES, 0);
+            assert_eq!(stream.read(&mut [0u8; 1]).unwrap(), 0);
+        });
 
-            let kill_evt = EventFd::new(libc::EFD_NONBLOCK).unwrap();
-            let result = VhostUserHandle::connect_vhost_user(
-                false,
-                socket_path.to_str().unwrap(),
-                1,
-                false,
-                &kill_evt,
-                |vu| vu.set_protocol_features_vhost_user(0, saved, false),
-            );
-            match result {
-                Ok(vu) => {
-                    assert_eq!(saved, 0);
-                    drop(vu);
-                }
-                Err(Error::InconsistentProtocolFeatures(bits)) => {
-                    assert_ne!(saved, 0);
-                    assert_eq!(bits, saved);
-                }
-                Err(err) => panic!("Unexpected negotiation error: {err}"),
-            }
-            backend.join().unwrap();
-        }
+        let kill_evt = EventFd::new(libc::EFD_NONBLOCK).unwrap();
+        let result = VhostUserHandle::connect_vhost_user(
+            false,
+            socket_path.to_str().unwrap(),
+            1,
+            false,
+            &kill_evt,
+            |_| Ok(()),
+        );
+        assert!(matches!(result, Err(Error::ProtocolFeaturesUnsupported)));
+        backend.join().unwrap();
     }
 
     #[test]
     fn add_memory_region_skips_disconnected_device() {
-        let (vu, _backend) = connect_handle(0);
+        let (vu, _backend) = connect_handle(VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits());
         let mut common = VhostUserCommon {
             vu: Some(Arc::new(Mutex::new(vu))),
             acked_protocol_features: VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits(),

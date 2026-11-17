@@ -204,38 +204,27 @@ impl VhostUserHandle {
     ) -> Result<(u64, u64)> {
         let acked_features = avail_features & self.backend_features;
 
-        let acked_protocol_features =
-            if acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
-                let backend_protocol_features = self
-                    .vu
-                    .get_protocol_features()
-                    .map_err(Error::VhostUserGetProtocolFeatures)?;
-                if postcopy
-                    && !backend_protocol_features.contains(VhostUserProtocolFeatures::PAGEFAULT)
-                {
-                    return Err(Error::VhostUserPageFaultUnsupported);
-                }
+        let backend_protocol_features = self
+            .vu
+            .get_protocol_features()
+            .map_err(Error::VhostUserGetProtocolFeatures)?;
+        if postcopy && !backend_protocol_features.contains(VhostUserProtocolFeatures::PAGEFAULT) {
+            return Err(Error::VhostUserPageFaultUnsupported);
+        }
 
-                let acked_protocol_features = avail_protocol_features & backend_protocol_features;
-                let mut enabled_protocol_features = acked_protocol_features;
+        let acked_protocol_features = avail_protocol_features & backend_protocol_features;
+        let mut enabled_protocol_features = acked_protocol_features;
 
-                // Postcopy is not a feature we want to persist to state, since
-                // it's enabled only if we're in postcopy, which we can't know
-                // beforehand, so don't add it to the acked bitflag.
-                if postcopy {
-                    enabled_protocol_features |= VhostUserProtocolFeatures::PAGEFAULT;
-                }
+        // Postcopy is not a feature we want to persist to state, since
+        // it's enabled only if we're in postcopy, which we can't know
+        // beforehand, so don't add it to the acked bitflag.
+        if postcopy {
+            enabled_protocol_features |= VhostUserProtocolFeatures::PAGEFAULT;
+        }
 
-                self.vu
-                    .set_protocol_features(enabled_protocol_features)
-                    .map_err(Error::VhostUserSetProtocolFeatures)?;
-
-                acked_protocol_features
-            } else if postcopy {
-                return Err(Error::VhostUserPageFaultUnsupported);
-            } else {
-                VhostUserProtocolFeatures::empty()
-            };
+        self.vu
+            .set_protocol_features(enabled_protocol_features)
+            .map_err(Error::VhostUserSetProtocolFeatures)?;
 
         if avail_protocol_features.contains(VhostUserProtocolFeatures::REPLY_ACK)
             && acked_protocol_features.contains(VhostUserProtocolFeatures::REPLY_ACK)
@@ -425,43 +414,35 @@ impl VhostUserHandle {
 
     pub fn set_protocol_features_vhost_user(
         &mut self,
-        acked_features: u64,
         acked_protocol_features: u64,
         postcopy: bool,
     ) -> Result<()> {
-        if acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
-            let backend_protocol_features = self
-                .vu
-                .get_protocol_features()
-                .map_err(Error::VhostUserGetProtocolFeatures)?;
-            let unsupported = acked_protocol_features & !backend_protocol_features.bits();
-            if unsupported != 0 {
-                return Err(Error::UnsupportedProtocolFeatures(unsupported));
-            }
-            if postcopy && !backend_protocol_features.contains(VhostUserProtocolFeatures::PAGEFAULT)
-            {
-                return Err(Error::VhostUserPageFaultUnsupported);
-            }
-
-            let mut acked_protocol_features =
-                VhostUserProtocolFeatures::from_bits_truncate(acked_protocol_features);
-            // Postcopy is not a feature we want to persist to state, since
-            // it's enabled only if we're in postcopy, which we can't know
-            // beforehand, so don't add it to the acked bitflag.
-            if postcopy {
-                acked_protocol_features |= VhostUserProtocolFeatures::PAGEFAULT;
-            }
-            self.vu
-                .set_protocol_features(acked_protocol_features)
-                .map_err(Error::VhostUserSetProtocolFeatures)?;
-
-            if acked_protocol_features.contains(VhostUserProtocolFeatures::REPLY_ACK) {
-                self.vu.set_hdr_flags(VhostUserHeaderFlag::NEED_REPLY);
-            }
-        } else if acked_protocol_features != 0 {
-            return Err(Error::InconsistentProtocolFeatures(acked_protocol_features));
-        } else if postcopy {
+        let backend_protocol_features = self
+            .vu
+            .get_protocol_features()
+            .map_err(Error::VhostUserGetProtocolFeatures)?;
+        let unsupported = acked_protocol_features & !backend_protocol_features.bits();
+        if unsupported != 0 {
+            return Err(Error::UnsupportedProtocolFeatures(unsupported));
+        }
+        if postcopy && !backend_protocol_features.contains(VhostUserProtocolFeatures::PAGEFAULT) {
             return Err(Error::VhostUserPageFaultUnsupported);
+        }
+
+        let mut enabled_protocol_features =
+            VhostUserProtocolFeatures::from_bits_truncate(acked_protocol_features);
+        // Postcopy is not a feature we want to persist to state, since
+        // it's enabled only if we're in postcopy, which we can't know
+        // beforehand, so don't add it to the acked bitflag.
+        if postcopy {
+            enabled_protocol_features |= VhostUserProtocolFeatures::PAGEFAULT;
+        }
+        self.vu
+            .set_protocol_features(enabled_protocol_features)
+            .map_err(Error::VhostUserSetProtocolFeatures)?;
+
+        if enabled_protocol_features.contains(VhostUserProtocolFeatures::REPLY_ACK) {
+            self.vu.set_hdr_flags(VhostUserHeaderFlag::NEED_REPLY);
         }
 
         self.update_supported_protocol_features(acked_protocol_features);
@@ -480,7 +461,7 @@ impl VhostUserHandle {
         backend_req_handler: &Option<FrontendReqHandler<S>>,
         inflight: Option<&mut Inflight>,
     ) -> Result<()> {
-        self.set_protocol_features_vhost_user(acked_features, acked_protocol_features, false)?;
+        self.set_protocol_features_vhost_user(acked_protocol_features, false)?;
 
         // With in-order processing, used_idx is a contiguous completion boundary.
         // Replay descriptors after it when inflight tracking is not available to
@@ -514,6 +495,21 @@ impl VhostUserHandle {
             queue_evt.write(1).map_err(Error::VhostUserKickVring)?;
         }
 
+        Ok(())
+    }
+
+    fn read_backend_features(&mut self) -> Result<()> {
+        let features = self
+            .vu
+            .get_features()
+            .map_err(Error::VhostUserGetFeatures)?;
+        // Without PROTOCOL_FEATURES, vhost-user allows neither
+        // SET_VRING_ENABLE, which activation and pausing need, nor any
+        // protocol feature.
+        if features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() == 0 {
+            return Err(Error::ProtocolFeaturesUnsupported);
+        }
+        self.backend_features = features;
         Ok(())
     }
 
@@ -552,10 +548,7 @@ impl VhostUserHandle {
                 .vu
                 .set_owner()
                 .map_err(Error::VhostUserSetOwner)?;
-            vhost_user.backend_features = vhost_user
-                .vu
-                .get_features()
-                .map_err(Error::VhostUserGetFeatures)?;
+            vhost_user.read_backend_features()?;
             initialize(&mut vhost_user)?;
             Ok(vhost_user)
         } else {
@@ -616,10 +609,7 @@ impl VhostUserHandle {
                         .set_owner()
                         .map_err(Error::VhostUserSetOwner)
                         .and_then(|()| {
-                            vhost_user.backend_features = vhost_user
-                                .vu
-                                .get_features()
-                                .map_err(Error::VhostUserGetFeatures)?;
+                            vhost_user.read_backend_features()?;
                             initialize(&mut vhost_user)
                         }) {
                         Ok(()) => return Ok(vhost_user),

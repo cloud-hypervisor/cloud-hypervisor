@@ -106,7 +106,6 @@ impl Fs {
             info!("Restoring vhost-user-fs {id}");
 
             vu.set_protocol_features_vhost_user(
-                state.acked_features,
                 state.acked_protocol_features,
                 postcopy_handler.is_some(),
             )?;

@@ -91,7 +91,6 @@ impl GenericVhostUser {
         ) = if let Some(state) = state {
             info!("Restoring generic vhost-user {id}");
             vu.set_protocol_features_vhost_user(
-                state.acked_features,
                 state.acked_protocol_features,
                 postcopy_handler.is_some(),
             )?;
