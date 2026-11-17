@@ -22,7 +22,7 @@ use vm_memory::{
     GuestMemoryBackend, GuestMemoryError, GuestMemoryLoadGuard,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
-use vm_virtio::AccessPlatform;
+use vm_virtio::{AccessPlatform, AccessType};
 use vmm_sys_util::eventfd::EventFd;
 
 use super::{
@@ -1069,7 +1069,13 @@ fn translate_contiguous_range(
 }
 
 impl DmaRemapping for IommuMapping {
-    fn translate_gva(&self, id: u32, addr: u64, size: u64) -> io::Result<u64> {
+    fn translate_gva(
+        &self,
+        id: u32,
+        addr: u64,
+        size: u64,
+        _access_type: AccessType,
+    ) -> io::Result<u64> {
         debug!("Translate GVA addr 0x{addr:x} size 0x{size:x}");
         let end = span_end(addr, size)?;
         if let Some(domain_id) = self.endpoints.read().unwrap().get(&id) {
@@ -1133,7 +1139,8 @@ impl InterruptRemapping for IommuMapping {
         let gpa = if (start..=end).contains(&addr) {
             addr
         } else {
-            self.translate_gva(dev_id, addr, size_of::<u32>() as u64)
+            // An MSI is a device write to the doorbell.
+            self.translate_gva(dev_id, addr, size_of::<u32>() as u64, AccessType::Write)
                 .ok()?
         };
 
@@ -1158,8 +1165,8 @@ impl AccessPlatformMapping {
 }
 
 impl AccessPlatform for AccessPlatformMapping {
-    fn translate_gva(&self, base: u64, size: u64) -> io::Result<u64> {
-        self.mapping.translate_gva(self.id, base, size)
+    fn translate_gva(&self, base: u64, size: u64, access_type: AccessType) -> io::Result<u64> {
+        self.mapping.translate_gva(self.id, base, size, access_type)
     }
     fn translate_gpa(&self, base: u64, size: u64) -> io::Result<u64> {
         self.mapping.translate_gpa(self.id, base, size)
@@ -1481,6 +1488,7 @@ mod tests {
     use virtio_queue::QueueT;
     use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
     use vm_memory::{ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
+    use vm_virtio::AccessType;
     use vm_virtio::queue::testing::VirtQueue;
     use vmm_sys_util::eventfd::{EFD_NONBLOCK, EventFd};
 
@@ -1580,7 +1588,10 @@ mod tests {
     #[test]
     fn translate_within_single_mapping() {
         let m = iommu_mapping(&[(0x1000, 0x4000, 0x1000)]);
-        assert_eq!(m.translate_gva(0, 0x1200, 0x100).unwrap(), 0x4200);
+        assert_eq!(
+            m.translate_gva(0, 0x1200, 0x100, AccessType::Read).unwrap(),
+            0x4200
+        );
     }
 
     #[test]
@@ -1588,29 +1599,39 @@ mod tests {
         // A buffer mapped with two adjacent mappings that resolve to a
         // contiguous physical range translates as one range.
         let m = iommu_mapping(&[(0x1000, 0x4000, 0x1000), (0x2000, 0x5000, 0x1000)]);
-        assert_eq!(m.translate_gva(0, 0x1000, 0x2000).unwrap(), 0x4000);
+        assert_eq!(
+            m.translate_gva(0, 0x1000, 0x2000, AccessType::Read)
+                .unwrap(),
+            0x4000
+        );
         // A sub-range that straddles the boundary also resolves.
-        assert_eq!(m.translate_gva(0, 0x1f00, 0x200).unwrap(), 0x4f00);
+        assert_eq!(
+            m.translate_gva(0, 0x1f00, 0x200, AccessType::Read).unwrap(),
+            0x4f00
+        );
     }
 
     #[test]
     fn reject_spanning_noncontiguous_mappings() {
         // Adjacent in IOVA but disjoint in GPA cannot be one range.
         let m = iommu_mapping(&[(0x1000, 0x4000, 0x1000), (0x2000, 0x9000, 0x1000)]);
-        m.translate_gva(0, 0x1000, 0x2000).unwrap_err();
+        m.translate_gva(0, 0x1000, 0x2000, AccessType::Read)
+            .unwrap_err();
     }
 
     #[test]
     fn reject_span_across_iova_gap() {
         // A hole between mappings leaves part of the span unmapped.
         let m = iommu_mapping(&[(0x1000, 0x4000, 0x1000), (0x3000, 0x6000, 0x1000)]);
-        m.translate_gva(0, 0x1000, 0x2000).unwrap_err();
+        m.translate_gva(0, 0x1000, 0x2000, AccessType::Read)
+            .unwrap_err();
     }
 
     #[test]
     fn reject_unmapped_base() {
         let m = iommu_mapping(&[(0x1000, 0x4000, 0x1000)]);
-        m.translate_gva(0, 0x2500, 0x10).unwrap_err();
+        m.translate_gva(0, 0x2500, 0x10, AccessType::Read)
+            .unwrap_err();
     }
 
     const TAIL_LEN: usize = size_of::<VirtioIommuReqTail>();

@@ -914,7 +914,12 @@ impl AccessPlatform for SevSnpPageAccessProxy {
         Ok(base)
     }
 
-    fn translate_gva(&self, base: u64, size: u64) -> result::Result<u64, io::Error> {
+    fn translate_gva(
+        &self,
+        base: u64,
+        size: u64,
+        _access_type: vm_virtio::AccessType,
+    ) -> result::Result<u64, io::Error> {
         self.vm
             .gain_page_access(base, size as u32)
             .map_err(io::Error::other)?;

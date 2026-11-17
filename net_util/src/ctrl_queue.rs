@@ -20,7 +20,7 @@ use virtio_bindings::virtio_net::{
 };
 use virtio_queue::{Queue, QueueT};
 use vm_memory::{ByteValued, Bytes, GuestMemoryBackend, GuestMemoryError};
-use vm_virtio::{AccessPlatform, Translatable};
+use vm_virtio::{AccessPlatform, AccessType, Translatable};
 
 use super::virtio_features_to_tap_offload;
 use crate::{Tap, associate_taps};
@@ -133,7 +133,7 @@ impl CtrlQueue {
                 .read_obj(
                     ctrl_desc
                         .addr()
-                        .translate_gva(access_platform, ctrl_desc.len() as usize)
+                        .translate_gva(access_platform, ctrl_desc.len() as usize, AccessType::Read)
                         .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?,
                 )
                 .map_err(Error::GuestMemory)?;
@@ -146,7 +146,7 @@ impl CtrlQueue {
                     }
                     let data_desc_addr = data_desc
                         .addr()
-                        .translate_gva(access_platform, data_desc.len() as usize)
+                        .translate_gva(access_platform, data_desc.len() as usize, AccessType::Read)
                         .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?;
 
                     let status_desc = desc_chain.next().ok_or(Error::NoStatusDescriptor)?;
@@ -184,7 +184,7 @@ impl CtrlQueue {
                     }
                     let data_desc_addr = data_desc
                         .addr()
-                        .translate_gva(access_platform, data_desc.len() as usize)
+                        .translate_gva(access_platform, data_desc.len() as usize, AccessType::Read)
                         .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?;
 
                     let status_desc = desc_chain.next().ok_or(Error::NoStatusDescriptor)?;
@@ -266,7 +266,11 @@ impl CtrlQueue {
                     if ok { VIRTIO_NET_OK } else { VIRTIO_NET_ERR } as u8,
                     status_desc
                         .addr()
-                        .translate_gva(access_platform, status_desc.len() as usize)
+                        .translate_gva(
+                            access_platform,
+                            status_desc.len() as usize,
+                            AccessType::Write,
+                        )
                         .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?,
                 )
                 .map_err(Error::GuestMemory)?;

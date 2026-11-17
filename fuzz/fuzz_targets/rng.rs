@@ -17,7 +17,7 @@ use virtio_queue::{Queue, QueueT};
 use vm_allocator::GuestMemory;
 use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
 use vm_migration::{Pausable, Snapshottable};
-use vm_virtio::AccessPlatform;
+use vm_virtio::{AccessPlatform, AccessType};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
 macro_rules! align {
@@ -284,7 +284,7 @@ struct FuzzAccessPlatform {
 }
 
 impl AccessPlatform for FuzzAccessPlatform {
-    fn translate_gva(&self, base: u64, _size: u64) -> io::Result<u64> {
+    fn translate_gva(&self, base: u64, _size: u64, _access_type: AccessType) -> io::Result<u64> {
         if self.fail_on_odd && (base & 1) != 0 {
             return Err(io::Error::other("fuzz translation failure"));
         }

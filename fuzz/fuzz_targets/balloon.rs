@@ -13,7 +13,7 @@ use virtio_queue::{Queue, QueueT};
 use vm_allocator::GuestMemory;
 use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryAtomic};
 use vm_migration::{Pausable, Snapshottable};
-use vm_virtio::AccessPlatform;
+use vm_virtio::{AccessPlatform, AccessType};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
 const QUEUE_DATA_SIZE: usize = 4;
@@ -341,7 +341,12 @@ impl VirtioInterrupt for FailingVirtioInterrupt {
 struct IdentityAccessPlatform {}
 
 impl AccessPlatform for IdentityAccessPlatform {
-    fn translate_gva(&self, base: u64, _size: u64) -> std::io::Result<u64> {
+    fn translate_gva(
+        &self,
+        base: u64,
+        _size: u64,
+        _access_type: AccessType,
+    ) -> std::io::Result<u64> {
         Ok(base)
     }
 

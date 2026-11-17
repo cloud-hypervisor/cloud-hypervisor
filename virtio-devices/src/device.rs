@@ -21,7 +21,7 @@ use virtio_bindings::virtio_config::VIRTIO_F_ACCESS_PLATFORM;
 use virtio_queue::Queue;
 use vm_memory::GuestMemoryAtomic;
 use vm_migration::{MigratableError, Pausable};
-use vm_virtio::{AccessPlatform, VirtioDeviceType};
+use vm_virtio::{AccessPlatform, AccessType, VirtioDeviceType};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::epoll_helper::EpollHelperError;
@@ -202,7 +202,13 @@ pub trait DmaRemapping {
     /// Provide a way to translate GVA address ranges into GPAs. The
     /// implementation must reject translations whose [addr, addr+size)
     /// span isn't entirely covered by a single mapping.
-    fn translate_gva(&self, id: u32, addr: u64, size: u64) -> io::Result<u64>;
+    fn translate_gva(
+        &self,
+        id: u32,
+        addr: u64,
+        size: u64,
+        access_type: AccessType,
+    ) -> io::Result<u64>;
     /// Provide a way to translate GPA address ranges into GVAs. Same
     /// span requirement as `translate_gva`.
     fn translate_gpa(&self, id: u32, addr: u64, size: u64) -> io::Result<u64>;

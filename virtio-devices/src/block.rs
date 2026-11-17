@@ -1388,6 +1388,7 @@ mod tests {
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::desc::split::Descriptor;
     use vm_memory::GuestAddress;
+    use vm_virtio::AccessType;
     use vm_virtio::queue::testing::VirtQueue as GuestQ;
     use vmm_sys_util::eventfd::EFD_NONBLOCK;
 
@@ -1908,7 +1909,7 @@ mod tests {
     #[derive(Debug)]
     struct Offset;
     impl AccessPlatform for Offset {
-        fn translate_gva(&self, base: u64, _size: u64) -> IoResult<u64> {
+        fn translate_gva(&self, base: u64, _size: u64, _access_type: AccessType) -> IoResult<u64> {
             base.checked_sub(0x8000_0000)
                 .ok_or_else(|| io::Error::other("unmapped"))
         }

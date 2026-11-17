@@ -28,7 +28,7 @@ use vm_memory::{
     GuestMemoryLoadGuard,
 };
 use vm_virtio::checked_descriptor::DescriptorChainExt;
-use vm_virtio::{AccessPlatform, Translatable};
+use vm_virtio::{AccessPlatform, AccessType, Translatable};
 use vmm_sys_util::file_traits::FileSync;
 
 use crate::async_io::{
@@ -191,7 +191,7 @@ impl Request {
 
         let addr = status_desc
             .addr()
-            .translate_gva(access_platform, 1)
+            .translate_gva(access_platform, 1, AccessType::Write)
             .map_err(|_| {
                 Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(status_desc.addr()))
             })?;

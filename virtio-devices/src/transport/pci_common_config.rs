@@ -14,6 +14,7 @@ use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use virtio_queue::{Queue, QueueT};
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
+use vm_virtio::AccessType;
 
 use super::pci_device::VIRTQ_MSI_NO_VECTOR;
 use crate::{DEVICE_FEATURES_OK, VirtioDevice};
@@ -327,27 +328,33 @@ impl VirtioPciCommonConfig {
                     None
                 };
                 if let Some(access_platform) = access_platform {
-                    let desc_table = match access_platform
-                        .translate_gva(q.desc_table(), get_vring_size(VringType::Desc, q.size()))
-                    {
+                    let desc_table = match access_platform.translate_gva(
+                        q.desc_table(),
+                        get_vring_size(VringType::Desc, q.size()),
+                        AccessType::Read,
+                    ) {
                         Ok(addr) => addr,
                         Err(e) => {
                             error!("Failed to translate desc_table GVA: {e}");
                             return;
                         }
                     };
-                    let avail_ring = match access_platform
-                        .translate_gva(q.avail_ring(), get_vring_size(VringType::Avail, q.size()))
-                    {
+                    let avail_ring = match access_platform.translate_gva(
+                        q.avail_ring(),
+                        get_vring_size(VringType::Avail, q.size()),
+                        AccessType::Read,
+                    ) {
                         Ok(addr) => addr,
                         Err(e) => {
                             error!("Failed to translate avail_ring GVA: {e}");
                             return;
                         }
                     };
-                    let used_ring = match access_platform
-                        .translate_gva(q.used_ring(), get_vring_size(VringType::Used, q.size()))
-                    {
+                    let used_ring = match access_platform.translate_gva(
+                        q.used_ring(),
+                        get_vring_size(VringType::Used, q.size()),
+                        AccessType::Write,
+                    ) {
                         Ok(addr) => addr,
                         Err(e) => {
                             error!("Failed to translate used_ring GVA: {e}");
