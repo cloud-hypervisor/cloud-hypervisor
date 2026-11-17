@@ -10580,6 +10580,16 @@ mod ivshmem {
     }
 
     #[test]
+    fn test_snapshot_restore_new_console_file() {
+        snapshot_restore_common::_test_snapshot_restore(
+            snapshot_restore_common::SnapshotRestoreTest {
+                use_new_console_file: true,
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
     fn test_snapshot_restore_with_resume() {
         snapshot_restore_common::_test_snapshot_restore(
             snapshot_restore_common::SnapshotRestoreTest {
@@ -10779,6 +10789,7 @@ mod snapshot_restore_common {
         pub memory_restore_mode: Option<&'static str>,
         pub use_prefault: bool,
         pub check_vmgenid: bool,
+        pub use_new_console_file: bool,
     }
 
     pub(crate) fn _test_snapshot_restore(cfg: SnapshotRestoreTest) {
@@ -10789,6 +10800,7 @@ mod snapshot_restore_common {
             memory_restore_mode,
             use_prefault,
             check_vmgenid,
+            use_new_console_file,
         } = cfg;
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -10828,6 +10840,21 @@ mod snapshot_restore_common {
             boot_cmdline.push_str(" acpi=on");
         }
 
+        // The source VM writes to file 1, and the restored VM to file 2.
+        let console_file = |n: u8| guest.tmp_dir.as_path().join(format!("console.{n}"));
+        let console_output = |stdout: &[u8], n: u8| {
+            if use_new_console_file {
+                read_to_string(console_file(n)).unwrap()
+            } else {
+                String::from_utf8_lossy(stdout).into_owned()
+            }
+        };
+        let console = if use_new_console_file {
+            format!("file={}", console_file(1).display())
+        } else {
+            "tty".to_string()
+        };
+
         let mut child = GuestCommand::new(&guest)
             .args(["--api-socket", &api_socket_source])
             .args(["--event-monitor", format!("path={event_path}").as_str()])
@@ -10847,6 +10874,7 @@ mod snapshot_restore_common {
             .args(["--net", net_params.as_str()])
             .args(["--vsock", format!("cid=3,socket={socket}").as_str()])
             .args(["--cmdline", &boot_cmdline])
+            .args(["--console", &console])
             .capture_output()
             .spawn()
             .unwrap();
@@ -10917,7 +10945,7 @@ mod snapshot_restore_common {
         handle_child_output(r, &output);
 
         let r = panic::catch_unwind(|| {
-            assert!(String::from_utf8_lossy(&output.stdout).contains(&console_text));
+            assert!(console_output(&output.stdout, 1).contains(&console_text));
         });
 
         handle_child_output(r, &output);
@@ -10958,6 +10986,9 @@ mod snapshot_restore_common {
         }
         if use_prefault {
             restore_params.push_str(",prefault=on");
+        }
+        if use_new_console_file {
+            restore_params.push_str(&format!(",console_file={}", console_file(2).display()));
         }
 
         // Restore the VM from the snapshot
@@ -11138,7 +11169,7 @@ mod snapshot_restore_common {
         handle_child_output(r, &output);
 
         let r = panic::catch_unwind(|| {
-            assert!(String::from_utf8_lossy(&output.stdout).contains(&console_text));
+            assert!(console_output(&output.stdout, 2).contains(&console_text));
             if use_prefault {
                 assert!(
                     String::from_utf8_lossy(&output.stderr).contains("Prefaulted 1 memory regions"),
