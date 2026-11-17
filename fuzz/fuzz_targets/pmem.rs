@@ -20,7 +20,7 @@ use vm_allocator::{GuestMemory, GuestRegion};
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, MmapRegion};
 use vm_migration::{Pausable, Snapshottable};
-use vm_virtio::AccessPlatform;
+use vm_virtio::{AccessPlatform, AccessType};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
 const MEM_SIZE: usize = 2 * 1024 * 1024;
@@ -463,7 +463,7 @@ struct FuzzAccessPlatform {
 }
 
 impl AccessPlatform for FuzzAccessPlatform {
-    fn translate_gva(&self, base: u64, _size: u64) -> io::Result<u64> {
+    fn translate_gva(&self, base: u64, _size: u64, _access_type: AccessType) -> io::Result<u64> {
         if self.fail_on_odd && (base & 1) != 0 {
             Err(io::Error::other("fuzz gva translation failure"))
         } else {

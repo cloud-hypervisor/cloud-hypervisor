@@ -20,7 +20,7 @@ use virtio_queue::{Queue, QueueT};
 use vm_allocator::GuestMemory;
 use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
 use vm_migration::{Pausable, Snapshottable};
-use vm_virtio::AccessPlatform;
+use vm_virtio::{AccessPlatform, AccessType};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
 macro_rules! align {
@@ -122,7 +122,7 @@ impl VirtioInterrupt for HarnessInterrupt {
 struct IdentityAccessPlatform;
 
 impl AccessPlatform for IdentityAccessPlatform {
-    fn translate_gva(&self, base: u64, _size: u64) -> io::Result<u64> {
+    fn translate_gva(&self, base: u64, _size: u64, _access_type: AccessType) -> io::Result<u64> {
         Ok(base)
     }
 

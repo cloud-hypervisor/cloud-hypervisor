@@ -17,7 +17,7 @@ use virtio_queue::DescriptorChain;
 use virtio_queue::desc::split::Descriptor;
 use vm_memory::{GuestAddress, GuestMemoryBackend};
 
-use crate::{AccessPlatform, Translatable};
+use crate::{AccessPlatform, AccessType, Translatable};
 
 /// A descriptor whose buffer range has been validated against guest memory.
 #[derive(Debug)]
@@ -105,9 +105,14 @@ where
 
         let desc_addr = desc.addr();
         let desc_len = desc.len() as usize;
+        let access_type = if desc.is_write_only() {
+            AccessType::Write
+        } else {
+            AccessType::Read
+        };
 
         let result = desc_addr
-            .translate_gva(self.access_platform, desc_len)
+            .translate_gva(self.access_platform, desc_len, access_type)
             .map_err(|_| {
                 warn!(
                     "Descriptor address translation failed: addr=0x{:x} len={}",
@@ -403,7 +408,12 @@ mod tests {
     }
 
     impl AccessPlatform for OffsetTranslator {
-        fn translate_gva(&self, base: u64, _size: u64) -> io::Result<u64> {
+        fn translate_gva(
+            &self,
+            base: u64,
+            _size: u64,
+            _access_type: AccessType,
+        ) -> io::Result<u64> {
             Ok(base - self.gva_base + self.gpa_base)
         }
         fn translate_gpa(&self, base: u64, _size: u64) -> io::Result<u64> {
@@ -438,7 +448,12 @@ mod tests {
     struct FailingTranslator;
 
     impl AccessPlatform for FailingTranslator {
-        fn translate_gva(&self, _base: u64, _size: u64) -> io::Result<u64> {
+        fn translate_gva(
+            &self,
+            _base: u64,
+            _size: u64,
+            _access_type: AccessType,
+        ) -> io::Result<u64> {
             Err(io::Error::other("translation failed"))
         }
         fn translate_gpa(&self, _base: u64, _size: u64) -> io::Result<u64> {

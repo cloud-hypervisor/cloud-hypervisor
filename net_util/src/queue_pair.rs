@@ -21,7 +21,7 @@ use virtio_bindings::virtio_net::{
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
 use vm_memory::bitmap::Bitmap;
 use vm_memory::{Bytes, GuestAddress, GuestMemoryBackend};
-use vm_virtio::{AccessPlatform, Translatable};
+use vm_virtio::{AccessPlatform, AccessType, Translatable};
 
 use super::{Tap, register_listener, unregister_listener, vnet_hdr_len};
 
@@ -147,7 +147,7 @@ impl TxVirtio {
                 while let Some(desc) = next_desc {
                     let desc_addr = desc
                         .addr()
-                        .translate_gva(access_platform, desc.len() as usize)
+                        .translate_gva(access_platform, desc.len() as usize, AccessType::Read)
                         .map_err(|e| {
                             NetQueuePairError::GuestMemory(vm_memory::GuestMemoryError::IOError(e))
                         })?;
@@ -339,7 +339,7 @@ impl RxVirtio {
                     .memory()
                     .checked_offset(
                         desc.addr()
-                            .translate_gva(access_platform, vnet_hdr_len())
+                            .translate_gva(access_platform, vnet_hdr_len(), AccessType::Write)
                             .map_err(|e| {
                                 NetQueuePairError::GuestMemory(
                                     vm_memory::GuestMemoryError::IOError(e),
@@ -353,7 +353,7 @@ impl RxVirtio {
                 while let Some(desc) = next_desc {
                     let desc_addr = desc
                         .addr()
-                        .translate_gva(access_platform, desc.len() as usize)
+                        .translate_gva(access_platform, desc.len() as usize, AccessType::Write)
                         .map_err(|e| {
                             NetQueuePairError::GuestMemory(vm_memory::GuestMemoryError::IOError(e))
                         })?;

@@ -19,7 +19,7 @@ use vm_allocator::GuestMemory;
 use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
 use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
 use vm_migration::{Pausable, Snapshottable};
-use vm_virtio::AccessPlatform;
+use vm_virtio::{AccessPlatform, AccessType};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
 macro_rules! align {
@@ -286,11 +286,11 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     iommu.write_config(IOMMU_BYPASS_CONFIG_OFFSET, &[1]);
     iommu.ack_features(VIRTIO_IOMMU_F_BYPASS_CONFIG_BIT);
     iommu.write_config(IOMMU_BYPASS_CONFIG_OFFSET, &[0]);
-    let _ = mapping.translate_gva(u32::MAX, 0x1000, 0x100);
+    let _ = mapping.translate_gva(u32::MAX, 0x1000, 0x100, AccessType::Read);
     iommu.write_config(IOMMU_BYPASS_CONFIG_OFFSET, &[1]);
-    let _ = mapping.translate_gva(u32::MAX, 0x1000, 0x100);
+    let _ = mapping.translate_gva(u32::MAX, 0x1000, 0x100, AccessType::Read);
     let _ = mapping.translate_gpa(u32::MAX, 0x1000, 0x100);
-    let _ = mapping.translate_gva(u32::MAX, 0x1000, 0);
+    let _ = mapping.translate_gva(u32::MAX, 0x1000, 0, AccessType::Read);
 
     install_external_mappings(&mut iommu, &fuzz_plan);
 
@@ -335,7 +335,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     exercise_translation_paths(&mapping, &fuzz_plan);
 
     let access_mapping = AccessPlatformMapping::new(21, mapping.clone());
-    let _ = access_mapping.translate_gva(0x28100, 0x80);
+    let _ = access_mapping.translate_gva(0x28100, 0x80, AccessType::Read);
     let _ = access_mapping.translate_gpa(0x38100, 0x80);
 
     let _ = iommu.id();
@@ -364,6 +364,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
                 fuzz_plan.trans_ep_b,
                 fuzz_plan.trans_virt + PAGE_SIZE - 0x80,
                 0x100,
+                AccessType::Read,
             );
             let _ = restored.snapshot();
         }
@@ -1133,19 +1134,39 @@ fn install_external_mappings(iommu: &mut virtio_devices::Iommu, plan: &FuzzPlan)
 }
 
 fn exercise_translation_paths(mapping: &Arc<virtio_devices::IommuMapping>, plan: &FuzzPlan) {
-    let _ = mapping.translate_gva(21, 0x28100, 0x100);
-    let _ = mapping.translate_gva(21, 0x28f00, 0x200);
+    let _ = mapping.translate_gva(21, 0x28100, 0x100, AccessType::Read);
+    let _ = mapping.translate_gva(21, 0x28f00, 0x200, AccessType::Read);
     let _ = mapping.translate_gpa(21, 0x38100, 0x100);
     let _ = mapping.translate_gpa(21, 0x38f00, 0x200);
-    let _ = mapping.translate_gva(21, 0x28100, 0);
-    let _ = mapping.translate_gva(plan.trans_ep_b, plan.trans_virt + PAGE_SIZE - 0x80, 0x100);
-    let _ = mapping.translate_gva(plan.trans_ep_b, plan.trans_virt + PAGE_SIZE, 2 * PAGE_SIZE);
-    let _ = mapping.translate_gva(plan.trans_ep_b, plan.trans_virt - PAGE_SIZE, 0x100);
-    let _ = mapping.translate_gva(plan.trans_ep_b, plan.trans_virt + 5 * PAGE_SIZE, 0x100);
-    let _ = mapping.translate_gva(plan.gap_ep, plan.gap_virt, 2 * PAGE_SIZE);
+    let _ = mapping.translate_gva(21, 0x28100, 0, AccessType::Read);
+    let _ = mapping.translate_gva(
+        plan.trans_ep_b,
+        plan.trans_virt + PAGE_SIZE - 0x80,
+        0x100,
+        AccessType::Read,
+    );
+    let _ = mapping.translate_gva(
+        plan.trans_ep_b,
+        plan.trans_virt + PAGE_SIZE,
+        2 * PAGE_SIZE,
+        AccessType::Read,
+    );
+    let _ = mapping.translate_gva(
+        plan.trans_ep_b,
+        plan.trans_virt - PAGE_SIZE,
+        0x100,
+        AccessType::Read,
+    );
+    let _ = mapping.translate_gva(
+        plan.trans_ep_b,
+        plan.trans_virt + 5 * PAGE_SIZE,
+        0x100,
+        AccessType::Read,
+    );
+    let _ = mapping.translate_gva(plan.gap_ep, plan.gap_virt, 2 * PAGE_SIZE, AccessType::Read);
     let _ = mapping.translate_gpa(plan.trans_ep_b, plan.trans_phys + 0x80, 0x100);
     let _ = mapping.translate_gpa(plan.trans_ep_b, plan.trans_phys + PAGE_SIZE - 0x80, 0x100);
-    let _ = mapping.translate_gva(plan.bypass_ep, plan.trans_virt, 0x100);
+    let _ = mapping.translate_gva(plan.bypass_ep, plan.trans_virt, 0x100, AccessType::Read);
     let _ = mapping.translate_gpa(plan.bypass_ep, plan.trans_phys, 0x100);
-    let _ = mapping.translate_gva(plan.trans_ep_b, u64::MAX - 0x10, 0x100);
+    let _ = mapping.translate_gva(plan.trans_ep_b, u64::MAX - 0x10, 0x100, AccessType::Read);
 }

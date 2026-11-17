@@ -94,11 +94,18 @@ impl fmt::Display for VirtioDeviceType {
     }
 }
 
+/// Type of access a device performs on a translated address range.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AccessType {
+    Read,
+    Write,
+}
+
 /// Trait for devices with access to data in memory being limited and/or
 /// translated.
 pub trait AccessPlatform: Send + Sync + Debug {
     /// Provide a way to translate GVA address ranges into GPAs.
-    fn translate_gva(&self, base: u64, size: u64) -> io::Result<u64>;
+    fn translate_gva(&self, base: u64, size: u64, access_type: AccessType) -> io::Result<u64>;
     /// Provide a way to translate GPA address ranges into GVAs.
     fn translate_gpa(&self, base: u64, size: u64) -> io::Result<u64>;
 }
@@ -108,6 +115,7 @@ pub trait Translatable {
         &self,
         access_platform: Option<&dyn AccessPlatform>,
         len: usize,
+        access_type: AccessType,
     ) -> io::Result<Self>
     where
         Self: Sized;
@@ -125,8 +133,13 @@ impl Translatable for GuestAddress {
         &self,
         access_platform: Option<&dyn AccessPlatform>,
         len: usize,
+        access_type: AccessType,
     ) -> io::Result<Self> {
-        Ok(GuestAddress(self.0.translate_gva(access_platform, len)?))
+        Ok(GuestAddress(self.0.translate_gva(
+            access_platform,
+            len,
+            access_type,
+        )?))
     }
     fn translate_gpa(
         &self,
@@ -142,9 +155,10 @@ impl Translatable for u64 {
         &self,
         access_platform: Option<&dyn AccessPlatform>,
         len: usize,
+        access_type: AccessType,
     ) -> io::Result<Self> {
         if let Some(access_platform) = access_platform {
-            access_platform.translate_gva(*self, len as u64)
+            access_platform.translate_gva(*self, len as u64, access_type)
         } else {
             Ok(*self)
         }
