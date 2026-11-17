@@ -56,6 +56,9 @@ macro_rules! stos {
                 count -= 1;
             }
 
+            state
+                .write_reg(Register::RDI, rdi)
+                .map_err(|e| EmulationError::InvalidOperand(anyhow!(e)))?;
             if insn.has_rep_prefix() {
                 state
                     .write_reg(Register::ECX, 0)
@@ -230,5 +233,43 @@ mod tests {
         assert_eq!(0x11223344aabbccdd, <u64>::from_le_bytes(data));
         vmm.read_memory(0x10, &mut data).unwrap();
         assert_eq!(0x0, <u64>::from_le_bytes(data));
+    }
+
+    #[test]
+    fn test_stos_advances_rdi() {
+        let ip: u64 = 0x1000;
+        let cpu_id = 0;
+        let memory: [u8; 16] = [0; 16];
+
+        // stosw
+        let insn = [0x66, 0xab];
+        let regs = vec![(Register::RDI, 0x1), (Register::AX, 0xaabb)];
+        let mut vmm = MockVmm::new(ip, regs, Some((0, &memory)));
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap();
+        let rdi = vmm
+            .cpu_state(cpu_id)
+            .unwrap()
+            .read_reg(Register::RDI)
+            .unwrap();
+        assert_eq!(rdi, 0x3);
+
+        // rep stosd, backwards
+        let insn = [0xf3, 0xab];
+        let regs = vec![
+            (Register::ECX, 2),
+            (Register::RDI, 0x8),
+            (Register::EAX, 0xaabbccdd),
+        ];
+        let mut vmm = MockVmm::new(ip, regs, Some((0, &memory)));
+        let mut state = vmm.cpu_state(cpu_id).unwrap();
+        state.set_flags(state.flags() | DF);
+        vmm.set_cpu_state(cpu_id, state).unwrap();
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap();
+        let rdi = vmm
+            .cpu_state(cpu_id)
+            .unwrap()
+            .read_reg(Register::RDI)
+            .unwrap();
+        assert_eq!(rdi, 0x0);
     }
 }
