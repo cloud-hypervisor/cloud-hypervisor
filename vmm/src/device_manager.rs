@@ -719,9 +719,14 @@ impl DeviceRelocation for AddressManager {
         pci_dev: &mut dyn PciDevice,
         region_type: PciBarRegionType,
     ) -> result::Result<(), io::Error> {
+        // Keep allocators locked until the BAR has fully moved to protect
+        // against concurrent allocations (e.g., hotplug).
+        let mut sys_allocator;
+        let mut pci_mmio_allocator;
+
         match region_type {
             PciBarRegionType::IoRegion => {
-                let mut sys_allocator = self.allocator.lock().unwrap();
+                sys_allocator = self.allocator.lock().unwrap();
                 if sys_allocator
                     .move_io_addresses(
                         GuestAddress(old_base),
@@ -747,10 +752,9 @@ impl DeviceRelocation for AddressManager {
                 } else {
                     &self.pci_mmio64_allocators
                 };
-                let mut pci_mmio_allocator = pci_mmio_allocators
-                    [usize::from(pci_dev.bdf().segment())]
-                .lock()
-                .unwrap();
+                pci_mmio_allocator = pci_mmio_allocators[usize::from(pci_dev.bdf().segment())]
+                    .lock()
+                    .unwrap();
 
                 if pci_mmio_allocator
                     .move_range(
