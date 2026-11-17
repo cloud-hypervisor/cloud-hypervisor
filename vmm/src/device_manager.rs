@@ -5506,34 +5506,20 @@ impl DeviceManager {
     }
 
     pub fn remove_device(&mut self, id: &str) -> DeviceManagerResult<()> {
-        // Release advisory locks by dropping all references.
-        // Linux automatically releases all locks of that file if the last open FD is closed.
-        {
-            let maybe_block_device_index = self
-                .block_devices
-                .iter()
-                .enumerate()
-                .find(|(_, dev)| {
-                    let dev = dev.lock().unwrap();
-                    dev.id() == id
-                })
-                .map(|(i, _)| i);
-            if let Some(index) = maybe_block_device_index {
-                let _ = self.block_devices.swap_remove(index);
-            }
-        }
-
         // The node can be directly a PCI node in case the 'id' refers to a
         // VFIO device or a virtio-pci one.
         // In case the 'id' refers to a virtio device, we must find the PCI
         // node by looking at the parent.
         let device_tree = self.device_tree.lock().unwrap();
         let Some(node) = device_tree.get(id) else {
-            return if self.config.lock().unwrap().remove_device(id) {
-                Ok(())
-            } else {
-                Err(DeviceManagerError::UnknownDeviceId(id.to_string()))
-            };
+            if !self.config.lock().unwrap().remove_device(id) {
+                return Err(DeviceManagerError::UnknownDeviceId(id.to_string()));
+            }
+            // Release advisory locks by dropping all references.
+            // Linux automatically releases all locks of that file if the last open FD is closed.
+            self.block_devices
+                .retain(|dev| dev.lock().unwrap().id() != id);
+            return Ok(());
         };
 
         let pci_device_node = if node.pci_bdf.is_some() && node.pci_device_handle.is_some() {
@@ -5587,6 +5573,10 @@ impl DeviceManager {
         }
 
         self.config.lock().unwrap().remove_device(id);
+        // Release advisory locks by dropping all references.
+        // Linux automatically releases all locks of that file if the last open FD is closed.
+        self.block_devices
+            .retain(|dev| dev.lock().unwrap().id() != id);
 
         // Update the PCID bitmap
         self.pci_segments[pci_segment_id as usize].pci_devices_down |= 1 << pci_device_bdf.device();
