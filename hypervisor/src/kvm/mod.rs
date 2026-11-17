@@ -94,9 +94,7 @@ use crate::arch::x86::{
 use crate::{ClockRestoreMode, ClockState};
 use crate::{
     CpuState, HypervisorType, HypervisorVmConfig, InterruptSourceConfig, IoEventAddress,
-    IrqRoutingEntry, MpState, StandardRegisters, USER_MEMORY_REGION_GUEST_MEMFD,
-    USER_MEMORY_REGION_LOG_DIRTY, USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
-    UserMemoryRegion, VmOps, cpu, hypervisor, vm,
+    IrqRoutingEntry, MpState, StandardRegisters, VmOps, cpu, hypervisor, vm,
 };
 // aarch64 dependencies
 #[cfg(target_arch = "aarch64")]
@@ -255,62 +253,6 @@ fn make_segment(sev_selector: SevSelector) -> Segment {
     }
 }
 
-impl From<kvm_userspace_memory_region2> for UserMemoryRegion {
-    fn from(region: kvm_userspace_memory_region2) -> Self {
-        let mut flags = USER_MEMORY_REGION_READ;
-        if region.flags & KVM_MEM_READONLY == 0 {
-            flags |= USER_MEMORY_REGION_WRITE;
-        }
-        if region.flags & KVM_MEM_LOG_DIRTY_PAGES != 0 {
-            flags |= USER_MEMORY_REGION_LOG_DIRTY;
-        }
-        if region.flags & KVM_MEM_GUEST_MEMFD != 0 {
-            flags |= USER_MEMORY_REGION_GUEST_MEMFD;
-        }
-
-        UserMemoryRegion {
-            slot: region.slot,
-            guest_phys_addr: region.guest_phys_addr,
-            memory_size: region.memory_size,
-            userspace_addr: region.userspace_addr,
-            flags,
-            guest_memfd: Some(region.guest_memfd),
-            guest_memfd_offset: Some(region.guest_memfd_offset),
-        }
-    }
-}
-
-impl From<UserMemoryRegion> for kvm_userspace_memory_region2 {
-    fn from(region: UserMemoryRegion) -> Self {
-        assert_ne!(
-            region.flags & USER_MEMORY_REGION_READ,
-            0,
-            "KVM mapped memory is always readable"
-        );
-
-        let mut flags = 0;
-        if region.flags & USER_MEMORY_REGION_WRITE == 0 {
-            flags |= KVM_MEM_READONLY;
-        }
-        if region.flags & USER_MEMORY_REGION_LOG_DIRTY != 0 {
-            flags |= KVM_MEM_LOG_DIRTY_PAGES;
-        }
-        if region.flags & USER_MEMORY_REGION_GUEST_MEMFD != 0 {
-            flags |= KVM_MEM_GUEST_MEMFD;
-        }
-
-        kvm_userspace_memory_region2 {
-            slot: region.slot,
-            guest_phys_addr: region.guest_phys_addr,
-            memory_size: region.memory_size,
-            userspace_addr: region.userspace_addr,
-            flags,
-            guest_memfd: region.guest_memfd.unwrap_or(0),
-            guest_memfd_offset: region.guest_memfd_offset.unwrap_or(0),
-            ..Default::default()
-        }
-    }
-}
 impl From<kvm_mp_state> for MpState {
     fn from(s: kvm_mp_state) -> Self {
         MpState::Kvm(s)
