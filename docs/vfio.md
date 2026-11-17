@@ -162,6 +162,21 @@ mmap for BAR 2 of the assigned device:
 --device path=/sys/bus/pci/devices/0000:01:00.0/,x_exclude_mmap_bars=[2]
 ```
 
+Some VFIO devices (such as SR-IOV VFs or multi-queue adapters) advertise a
+large MSI-X table size in PCI configuration space even when fewer interrupt
+vectors are needed or budgeted per function. The `num_msix_vectors` config
+argument can be used to cap the number of MSI-X vectors exposed to the guest
+and allocated by Cloud Hypervisor.
+
+`num_msix_vectors` must be between 1 and 2048 inclusive. If the specified
+value exceeds the device's hardware MSI-X table size, Cloud Hypervisor logs a
+warning and keeps the hardware table size unchanged. The following example
+limits the assigned device to 32 MSI-X vectors:
+
+```
+--device path=/sys/bus/pci/devices/0000:01:00.0/,num_msix_vectors=32
+```
+
 Some VFIO devices have a 32-bit mmio BAR. When using many such devices, it is
 possible to exhaust the 32-bit mmio space available on a PCI segment. The
 following example demonstrates an example device with a 16 MiB 32-bit mmio BAR.
