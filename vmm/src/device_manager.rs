@@ -5870,16 +5870,23 @@ impl DeviceManager {
         };
 
         let id = handle.id().to_owned();
-        let bdf = self.add_virtio_pci_device(
-            handle.virtio_device,
-            &mapping,
-            &id,
-            handle.pci_common.pci_segment,
-            true,
-            handle.dma_handler,
-            handle.pci_common.pci_device_id,
-            None,
-        )?;
+        let bdf = self
+            .add_virtio_pci_device(
+                handle.virtio_device,
+                &mapping,
+                &id,
+                handle.pci_common.pci_segment,
+                true,
+                handle.dma_handler,
+                handle.pci_common.pci_device_id,
+                None,
+            )
+            .inspect_err(|_| {
+                self.virtio_devices.retain(|device| device.id() != id);
+                self.block_devices
+                    .retain(|device| device.lock().unwrap().id() != id);
+                self.device_tree.lock().unwrap().remove(&id);
+            })?;
 
         // Update the PCIU bitmap
         self.pci_segments[handle.pci_common.pci_segment as usize].pci_devices_up |=
