@@ -261,8 +261,11 @@ impl VhostUserHandle {
 
         // ACCESS_PLATFORM can be offered to confidential guests, but vhost-user
         // gives it IOTLB semantics, which this frontend does not implement.
+        // PROTOCOL_FEATURES belongs to vhost-user, so guests never ack it, and
+        // every backend offers it, as connecting checks.
         let acked_features =
-            acked_features & self.backend_features & !(1u64 << VIRTIO_F_ACCESS_PLATFORM);
+            (acked_features & self.backend_features & !(1u64 << VIRTIO_F_ACCESS_PLATFORM))
+                | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
 
         self.vu
             .set_features(acked_features)

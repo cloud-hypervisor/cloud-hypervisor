@@ -279,7 +279,6 @@ pub const DEFAULT_VIRTIO_FEATURES: u64 = (1 << VIRTIO_F_RING_INDIRECT_DESC)
     | (1 << VIRTIO_F_IN_ORDER)
     | (1 << VIRTIO_F_ORDER_PLATFORM)
     | (1 << VIRTIO_F_NOTIFICATION_DATA)
-    | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
     | VhostUserVirtioFeatures::LOG_ALL.bits();
 
 const HUP_CONNECTION_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
@@ -1140,7 +1139,8 @@ mod tests {
             stream.write_all(&features.to_ne_bytes()).unwrap();
             assert_eq!(
                 read_request(&mut stream, FrontendReq::SET_FEATURES),
-                (1u64 << VIRTIO_F_VERSION_1).to_ne_bytes()
+                ((1u64 << VIRTIO_F_VERSION_1) | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits())
+                    .to_ne_bytes()
             );
             assert_eq!(
                 read_request(&mut stream, FrontendReq::SET_MEM_TABLE).len(),
