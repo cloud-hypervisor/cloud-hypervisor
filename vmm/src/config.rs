@@ -241,7 +241,7 @@ pub enum ValidationError {
     ConsoleOutputUpdateAmbiguous(String),
     /// A new console output must keep the mode of the current one
     #[error("Cannot change console output {0:?} to {1:?} with a different mode")]
-    ConsoleOutputUpdateModeMismatch(ConsoleOutput, ConsoleOutput),
+    ConsoleOutputUpdateModeMismatch(Box<ConsoleOutput>, Box<ConsoleOutput>),
     /// Boot has no vCPUs
     #[error("Number of boot vCPUs must be greater than 0")]
     CpusBootZero,
@@ -2640,8 +2640,8 @@ impl ConsoleOutput {
     fn update(&mut self, new: &Self) -> ValidationResult<()> {
         if discriminant(self) != discriminant(new) {
             return Err(ValidationError::ConsoleOutputUpdateModeMismatch(
-                self.clone(),
-                new.clone(),
+                Box::new(self.clone()),
+                Box::new(new.clone()),
             ));
         }
         new.validate()?;
@@ -6356,8 +6356,8 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             output.update(&file),
             Err(ValidationError::ConsoleOutputUpdateModeMismatch(
-                tcp("127.0.0.1:5555"),
-                file.clone()
+                Box::new(tcp("127.0.0.1:5555")),
+                Box::new(file.clone())
             ))
         );
         assert_eq!(
@@ -6397,8 +6397,8 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                     assert_eq!(
                         output.update(new),
                         Err(ValidationError::ConsoleOutputUpdateModeMismatch(
-                            current.clone(),
-                            new.clone()
+                            Box::new(current.clone()),
+                            Box::new(new.clone()),
                         ))
                     );
                     assert_eq!(output, *current);
