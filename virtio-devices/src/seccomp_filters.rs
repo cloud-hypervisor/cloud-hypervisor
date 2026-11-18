@@ -386,6 +386,7 @@ fn virtio_thread_common() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_epoll_pwait, vec![]),
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_epoll_wait, vec![]),
+        (libc::SYS_eventfd2, vec![]),
         (libc::SYS_exit, vec![]),
         (libc::SYS_fcntl, vec![]),
         (libc::SYS_futex, vec![]),
