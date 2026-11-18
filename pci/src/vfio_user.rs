@@ -260,38 +260,34 @@ impl Vfio for VfioUserClientWrapper {
             })
     }
 
-    fn enable_irq(&self, irq_index: u32, event_fds: Vec<&EventFd>) -> Result<(), VfioError> {
+    fn enable_irq(
+        &self,
+        irq_index: u32,
+        mut start: u32,
+        event_fds: &[Option<&EventFd>],
+    ) -> Result<(), VfioError> {
         info!(
-            "Enabling IRQ {:x} number of fds = {:?}",
-            irq_index,
+            "Enabling IRQ {irq_index:x} start = {start} count = {}",
             event_fds.len()
         );
-        let fds: Vec<i32> = event_fds.iter().map(|e| e.as_raw_fd()).collect();
-
-        // Batch into blocks of 16 fds as sendmsg() has a size limit
-        let mut sent_fds = 0;
-        let num_fds = event_fds.len() as u32;
-        while sent_fds < num_fds {
-            let remaining_fds = num_fds - sent_fds;
-            let count = if remaining_fds > 16 {
-                16
-            } else {
-                remaining_fds
-            };
-
-            self.client
-                .lock()
-                .unwrap()
-                .set_irqs(
-                    irq_index,
-                    VFIO_IRQ_SET_DATA_EVENTFD | VFIO_IRQ_SET_ACTION_TRIGGER,
-                    sent_fds,
-                    count,
-                    &fds[sent_fds as usize..(sent_fds + count) as usize],
-                )
-                .map_err(VfioError::VfioUser)?;
-
-            sent_fds += count;
+        let mut client = self.client.lock().unwrap();
+        // A request without descriptors clears its whole range.
+        for run in event_fds.chunk_by(|a, b| a.is_some() == b.is_some()) {
+            // Only requests carrying descriptors need the sendmsg() limit.
+            let batch_size = if run[0].is_some() { 16 } else { run.len() };
+            for chunk in run.chunks(batch_size) {
+                let fds: Vec<_> = chunk.iter().flatten().map(|fd| fd.as_raw_fd()).collect();
+                client
+                    .set_irqs(
+                        irq_index,
+                        VFIO_IRQ_SET_DATA_EVENTFD | VFIO_IRQ_SET_ACTION_TRIGGER,
+                        start,
+                        chunk.len() as u32,
+                        &fds,
+                    )
+                    .map_err(VfioError::VfioUser)?;
+                start += chunk.len() as u32;
+            }
         }
 
         Ok(())
@@ -509,5 +505,124 @@ where
                 size,
                 source: e.into(),
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs::File;
+    use std::io::Write;
+    use std::thread;
+
+    use vfio_user::{DmaMapFlags, DmaUnmapFlags, IrqInfo, Server, ServerBackend};
+    use vmm_sys_util::tempdir::TempDir;
+
+    use super::*;
+
+    #[derive(Default)]
+    struct IrqBackend {
+        requests: Vec<(u32, u32, usize)>,
+    }
+
+    impl ServerBackend for IrqBackend {
+        fn region_read(&mut self, _: u32, _: u64, _: &mut [u8]) -> io::Result<()> {
+            unreachable!()
+        }
+
+        fn region_write(&mut self, _: u32, _: u64, _: &[u8]) -> io::Result<()> {
+            unreachable!()
+        }
+
+        fn dma_map(
+            &mut self,
+            _: DmaMapFlags,
+            _: u64,
+            _: u64,
+            _: u64,
+            _: Option<File>,
+        ) -> io::Result<()> {
+            unreachable!()
+        }
+
+        fn dma_unmap(&mut self, _: DmaUnmapFlags, _: u64, _: u64) -> io::Result<()> {
+            unreachable!()
+        }
+
+        fn reset(&mut self) -> io::Result<()> {
+            unreachable!()
+        }
+
+        fn set_irqs(
+            &mut self,
+            index: u32,
+            flags: u32,
+            start: u32,
+            count: u32,
+            fds: Vec<File>,
+        ) -> io::Result<()> {
+            assert_eq!(index, VFIO_PCI_MSIX_IRQ_INDEX);
+            assert_eq!(
+                flags,
+                VFIO_IRQ_SET_DATA_EVENTFD | VFIO_IRQ_SET_ACTION_TRIGGER
+            );
+            self.requests.push((start, count, fds.len()));
+            for (offset, mut fd) in fds.into_iter().enumerate() {
+                fd.write_all(&(u64::from(start) + offset as u64 + 1).to_ne_bytes())?;
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn irq_ranges_preserve_indices_and_batch_descriptors() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.as_path().join("vfio.sock");
+        let irqs = (0..=VFIO_PCI_MSIX_IRQ_INDEX)
+            .map(|index| IrqInfo {
+                index,
+                flags: VFIO_IRQ_INFO_EVENTFD,
+                count: 2048,
+            })
+            .collect();
+        let server = Server::new(&path, false, irqs, Vec::new()).unwrap();
+        let server_thread = thread::spawn(move || {
+            let mut backend = IrqBackend::default();
+            server.run(&mut backend).unwrap();
+            backend.requests
+        });
+        let wrapper = VfioUserClientWrapper {
+            client: Arc::new(Mutex::new(Client::new(&path).unwrap())),
+        };
+        assert_eq!(
+            wrapper.get_irq_info(VFIO_PCI_MSIX_IRQ_INDEX).unwrap().flags,
+            VFIO_IRQ_INFO_EVENTFD
+        );
+        let fds: Vec<_> = (0..33)
+            .map(|_| EventFd::new(libc::EFD_NONBLOCK).unwrap())
+            .collect();
+        let mut entries = vec![None, None];
+        entries.extend(fds[..17].iter().map(Some));
+        entries.push(None);
+        entries.extend(fds[17..].iter().map(Some));
+        entries.extend([None; 17]);
+        wrapper
+            .enable_irq(VFIO_PCI_MSIX_IRQ_INDEX, 1000, &entries)
+            .unwrap();
+
+        for (fd, index) in fds.iter().zip((1002..1019).chain(1020..1036)) {
+            assert_eq!(fd.read().unwrap(), index + 1);
+        }
+        wrapper.client.lock().unwrap().shutdown().unwrap();
+        assert_eq!(
+            server_thread.join().unwrap(),
+            vec![
+                (1000, 2, 0),
+                (1002, 16, 16),
+                (1018, 1, 1),
+                (1019, 1, 0),
+                (1020, 16, 16),
+                (1036, 17, 0),
+            ]
+        );
     }
 }

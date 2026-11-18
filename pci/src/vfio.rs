@@ -656,16 +656,16 @@ pub(crate) trait Vfio: Send + Sync {
         self.region_write(VFIO_PCI_CONFIG_REGION_INDEX, offset.into(), data);
     }
 
-    fn enable_msi(&self, fds: Vec<&EventFd>) -> Result<(), VfioError> {
-        self.enable_irq(VFIO_PCI_MSI_IRQ_INDEX, fds)
+    fn enable_msi(&self, fds: &[Option<&EventFd>]) -> Result<(), VfioError> {
+        self.enable_irq(VFIO_PCI_MSI_IRQ_INDEX, 0, fds)
     }
 
     fn disable_msi(&self) -> Result<(), VfioError> {
         self.disable_irq(VFIO_PCI_MSI_IRQ_INDEX)
     }
 
-    fn enable_msix(&self, fds: Vec<&EventFd>) -> Result<(), VfioError> {
-        self.enable_irq(VFIO_PCI_MSIX_IRQ_INDEX, fds)
+    fn enable_msix(&self, fds: &[Option<&EventFd>]) -> Result<(), VfioError> {
+        self.enable_irq(VFIO_PCI_MSIX_IRQ_INDEX, 0, fds)
     }
 
     fn disable_msix(&self) -> Result<(), VfioError> {
@@ -684,7 +684,12 @@ pub(crate) trait Vfio: Send + Sync {
         unimplemented!()
     }
 
-    fn enable_irq(&self, _irq_index: u32, _event_fds: Vec<&EventFd>) -> Result<(), VfioError> {
+    fn enable_irq(
+        &self,
+        _irq_index: u32,
+        _start: u32,
+        _event_fds: &[Option<&EventFd>],
+    ) -> Result<(), VfioError> {
         unimplemented!()
     }
 
@@ -758,9 +763,14 @@ impl Vfio for VfioDeviceWrapper {
         self.device.get_irq_info(irq_index).copied()
     }
 
-    fn enable_irq(&self, irq_index: u32, event_fds: Vec<&EventFd>) -> Result<(), VfioError> {
+    fn enable_irq(
+        &self,
+        irq_index: u32,
+        start: u32,
+        event_fds: &[Option<&EventFd>],
+    ) -> Result<(), VfioError> {
         self.device
-            .enable_irq(irq_index, event_fds)
+            .set_irq_eventfds(irq_index, start, event_fds)
             .map_err(VfioError::KernelVfio)
     }
 
@@ -1752,7 +1762,7 @@ impl VfioCommon {
                 .map_err(VfioPciError::GetInterruptNotifier)?
             {
                 self.vfio_wrapper
-                    .enable_irq(VFIO_PCI_INTX_IRQ_INDEX, vec![&eventfd])
+                    .enable_irq(VFIO_PCI_INTX_IRQ_INDEX, 0, &[Some(&eventfd)])
                     .map_err(VfioPciError::EnableIntx)?;
 
                 intx.enabled = true;
@@ -1792,7 +1802,7 @@ impl VfioCommon {
             }
 
             self.vfio_wrapper
-                .enable_msi(irq_fds.iter().collect())
+                .enable_msi(&irq_fds.iter().map(Some).collect::<Vec<_>>())
                 .map_err(VfioPciError::EnableMsi)?;
         }
 
@@ -1821,7 +1831,7 @@ impl VfioCommon {
             }
 
             self.vfio_wrapper
-                .enable_msix(irq_fds.iter().collect())
+                .enable_msix(&irq_fds.iter().map(Some).collect::<Vec<_>>())
                 .map_err(VfioPciError::EnableMsix)?;
         }
 
