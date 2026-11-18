@@ -23,7 +23,7 @@ use log::{debug, error, info, warn};
 use net_util::virtio_features_to_tap_offload;
 use net_util::{
     CtrlQueue, MAC_ADDR_LEN, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap,
-    TapError, TxVirtio, VirtioNetConfig, associate_taps, open_tap, vnet_hdr_len,
+    TapError, TapQueues, TxVirtio, VirtioNetConfig, open_tap, vnet_hdr_len,
 };
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
@@ -865,7 +865,8 @@ impl VirtioDevice for Net {
             .curr_queue_pairs
             .load(Ordering::Acquire)
             .min(qp_threads);
-        associate_taps(&self.taps, curr_queue_pairs.into()).map_err(|e| {
+        let tap_queues = Arc::new(TapQueues::new(self.taps.clone()));
+        tap_queues.associate(curr_queue_pairs.into()).map_err(|e| {
             error!("Error setting the number of tap queues: {e:?}");
             ActivateError::BadActivate
         })?;
@@ -906,7 +907,7 @@ impl VirtioDevice for Net {
                 kill_evt,
                 pause_evt,
                 ctrl_q: CtrlQueue::new(
-                    self.taps.clone(),
+                    Arc::clone(&tap_queues),
                     Arc::clone(&self.announce.pending),
                     self.config.max_virtqueue_pairs,
                     Arc::clone(&self.curr_queue_pairs),

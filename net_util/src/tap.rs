@@ -541,19 +541,31 @@ impl Tap {
     }
 }
 
-/// Attach the first `n` TAP queues and detach the rest, whatever state they
-/// are in, so the kernel only steers received frames to queues being read.
-pub fn associate_taps(taps: &[Tap], n: usize) -> Result<()> {
-    for (index, tap) in taps.iter().enumerate() {
-        let flag = if index < n {
-            libc::IFF_ATTACH_QUEUE
-        } else {
-            libc::IFF_DETACH_QUEUE
-        };
-        tap.set_queue(flag as c_short)?;
+/// The TAP queues of a device, one per queue pair.
+pub struct TapQueues {
+    pub(crate) taps: Vec<Tap>,
+}
+
+impl TapQueues {
+    pub fn new(taps: Vec<Tap>) -> Self {
+        TapQueues { taps }
     }
 
-    Ok(())
+    /// Attach the first `n` TAP queues and detach the rest, whatever state
+    /// they are in, so the kernel only steers received frames to queues
+    /// being read.
+    pub fn associate(&self, n: usize) -> Result<()> {
+        for (index, tap) in self.taps.iter().enumerate() {
+            let flag = if index < n {
+                libc::IFF_ATTACH_QUEUE
+            } else {
+                libc::IFF_DETACH_QUEUE
+            };
+            tap.set_queue(flag as c_short)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl Read for Tap {
@@ -943,18 +955,18 @@ mod tests {
         let tap1 = Tap::open_named(tap0.if_name_as_str(), 3, None).unwrap();
         let tap2 = Tap::open_named(tap0.if_name_as_str(), 3, None).unwrap();
         let if_name = tap0.if_name_as_str().to_string();
-        let taps = [tap0, tap1, tap2];
+        let tap_queues = TapQueues::new(vec![tap0, tap1, tap2]);
 
-        associate_taps(&taps, 1).unwrap();
+        tap_queues.associate(1).unwrap();
         assert_eq!(rx_queues(&if_name), 1);
 
-        associate_taps(&taps, 1).unwrap();
+        tap_queues.associate(1).unwrap();
         assert_eq!(rx_queues(&if_name), 1);
 
-        associate_taps(&taps, 3).unwrap();
+        tap_queues.associate(3).unwrap();
         assert_eq!(rx_queues(&if_name), 3);
 
-        associate_taps(&taps, 2).unwrap();
+        tap_queues.associate(2).unwrap();
         assert_eq!(rx_queues(&if_name), 2);
     }
 }
