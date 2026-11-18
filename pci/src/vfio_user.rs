@@ -24,7 +24,8 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottabl
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::vfio::{
-    UserMemoryRegion, VFIO_COMMON_ID, Vfio, VfioCommon, VfioCommonConfig, VfioError, find_alignment,
+    VFIO_COMMON_ID, Vfio, VfioBarMemoryRegion, VfioCommon, VfioCommonConfig, VfioError,
+    find_alignment,
 };
 use crate::{
     BarReprogrammingParams, PciBarConfiguration, PciBdf, PciDevice, PciDeviceError, PciSubclass,
@@ -194,16 +195,16 @@ impl VfioUserPciDevice {
                         .map_err(VfioUserPciDeviceError::MapRegionGuest)?;
                     let mapping = Arc::new(Mutex::new(mapping));
 
-                    let user_memory_region = UserMemoryRegion {
+                    let bar_memory_region = VfioBarMemoryRegion {
                         offset: s.offset,
-                        mapping,
+                        region: mapping,
                         p2p_mapped: false,
                         // A vfio-user device exports no dma-buf.
                         #[cfg(feature = "kvm")]
                         dma_buf: None,
                     };
 
-                    mmio_region.user_memory_regions.push(user_memory_region);
+                    mmio_region.bar_memory_regions.push(bar_memory_region);
                 }
             }
         }
@@ -213,7 +214,7 @@ impl VfioUserPciDevice {
 
     fn unmap_mmio_regions(&mut self) {
         for mmio_region in &mut self.common.bars {
-            mmio_region.user_memory_regions.clear();
+            mmio_region.bar_memory_regions.clear();
         }
     }
 }
@@ -393,30 +394,30 @@ impl PciDevice for VfioUserPciDevice {
             }
             let old_base = mmio_region.start.raw_value();
             let new_addresses = mmio_region
-                .user_memory_regions
+                .bar_memory_regions
                 .iter()
-                .map(|user_memory_region| {
+                .map(|bar_memory_region| {
                     let new_address = new_base
-                        .checked_add(user_memory_region.offset)
+                        .checked_add(bar_memory_region.offset)
                         .ok_or_else(|| io::Error::other("BAR address overflows"))?;
                     new_address
-                        .checked_add(user_memory_region.size() as u64)
+                        .checked_add(bar_memory_region.size() as u64)
                         .ok_or_else(|| io::Error::other("BAR range overflows"))?;
-                    Ok((user_memory_region.start(), new_address))
+                    Ok((bar_memory_region.start(), new_address))
                 })
                 .collect::<io::Result<Vec<_>>>()?;
             for (i, &(_, new_address)) in new_addresses.iter().enumerate() {
-                let user_memory_region = &mut mmio_region.user_memory_regions[i];
-                let result = user_memory_region.move_region(new_address);
+                let bar_memory_region = &mut mmio_region.bar_memory_regions[i];
+                let result = bar_memory_region.move_region(new_address);
                 if let Err(e) = result {
-                    for (user_memory_region, &(old_address, _)) in mmio_region.user_memory_regions
+                    for (bar_memory_region, &(old_address, _)) in mmio_region.bar_memory_regions
                         [..=i]
                         .iter_mut()
                         .zip(&new_addresses[..=i])
                         .rev()
                     {
-                        let rollback = user_memory_region.move_region(old_address).and_then(|()| {
-                            let mapping = user_memory_region.mapping.lock().unwrap();
+                        let rollback = bar_memory_region.move_region(old_address).and_then(|()| {
+                            let mapping = bar_memory_region.region.lock().unwrap();
                             if mapping.is_registered() {
                                 Ok(())
                             } else {
