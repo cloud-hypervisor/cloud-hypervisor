@@ -240,7 +240,7 @@ impl PciBus {
             ) {
                 // Rollback the changes from detect_bar_reprogramming().
                 warn!(
-                    "Failed moving device BAR: {}: 0x{:x}->0x{:x}(0x{:x}), keeping old BAR",
+                    "Failed moving device BAR: {:?}: 0x{:x}->0x{:x}(0x{:x}), keeping old BAR",
                     e, bar.old_base, bar.new_base, bar.len
                 );
                 device.restore_bar_addr(bar);

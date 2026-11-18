@@ -88,6 +88,14 @@ pub(crate) fn find_alignment(len: usize) -> usize {
 
 #[derive(Debug, Error)]
 pub enum VfioPciError {
+    #[error("BAR address overflows: base={base:#x}, offset={offset:#x}")]
+    BarAddressOverflow { base: u64, offset: u64 },
+    #[error("BAR range overflows: address={address:#x}, size={size:#x}")]
+    BarRangeOverflow { address: u64, size: u64 },
+    #[error("Failed to move BAR memory region")]
+    MoveBarMemoryRegion(#[source] GuestRegionError),
+    #[error("Failed to unmap peer to peer DMA")]
+    DmaUnmap(#[source] vfio_ioctls::VfioError),
     #[error("Failed to create user memory region")]
     CreateUserMemoryRegion(#[source] GuestRegionError),
     #[error("Failed to DMA map: {0} for device {1} (guest BDF: {2})")]
@@ -919,7 +927,7 @@ pub(crate) struct VfioCommonConfig {
 }
 
 impl VfioCommon {
-    pub(crate) fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> Result<(), io::Error> {
+    pub(crate) fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> Result<(), VfioPciError> {
         for region in &mut self.bars {
             if region.index as usize != bar_idx || region.start == GuestAddress(new_base) {
                 continue;
@@ -928,28 +936,37 @@ impl VfioCommon {
                 .bar_memory_regions
                 .iter()
                 .map(|bar_memory_region| {
-                    let new_address = new_base
-                        .checked_add(bar_memory_region.offset)
-                        .ok_or_else(|| io::Error::other("BAR address overflows"))?;
+                    let new_address = new_base.checked_add(bar_memory_region.offset).ok_or(
+                        VfioPciError::BarAddressOverflow {
+                            base: new_base,
+                            offset: bar_memory_region.offset,
+                        },
+                    )?;
+                    let size = bar_memory_region.size() as u64;
                     new_address
-                        .checked_add(bar_memory_region.size() as u64)
-                        .ok_or_else(|| io::Error::other("BAR range overflows"))?;
+                        .checked_add(size)
+                        .ok_or(VfioPciError::BarRangeOverflow {
+                            address: new_address,
+                            size,
+                        })?;
                     Ok((
                         bar_memory_region.start(),
                         new_address,
                         bar_memory_region.p2p_mapped(),
                     ))
                 })
-                .collect::<io::Result<Vec<_>>>()?;
+                .collect::<Result<Vec<_>, VfioPciError>>()?;
             for (i, &(_, new_address, map_p2p)) in moves.iter().enumerate() {
                 let bar_memory_region = &mut region.bar_memory_regions[i];
                 let result = (|| {
-                    bar_memory_region.unmap_p2p().map_err(io::Error::other)?;
+                    bar_memory_region
+                        .unmap_p2p()
+                        .map_err(VfioPciError::DmaUnmap)?;
                     bar_memory_region
                         .move_region(new_address)
-                        .map_err(io::Error::other)?;
+                        .map_err(VfioPciError::MoveBarMemoryRegion)?;
                     if map_p2p {
-                        bar_memory_region.map_for_p2p().map_err(io::Error::other)?;
+                        bar_memory_region.map_for_p2p()?;
                     }
                     Ok(())
                 })();
@@ -966,25 +983,29 @@ impl VfioCommon {
                         {
                             continue;
                         }
-                        let rollback: io::Result<()> = (|| {
-                            bar_memory_region.unmap_p2p().map_err(io::Error::other)?;
+                        let rollback: Result<(), VfioPciError> = (|| {
+                            bar_memory_region
+                                .unmap_p2p()
+                                .map_err(VfioPciError::DmaUnmap)?;
                             bar_memory_region
                                 .move_region(old_address)
-                                .map_err(io::Error::other)?;
+                                .map_err(VfioPciError::MoveBarMemoryRegion)?;
                             {
                                 let mapping = bar_memory_region.region.lock().unwrap();
                                 if !mapping.is_registered() {
-                                    mapping.register().map_err(io::Error::other)?;
+                                    mapping
+                                        .register()
+                                        .map_err(VfioPciError::CreateUserMemoryRegion)?;
                                 }
                             }
                             if was_mapped {
-                                bar_memory_region.map_for_p2p().map_err(io::Error::other)?;
+                                bar_memory_region.map_for_p2p()?;
                             }
                             Ok(())
                         })();
                         if let Err(rollback) = rollback {
                             // Continuing would leave the BAR with inconsistent mappings.
-                            error!("FATAL: Failed to restore BAR mapping: {rollback}");
+                            error!("FATAL: Failed to restore BAR mapping: {rollback:?}");
                             process::exit(1);
                         }
                     }
@@ -2998,7 +3019,9 @@ impl PciDevice for VfioPciDevice {
     }
 
     fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> Result<(), io::Error> {
-        self.common.move_bar(bar_idx, new_base)
+        self.common
+            .move_bar(bar_idx, new_base)
+            .map_err(io::Error::other)
     }
 
     fn restore_bar_addr(&mut self, params: &BarReprogrammingParams) {
