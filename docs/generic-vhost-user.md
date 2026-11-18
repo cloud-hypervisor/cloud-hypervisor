@@ -14,11 +14,12 @@ expected to work. It can (and often will) be of a type that Cloud
 Hypervisor does not know about. It can even be of a type that is
 not standardized.
 
-Virtio-GPU is known to *not* work. The version implemented in QEMU
-requires `VHOST_USER_GPU_SET_SOCKET`, which is standard but will
-never be implemented by Cloud Hypervisor. Other versions require
-messages that have not been standardized. In the future, these
-versions might be supported.
+Virtio-GPU backends that rely on `VHOST_USER_GPU_SET_SOCKET` (as implemented in
+QEMU) will not work, as `VHOST_USER_GPU_SET_SOCKET` will not be implemented by
+Cloud Hypervisor. However, backends that use standardized shared memory regions
+(`VHOST_USER_PROTOCOL_F_SHMEM` with `VHOST_USER_GET_SHMEM_CONFIG`,
+`VHOST_USER_BACKEND_SHMEM_MAP`, and `VHOST_USER_BACKEND_SHMEM_UNMAP`) are
+supported.
 
 ## Examples
 
