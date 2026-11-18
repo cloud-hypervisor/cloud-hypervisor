@@ -300,7 +300,8 @@ jobs:
     timeout-minutes: 20
     strategy:
       matrix:
-        rust: [nightly]
+        # Pin until https://github.com/google/zerocopy/issues/3929 is fixed.
+        rust: [nightly-2026-11-17]
         target: [x86_64-unknown-linux-gnu]
     env:
       RUSTFLAGS: -D warnings
