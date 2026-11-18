@@ -1192,6 +1192,7 @@ impl MemoryManager {
         &mut self,
         file_path: &Path,
         saved_regions: &MemoryRangeTable,
+        background_fetch_pages: bool,
         exit_evt: &EventFd,
     ) -> Result<(), Error> {
         let mut file_offset: u64 = 0;
@@ -1246,7 +1247,14 @@ impl MemoryManager {
             }
         }
 
-        self.spawn_uffd_handler(uffd, None, served_bitmap, source, exit_evt, true)?;
+        self.spawn_uffd_handler(
+            uffd,
+            None,
+            served_bitmap,
+            source,
+            exit_evt,
+            background_fetch_pages,
+        )?;
         info!("UFFD restore: demand-paged restore enabled");
         Ok(())
     }
@@ -2528,11 +2536,17 @@ impl MemoryManager {
 
             if !mem_snapshot.memory_ranges.is_empty() {
                 match memory_restore_mode {
-                    MemoryRestoreMode::OnDemand => mm.lock().unwrap().restore_by_uffd(
-                        &memory_file_path,
-                        &mem_snapshot.memory_ranges,
-                        exit_evt,
-                    )?,
+                    MemoryRestoreMode::OnDemand
+                    | MemoryRestoreMode::OnDemandNoBackgroundFetchPages => {
+                        let background_fetch_pages =
+                            memory_restore_mode == MemoryRestoreMode::OnDemand;
+                        mm.lock().unwrap().restore_by_uffd(
+                            &memory_file_path,
+                            &mem_snapshot.memory_ranges,
+                            background_fetch_pages,
+                            exit_evt,
+                        )?;
+                    }
                     MemoryRestoreMode::CopyOnWrite => mm
                         .lock()
                         .unwrap()
