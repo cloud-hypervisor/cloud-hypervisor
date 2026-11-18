@@ -989,7 +989,7 @@ impl VirtioInterrupt for VirtioInterruptMsix {
             .trigger(vector as InterruptIndex)
     }
 
-    fn notifier(&self, int_type: VirtioInterruptType) -> Option<EventFd> {
+    fn notifier(&self, int_type: VirtioInterruptType) -> io::Result<Option<EventFd>> {
         let vector = match int_type {
             VirtioInterruptType::Config => self.config_vector.load(Ordering::Acquire),
             VirtioInterruptType::Queue(queue_index) => {
@@ -998,12 +998,12 @@ impl VirtioInterrupt for VirtioInterruptMsix {
         };
 
         if vector == VIRTQ_MSI_NO_VECTOR {
-            return None;
+            return Ok(None);
         }
 
         if vector as usize >= self.msix_table_size {
             warn!("MSI-X vector {vector} out of range, notifier unavailable");
-            return None;
+            return Ok(None);
         }
 
         self.interrupt_source_group
@@ -1442,8 +1442,8 @@ mod tests {
         fn trigger(&self, _index: InterruptIndex) -> io::Result<()> {
             self.event_fd.write(1)
         }
-        fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {
-            Some(self.event_fd.try_clone().unwrap())
+        fn notifier(&self, _index: InterruptIndex) -> io::Result<Option<EventFd>> {
+            self.event_fd.try_clone().map(Some)
         }
         fn update(
             &self,
@@ -1504,7 +1504,11 @@ mod tests {
     fn notifier_with_oob_vector_returns_none() {
         let intr = make_msix_interrupt(2);
         intr.queues_vectors.lock().unwrap()[0] = 0xFFFE;
-        assert!(intr.notifier(VirtioInterruptType::Queue(0)).is_none());
+        assert!(
+            intr.notifier(VirtioInterruptType::Queue(0))
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

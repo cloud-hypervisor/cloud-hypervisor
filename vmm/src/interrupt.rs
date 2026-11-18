@@ -117,13 +117,8 @@ impl InterruptRoute {
         }
     }
 
-    fn notifier(&mut self) -> Option<EventFd> {
-        Some(
-            self.irq_fd
-                .as_ref()?
-                .try_clone()
-                .expect("Failed cloning interrupt's EventFd"),
-        )
+    fn notifier(&mut self) -> Result<Option<EventFd>> {
+        self.irq_fd.as_ref().map(EventFd::try_clone).transpose()
     }
 
     fn set_notifier(&mut self, eventfd: Option<EventFd>, vm: &dyn hypervisor::Vm) -> Result<()> {
@@ -257,12 +252,12 @@ impl InterruptSourceGroup for MsiInterruptGroup {
         )))
     }
 
-    fn notifier(&self, index: InterruptIndex) -> Option<EventFd> {
+    fn notifier(&self, index: InterruptIndex) -> Result<Option<EventFd>> {
         if let Some(route) = self.irq_routes.get(&index) {
             return route.lock().unwrap().notifier();
         }
 
-        None
+        Ok(None)
     }
 
     fn update(
@@ -376,7 +371,7 @@ impl InterruptSourceGroup for LegacyUserspaceInterruptGroup {
         Ok(())
     }
 
-    fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {
+    fn notifier(&self, _index: InterruptIndex) -> Result<Option<EventFd>> {
         self.ioapic.lock().unwrap().notifier(self.irq as usize)
     }
 }

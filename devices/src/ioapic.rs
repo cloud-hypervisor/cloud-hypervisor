@@ -9,8 +9,8 @@
 // Implementation of an intel 82093AA Input/Output Advanced Programmable Interrupt Controller
 // See https://pdos.csail.mit.edu/6.828/2016/readings/ia32/ioapic.pdf for a specification.
 
-use std::result;
 use std::sync::{Arc, Barrier};
+use std::{io, result};
 
 use log::{debug, error, trace};
 use serde::{Deserialize, Serialize};
@@ -430,7 +430,7 @@ impl InterruptController for Ioapic {
         Ok(())
     }
 
-    fn notifier(&self, irq: usize) -> Option<EventFd> {
+    fn notifier(&self, irq: usize) -> io::Result<Option<EventFd>> {
         self.interrupt_source_group.notifier(irq as InterruptIndex)
     }
 }

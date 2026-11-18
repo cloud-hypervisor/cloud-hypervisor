@@ -1024,8 +1024,8 @@ mod tests {
             Ok(())
         }
 
-        fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {
-            None
+        fn notifier(&self, _index: InterruptIndex) -> io::Result<Option<EventFd>> {
+            Ok(None)
         }
 
         fn update(

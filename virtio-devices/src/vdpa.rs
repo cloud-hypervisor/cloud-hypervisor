@@ -36,6 +36,8 @@ use crate::{
 
 #[derive(Error, Debug)]
 pub enum Error {
+    #[error("Failed to get interrupt notifier")]
+    GetInterruptNotifier(#[source] io::Error),
     #[error("Failed to create EventFd")]
     CreateEventFd(#[source] io::Error),
     #[error("Failed to create vhost-vdpa")]
@@ -283,8 +285,9 @@ impl Vdpa {
                 .set_vring_base(*queue_index as usize, 0)
                 .map_err(Error::SetVringBase)?;
 
-            if let Some(eventfd) =
-                virtio_interrupt.notifier(VirtioInterruptType::Queue(*queue_index))
+            if let Some(eventfd) = virtio_interrupt
+                .notifier(VirtioInterruptType::Queue(*queue_index))
+                .map_err(Error::GetInterruptNotifier)?
             {
                 self.vhost
                     .as_ref()
@@ -303,7 +306,10 @@ impl Vdpa {
         }
 
         // Setup the config eventfd if there is one
-        if let Some(eventfd) = virtio_interrupt.notifier(VirtioInterruptType::Config) {
+        if let Some(eventfd) = virtio_interrupt
+            .notifier(VirtioInterruptType::Config)
+            .map_err(Error::GetInterruptNotifier)?
+        {
             self.vhost
                 .as_ref()
                 .ok_or(Error::MissingDevice)?
