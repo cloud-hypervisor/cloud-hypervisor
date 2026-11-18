@@ -600,3 +600,287 @@ impl Migratable for GenericVhostUser {
         self.vu_common.notify_completed_migration()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs::File;
+    use std::io::Write;
+    use std::os::unix::net::UnixListener;
+    use std::thread;
+
+    use vhost::vhost_user::message::{FrontendReq, VhostUserHeaderFlag, VhostUserVirtioFeatures};
+    use vmm_sys_util::tempdir::TempDir;
+
+    use super::*;
+    use crate::vhost_user::tests::read_request;
+    use crate::vsock::tests::NoopVirtioInterrupt;
+
+    #[test]
+    fn generic_vhost_user_invalid_shmem_region_count_returns_error() {
+        let protocol_features = VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
+        let shmem = VhostUserProtocolFeatures::SHMEM.bits();
+        for bad_nregions in [2u32, 257u32] {
+            let temp_dir = TempDir::new_with_prefix("/tmp/vhost-user-shmem-invalid-").unwrap();
+            let socket_path = temp_dir.as_path().join("backend.sock");
+            let listener = UnixListener::bind(&socket_path).unwrap();
+            let backend = thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                assert!(read_request(&mut stream, FrontendReq::SET_OWNER).is_empty());
+                for (request, value) in [
+                    (FrontendReq::GET_FEATURES, protocol_features),
+                    (FrontendReq::GET_PROTOCOL_FEATURES, shmem),
+                ] {
+                    assert!(read_request(&mut stream, request).is_empty());
+                    for field in [u32::from(request), VhostUserHeaderFlag::REPLY.bits() | 1, 8] {
+                        stream.write_all(&field.to_ne_bytes()).unwrap();
+                    }
+                    stream.write_all(&value.to_ne_bytes()).unwrap();
+                }
+                assert_eq!(
+                    read_request(&mut stream, FrontendReq::SET_PROTOCOL_FEATURES),
+                    shmem.to_ne_bytes()
+                );
+                assert!(read_request(&mut stream, FrontendReq::GET_SHMEM_CONFIG).is_empty());
+                let payload_len = 8 + 256 * 8;
+                for field in [
+                    u32::from(FrontendReq::GET_SHMEM_CONFIG),
+                    VhostUserHeaderFlag::REPLY.bits() | 1,
+                    payload_len as u32,
+                ] {
+                    stream.write_all(&field.to_ne_bytes()).unwrap();
+                }
+                let mut shmem_cfg = vec![0u8; payload_len];
+                shmem_cfg[0..4].copy_from_slice(&bad_nregions.to_ne_bytes());
+                // Only 1 non-zero region (at shmid 2), so both nregions=2 and nregions=257 are invalid
+                shmem_cfg[8 + 2 * 8..8 + 3 * 8].copy_from_slice(&0x1000u64.to_ne_bytes());
+                stream.write_all(&shmem_cfg).unwrap();
+            });
+
+            let result = GenericVhostUser::new(
+                "test-shmem".to_string(),
+                socket_path.to_str().unwrap(),
+                vec![256],
+                vm_virtio::VirtioDeviceType::Gpu as u32,
+                SeccompAction::Allow,
+                EventFd::new(libc::EFD_NONBLOCK).unwrap(),
+                false,
+                None,
+                None,
+            );
+            match result {
+                Err(Error::BadShmemRegionCount(n)) if n == bad_nregions => {}
+                Ok(_) => panic!("Expected BadShmemRegionCount({bad_nregions}), got Ok"),
+                Err(err) => panic!("Expected BadShmemRegionCount({bad_nregions}), got {err}"),
+            }
+            backend.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn generic_vhost_user_shmem_snapshot_restore() {
+        let protocol_features = VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
+        let shmem = VhostUserProtocolFeatures::SHMEM.bits();
+        let temp_dir = TempDir::new_with_prefix("/tmp/vhost-user-shmem-snap-").unwrap();
+        let socket_path = temp_dir.as_path().join("backend.sock");
+        let listener = UnixListener::bind(&socket_path).unwrap();
+        let backend = thread::spawn(move || {
+            // Initial creation
+            let (mut stream, _) = listener.accept().unwrap();
+            assert!(read_request(&mut stream, FrontendReq::SET_OWNER).is_empty());
+            for (request, value) in [
+                (FrontendReq::GET_FEATURES, protocol_features),
+                (FrontendReq::GET_PROTOCOL_FEATURES, shmem),
+            ] {
+                assert!(read_request(&mut stream, request).is_empty());
+                for field in [u32::from(request), VhostUserHeaderFlag::REPLY.bits() | 1, 8] {
+                    stream.write_all(&field.to_ne_bytes()).unwrap();
+                }
+                stream.write_all(&value.to_ne_bytes()).unwrap();
+            }
+            assert_eq!(
+                read_request(&mut stream, FrontendReq::SET_PROTOCOL_FEATURES),
+                shmem.to_ne_bytes()
+            );
+            assert!(read_request(&mut stream, FrontendReq::GET_SHMEM_CONFIG).is_empty());
+            let payload_len = 8 + 256 * 8;
+            for field in [
+                u32::from(FrontendReq::GET_SHMEM_CONFIG),
+                VhostUserHeaderFlag::REPLY.bits() | 1,
+                payload_len as u32,
+            ] {
+                stream.write_all(&field.to_ne_bytes()).unwrap();
+            }
+            let mut shmem_cfg = vec![0u8; payload_len];
+            shmem_cfg[0..4].copy_from_slice(&1u32.to_ne_bytes());
+            shmem_cfg[8 + 2 * 8..8 + 3 * 8].copy_from_slice(&0x1000u64.to_ne_bytes());
+            stream.write_all(&shmem_cfg).unwrap();
+            drop(stream);
+
+            // Restore connection
+            let (mut stream2, _) = listener.accept().unwrap();
+            assert!(read_request(&mut stream2, FrontendReq::SET_OWNER).is_empty());
+            for (request, value) in [
+                (FrontendReq::GET_FEATURES, protocol_features),
+                (FrontendReq::GET_PROTOCOL_FEATURES, shmem),
+            ] {
+                assert!(read_request(&mut stream2, request).is_empty());
+                for field in [u32::from(request), VhostUserHeaderFlag::REPLY.bits() | 1, 8] {
+                    stream2.write_all(&field.to_ne_bytes()).unwrap();
+                }
+                stream2.write_all(&value.to_ne_bytes()).unwrap();
+            }
+            assert_eq!(
+                read_request(&mut stream2, FrontendReq::SET_PROTOCOL_FEATURES),
+                shmem.to_ne_bytes()
+            );
+        });
+
+        let (mut device, shmem_sizes) = GenericVhostUser::new(
+            "test-shmem".to_string(),
+            socket_path.to_str().unwrap(),
+            vec![256],
+            vm_virtio::VirtioDeviceType::Gpu as u32,
+            SeccompAction::Allow,
+            EventFd::new(libc::EFD_NONBLOCK).unwrap(),
+            false,
+            None,
+            None,
+        )
+        .unwrap();
+        let mut expected_sizes = vec![0u64; 256];
+        expected_sizes[2] = 0x1000;
+        assert_eq!(shmem_sizes, expected_sizes);
+
+        let mapping = vm_memory::MmapRegion::build(
+            None,
+            0x1000,
+            libc::PROT_NONE,
+            libc::MAP_ANONYMOUS | libc::MAP_PRIVATE,
+        )
+        .unwrap();
+        let guest_region = vm_memory::GuestRegionMmap::new(mapping, GuestAddress(0x1_0000_0000))
+            .unwrap()
+            .into();
+        device
+            .set_shm_regions(crate::VirtioSharedMemoryList {
+                mapping: Arc::new(Mutex::new(guest_region)),
+                region_list: expected_sizes
+                    .iter()
+                    .map(|&len| crate::VirtioSharedMemory { offset: 0, len })
+                    .collect(),
+            })
+            .unwrap();
+
+        let state: VhostUserState<()> = device.snapshot().unwrap().to_state().unwrap();
+        assert_eq!(state.shmem_sizes, expected_sizes);
+        drop(device);
+
+        let (_restored_device, restored_sizes) = GenericVhostUser::new(
+            "test-shmem".to_string(),
+            socket_path.to_str().unwrap(),
+            vec![256],
+            vm_virtio::VirtioDeviceType::Gpu as u32,
+            SeccompAction::Allow,
+            EventFd::new(libc::EFD_NONBLOCK).unwrap(),
+            false,
+            Some(state),
+            None,
+        )
+        .unwrap();
+        assert_eq!(restored_sizes, expected_sizes);
+        backend.join().unwrap();
+    }
+
+    #[test]
+    fn generic_vhost_user_shmem_map_unmap_and_overlap() {
+        let temp_dir = TempDir::new_with_prefix("/tmp/vhost-user-shmem-map-").unwrap();
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(temp_dir.as_path().join("blob"))
+            .unwrap();
+        file.set_len(0x2000).unwrap();
+
+        let mapping = MmapRegion::build(
+            None,
+            0x2000,
+            libc::PROT_NONE,
+            libc::MAP_ANONYMOUS | libc::MAP_PRIVATE,
+        )
+        .unwrap();
+        let guest_region = vm_memory::GuestRegionMmap::new(mapping, GuestAddress(0x1_0000_0000))
+            .unwrap()
+            .into();
+        let shm_list = crate::VirtioSharedMemoryList {
+            mapping: Arc::new(Mutex::new(guest_region)),
+            region_list: vec![crate::VirtioSharedMemory {
+                offset: 0,
+                len: 0x2000,
+            }],
+        };
+        let mapped_regions = Arc::new(Mutex::new(Vec::new()));
+        let handler = BackendReqHandler {
+            interrupt_cb: Arc::new(NoopVirtioInterrupt {}),
+            mapped_regions: Arc::clone(&mapped_regions),
+            shm_regions: Some(shm_list),
+        };
+
+        let req1 = VhostUserMMap {
+            shmid: 0,
+            padding: [0; 7],
+            fd_offset: 0,
+            shm_offset: 0,
+            len: 0x1000,
+            flags: VhostUserMMapFlags::WRITABLE.bits(),
+        };
+        assert_eq!(handler.shmem_map(&req1, &file).unwrap(), 0);
+        assert_eq!(mapped_regions.lock().unwrap().len(), 1);
+
+        // Overlapping mapping must fail with EINVAL
+        let overlapping_req = VhostUserMMap {
+            shmid: 0,
+            padding: [0; 7],
+            fd_offset: 0,
+            shm_offset: 0,
+            len: 0x2000,
+            flags: VhostUserMMapFlags::WRITABLE.bits(),
+        };
+        assert_eq!(
+            handler
+                .shmem_map(&overlapping_req, &file)
+                .unwrap_err()
+                .raw_os_error(),
+            Some(libc::EINVAL)
+        );
+
+        // Non-overlapping mapping succeeds
+        let req2 = VhostUserMMap {
+            shmid: 0,
+            padding: [0; 7],
+            fd_offset: 0x1000,
+            shm_offset: 0x1000,
+            len: 0x1000,
+            flags: VhostUserMMapFlags::WRITABLE.bits(),
+        };
+        assert_eq!(handler.shmem_map(&req2, &file).unwrap(), 0);
+        assert_eq!(mapped_regions.lock().unwrap().len(), 2);
+
+        // Unmapping a non-existent range must fail with EINVAL
+        assert_eq!(
+            handler
+                .shmem_unmap(&overlapping_req)
+                .unwrap_err()
+                .raw_os_error(),
+            Some(libc::EINVAL)
+        );
+
+        // Unmapping req1 succeeds and removes it from mapped_regions
+        assert_eq!(handler.shmem_unmap(&req1).unwrap(), 0);
+        assert_eq!(mapped_regions.lock().unwrap().len(), 1);
+
+        // Re-mapping req1 now succeeds
+        assert_eq!(handler.shmem_map(&req1, &file).unwrap(), 0);
+        assert_eq!(mapped_regions.lock().unwrap().len(), 2);
+    }
+}
