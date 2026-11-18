@@ -385,7 +385,9 @@ impl PciDevice for VfioUserPciDevice {
 
     fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> Result<(), io::Error> {
         info!("Moving BAR {bar_idx} -> 0x{new_base:x}");
-        self.common.move_bar(bar_idx, new_base)
+        self.common
+            .move_bar(bar_idx, new_base)
+            .map_err(io::Error::other)
     }
 
     fn id(&self) -> Option<String> {
