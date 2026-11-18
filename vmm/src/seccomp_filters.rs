@@ -1004,6 +1004,7 @@ fn vcpu_thread_rules(
         (libc::SYS_clock_nanosleep, vec![]),
         (libc::SYS_close, vec![]),
         (libc::SYS_dup, vec![]),
+        (libc::SYS_eventfd2, vec![]),
         (libc::SYS_exit, vec![]),
         (libc::SYS_epoll_ctl, vec![]),
         (
@@ -1263,6 +1264,7 @@ fn serial_manager_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         (libc::SYS_epoll_pwait, vec![]),
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_epoll_wait, vec![]),
+        (libc::SYS_eventfd2, vec![]),
         (libc::SYS_exit, vec![]),
         (libc::SYS_fcntl, vec![]),
         (libc::SYS_futex, vec![]),
