@@ -443,8 +443,8 @@ mod tests {
         fn trigger(&self, _index: InterruptIndex) -> io::Result<()> {
             Ok(())
         }
-        fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {
-            None
+        fn notifier(&self, _index: InterruptIndex) -> io::Result<Option<EventFd>> {
+            Ok(None)
         }
         fn update(
             &self,

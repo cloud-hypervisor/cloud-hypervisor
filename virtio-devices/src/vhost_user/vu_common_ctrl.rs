@@ -361,8 +361,9 @@ impl VhostUserHandle {
                 .set_vring_base(*queue_index as usize, base)
                 .map_err(Error::VhostUserSetVringBase)?;
 
-            if let Some(eventfd) =
-                virtio_interrupt.notifier(VirtioInterruptType::Queue(*queue_index))
+            if let Some(eventfd) = virtio_interrupt
+                .notifier(VirtioInterruptType::Queue(*queue_index))
+                .map_err(Error::GetInterruptNotifier)?
             {
                 self.vu
                     .set_vring_call(*queue_index as usize, &eventfd)

@@ -96,6 +96,8 @@ pub enum VfioPciError {
     MoveBarMemoryRegion(#[source] GuestRegionError),
     #[error("Failed to unmap peer to peer DMA")]
     DmaUnmap(#[source] vfio_ioctls::VfioError),
+    #[error("Failed to get interrupt notifier")]
+    GetInterruptNotifier(#[source] io::Error),
     #[error("Failed to create user memory region")]
     CreateUserMemoryRegion(#[source] GuestRegionError),
     #[error("Failed to DMA map: {0} for device {1} (guest BDF: {2})")]
@@ -1744,7 +1746,11 @@ impl VfioCommon {
         if let Some(intx) = &mut self.interrupt.intx
             && !intx.enabled
         {
-            if let Some(eventfd) = intx.interrupt_source_group.notifier(0) {
+            if let Some(eventfd) = intx
+                .interrupt_source_group
+                .notifier(0)
+                .map_err(VfioPciError::GetInterruptNotifier)?
+            {
                 self.vfio_wrapper
                     .enable_irq(VFIO_PCI_INTX_IRQ_INDEX, vec![&eventfd])
                     .map_err(VfioPciError::EnableIntx)?;
@@ -1774,7 +1780,11 @@ impl VfioCommon {
         if let Some(msi) = &self.interrupt.msi {
             let mut irq_fds: Vec<EventFd> = Vec::new();
             for i in 0..msi.cfg.num_enabled_vectors() {
-                if let Some(eventfd) = msi.interrupt_source_group.notifier(i as InterruptIndex) {
+                if let Some(eventfd) = msi
+                    .interrupt_source_group
+                    .notifier(i as InterruptIndex)
+                    .map_err(VfioPciError::GetInterruptNotifier)?
+                {
                     irq_fds.push(eventfd);
                 } else {
                     return Err(VfioPciError::MissingNotifier);
@@ -1799,7 +1809,11 @@ impl VfioCommon {
         if let Some(msix) = &self.interrupt.msix {
             let mut irq_fds: Vec<EventFd> = Vec::new();
             for i in 0..msix.bar.table_entries.len() {
-                if let Some(eventfd) = msix.interrupt_source_group.notifier(i as InterruptIndex) {
+                if let Some(eventfd) = msix
+                    .interrupt_source_group
+                    .notifier(i as InterruptIndex)
+                    .map_err(VfioPciError::GetInterruptNotifier)?
+                {
                     irq_fds.push(eventfd);
                 } else {
                     return Err(VfioPciError::MissingNotifier);

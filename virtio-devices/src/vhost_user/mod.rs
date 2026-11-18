@@ -70,6 +70,8 @@ pub trait PostcopyHandler: Send + Sync {
 
 #[derive(Error, Debug)]
 pub enum Error {
+    #[error("Failed to get interrupt notifier")]
+    GetInterruptNotifier(#[source] io::Error),
     #[error("Failed accepting connection")]
     AcceptConnection(#[source] io::Error),
     #[error("Invalid available address")]

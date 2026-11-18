@@ -39,8 +39,8 @@ pub enum VirtioInterruptType {
 
 pub trait VirtioInterrupt: Send + Sync {
     fn trigger(&self, int_type: VirtioInterruptType) -> io::Result<()>;
-    fn notifier(&self, _int_type: VirtioInterruptType) -> Option<EventFd> {
-        None
+    fn notifier(&self, _int_type: VirtioInterruptType) -> io::Result<Option<EventFd>> {
+        Ok(None)
     }
     fn set_notifier(
         &self,

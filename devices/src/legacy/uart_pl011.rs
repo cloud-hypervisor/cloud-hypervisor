@@ -483,8 +483,8 @@ mod tests {
         fn set_gsi(&self) -> io::Result<()> {
             Ok(())
         }
-        fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {
-            Some(self.event_fd.try_clone().unwrap())
+        fn notifier(&self, _index: InterruptIndex) -> io::Result<Option<EventFd>> {
+            self.event_fd.try_clone().map(Some)
         }
     }
 

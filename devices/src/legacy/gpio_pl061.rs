@@ -354,8 +354,8 @@ mod tests {
             Ok(())
         }
 
-        fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {
-            Some(self.event_fd.try_clone().unwrap())
+        fn notifier(&self, _index: InterruptIndex) -> io::Result<Option<EventFd>> {
+            self.event_fd.try_clone().map(Some)
         }
     }
 

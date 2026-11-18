@@ -163,8 +163,8 @@ impl InterruptSourceGroup for TestInterrupt {
     fn set_gsi(&self) -> Result<(), std::io::Error> {
         Ok(())
     }
-    fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {
-        self.event_fd.try_clone().ok()
+    fn notifier(&self, _index: InterruptIndex) -> io::Result<Option<EventFd>> {
+        self.event_fd.try_clone().map(Some)
     }
 }
 

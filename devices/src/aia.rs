@@ -3,8 +3,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::result;
 use std::sync::{Arc, Mutex};
+use std::{io, result};
 
 use arch::layout;
 use hypervisor::arch::riscv64::aia::{Vaia, VaiaConfig};
@@ -119,7 +119,7 @@ impl InterruptController for Aia {
         Ok(())
     }
 
-    fn notifier(&self, irq: usize) -> Option<EventFd> {
+    fn notifier(&self, irq: usize) -> io::Result<Option<EventFd>> {
         self.interrupt_source_group.notifier(irq as InterruptIndex)
     }
 }

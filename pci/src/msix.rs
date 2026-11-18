@@ -97,7 +97,7 @@ impl InterruptSourceGroup for MaybeMutInterruptSourceGroup {
     impl_method! {
         fn trigger(&self, index: InterruptIndex) -> interrupt::Result<()>;
 
-        fn notifier(&self, index: InterruptIndex) -> Option<EventFd>;
+        fn notifier(&self, index: InterruptIndex) -> io::Result<Option<EventFd>>;
 
         fn update(
             &self,
@@ -654,7 +654,7 @@ mod tests {
             unreachable!()
         }
 
-        fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {
+        fn notifier(&self, _index: InterruptIndex) -> io::Result<Option<EventFd>> {
             unreachable!()
         }
 
