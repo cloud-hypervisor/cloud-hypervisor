@@ -2337,10 +2337,11 @@ dependencies = [
 
 [[package]]
 name = "vfio-ioctls"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a80f9cf326a62dc7f86795775ecb33ee077e40c8d5b80396c4b82f51958a348"
+checksum = "eaeeedbd6dd200213f7a809ed87715c46386590b6035d5f28c7bf72728f446cc"
 dependencies = [
+ "bitflags 2.13.2",
  "byteorder",
  "iommufd-bindings",
  "iommufd-ioctls",
@@ -2358,9 +2359,9 @@ dependencies = [
 
 [[package]]
 name = "vfio_user"
-version = "0.1.7"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a64e7c1e41fd8574ace87ded52ff64752e821e2769077d150a0a60399b6733e"
+checksum = "a5f9129c7d9f69f291593c7eb31831e02e65f2e824cf00376d310d30ac894d69"
 dependencies = [
  "bitflags 2.13.2",
  "enumn",
