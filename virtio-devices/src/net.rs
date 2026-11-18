@@ -887,10 +887,8 @@ impl VirtioDevice for Net {
                 &self.announce,
             );
 
-            let host_announce_ops = VirtioNetHostAnnounceOps::new(
-                self.build_rarp_announce(),
-                self.taps.clone().into_boxed_slice(),
-            );
+            let host_announce_ops =
+                VirtioNetHostAnnounceOps::new(self.build_rarp_announce(), self.taps[0].clone());
 
             let announcer = Announcer::new(
                 &self.announce,
@@ -1197,15 +1195,12 @@ impl AnnounceOps for VirtioNetGuestAnnounceOps {
 
 struct VirtioNetHostAnnounceOps {
     rarp_announce: Option<[u8; ETH_FRAME_LEN]>,
-    taps: Box<[Tap]>,
+    tap: Tap,
 }
 
 impl VirtioNetHostAnnounceOps {
-    pub(crate) fn new(rarp_announce: Option<[u8; ETH_FRAME_LEN]>, taps: Box<[Tap]>) -> Self {
-        Self {
-            rarp_announce,
-            taps,
-        }
+    pub(crate) fn new(rarp_announce: Option<[u8; ETH_FRAME_LEN]>, tap: Tap) -> Self {
+        Self { rarp_announce, tap }
     }
 }
 
@@ -1217,12 +1212,10 @@ impl AnnounceOps for VirtioNetHostAnnounceOps {
             let mut buf = vec![0u8; vnet_hdr_len() + rarp_announce.len()];
             buf[vnet_hdr_len()..].copy_from_slice(&rarp_announce);
 
-            for tap in &mut self.taps {
-                if let Err(e) = tap.write_all(&buf) {
-                    // The host-side RARP packets are best-effort. Thus, to keep things simple, we
-                    // only log errors here instead of waiting for the TAP to become writable again.
-                    error!("Host RARP write to TAP failed: {e}");
-                }
+            if let Err(e) = self.tap.write_all(&buf) {
+                // The host-side RARP packets are best-effort. Thus, to keep things simple, we
+                // only log errors here instead of waiting for the TAP to become writable again.
+                error!("Host RARP write to TAP failed: {e}");
             }
 
             return AnnounceOutcome::Retry;
@@ -1327,18 +1320,9 @@ mod tests {
             &dev.announce,
         );
 
-        let host_announce_ops = VirtioNetHostAnnounceOps::new(
-            dev.build_rarp_announce(),
-            dev.taps.clone().into_boxed_slice(),
-        );
-
         let announcer = Announcer::new(
             &dev.announce,
-            vec![
-                Box::new(guest_announce_ops) as Box<dyn AnnounceOps>,
-                Box::new(host_announce_ops) as Box<dyn AnnounceOps>,
-            ]
-            .into_boxed_slice(),
+            vec![Box::new(guest_announce_ops) as Box<dyn AnnounceOps>].into_boxed_slice(),
         );
 
         Ok(announcer)
