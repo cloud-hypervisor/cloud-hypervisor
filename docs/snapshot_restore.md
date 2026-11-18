@@ -133,10 +133,17 @@ guest RAM before restore completes. This mode is strict: if Cloud Hypervisor
 cannot enable the `userfaultfd` restore path, restore fails instead of falling
 back to `copy`.
 
+`memory_restore_mode=ondemand` also copies the remaining pages into guest RAM in
+the background. If you don't want prefaulting to happen, use
+`memory_restore_mode=ondemand_no_background_fetch_pages` instead. Only the pages
+that the guest, the VMM or vhost-user backends access are populated. Be aware
+that the VM will stay in a "restoring" state indefinitely.
+
 If the page source fails during the restore, the guest memory that was not
 restored yet is poisoned so that the guest cannot use it.
 
-Current constraints for `memory_restore_mode=ondemand`:
+Current constraints for `memory_restore_mode=ondemand` and
+`memory_restore_mode=ondemand_no_background_fetch_pages`:
 
 - `prefault=on` is not supported
 - the snapshot memory ranges must be page-aligned
