@@ -353,7 +353,7 @@ pub(crate) struct VfioP2pMapping {
     region_index: u32,
     mapped: bool,
     #[cfg(feature = "kvm")]
-    dma_buf: Option<Arc<OwnedFd>>,
+    dma_buf: Option<OwnedFd>,
 }
 
 impl VfioBarMemoryRegion {
@@ -435,7 +435,7 @@ impl VfioP2pMapping {
                 .map_file(dma_buf.as_raw_fd(), 0, length as u64, iova, true)
                 .map_err(|e| VfioPciError::DmaMapFile(e, self.device_path.clone(), bdf))?;
 
-            self.dma_buf = Some(Arc::new(OwnedFd::from(dma_buf)));
+            self.dma_buf = Some(OwnedFd::from(dma_buf));
             self.mapped = true;
             return Ok(());
         }
