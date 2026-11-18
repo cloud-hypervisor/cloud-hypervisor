@@ -9,7 +9,7 @@ use std::os::fd::BorrowedFd;
 #[cfg(feature = "kvm")]
 use std::os::fd::OwnedFd;
 use std::os::unix::io::AsRawFd;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, process, result};
 
@@ -336,8 +336,13 @@ pub(crate) struct VfioBarMemoryRegion {
     pub p2p_mapping: Option<Arc<Mutex<VfioP2pMapping>>>,
 }
 
-#[derive(Default)]
 pub(crate) struct VfioP2pMapping {
+    #[cfg(feature = "kvm")]
+    device: Arc<VfioDevice>,
+    vfio_ops: Arc<dyn VfioOps>,
+    device_path: PathBuf,
+    bdf: PciBdf,
+    region_index: u32,
     mapped: bool,
     #[cfg(feature = "kvm")]
     dma_buf: Option<Arc<OwnedFd>>,
@@ -369,22 +374,19 @@ impl VfioBarMemoryRegion {
             .is_some_and(|mapping| mapping.lock().unwrap().mapped)
     }
 
-    #[cfg_attr(not(feature = "kvm"), expect(unused_variables))]
-    fn map_for_p2p(
-        &mut self,
-        device: &VfioDevice,
-        vfio_ops: &Arc<dyn VfioOps>,
-        device_path: &Path,
-        bdf: PciBdf,
-        region_index: u32,
-        offset: u64,
-    ) -> Result<(), VfioPciError> {
+    fn map_for_p2p(&self) -> Result<(), VfioPciError> {
         let Some(p2p_mapping) = &self.p2p_mapping else {
             return Ok(());
         };
         let iova = self.start();
         let length = self.size();
         let mut p2p_mapping = p2p_mapping.lock().unwrap();
+        let vfio_ops = &p2p_mapping.vfio_ops;
+        #[cfg(feature = "kvm")]
+        let device = &p2p_mapping.device;
+        let device_path = &p2p_mapping.device_path;
+        let bdf = p2p_mapping.bdf;
+        let region_index = p2p_mapping.region_index;
 
         #[cfg(feature = "kvm")]
         if let Some(vfio_iommufd) = vfio_ops.as_any().downcast_ref::<VfioIommufd>()
@@ -392,7 +394,7 @@ impl VfioBarMemoryRegion {
                 .export_dma_buf(
                     region_index,
                     &[VfioRegionDmaRange {
-                        offset,
+                        offset: self.offset,
                         length: length as u64,
                     }],
                     libc::O_RDWR as u32,
@@ -430,13 +432,14 @@ impl VfioBarMemoryRegion {
         Ok(())
     }
 
-    fn unmap_p2p(&mut self, vfio_ops: &dyn VfioOps) -> io::Result<()> {
+    fn unmap_p2p(&self) -> io::Result<()> {
         let Some(p2p_mapping) = &self.p2p_mapping else {
             return Ok(());
         };
         let mut p2p_mapping = p2p_mapping.lock().unwrap();
         if p2p_mapping.mapped {
-            vfio_ops
+            p2p_mapping
+                .vfio_ops
                 .vfio_dma_unmap(self.start(), self.size())
                 .map_err(io::Error::other)?;
             p2p_mapping.mapped = false;
@@ -2655,23 +2658,27 @@ impl VfioPciDevice {
                     mapping
                         .register()
                         .map_err(VfioPciError::CreateUserMemoryRegion)?;
-                    let mut bar_memory_region = VfioBarMemoryRegion {
+                    let bar_memory_region = VfioBarMemoryRegion {
                         offset: area.offset,
                         region: Arc::new(Mutex::new(mapping)),
-                        p2p_mapping: map_p2p
-                            .then(|| Arc::new(Mutex::new(VfioP2pMapping::default()))),
+                        p2p_mapping: map_p2p.then(|| {
+                            Arc::new(Mutex::new(VfioP2pMapping {
+                                #[cfg(feature = "kvm")]
+                                device: Arc::clone(&self.device),
+                                vfio_ops: Arc::clone(&self.vfio_ops),
+                                device_path: self.device_path.clone(),
+                                bdf: self.bdf,
+                                region_index: region.index,
+                                mapped: false,
+                                #[cfg(feature = "kvm")]
+                                dma_buf: None,
+                            }))
+                        }),
                     };
                     // Map the MMIO BAR into the host IOMMU address space via VfioOps
                     // Only needed if p2p_dma is enabled.
                     if map_p2p {
-                        bar_memory_region.map_for_p2p(
-                            &self.device,
-                            &self.vfio_ops,
-                            &self.device_path,
-                            self.bdf,
-                            region.index,
-                            area.offset,
-                        )?;
+                        bar_memory_region.map_for_p2p()?;
                     }
                     region.bar_memory_regions.push(bar_memory_region);
                 }
@@ -2748,8 +2755,8 @@ impl VfioPciDevice {
 
     pub fn unmap_mmio_regions(&mut self) {
         for region in &mut self.common.bars {
-            for mut bar_memory_region in region.bar_memory_regions.drain(..) {
-                if let Err(e) = bar_memory_region.unmap_p2p(self.vfio_ops.as_ref()) {
+            for bar_memory_region in region.bar_memory_regions.drain(..) {
+                if let Err(e) = bar_memory_region.unmap_p2p() {
                     // The backing memory must remain alive while mapped for DMA.
                     error!("FATAL: Failed to remove P2P mapping: {e}");
                     process::exit(1);
@@ -2910,7 +2917,6 @@ impl PciDevice for VfioPciDevice {
             if region.index as usize != bar_idx || region.start == GuestAddress(new_base) {
                 continue;
             }
-            let old_base = region.start.raw_value();
             let moves = region
                 .bar_memory_regions
                 .iter()
@@ -2928,24 +2934,15 @@ impl PciDevice for VfioPciDevice {
                     ))
                 })
                 .collect::<io::Result<Vec<_>>>()?;
-            for (i, &(old_address, new_address, map_p2p)) in moves.iter().enumerate() {
+            for (i, &(_, new_address, map_p2p)) in moves.iter().enumerate() {
                 let bar_memory_region = &mut region.bar_memory_regions[i];
                 let result = (|| {
-                    bar_memory_region.unmap_p2p(self.vfio_ops.as_ref())?;
+                    bar_memory_region.unmap_p2p()?;
                     bar_memory_region
                         .move_region(new_address)
                         .map_err(io::Error::other)?;
                     if map_p2p {
-                        bar_memory_region
-                            .map_for_p2p(
-                                &self.device,
-                                &self.vfio_ops,
-                                &self.device_path,
-                                self.bdf,
-                                region.index,
-                                old_address - old_base,
-                            )
-                            .map_err(io::Error::other)?;
+                        bar_memory_region.map_for_p2p().map_err(io::Error::other)?;
                     }
                     Ok(())
                 })();
@@ -2963,7 +2960,7 @@ impl PciDevice for VfioPciDevice {
                             continue;
                         }
                         let rollback: io::Result<()> = (|| {
-                            bar_memory_region.unmap_p2p(self.vfio_ops.as_ref())?;
+                            bar_memory_region.unmap_p2p()?;
                             bar_memory_region
                                 .move_region(old_address)
                                 .map_err(io::Error::other)?;
@@ -2974,16 +2971,7 @@ impl PciDevice for VfioPciDevice {
                                 }
                             }
                             if was_mapped {
-                                bar_memory_region
-                                    .map_for_p2p(
-                                        &self.device,
-                                        &self.vfio_ops,
-                                        &self.device_path,
-                                        self.bdf,
-                                        region.index,
-                                        old_address - old_base,
-                                    )
-                                    .map_err(io::Error::other)?;
+                                bar_memory_region.map_for_p2p().map_err(io::Error::other)?;
                             }
                             Ok(())
                         })();
