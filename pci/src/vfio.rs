@@ -339,13 +339,11 @@ pub(crate) struct VfioBarMemoryRegion {
 }
 
 impl VfioBarMemoryRegion {
-    pub(crate) fn move_region(&mut self, new_address: u64) -> io::Result<()> {
+    pub(crate) fn move_region(&mut self, new_address: u64) -> Result<(), GuestRegionError> {
         self.region
             .lock()
             .unwrap()
             .move_guest_address(GuestAddress(new_address))
-            .map_err(io::Error::other)?;
-        Ok(())
     }
 
     pub(crate) fn start(&self) -> u64 {
@@ -2912,7 +2910,9 @@ impl PciDevice for VfioPciDevice {
                 let bar_memory_region = &mut region.bar_memory_regions[i];
                 let result = (|| {
                     bar_memory_region.unmap_p2p(self.vfio_ops.as_ref())?;
-                    bar_memory_region.move_region(new_address)?;
+                    bar_memory_region
+                        .move_region(new_address)
+                        .map_err(io::Error::other)?;
                     if map_p2p {
                         bar_memory_region
                             .map_for_p2p(
@@ -2942,7 +2942,9 @@ impl PciDevice for VfioPciDevice {
                         }
                         let rollback: io::Result<()> = (|| {
                             bar_memory_region.unmap_p2p(self.vfio_ops.as_ref())?;
-                            bar_memory_region.move_region(old_address)?;
+                            bar_memory_region
+                                .move_region(old_address)
+                                .map_err(io::Error::other)?;
                             {
                                 let mapping = bar_memory_region.region.lock().unwrap();
                                 if !mapping.is_registered() {

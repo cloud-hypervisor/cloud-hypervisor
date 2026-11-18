@@ -408,7 +408,9 @@ impl PciDevice for VfioUserPciDevice {
                 .collect::<io::Result<Vec<_>>>()?;
             for (i, &(_, new_address)) in new_addresses.iter().enumerate() {
                 let bar_memory_region = &mut mmio_region.bar_memory_regions[i];
-                let result = bar_memory_region.move_region(new_address);
+                let result = bar_memory_region
+                    .move_region(new_address)
+                    .map_err(io::Error::other);
                 if let Err(e) = result {
                     for (bar_memory_region, &(old_address, _)) in mmio_region.bar_memory_regions
                         [..=i]
@@ -416,14 +418,17 @@ impl PciDevice for VfioUserPciDevice {
                         .zip(&new_addresses[..=i])
                         .rev()
                     {
-                        let rollback = bar_memory_region.move_region(old_address).and_then(|()| {
-                            let mapping = bar_memory_region.region.lock().unwrap();
-                            if mapping.is_registered() {
-                                Ok(())
-                            } else {
-                                mapping.register().map_err(io::Error::other)
-                            }
-                        });
+                        let rollback = bar_memory_region
+                            .move_region(old_address)
+                            .map_err(io::Error::other)
+                            .and_then(|()| {
+                                let mapping = bar_memory_region.region.lock().unwrap();
+                                if mapping.is_registered() {
+                                    Ok(())
+                                } else {
+                                    mapping.register().map_err(io::Error::other)
+                                }
+                            });
                         if let Err(rollback) = rollback {
                             // Continuing would leave the BAR with inconsistent mappings.
                             error!("FATAL: Failed to restore BAR mapping: {rollback}");
