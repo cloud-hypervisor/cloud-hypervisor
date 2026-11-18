@@ -978,6 +978,8 @@ impl VirtioDevice for Net {
                 net: NetQueuePair {
                     tap_for_write_epoll: tap.clone(),
                     tap,
+                    tap_queues: Arc::clone(&tap_queues),
+                    tap_queue_index: i,
                     rx,
                     tx,
                     epoll_fd: None,

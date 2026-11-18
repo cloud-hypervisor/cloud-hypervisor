@@ -15,8 +15,8 @@ use std::{io, process, result};
 use libc::EFD_NONBLOCK;
 use log::{debug, error};
 use net_util::{
-    MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TxVirtio, VirtioNetConfig,
-    open_tap,
+    MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TapQueues, TxVirtio,
+    VirtioNetConfig, open_tap,
 };
 use option_parser::{OptionParser, OptionParserError, Toggle};
 use thiserror::Error;
@@ -90,6 +90,9 @@ impl VhostUserNetThread {
             kill_evt: EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?,
             net: NetQueuePair {
                 tap_for_write_epoll: tap.clone(),
+                // Nothing detaches the queue, so TX always goes to `tap`.
+                tap_queues: Arc::new(TapQueues::new(vec![tap.clone()])),
+                tap_queue_index: 0,
                 tap,
                 rx: RxVirtio::new(),
                 tx: TxVirtio::new(0),

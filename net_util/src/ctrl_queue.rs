@@ -221,7 +221,9 @@ impl CtrlQueue {
                         let mut ok = true;
                         for tap in &self.tap_queues.taps {
                             info!("Reprogramming tap offload with features: {features}");
-                            tap.set_offload(virtio_features_to_tap_offload(features))
+                            tap.lock()
+                                .unwrap()
+                                .set_offload(virtio_features_to_tap_offload(features))
                                 .map_err(|e| {
                                     error!("Error programming tap offload: {e:?}");
                                     ok = false;
