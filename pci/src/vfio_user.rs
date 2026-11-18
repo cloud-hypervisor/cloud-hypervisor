@@ -198,10 +198,7 @@ impl VfioUserPciDevice {
                     let bar_memory_region = VfioBarMemoryRegion {
                         offset: s.offset,
                         region: mapping,
-                        p2p_mapped: false,
-                        // A vfio-user device exports no dma-buf.
-                        #[cfg(feature = "kvm")]
-                        dma_buf: None,
+                        p2p_mapping: None,
                     };
 
                     mmio_region.bar_memory_regions.push(bar_memory_region);
