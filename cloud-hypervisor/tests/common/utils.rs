@@ -802,18 +802,18 @@ pub(crate) fn get_counters(api_socket: &str) -> Counters {
     let (cmd_success, cmd_output, _) = remote_command_w_output(api_socket, "counters", None);
     assert!(cmd_success);
 
-    let counters: HashMap<&str, HashMap<&str, u64>> =
-        serde_json::from_slice(&cmd_output).unwrap_or_default();
+    let counters: HashMap<&str, HashMap<&str, serde_json::Value>> =
+        serde_json::from_slice(&cmd_output).unwrap();
 
-    let rx_bytes = *counters.get("_net2").unwrap().get("rx_bytes").unwrap();
-    let rx_frames = *counters.get("_net2").unwrap().get("rx_frames").unwrap();
-    let tx_bytes = *counters.get("_net2").unwrap().get("tx_bytes").unwrap();
-    let tx_frames = *counters.get("_net2").unwrap().get("tx_frames").unwrap();
+    let rx_bytes = counters["_net2"]["rx_bytes"].as_u64().unwrap();
+    let rx_frames = counters["_net2"]["rx_frames"].as_u64().unwrap();
+    let tx_bytes = counters["_net2"]["tx_bytes"].as_u64().unwrap();
+    let tx_frames = counters["_net2"]["tx_frames"].as_u64().unwrap();
 
-    let read_bytes = *counters.get("_disk0").unwrap().get("read_bytes").unwrap();
-    let write_bytes = *counters.get("_disk0").unwrap().get("write_bytes").unwrap();
-    let read_ops = *counters.get("_disk0").unwrap().get("read_ops").unwrap();
-    let write_ops = *counters.get("_disk0").unwrap().get("write_ops").unwrap();
+    let read_bytes = counters["_disk0"]["read_bytes"].as_u64().unwrap();
+    let write_bytes = counters["_disk0"]["write_bytes"].as_u64().unwrap();
+    let read_ops = counters["_disk0"]["read_ops"].as_u64().unwrap();
+    let write_ops = counters["_disk0"]["write_ops"].as_u64().unwrap();
 
     Counters {
         rx_bytes,

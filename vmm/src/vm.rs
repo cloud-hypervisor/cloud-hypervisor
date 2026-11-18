@@ -16,7 +16,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ffi;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
-use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::net::UnixStream;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -2444,7 +2443,7 @@ impl Vm {
         Ok(pci_device_info)
     }
 
-    pub fn counters(&self) -> Result<HashMap<String, HashMap<&'static str, Wrapping<u64>>>> {
+    pub fn counters(&self) -> Result<HashMap<String, HashMap<&'static str, serde_json::Value>>> {
         Ok(self.device_manager.lock().unwrap().counters())
     }
 
