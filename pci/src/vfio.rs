@@ -215,6 +215,8 @@ pub(crate) struct VfioMsix {
     cap: MsixCap,
     cap_offset: u32,
     interrupt_source_group: Arc<dyn InterruptSourceGroup>,
+    supports_resize: bool,
+    enabled_vectors: Mutex<Option<Vec<bool>>>,
 }
 
 impl VfioMsix {
@@ -1423,6 +1425,11 @@ impl VfioCommon {
             cap: msix_cap,
             cap_offset,
             interrupt_source_group,
+            supports_resize: self
+                .vfio_wrapper
+                .get_irq_info(VFIO_PCI_MSIX_IRQ_INDEX)
+                .is_some_and(|irq| irq.flags & VFIO_IRQ_INFO_NORESIZE == 0),
+            enabled_vectors: Mutex::new(None),
         });
         Ok(())
     }
@@ -1817,6 +1824,11 @@ impl VfioCommon {
 
     pub(crate) fn enable_msix(&self) -> Result<(), VfioPciError> {
         if let Some(msix) = &self.interrupt.msix {
+            if msix.supports_resize {
+                *msix.enabled_vectors.lock().unwrap() = None;
+                return self.update_msix_vectors(None);
+            }
+
             let mut irq_fds: Vec<EventFd> = Vec::new();
             for i in 0..msix.bar.table_entries.len() {
                 if let Some(eventfd) = msix
@@ -1835,6 +1847,47 @@ impl VfioCommon {
                 .map_err(VfioPciError::EnableMsix)?;
         }
 
+        Ok(())
+    }
+
+    fn update_msix_vectors(&self, offset: Option<u64>) -> Result<(), VfioPciError> {
+        if let Some(msix) = &self.interrupt.msix
+            && msix.supports_resize
+            && msix.bar.enabled()
+        {
+            let mut enabled_vectors = msix.enabled_vectors.lock().unwrap();
+            if enabled_vectors.is_none() {
+                // Limit the kernel's initial IRQ allocation to vector zero.
+                self.vfio_wrapper
+                    .enable_irq(VFIO_PCI_MSIX_IRQ_INDEX, 0, &[None])
+                    .map_err(VfioPciError::EnableMsix)?;
+            }
+            let enabled_vectors =
+                enabled_vectors.get_or_insert_with(|| vec![false; msix.bar.table_entries.len()]);
+            if msix.bar.masked() {
+                return Ok(());
+            }
+            let range = offset.map_or(0..msix.bar.table_entries.len(), |offset| {
+                let index = ((offset - u64::from(msix.cap.table_offset()))
+                    / MSIX_TABLE_ENTRY_SIZE as u64) as usize;
+                index..index + 1
+            });
+            for index in range {
+                if msix.bar.table_entries[index].masked() || enabled_vectors[index] {
+                    continue;
+                }
+                let eventfd = msix
+                    .interrupt_source_group
+                    .notifier(index as InterruptIndex)
+                    .map_err(VfioPciError::GetInterruptNotifier)?
+                    .ok_or(VfioPciError::MissingNotifier)?;
+                self.vfio_wrapper
+                    .enable_irq(VFIO_PCI_MSIX_IRQ_INDEX, index as u32, &[Some(&eventfd)])
+                    .map_err(VfioPciError::EnableMsix)?;
+                // Retain the eventfd registration across mask changes.
+                enabled_vectors[index] = true;
+            }
+        }
         Ok(())
     }
 
@@ -1895,7 +1948,7 @@ impl VfioCommon {
                 self.disable_msix();
                 self.enable_intx()?;
             }
-            _ => {}
+            _ => self.update_msix_vectors(None)?,
         }
 
         Ok(())
@@ -1965,6 +2018,9 @@ impl VfioCommon {
             // If the MSI-X table is written to, we need to update our cache.
             if self.interrupt.msix_table_accessed(region.index, offset) {
                 self.interrupt.msix_write_table(offset, data);
+                if let Err(e) = self.update_msix_vectors(Some(offset)) {
+                    error!("Could not update MSI-X vectors: {e}");
+                }
             } else if self.is_nvidia_bar0_config_mirror(region.index, offset) {
                 // Route writes to the NVIDIA BAR0 config space mirror through
                 // write_config_register() so config patches, MSI/MSI-X updates,
@@ -3234,6 +3290,7 @@ mod tests {
     #[cfg(feature = "kvm")]
     use std::sync::atomic::AtomicU32;
 
+    use vm_device::interrupt::InterruptSourceConfig;
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
@@ -3751,8 +3808,263 @@ mod tests {
     impl InterruptManager for MockMsiInterruptManager {
         type GroupConfig = MsiIrqGroupConfig;
         fn create_group(&self, _: MsiIrqGroupConfig) -> io::Result<Arc<dyn InterruptSourceGroup>> {
-            unimplemented!("not exercised by the migration-helper tests")
+            Ok(Arc::new(MockInterruptGroup))
         }
+    }
+
+    struct MockInterruptGroup;
+
+    impl InterruptSourceGroup for MockInterruptGroup {
+        fn trigger(&self, _: InterruptIndex) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn notifier(&self, _: InterruptIndex) -> io::Result<Option<EventFd>> {
+            EventFd::new(libc::EFD_NONBLOCK).map(Some)
+        }
+
+        fn update(
+            &self,
+            _: InterruptIndex,
+            _: InterruptSourceConfig,
+            _: bool,
+            _: bool,
+        ) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn set_gsi(&self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct MockMsixVfio {
+        supports_resize: bool,
+        requests: Mutex<Vec<(u32, Vec<bool>)>>,
+        fail_at: Mutex<Option<u32>>,
+    }
+
+    impl Vfio for MockMsixVfio {
+        fn get_irq_info(&self, index: u32) -> Option<VfioIrq> {
+            assert_eq!(index, VFIO_PCI_MSIX_IRQ_INDEX);
+            Some(VfioIrq {
+                index,
+                flags: VFIO_IRQ_INFO_EVENTFD
+                    | if self.supports_resize {
+                        0
+                    } else {
+                        VFIO_IRQ_INFO_NORESIZE
+                    },
+                count: 2048,
+            })
+        }
+
+        fn enable_irq(
+            &self,
+            index: u32,
+            start: u32,
+            fds: &[Option<&EventFd>],
+        ) -> Result<(), VfioError> {
+            assert_eq!(index, VFIO_PCI_MSIX_IRQ_INDEX);
+            let mut fail_at = self.fail_at.lock().unwrap();
+            if *fail_at == Some(start) {
+                *fail_at = None;
+                return Err(VfioError::KernelVfio(
+                    vfio_ioctls::VfioError::VfioDeviceEnableIrq,
+                ));
+            }
+            self.requests
+                .lock()
+                .unwrap()
+                .push((start, fds.iter().map(Option::is_some).collect()));
+            Ok(())
+        }
+
+        fn disable_irq(&self, index: u32) -> Result<(), VfioError> {
+            assert_eq!(index, VFIO_PCI_MSIX_IRQ_INDEX);
+            self.requests.lock().unwrap().push((0, Vec::new()));
+            Ok(())
+        }
+
+        fn reset(&self) {}
+        fn region_write(&self, _: u32, _: u64, _: &[u8]) {}
+    }
+
+    fn test_msix_common(
+        supports_resize: bool,
+        num_vectors: u16,
+    ) -> (VfioCommon, Arc<MockMsixVfio>) {
+        let vfio = Arc::new(MockMsixVfio {
+            supports_resize,
+            requests: Mutex::new(Vec::new()),
+            fail_at: Mutex::new(None),
+        });
+        let mut common = test_vfio_common(Arc::clone(&vfio), None);
+        common.bars.push(VfioBar {
+            start: GuestAddress(0),
+            length: 0x10000,
+            type_: PciBarRegionType::Memory32BitRegion,
+            index: 0,
+            bar_memory_regions: Vec::new(),
+        });
+        common
+            .initialize_msix(
+                MsixCap {
+                    msg_ctl: num_vectors - 1,
+                    table: 0,
+                    pba: 0x8000,
+                },
+                0xb0,
+                0.into(),
+                None,
+            )
+            .unwrap();
+        (common, vfio)
+    }
+
+    #[test]
+    fn msix_allocates_only_used_vectors() {
+        let (mut common, vfio) = test_msix_common(true, 2048);
+        // The function mask prevents eventfd registration.
+        common
+            .update_msix_capabilities(2, &0xc000u16.to_le_bytes())
+            .unwrap();
+        assert_eq!(*vfio.requests.lock().unwrap(), vec![(0, vec![false])]);
+        common.write_bar(0, 1024 * 16 + 12, &0u32.to_le_bytes());
+        assert_eq!(vfio.requests.lock().unwrap().len(), 1);
+
+        common
+            .update_msix_capabilities(2, &0x8000u16.to_le_bytes())
+            .unwrap();
+        assert_eq!(
+            *vfio.requests.lock().unwrap(),
+            vec![(0, vec![false]), (1024, vec![true])]
+        );
+        // Sparse vectors must retain their MSI-X table indices.
+        common.write_bar(0, 2047 * 16 + 12, &0u32.to_le_bytes());
+        assert_eq!(
+            vfio.requests.lock().unwrap().last(),
+            Some(&(2047, vec![true]))
+        );
+
+        // Masking and unmasking must not register the eventfds again.
+        common.write_bar(0, 1024 * 16 + 12, &1u32.to_le_bytes());
+        common.write_bar(0, 1024 * 16 + 12, &0u32.to_le_bytes());
+        common
+            .update_msix_capabilities(2, &0xc000u16.to_le_bytes())
+            .unwrap();
+        common
+            .update_msix_capabilities(2, &0x8000u16.to_le_bytes())
+            .unwrap();
+        assert_eq!(vfio.requests.lock().unwrap().len(), 3);
+
+        common
+            .update_msix_capabilities(2, &0u16.to_le_bytes())
+            .unwrap();
+        common
+            .update_msix_capabilities(2, &0x8000u16.to_le_bytes())
+            .unwrap();
+        assert_eq!(
+            &vfio.requests.lock().unwrap()[3..],
+            &[
+                (0, vec![]),
+                (0, vec![false]),
+                (1024, vec![true]),
+                (2047, vec![true])
+            ]
+        );
+    }
+
+    #[test]
+    fn msix_retries_failed_wiring() {
+        let (mut common, vfio) = test_msix_common(true, 2048);
+        common.interrupt.msix.as_mut().unwrap().cap.table = 0x1000;
+        *vfio.fail_at.lock().unwrap() = Some(0);
+        assert!(
+            common
+                .update_msix_capabilities(2, &0x8000u16.to_le_bytes())
+                .is_err()
+        );
+        *vfio.fail_at.lock().unwrap() = Some(100);
+        common.write_bar(0, 0x1000 + 100 * 16 + 8, &0u64.to_le_bytes());
+        assert_eq!(*vfio.requests.lock().unwrap(), vec![(0, vec![false])]);
+
+        // Writing another entry must not retry the failed vector.
+        common.write_bar(0, 0x1000 + 200 * 16 + 12, &0u32.to_le_bytes());
+        assert_eq!(
+            *vfio.requests.lock().unwrap(),
+            vec![(0, vec![false]), (200, vec![true])]
+        );
+        common.write_bar(0, 0x1000 + 100 * 16 + 8, &0u64.to_le_bytes());
+        assert_eq!(
+            *vfio.requests.lock().unwrap(),
+            vec![(0, vec![false]), (200, vec![true]), (100, vec![true])]
+        );
+
+        // Clearing the function mask retries all unwired vectors.
+        *vfio.fail_at.lock().unwrap() = Some(300);
+        common.write_bar(0, 0x1000 + 300 * 16 + 12, &0u32.to_le_bytes());
+        assert_eq!(vfio.requests.lock().unwrap().len(), 3);
+        common
+            .update_msix_capabilities(2, &0xc000u16.to_le_bytes())
+            .unwrap();
+        common
+            .update_msix_capabilities(2, &0x8000u16.to_le_bytes())
+            .unwrap();
+        assert_eq!(
+            *vfio.requests.lock().unwrap(),
+            vec![
+                (0, vec![false]),
+                (200, vec![true]),
+                (100, vec![true]),
+                (300, vec![true])
+            ]
+        );
+    }
+
+    #[test]
+    fn msix_without_resize_uses_bulk_setup() {
+        let (mut common, vfio) = test_msix_common(false, 128);
+        common
+            .update_msix_capabilities(2, &0x8000u16.to_le_bytes())
+            .unwrap();
+        assert_eq!(*vfio.requests.lock().unwrap(), vec![(0, vec![true; 128])]);
+        common
+            .interrupt
+            .msix_write_table(100 * 16 + 12, &0u32.to_le_bytes());
+        common.update_msix_vectors(None).unwrap();
+        assert_eq!(vfio.requests.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn msix_restore_and_reset_rebuild_wiring() {
+        let (mut common, _) = test_msix_common(true, 2048);
+        common
+            .interrupt
+            .msix_write_table(100 * 16 + 12, &0u32.to_le_bytes());
+        common
+            .update_msix_capabilities(2, &0x8000u16.to_le_bytes())
+            .unwrap();
+        let state = common.state();
+        let snapshot = common
+            .interrupt
+            .msix
+            .as_mut()
+            .unwrap()
+            .bar
+            .snapshot()
+            .unwrap();
+        let msix_state = snapshot.to_state::<MsixConfigState>().unwrap();
+
+        let (mut restored, vfio) = test_msix_common(true, 2048);
+        restored
+            .set_state(&state, None, Some(msix_state), None)
+            .unwrap();
+        let expected = vec![(0, vec![false]), (100, vec![true])];
+        assert_eq!(*vfio.requests.lock().unwrap(), expected);
+        vfio.requests.lock().unwrap().clear();
+        restored.reset_and_rearm();
+        assert_eq!(*vfio.requests.lock().unwrap(), expected);
     }
 
     fn test_vfio_common<V: Vfio + 'static>(
