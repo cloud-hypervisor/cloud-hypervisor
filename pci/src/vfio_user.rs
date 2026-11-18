@@ -121,7 +121,7 @@ impl VfioUserPciDevice {
 
     /// Map all of the MMIO regions.
     pub fn map_mmio_regions(&mut self) -> Result<(), VfioUserPciDeviceError> {
-        for mmio_region in &mut self.common.mmio_regions {
+        for mmio_region in &mut self.common.bars {
             let (region_flags, region_size, file_offset, sparse_areas) = {
                 let client = self.client.lock().unwrap();
                 let region = client
@@ -212,7 +212,7 @@ impl VfioUserPciDevice {
     }
 
     fn unmap_mmio_regions(&mut self) {
-        for mmio_region in &mut self.common.mmio_regions {
+        for mmio_region in &mut self.common.bars {
             mmio_region.user_memory_regions.clear();
         }
     }
@@ -387,7 +387,7 @@ impl PciDevice for VfioUserPciDevice {
 
     fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> Result<(), io::Error> {
         info!("Moving BAR {bar_idx} -> 0x{new_base:x}");
-        for mmio_region in &mut self.common.mmio_regions {
+        for mmio_region in &mut self.common.bars {
             if mmio_region.index as usize != bar_idx {
                 continue;
             }
