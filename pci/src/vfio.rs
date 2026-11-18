@@ -919,6 +919,83 @@ pub(crate) struct VfioCommonConfig {
 }
 
 impl VfioCommon {
+    pub(crate) fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> Result<(), io::Error> {
+        for region in &mut self.bars {
+            if region.index as usize != bar_idx || region.start == GuestAddress(new_base) {
+                continue;
+            }
+            let moves = region
+                .bar_memory_regions
+                .iter()
+                .map(|bar_memory_region| {
+                    let new_address = new_base
+                        .checked_add(bar_memory_region.offset)
+                        .ok_or_else(|| io::Error::other("BAR address overflows"))?;
+                    new_address
+                        .checked_add(bar_memory_region.size() as u64)
+                        .ok_or_else(|| io::Error::other("BAR range overflows"))?;
+                    Ok((
+                        bar_memory_region.start(),
+                        new_address,
+                        bar_memory_region.p2p_mapped(),
+                    ))
+                })
+                .collect::<io::Result<Vec<_>>>()?;
+            for (i, &(_, new_address, map_p2p)) in moves.iter().enumerate() {
+                let bar_memory_region = &mut region.bar_memory_regions[i];
+                let result = (|| {
+                    bar_memory_region.unmap_p2p().map_err(io::Error::other)?;
+                    bar_memory_region
+                        .move_region(new_address)
+                        .map_err(io::Error::other)?;
+                    if map_p2p {
+                        bar_memory_region.map_for_p2p().map_err(io::Error::other)?;
+                    }
+                    Ok(())
+                })();
+                if let Err(e) = result {
+                    for (bar_memory_region, &(old_address, _, was_mapped)) in region
+                        .bar_memory_regions[..=i]
+                        .iter_mut()
+                        .zip(&moves[..=i])
+                        .rev()
+                    {
+                        if bar_memory_region.start() == old_address
+                            && bar_memory_region.p2p_mapped() == was_mapped
+                            && bar_memory_region.region.lock().unwrap().is_registered()
+                        {
+                            continue;
+                        }
+                        let rollback: io::Result<()> = (|| {
+                            bar_memory_region.unmap_p2p().map_err(io::Error::other)?;
+                            bar_memory_region
+                                .move_region(old_address)
+                                .map_err(io::Error::other)?;
+                            {
+                                let mapping = bar_memory_region.region.lock().unwrap();
+                                if !mapping.is_registered() {
+                                    mapping.register().map_err(io::Error::other)?;
+                                }
+                            }
+                            if was_mapped {
+                                bar_memory_region.map_for_p2p().map_err(io::Error::other)?;
+                            }
+                            Ok(())
+                        })();
+                        if let Err(rollback) = rollback {
+                            // Continuing would leave the BAR with inconsistent mappings.
+                            error!("FATAL: Failed to restore BAR mapping: {rollback}");
+                            process::exit(1);
+                        }
+                    }
+                    return Err(e);
+                }
+            }
+            region.start = GuestAddress(new_base);
+        }
+        Ok(())
+    }
+
     pub(crate) fn new(
         msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
@@ -2921,80 +2998,7 @@ impl PciDevice for VfioPciDevice {
     }
 
     fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> Result<(), io::Error> {
-        for region in &mut self.common.bars {
-            if region.index as usize != bar_idx || region.start == GuestAddress(new_base) {
-                continue;
-            }
-            let moves = region
-                .bar_memory_regions
-                .iter()
-                .map(|bar_memory_region| {
-                    let new_address = new_base
-                        .checked_add(bar_memory_region.offset)
-                        .ok_or_else(|| io::Error::other("BAR address overflows"))?;
-                    new_address
-                        .checked_add(bar_memory_region.size() as u64)
-                        .ok_or_else(|| io::Error::other("BAR range overflows"))?;
-                    Ok((
-                        bar_memory_region.start(),
-                        new_address,
-                        bar_memory_region.p2p_mapped(),
-                    ))
-                })
-                .collect::<io::Result<Vec<_>>>()?;
-            for (i, &(_, new_address, map_p2p)) in moves.iter().enumerate() {
-                let bar_memory_region = &mut region.bar_memory_regions[i];
-                let result = (|| {
-                    bar_memory_region.unmap_p2p().map_err(io::Error::other)?;
-                    bar_memory_region
-                        .move_region(new_address)
-                        .map_err(io::Error::other)?;
-                    if map_p2p {
-                        bar_memory_region.map_for_p2p().map_err(io::Error::other)?;
-                    }
-                    Ok(())
-                })();
-                if let Err(e) = result {
-                    for (bar_memory_region, &(old_address, _, was_mapped)) in region
-                        .bar_memory_regions[..=i]
-                        .iter_mut()
-                        .zip(&moves[..=i])
-                        .rev()
-                    {
-                        if bar_memory_region.start() == old_address
-                            && bar_memory_region.p2p_mapped() == was_mapped
-                            && bar_memory_region.region.lock().unwrap().is_registered()
-                        {
-                            continue;
-                        }
-                        let rollback: io::Result<()> = (|| {
-                            bar_memory_region.unmap_p2p().map_err(io::Error::other)?;
-                            bar_memory_region
-                                .move_region(old_address)
-                                .map_err(io::Error::other)?;
-                            {
-                                let mapping = bar_memory_region.region.lock().unwrap();
-                                if !mapping.is_registered() {
-                                    mapping.register().map_err(io::Error::other)?;
-                                }
-                            }
-                            if was_mapped {
-                                bar_memory_region.map_for_p2p().map_err(io::Error::other)?;
-                            }
-                            Ok(())
-                        })();
-                        if let Err(rollback) = rollback {
-                            // Continuing would leave the BAR with inconsistent mappings.
-                            error!("FATAL: Failed to restore BAR mapping: {rollback}");
-                            process::exit(1);
-                        }
-                    }
-                    return Err(e);
-                }
-            }
-            region.start = GuestAddress(new_base);
-        }
-        Ok(())
+        self.common.move_bar(bar_idx, new_base)
     }
 
     fn restore_bar_addr(&mut self, params: &BarReprogrammingParams) {
@@ -3305,6 +3309,74 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "kvm")]
+    #[test]
+    fn move_bar_restores_sparse_areas_after_failed_relocation() {
+        let page_size = get_page_size();
+        let vm = hypervisor::new()
+            .unwrap()
+            .create_vm(hypervisor::HypervisorVmConfig::default())
+            .unwrap();
+        let slot_allocator = Arc::new(MemorySlotAllocator::new(
+            Arc::new(AtomicU32::new(0)),
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let mut regions = Vec::new();
+        for address in [page_size, 3 * page_size, 6 * page_size] {
+            let mapping = GuestRegion::from_mmap(
+                vm_memory::MmapRegion::new(page_size as usize).unwrap(),
+                GuestAddress(address),
+                Arc::clone(&vm),
+                Arc::clone(&slot_allocator),
+                false,
+                false,
+                false,
+                hypervisor::MemoryVisibility::Shared,
+            )
+            .unwrap();
+            mapping.register().unwrap();
+            regions.push(VfioBarMemoryRegion {
+                offset: address - page_size,
+                region: Arc::new(Mutex::new(mapping)),
+                p2p_mapping: None,
+            });
+        }
+        // The second area will collide with this slot after the first moves.
+        let _blocker = regions.pop().unwrap();
+        let slots: Vec<_> = regions
+            .iter()
+            .map(|entry| entry.region.lock().unwrap().slot().unwrap())
+            .collect();
+        let mut common = test_vfio_common(Arc::new(DefaultVfio), None);
+        common.bars.push(VfioBar {
+            start: GuestAddress(page_size),
+            length: 3 * page_size,
+            type_: PciBarRegionType::Memory32BitRegion,
+            index: 0,
+            bar_memory_regions: regions,
+        });
+        let lookup_regions = common.bars.clone();
+
+        common.move_bar(0, 4 * page_size).unwrap_err();
+
+        assert_eq!(common.bars[0].start, GuestAddress(page_size));
+        for (i, entry) in common.bars[0].bar_memory_regions.iter().enumerate() {
+            let address = page_size + entry.offset;
+            let mapping = entry.region.lock().unwrap();
+            assert_eq!(mapping.start_addr(), GuestAddress(address));
+            assert_eq!(mapping.slot(), Some(slots[i]));
+            assert!(mapping.is_registered());
+        }
+        assert!(lookup_regions.check_range(page_size, 3 * page_size));
+        assert!(!lookup_regions.check_range(4 * page_size, page_size));
+        lookup_regions
+            .find_user_address(page_size, page_size)
+            .unwrap();
+        lookup_regions
+            .find_user_address(3 * page_size, page_size)
+            .unwrap();
+    }
+
     fn sparse_mmio_regions() -> Vec<VfioBar> {
         let page_size = get_page_size();
         let file =
@@ -3378,8 +3450,9 @@ mod tests {
     #[test]
     fn dma_lookup_through_cloned_bar_tracks_relocation() {
         let page_size = get_page_size();
-        let mut regions = sparse_mmio_regions();
-        let lookup_regions = regions.clone();
+        let mut common = test_vfio_common(Arc::new(DefaultVfio), None);
+        common.bars = sparse_mmio_regions();
+        let lookup_regions = common.bars.clone();
         let host_addresses = [
             lookup_regions
                 .find_user_address(page_size, page_size)
@@ -3390,11 +3463,8 @@ mod tests {
         ];
 
         for new_base in [10 * page_size, page_size] {
-            let old_base = regions[0].start.raw_value();
-            for entry in &mut regions[0].bar_memory_regions {
-                entry.move_region(new_base + entry.offset).unwrap();
-            }
-            regions[0].start = GuestAddress(new_base);
+            let old_base = common.bars[0].start.raw_value();
+            common.move_bar(0, new_base).unwrap();
 
             // Only the shared mappings change in the cloned lookup records.
             assert_eq!(lookup_regions[0].start, GuestAddress(page_size));
