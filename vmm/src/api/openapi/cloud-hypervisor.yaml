@@ -1851,7 +1851,7 @@ components:
 
     MemoryRestoreMode:
       type: string
-      enum: [Copy, OnDemand, CopyOnWrite]
+      enum: [Copy, OnDemand, OnDemandNoBackgroundFetchPages, CopyOnWrite]
       default: Copy
 
     ExternalFdTarget:

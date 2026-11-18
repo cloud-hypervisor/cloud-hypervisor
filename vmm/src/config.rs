@@ -3063,6 +3063,7 @@ pub enum MemoryRestoreMode {
     Copy,
     /// Restore lazily by faulting snapshot pages into guest RAM on demand.
     OnDemand,
+    OnDemandNoBackgroundFetchPages,
     /// Restore by mapping the snapshot memory file copy-on-write, sharing the
     /// page cache across VMs restored from the same snapshot.
     CopyOnWrite,
@@ -3081,6 +3082,7 @@ impl FromStr for MemoryRestoreMode {
         match s.to_lowercase().as_str() {
             "copy" => Ok(Self::Copy),
             "ondemand" => Ok(Self::OnDemand),
+            "ondemand_no_background_fetch_pages" => Ok(Self::OnDemandNoBackgroundFetchPages),
             "copyonwrite" => Ok(Self::CopyOnWrite),
             _ => Err(MemoryRestoreModeParseError::InvalidValue(s.to_owned())),
         }
@@ -3138,7 +3140,7 @@ pub struct RestoreConfig {
 impl RestoreConfig {
     pub const SYNTAX: &'static str = "Restore from a VM snapshot.\
         \nRestore parameters \"source_url=<source_url>,prefault=on|off,\
-        memory_restore_mode=copy|ondemand|copyonwrite,\
+        memory_restore_mode=copy|ondemand|ondemand_no_background_fetch_pages|copyonwrite,\
         external_fds=[net(<id>)@[<fd>,...],vfio(<id>)@[<fd>],iommu@[<fd>]],resume=true|false,\
         zone_updates=<list_of_updates>,\
         serial_file=<path>|serial_socket=<path>|serial_tcp=<ip>:<port>,\
@@ -3147,9 +3149,10 @@ impl RestoreConfig {
         \n`prefault` controls eager prefaulting for the copy-based restore path \
         (disabled by default)\
         \n`memory_restore_mode=copy` preserves the existing eager read-copy restore behavior, \
-        `memory_restore_mode=ondemand` enables lazy demand paging and fails restore if \
-        userfaultfd support is unavailable, and `memory_restore_mode=copyonwrite` maps the \
-        snapshot file copy-on-write (plain private RAM only; falls back to copy otherwise)\
+        `memory_restore_mode=ondemand` enables lazy demand paging and fails restore if userfaultfd \
+        support is unavailable, `memory_restore_mode=ondemand_no_background_fetch_pages` does the \
+        same without prefaulting pages in the background, and `memory_restore_mode=copyonwrite` \
+        maps the snapshot file copy-on-write (plain private RAM only; falls back to copy otherwise)\
         \n`external_fds` provides replacement file descriptors. `net(<id>)` entries replace \
         the FDs of network devices, `vfio(<id>)` entries replace VFIO cdev FDs, and `iommu` \
         provides the iommufd FD. \
@@ -3299,7 +3302,10 @@ impl RestoreConfig {
             return Err(ValidationError::InvalidRestorePrefaultWithOnDemand);
         }
 
-        if self.memory_restore_mode == MemoryRestoreMode::OnDemand {
+        if matches!(
+            self.memory_restore_mode,
+            MemoryRestoreMode::OnDemand | MemoryRestoreMode::OnDemandNoBackgroundFetchPages
+        ) {
             vm_config.check_postcopy_incompatible_device()?;
         }
 
