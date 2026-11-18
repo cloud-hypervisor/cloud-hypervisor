@@ -5982,13 +5982,17 @@ impl DeviceManager {
         self.hotplug_virtio_pci_device(device)
     }
 
-    pub fn counters(&self) -> HashMap<String, HashMap<&'static str, Wrapping<u64>>> {
+    pub fn counters(&self) -> HashMap<String, HashMap<&'static str, serde_json::Value>> {
         let mut counters = HashMap::new();
 
         for handle in &self.virtio_devices {
             let virtio_device = handle.virtio_device.lock().unwrap();
             if let Some(device_counters) = virtio_device.counters() {
-                counters.insert(handle.id().to_owned(), device_counters.clone());
+                let device_counters: HashMap<_, _> = device_counters
+                    .into_iter()
+                    .map(|(name, value)| (name, serde_json::Value::from(value.0)))
+                    .collect();
+                counters.insert(handle.id().to_owned(), device_counters);
             }
         }
 
