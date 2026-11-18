@@ -7033,6 +7033,19 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             // SAFETY: This input contains no inherited descriptors.
             unsafe {
                 RestoreConfig::parse(
+                    "source_url=/path/to/snapshot,memory_restore_mode=ondemand_no_background_fetch_pages",
+                )
+            }?,
+            RestoreConfig {
+                source_url: PathBuf::from("/path/to/snapshot"),
+                memory_restore_mode: MemoryRestoreMode::OnDemandNoBackgroundFetchPages,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe {
+                RestoreConfig::parse(
                     "source_url=/path/to/snapshot,resume=on,zone_updates=[zone1@1]",
                 )
             }?,
@@ -7127,6 +7140,14 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             .unwrap()
             .memory_restore_mode,
             MemoryRestoreMode::OnDemand
+        );
+        assert_eq!(
+            serde_json::from_str::<RestoreConfig>(
+                r#"{"source_url":"/path/to/snapshot","memory_restore_mode":"OnDemandNoBackgroundFetchPages"}"#
+            )
+            .unwrap()
+            .memory_restore_mode,
+            MemoryRestoreMode::OnDemandNoBackgroundFetchPages
         );
         assert_eq!(
             serde_json::from_str::<RestoreConfig>(
