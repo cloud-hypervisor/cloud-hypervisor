@@ -5993,10 +5993,16 @@ impl DeviceManager {
         for handle in &self.virtio_devices {
             let virtio_device = handle.virtio_device.lock().unwrap();
             if let Some(device_counters) = virtio_device.counters() {
-                let device_counters: HashMap<_, _> = device_counters
+                let mut device_counters: HashMap<_, _> = device_counters
                     .into_iter()
                     .map(|(name, value)| (name, serde_json::Value::from(value.0)))
                     .collect();
+                device_counters.insert(
+                    "device_type",
+                    serde_json::Value::from(
+                        VirtioDeviceType::from(virtio_device.device_type()).to_string(),
+                    ),
+                );
                 counters.insert(handle.id().to_owned(), device_counters);
             }
         }
