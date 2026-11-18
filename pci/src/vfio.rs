@@ -429,7 +429,7 @@ impl UserMemoryRegion {
 }
 
 #[derive(Clone)]
-pub struct MmioRegion {
+pub struct VfioBar {
     pub start: GuestAddress,
     pub length: GuestUsize,
     pub(crate) type_: PciBarRegionType,
@@ -437,14 +437,14 @@ pub struct MmioRegion {
     pub(crate) user_memory_regions: Vec<UserMemoryRegion>,
 }
 
-impl MmioRegion {
+impl VfioBar {
     /// Whether the BAR can be mapped for peer to peer DMA.
     fn is_p2p_mappable(&self) -> bool {
         self.length >= get_page_size()
     }
 
     /// Whether both BAR descriptions refer to the same backing regions.
-    pub fn has_matching_mappings(&self, other: &MmioRegion) -> bool {
+    pub fn has_matching_mappings(&self, other: &VfioBar) -> bool {
         self.user_memory_regions.len() == other.user_memory_regions.len()
             && self.user_memory_regions.iter().all(|u| {
                 other
@@ -456,7 +456,7 @@ impl MmioRegion {
 }
 
 #[derive(Debug, Error)]
-enum MmioRegionRangeError {
+enum VfioBarRangeError {
     #[error("User mapping not found: gpa={gpa:#x}, size={size:#x}")]
     UserMappingNotFound { gpa: u64, size: u64 },
 }
@@ -465,17 +465,13 @@ enum MmioRegionRangeError {
 ///
 /// [`Self::find_user_address`] must always either return `Err`
 /// or a pointer to `size` bytes of valid memory.
-unsafe trait MmioRegionRange {
+unsafe trait VfioBarRange {
     fn check_range(&self, guest_addr: u64, size: u64) -> bool;
-    fn find_user_address(
-        &self,
-        guest_addr: u64,
-        size: u64,
-    ) -> Result<*mut u8, MmioRegionRangeError>;
+    fn find_user_address(&self, guest_addr: u64, size: u64) -> Result<*mut u8, VfioBarRangeError>;
 }
 
 // SAFETY: See the comment in `find_user_address`.
-unsafe impl MmioRegionRange for Vec<MmioRegion> {
+unsafe impl VfioBarRange for Vec<VfioBar> {
     // Check if a guest address is within the range of mmio regions
     fn check_range(&self, guest_addr: u64, size: u64) -> bool {
         let Some(guest_addr_end) = guest_addr.checked_add(size) else {
@@ -499,11 +495,7 @@ unsafe impl MmioRegionRange for Vec<MmioRegion> {
     }
 
     // Locate the user region address for a guest address within all mmio regions
-    fn find_user_address(
-        &self,
-        guest_addr: u64,
-        size: u64,
-    ) -> Result<*mut u8, MmioRegionRangeError> {
+    fn find_user_address(&self, guest_addr: u64, size: u64) -> Result<*mut u8, VfioBarRangeError> {
         for region in self.iter() {
             for user_region in region.user_memory_regions.iter() {
                 let mapping = user_region.mapping.lock().unwrap();
@@ -530,7 +522,7 @@ unsafe impl MmioRegionRange for Vec<MmioRegion> {
             }
         }
 
-        Err(MmioRegionRangeError::UserMappingNotFound {
+        Err(VfioBarRangeError::UserMappingNotFound {
             gpa: guest_addr,
             size,
         })
@@ -876,7 +868,7 @@ impl ConfigPatch {
 
 pub(crate) struct VfioCommon {
     pub(crate) configuration: PciConfiguration,
-    pub(crate) mmio_regions: Vec<MmioRegion>,
+    pub(crate) bars: Vec<VfioBar>,
     pub(crate) interrupt: Interrupt,
     pub(crate) msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
     pub(crate) legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
@@ -949,7 +941,7 @@ impl VfioCommon {
         let vendor_id = vfio_wrapper.read_config_word(PCI_CONFIG_VENDOR_ID_OFFSET);
 
         let mut vfio_common = VfioCommon {
-            mmio_regions: Vec::new(),
+            bars: Vec::new(),
             configuration,
             interrupt: Interrupt {
                 intx: None,
@@ -1213,7 +1205,7 @@ impl VfioCommon {
             }
 
             bars.push(bar);
-            self.mmio_regions.push(MmioRegion {
+            self.bars.push(VfioBar {
                 start: bar_addr,
                 length: region_size,
                 type_: region_type,
@@ -1235,7 +1227,7 @@ impl VfioCommon {
         mmio32_allocator: &mut AddressAllocator,
         mmio64_allocator: &mut AddressAllocator,
     ) -> Result<(), PciDeviceError> {
-        for region in self.mmio_regions.iter() {
+        for region in self.bars.iter() {
             match region.type_ {
                 PciBarRegionType::IoRegion => {
                     allocator.free_io_addresses(region.start, region.length);
@@ -1759,8 +1751,8 @@ impl VfioCommon {
         Ok(())
     }
 
-    fn find_region(&self, addr: u64) -> Option<MmioRegion> {
-        for region in self.mmio_regions.iter() {
+    fn find_region(&self, addr: u64) -> Option<VfioBar> {
+        for region in self.bars.iter() {
             if addr >= region.start.raw_value()
                 && addr < region.start.unchecked_add(region.length).raw_value()
             {
@@ -2526,7 +2518,7 @@ impl VfioPciDevice {
         let fd = self.device.as_raw_fd();
         // SAFETY: fd is guaranteed valid
         let fd = unsafe { BorrowedFd::borrow_raw(fd) };
-        for region in self.common.mmio_regions.iter_mut() {
+        for region in self.common.bars.iter_mut() {
             if self
                 .common
                 .x_exclude_mmap_bars
@@ -2700,7 +2692,7 @@ impl VfioPciDevice {
             ("unmap", "Unmapped")
         };
 
-        for mmio_region in self.common.mmio_regions.iter_mut() {
+        for mmio_region in self.common.bars.iter_mut() {
             for user_memory_region in mmio_region.user_memory_regions.iter_mut() {
                 let Some(dma_buf) = &user_memory_region.dma_buf else {
                     continue;
@@ -2735,7 +2727,7 @@ impl VfioPciDevice {
     }
 
     pub fn unmap_mmio_regions(&mut self) {
-        for region in &mut self.common.mmio_regions {
+        for region in &mut self.common.bars {
             for mut user_memory_region in region.user_memory_regions.drain(..) {
                 if let Err(e) = user_memory_region.unmap_p2p(self.vfio_ops.as_ref()) {
                     // The backing memory must remain alive while mapped for DMA.
@@ -2746,8 +2738,8 @@ impl VfioPciDevice {
         }
     }
 
-    pub fn mmio_regions(&self) -> Vec<MmioRegion> {
-        self.common.mmio_regions.clone()
+    pub fn mmio_regions(&self) -> Vec<VfioBar> {
+        self.common.bars.clone()
     }
 
     // IOVA ranges for DMA logging. Without a virtual IOMMU the device sees an
@@ -2894,7 +2886,7 @@ impl PciDevice for VfioPciDevice {
     }
 
     fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> Result<(), io::Error> {
-        for region in &mut self.common.mmio_regions {
+        for region in &mut self.common.bars {
             if region.index as usize != bar_idx || region.start == GuestAddress(new_base) {
                 continue;
             }
@@ -3080,7 +3072,7 @@ impl Migratable for VfioPciDevice {
 pub struct VfioDmaMapping<M: GuestAddressSpace> {
     vfio_ops: Arc<dyn VfioOps>,
     memory: Arc<M>,
-    mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
+    mmio_regions: Arc<Mutex<Vec<VfioBar>>>,
 }
 
 impl<M: GuestAddressSpace> VfioDmaMapping<M> {
@@ -3092,7 +3084,7 @@ impl<M: GuestAddressSpace> VfioDmaMapping<M> {
     pub fn new(
         vfio_ops: Arc<dyn VfioOps>,
         memory: Arc<M>,
-        mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
+        mmio_regions: Arc<Mutex<Vec<VfioBar>>>,
     ) -> Self {
         VfioDmaMapping {
             vfio_ops,
@@ -3294,7 +3286,7 @@ mod tests {
         }
     }
 
-    fn sparse_mmio_regions() -> Vec<MmioRegion> {
+    fn sparse_mmio_regions() -> Vec<VfioBar> {
         let page_size = get_page_size();
         let file =
             TempFile::new_with_prefix(temp_dir().join("cloud-hypervisor-vfio-sparse-")).unwrap();
@@ -3325,7 +3317,7 @@ mod tests {
             .into(),
         ));
 
-        vec![MmioRegion {
+        vec![VfioBar {
             start: GuestAddress(page_size),
             length: 4 * page_size,
             type_: PciBarRegionType::Memory32BitRegion,
@@ -3650,7 +3642,7 @@ mod tests {
         );
         VfioCommon {
             configuration,
-            mmio_regions: Vec::new(),
+            bars: Vec::new(),
             interrupt: Interrupt {
                 intx: None,
                 msi: None,
@@ -4214,7 +4206,7 @@ mod tests {
             .set_region_type(PciBarRegionType::Memory32BitRegion)
             .set_prefetchable(PciBarPrefetchable::NotPrefetchable);
         common.configuration.add_pci_bar(&bar_cfg).unwrap();
-        common.mmio_regions.push(MmioRegion {
+        common.bars.push(VfioBar {
             start: GuestAddress(bar0_gpa),
             length: bar0_size,
             type_: PciBarRegionType::Memory32BitRegion,

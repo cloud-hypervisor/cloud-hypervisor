@@ -97,8 +97,8 @@ use libc::{
 use log::{debug, error, info, warn};
 use net_util::MacAddr;
 use pci::{
-    DeviceRelocation, MmioRegion, PasidCap, PciBarConfiguration, PciBarRegionType, PciBdf,
-    PciDevice, PciExpressCapability, VfioDmaMapping, VfioPciDevice, VfioUserDmaMapping,
+    DeviceRelocation, PasidCap, PciBarConfiguration, PciBarRegionType, PciBdf, PciDevice,
+    PciExpressCapability, VfioBar, VfioDmaMapping, VfioPciDevice, VfioUserDmaMapping,
     VfioUserPciDevice, VfioUserPciDeviceError,
 };
 use rate_limiter::group;
@@ -1126,7 +1126,7 @@ pub struct DeviceManager {
 
     rate_limit_groups: HashMap<String, Arc<RateLimiterGroup>>,
 
-    mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
+    mmio_regions: Arc<Mutex<Vec<VfioBar>>>,
 
     // Track shared pages for SEV-SNP VFIO
     #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
