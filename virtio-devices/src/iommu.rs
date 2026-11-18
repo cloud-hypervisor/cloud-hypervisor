@@ -1219,6 +1219,37 @@ pub struct IommuState {
     probe_size: u32,
 }
 
+fn restore_domain_mappings(entries: Vec<(u64, Mapping)>) -> io::Result<BTreeMap<u64, Mapping>> {
+    let mut mappings: BTreeMap<u64, Mapping> = BTreeMap::new();
+    for (start, m) in entries {
+        let end = inclusive_end(start, m.size).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "invalid restored IOMMU mapping: start 0x{start:x} size 0x{:x}",
+                    m.size
+                ),
+            )
+        })?;
+        if mappings
+            .range(..=end)
+            .next_back()
+            .and_then(|(&s, prev)| inclusive_end(s, prev.size))
+            .is_some_and(|prev_end| prev_end >= start)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "overlapping restored IOMMU mapping: start 0x{start:x} size 0x{:x}",
+                    m.size
+                ),
+            ));
+        }
+        mappings.insert(start, m);
+    }
+    Ok(mappings)
+}
+
 impl Iommu {
     #[expect(clippy::too_many_arguments)]
     pub fn new(
@@ -1241,16 +1272,16 @@ impl Iommu {
                     state
                         .domains
                         .into_iter()
-                        .map(|(k, v)| {
-                            (
+                        .map(|(k, (entries, bypass))| {
+                            Ok((
                                 k,
                                 Domain {
-                                    mappings: v.0.into_iter().collect(),
-                                    bypass: v.1,
+                                    mappings: restore_domain_mappings(entries)?,
+                                    bypass,
                                 },
-                            )
+                            ))
                         })
-                        .collect(),
+                        .collect::<io::Result<BTreeMap<_, _>>>()?,
                     true,
                     Some(state.probe_size),
                 )
@@ -1892,5 +1923,70 @@ mod tests {
         assert_eq!(len.unwrap(), 0);
         assert_eq!(status, INITIAL_STATUS);
         assert_eq!(mapping.endpoints.read().unwrap().get(&0), Some(&0));
+    }
+
+    #[test]
+    fn restore_validates_domain_mappings() {
+        let base_state = new_iommu().state();
+        let entry = |iova, gpa, size| {
+            (
+                iova,
+                Mapping {
+                    gpa,
+                    size,
+                    flags: Mapping::unrestricted_flags(),
+                },
+            )
+        };
+        let restore_entries = |entries: Vec<(u64, Mapping)>| {
+            let state = super::IommuState {
+                avail_features: base_state.avail_features,
+                acked_features: base_state.acked_features,
+                endpoints: vec![(0, 0)],
+                domains: vec![(0, (entries, false))],
+                probe_size: base_state.probe_size,
+            };
+            Iommu::new(
+                "test-iommu-restore".to_string(),
+                SeccompAction::Allow,
+                EventFd::new(EFD_NONBLOCK).unwrap(),
+                (0, 0),
+                Vec::new(),
+                64,
+                false,
+                Some(state),
+            )
+        };
+
+        // Disjoint mappings (even in unsorted order) restore cleanly.
+        let (_, restored) = restore_entries(vec![
+            entry(0x3000, 0x9000, 0x1000),
+            entry(0x1000, 0x4000, 0x2000),
+        ])
+        .unwrap();
+        assert_eq!(
+            restored
+                .translate_gva(0, 0x1000, 0x1000, AccessType::Read)
+                .unwrap(),
+            0x4000
+        );
+        assert_eq!(
+            restored
+                .translate_gva(0, 0x3000, 0x1000, AccessType::Read)
+                .unwrap(),
+            0x9000
+        );
+
+        // Zero size, u64 overflow, overlapping, and duplicate-start entries fail.
+        for bad_entries in [
+            vec![entry(0x1000, 0x4000, 0)],
+            vec![entry(u64::MAX - 0xfff, 0x4000, 0x2000)],
+            vec![entry(0x1000, 0x4000, 0x3000), entry(0x2000, 0x8000, 0x1000)],
+            vec![entry(0x2000, 0x8000, 0x1000), entry(0x1000, 0x4000, 0x1001)],
+            vec![entry(0x1000, 0x4000, 0x1000), entry(0x1000, 0x8000, 0x1000)],
+        ] {
+            let err = restore_entries(bad_entries).err().unwrap();
+            assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        }
     }
 }
