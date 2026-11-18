@@ -704,6 +704,12 @@ components:
       type: object
       additionalProperties:
         type: object
+        required:
+          - device_type
+        properties:
+          device_type:
+            type: string
+            description: The virtio device type, such as block or net
         additionalProperties:
           type: integer
           format: int64

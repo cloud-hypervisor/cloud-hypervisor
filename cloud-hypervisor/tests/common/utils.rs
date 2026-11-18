@@ -805,6 +805,9 @@ pub(crate) fn get_counters(api_socket: &str) -> Counters {
     let counters: HashMap<&str, HashMap<&str, serde_json::Value>> =
         serde_json::from_slice(&cmd_output).unwrap();
 
+    assert_eq!(counters["_net2"]["device_type"], "net");
+    assert_eq!(counters["_disk0"]["device_type"], "block");
+
     let rx_bytes = counters["_net2"]["rx_bytes"].as_u64().unwrap();
     let rx_frames = counters["_net2"]["rx_frames"].as_u64().unwrap();
     let tx_bytes = counters["_net2"]["tx_bytes"].as_u64().unwrap();
