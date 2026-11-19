@@ -121,7 +121,9 @@ use virtio_devices::{
     balloon, mem, net, transport, vdpa, vhost_user, vsock,
 };
 use vm_allocator::page_size::get_page_size;
-use vm_allocator::{AddressAllocator, GuestRegionError, InterruptAllocError, SystemAllocator};
+use vm_allocator::{
+    AddressAllocator, AllocateDirection, GuestRegionError, InterruptAllocError, SystemAllocator,
+};
 use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptRemapping, LegacyIrqGroupConfig, MsiIrqGroupConfig,
@@ -3682,7 +3684,12 @@ impl DeviceManager {
                 .mem64_allocator
                 .lock()
                 .unwrap()
-                .allocate(None, bar_size as GuestUsize, Some(bar_size))
+                .allocate_direction(
+                    None,
+                    bar_size as GuestUsize,
+                    Some(bar_size),
+                    AllocateDirection::BottomUp,
+                )
                 .ok_or(DeviceManagerError::PmemRangeAllocation)?;
 
             (base.raw_value(), size)
