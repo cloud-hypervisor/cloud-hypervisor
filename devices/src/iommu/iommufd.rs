@@ -129,6 +129,12 @@ impl IommufdIommu {
             .map_err(Error::AllocateVeventq)
     }
 
+    pub fn allocate_cmdqv_veventq(&self) -> Result<IommufdVEventQ, Error> {
+        self.viommu
+            .allocate_cmdqv_veventq(VEVENTQ_DEPTH)
+            .map_err(Error::AllocateVeventq)
+    }
+
     pub fn register_endpoint(
         &self,
         virt_id: u32,
@@ -377,10 +383,17 @@ impl Smmuv3Iommufd {
             device.set_max_cmdq_size(Smmuv3::max_cmdq_size(host_info.idr[1]));
         }
         let device = Arc::new(Mutex::new(device));
-        let fault_forwarder = FaultForwarder::new(vec![Veventq::Smmuv3(
+        let mut veventqs = vec![Veventq::Smmuv3(
             backend.allocate_veventq()?,
             Arc::clone(&device),
-        )])?;
+        )];
+        if let Some(cmdqv) = &cmdqv {
+            veventqs.push(Veventq::Tegra241Cmdqv(
+                backend.allocate_cmdqv_veventq()?,
+                Arc::clone(cmdqv),
+            ));
+        }
+        let fault_forwarder = FaultForwarder::new(veventqs)?;
 
         Ok(Self {
             vintf_page,
@@ -443,12 +456,13 @@ impl Smmuv3Iommufd {
 
 enum Veventq {
     Smmuv3(IommufdVEventQ, Arc<Mutex<Smmuv3>>),
+    Tegra241Cmdqv(IommufdVEventQ, Arc<Mutex<Tegra241Cmdqv>>),
 }
 
 impl Veventq {
     fn as_raw_fd(&self) -> RawFd {
         match self {
-            Veventq::Smmuv3(veventq, _) => veventq.as_raw_fd(),
+            Veventq::Smmuv3(veventq, _) | Veventq::Tegra241Cmdqv(veventq, _) => veventq.as_raw_fd(),
         }
     }
 }
@@ -528,6 +542,16 @@ impl FaultForwarder {
                         Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
                         Err(e) => warn!("SMMUv3 vEVENTQ read failed: {e}"),
                     },
+                    Veventq::Tegra241Cmdqv(veventq, cmdqv) => match veventq.read_events() {
+                        Ok(records) => {
+                            let mut cmdqv = cmdqv.lock().unwrap();
+                            for record in records {
+                                Self::forward_cmdqv_record(&mut cmdqv, record);
+                            }
+                        }
+                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+                        Err(e) => warn!("Tegra241 CMDQV vEVENTQ read failed: {e}"),
+                    },
                 }
             }
         }
@@ -559,6 +583,32 @@ impl FaultForwarder {
                     warn!("SMMUv3 vEVENTQ lost events at the tail");
                 }
                 device.set_event_overflow();
+            }
+        }
+    }
+
+    fn forward_cmdqv_record(cmdqv: &mut Tegra241Cmdqv, record: IommufdVEvent) {
+        if record.lost > 0 {
+            warn!(
+                "Tegra241 CMDQV vEVENTQ lost {} events before sequence {}",
+                record.lost, record.header.sequence
+            );
+        }
+
+        match record.data {
+            Some(IommufdVEventData::Tegra241Cmdqv(evt)) => {
+                cmdqv.report_vcmdq_errors(evt.lvcmdq_err_map.map(u64::from_le));
+            }
+            Some(IommufdVEventData::Smmuv3(_)) => {
+                warn!("Tegra241 CMDQV vEVENTQ yielded an unexpected SMMUv3 record");
+            }
+            // Header without a record.
+            None => {
+                if record.header.flags & iommu_veventq_flag_IOMMU_VEVENTQ_FLAG_LOST_EVENTS == 0 {
+                    warn!("Tegra241 CMDQV vEVENTQ yielded a header with no record");
+                } else {
+                    warn!("Tegra241 CMDQV vEVENTQ lost events at the tail");
+                }
             }
         }
     }
