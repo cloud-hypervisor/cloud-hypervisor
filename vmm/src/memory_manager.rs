@@ -883,7 +883,6 @@ impl MemoryManager {
                     Arc::clone(slot_allocator),
                     zone.mergeable,
                     log_dirty,
-                    hypervisor::MemoryVisibility::Private,
                 )?;
 
                 // Add region to the list of regions associated with the
@@ -1048,7 +1047,6 @@ impl MemoryManager {
                         Arc::clone(slot_allocator),
                         zone_config.mergeable,
                         log_dirty,
-                        hypervisor::MemoryVisibility::Private,
                     )?;
                     memory_regions.push(Arc::clone(&region));
                     if let Some(memory_zone) = memory_zones.get_mut(&state.zone_id) {
@@ -2181,7 +2179,9 @@ impl MemoryManager {
 
         for (zone_id, regions) in list {
             for (region, virtio_mem) in regions {
-                region.register().map_err(Error::RegisterGuestRegion)?;
+                region
+                    .register_guest_ram()
+                    .map_err(Error::RegisterGuestRegion)?;
                 self.guest_ram_regions.push(GuestRamRegion {
                     region: Arc::clone(&region),
                     zone_id: zone_id.clone(),
@@ -2233,7 +2233,6 @@ impl MemoryManager {
             false,
             false,
             false,
-            hypervisor::MemoryVisibility::Private,
         )
         .map_err(Error::CreateUefiFlash)?;
         uefi_region.register().map_err(Error::CreateUefiFlash)?;
@@ -2393,7 +2392,6 @@ impl MemoryManager {
                                 Arc::clone(&memory_slot_allocator),
                                 zone.mergeable,
                                 dynamic,
-                                hypervisor::MemoryVisibility::Private,
                             )?;
 
                             guest_memory
@@ -2806,7 +2804,6 @@ impl MemoryManager {
         slot_allocator: Arc<MemorySlotAllocator>,
         mergeable: bool,
         log_dirty: bool,
-        visibility: hypervisor::MemoryVisibility,
     ) -> Result<Arc<GuestRegion>, Error> {
         let r = Self::create_ram_region_raw(
             backing_file,
@@ -2829,7 +2826,6 @@ impl MemoryManager {
             mergeable,
             false,
             log_dirty,
-            visibility,
         )
         .map_err(Error::RegisterGuestRegion)?;
         Ok(Arc::new(region))
@@ -2922,7 +2918,6 @@ impl MemoryManager {
                 .get(DEFAULT_MEMORY_ZONE)
                 .map_or(self.mergeable, |z| z.mergeable),
             self.log_dirty,
-            hypervisor::MemoryVisibility::Private,
         )?;
 
         if self.prefault {
@@ -2936,7 +2931,9 @@ impl MemoryManager {
             }])?;
         }
 
-        region.register().map_err(Error::RegisterGuestRegion)?;
+        region
+            .register_guest_ram()
+            .map_err(Error::RegisterGuestRegion)?;
         self.guest_memory
             .add_region(&region)
             .map_err(Error::GuestRegionCollection)?;

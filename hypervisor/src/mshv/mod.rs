@@ -1956,7 +1956,7 @@ impl vm::Vm for MshvVm {
         userspace_addr: *mut u8,
         readonly: bool,
         _log_dirty_pages: bool,
-        _visibility: vm::MemoryVisibility,
+        _guest_ram: bool,
     ) -> vm::Result<()> {
         let mut flags = 1 << MSHV_SET_MEM_BIT_EXECUTABLE;
         if !readonly {

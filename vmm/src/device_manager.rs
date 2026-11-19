@@ -2096,7 +2096,6 @@ impl DeviceManager {
             Arc::clone(self.memory_manager.lock().unwrap().memory_slot_allocator()),
             false,
             false,
-            hypervisor::MemoryVisibility::Shared,
         )
         .map_err(DeviceManagerError::MemoryManager)?;
         region
@@ -3714,7 +3713,6 @@ impl DeviceManager {
             false,
             false,
             false,
-            hypervisor::MemoryVisibility::Shared,
         )
         .map_err(DeviceManagerError::RegisterGuestRegion)?;
         mapping
@@ -5317,7 +5315,6 @@ impl DeviceManager {
             false,
             false,
             false,
-            hypervisor::MemoryVisibility::Shared,
         )
         .map_err(DeviceManagerError::RegisterGuestRegion)?;
         region

@@ -65,7 +65,6 @@ pub struct GuestRegion {
     mergeable: bool,
     readonly: bool,
     log_dirty_pages: bool,
-    visibility: hypervisor::MemoryVisibility,
 }
 
 impl fmt::Debug for GuestRegion {
@@ -80,7 +79,6 @@ impl fmt::Debug for GuestRegion {
 
 impl GuestRegion {
     /// Wrap a mapping and reserve a slot without registering it with the VM.
-    #[expect(clippy::too_many_arguments)]
     pub fn from_mmap(
         mapping: MmapRegion<AtomicBitmap>,
         guest_addr: GuestAddress,
@@ -89,7 +87,6 @@ impl GuestRegion {
         mergeable: bool,
         readonly: bool,
         log_dirty_pages: bool,
-        visibility: hypervisor::MemoryVisibility,
     ) -> Result<Self, Error> {
         let region = GuestRegionMmap::new(mapping, guest_addr)
             .ok_or(Error::InvalidGuestAddress(guest_addr.raw_value()))?;
@@ -104,7 +101,6 @@ impl GuestRegion {
             mergeable,
             readonly,
             log_dirty_pages,
-            visibility,
         })
     }
 
@@ -142,22 +138,23 @@ impl GuestRegion {
                 .build()
         }
         .map_err(Error::MmapRegion)?;
-        let mut region = Self::from_mmap(
-            mapping,
-            guest_addr,
-            vm,
-            slot_allocator,
-            false,
-            false,
-            false,
-            hypervisor::MemoryVisibility::Shared,
-        )?;
+        let mut region =
+            Self::from_mmap(mapping, guest_addr, vm, slot_allocator, false, false, false)?;
         region.aligned_mapping = Some(backing);
         Ok(region)
     }
 
     /// Register the region with the hypervisor.
     pub fn register(&self) -> Result<(), Error> {
+        self.register_region(false)
+    }
+
+    /// Register a guest RAM region with the hypervisor.
+    pub fn register_guest_ram(&self) -> Result<(), Error> {
+        self.register_region(true)
+    }
+
+    fn register_region(&self, guest_ram: bool) -> Result<(), Error> {
         let vm = self.vm.as_ref().ok_or(Error::MissingVm)?;
         let guest_phys_addr = self.region.start_addr().raw_value();
         let memory_size = self.region.size();
@@ -176,7 +173,7 @@ impl GuestRegion {
                     userspace_addr,
                     self.readonly,
                     self.log_dirty_pages,
-                    self.visibility,
+                    guest_ram,
                 )
             }
             .map_err(Error::CreateRegion)?;
@@ -282,14 +279,14 @@ impl GuestRegion {
             self.region = region;
             return Ok(());
         }
-        if self.visibility != hypervisor::MemoryVisibility::Shared {
+        let vm = self.vm.as_ref().unwrap();
+        let slot = self.slot.unwrap();
+        if vm.is_slot_guest_memfd(slot) {
             return Err(Error::MovePrivateRegion);
         }
         if self.region.start_addr() == guest_addr {
             return Ok(());
         }
-        let vm = self.vm.as_ref().unwrap();
-        let slot = self.slot.unwrap();
         // SAFETY: exclusive access keeps the old region and its mapping alive.
         unsafe {
             vm.remove_user_memory_region(
@@ -311,7 +308,7 @@ impl GuestRegion {
                 region.as_ptr(),
                 self.readonly,
                 self.log_dirty_pages,
-                self.visibility,
+                false,
             )
         }
         .map_err(Error::CreateRegion)?;
@@ -380,7 +377,6 @@ impl From<GuestRegionMmap<AtomicBitmap>> for GuestRegion {
             mergeable: false,
             readonly: false,
             log_dirty_pages: false,
-            visibility: hypervisor::MemoryVisibility::Shared,
         }
     }
 }

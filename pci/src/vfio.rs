@@ -3415,7 +3415,6 @@ mod tests {
                 false,
                 false,
                 false,
-                hypervisor::MemoryVisibility::Shared,
             )
             .unwrap();
             mapping.register().unwrap();
@@ -3478,7 +3477,6 @@ mod tests {
                 false,
                 false,
                 false,
-                hypervisor::MemoryVisibility::Shared,
             )
             .unwrap();
             mapping.register().unwrap();

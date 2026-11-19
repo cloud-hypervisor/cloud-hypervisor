@@ -3380,14 +3380,15 @@ mod tests {
             false,
             false,
             false,
-            hypervisor::MemoryVisibility::Shared,
         )
         .unwrap();
         let mem = GuestMemory::from_regions(vec![region]).unwrap().memory();
         mem.write_slice(&code, load_addr)
             .expect("Writing code to memory failed");
         for region in mem.iter() {
-            region.register().expect("Cannot configure guest memory");
+            region
+                .register_guest_ram()
+                .expect("Cannot configure guest memory");
         }
 
         let mut vcpu = vm

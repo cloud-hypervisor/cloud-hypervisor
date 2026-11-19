@@ -222,15 +222,6 @@ pub trait MemoryConversionHandler: Send + Sync {
     fn handle_conversion(&self, gpa: u64, size: u64, to_shared: bool) -> anyhow::Result<()>;
 }
 
-/// Whether guest memory is shared or private from the host
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum MemoryVisibility {
-    /// Host-visible guest RAM.
-    Shared,
-    /// Confidential guest RAM (guest_memfd).
-    Private,
-}
-
 /// Trait to represent a Vm
 ///
 /// This crate provides a hypervisor-agnostic interfaces for Vm
@@ -288,7 +279,7 @@ pub trait Vm: Send + Sync + Any {
         userspace_addr: *mut u8,
         readonly: bool,
         log_dirty_pages: bool,
-        visibility: MemoryVisibility,
+        guest_ram: bool,
     ) -> Result<()>;
     /// Removes a guest physical memory slot.
     ///
@@ -391,6 +382,11 @@ pub trait Vm: Send + Sync + Any {
     /// Register a handler invoked on guest-memory shared/private conversions.
     fn register_memory_conversion_handler(&self, _handler: Arc<dyn MemoryConversionHandler>) {
         unimplemented!("memory conversion handlers are only supported on the KVM backend")
+    }
+
+    /// Returns whether the slot is backed by guest_memfd.
+    fn is_slot_guest_memfd(&self, _slot: u32) -> bool {
+        false
     }
 
     /// Initialize the VM

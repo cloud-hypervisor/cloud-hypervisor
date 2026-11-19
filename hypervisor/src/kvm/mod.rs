@@ -572,6 +572,12 @@ impl vm::Vm for KvmVm {
             .expect("Memory conversion handler already registered");
     }
 
+    fn is_slot_guest_memfd(&self, slot: u32) -> bool {
+        self.memory_slots
+            .as_ref()
+            .is_some_and(|slots| slots.read().unwrap().contains_key(&slot))
+    }
+
     #[cfg(feature = "sev_snp")]
     fn sev_snp_init(&self, guest_policy: igvm_defs::SnpPolicy) -> vm::Result<()> {
         self.sev_fd
@@ -928,7 +934,7 @@ impl vm::Vm for KvmVm {
         userspace_addr: *mut u8,
         readonly: bool,
         log_dirty_pages: bool,
-        visibility: vm::MemoryVisibility,
+        guest_ram: bool,
     ) -> vm::Result<()> {
         let mut flags = 0;
         if readonly {
@@ -938,12 +944,7 @@ impl vm::Vm for KvmVm {
 
         // Create a per-region guest_memfd when supported.
         // Each region gets its own fd sized exactly to memory_size
-        let guest_memfd = if self
-            .memory_slots
-            .as_ref()
-            .filter(|_| visibility == vm::MemoryVisibility::Private)
-            .is_some()
-        {
+        let guest_memfd = if guest_ram && self.memory_slots.is_some() {
             if log_dirty_pages {
                 return Err(vm::HypervisorVmError::CreateUserMemory(anyhow!(
                     "Error creating regions with both 'dirty-pages-log' and 'private' visibility."
@@ -992,7 +993,7 @@ impl vm::Vm for KvmVm {
         }
 
         #[cfg(feature = "sev_snp")]
-        if visibility == vm::MemoryVisibility::Private
+        if guest_ram
             && self.memory_slots.is_some()
             && let Err(e) = self.fd.set_memory_attributes(kvm_memory_attributes {
                 address: region.guest_phys_addr,

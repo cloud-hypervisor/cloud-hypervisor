@@ -66,7 +66,7 @@ pub use kvm::{AiaState, riscv64};
 use serde::{Deserialize, Serialize};
 pub use vm::{
     DataMatch, HypervisorVmError, InterruptSourceConfig, LegacyIrqSourceConfig,
-    MemoryConversionHandler, MemoryVisibility, MsiIrqSourceConfig, Vm, VmOps,
+    MemoryConversionHandler, MsiIrqSourceConfig, Vm, VmOps,
 };
 
 pub use crate::hypervisor::{Hypervisor, HypervisorError};
