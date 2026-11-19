@@ -3659,6 +3659,7 @@ impl DeviceManager {
             return Err(DeviceManagerError::PmemSizeNotAligned);
         }
 
+        let bar_size = size.next_power_of_two();
         let (region_base, region_size) = if let Some((base, size)) = region_range {
             // The memory needs to be 2MiB aligned in order to support
             // hugepages.
@@ -3668,7 +3669,7 @@ impl DeviceManager {
                 .unwrap()
                 .allocate(
                     Some(GuestAddress(base)),
-                    size as GuestUsize,
+                    bar_size as GuestUsize,
                     Some(0x0020_0000),
                 )
                 .ok_or(DeviceManagerError::PmemRangeAllocation)?;
@@ -3676,12 +3677,12 @@ impl DeviceManager {
             (base, size)
         } else {
             // The memory needs to be 2MiB aligned in order to support
-            // hugepages.
+            // hugepages, and aligned to its power-of-two BAR size.
             let base = self.pci_segments[pmem_cfg.pci_common.pci_segment as usize]
                 .mem64_allocator
                 .lock()
                 .unwrap()
-                .allocate(None, size as GuestUsize, Some(0x0020_0000))
+                .allocate(None, bar_size as GuestUsize, Some(bar_size))
                 .ok_or(DeviceManagerError::PmemRangeAllocation)?;
 
             (base.raw_value(), size)
