@@ -16,8 +16,9 @@ use iommufd_bindings::iommufd::{
     iommufd_hw_capabilities_IOMMU_HW_CAP_PCI_PASID_PRIV,
 };
 use iommufd_ioctls::{
-    AttachHwpt, IommufdError, IommufdHwInfoData, IommufdHwptData, IommufdInvalidateData,
-    IommufdVDevice, IommufdVEvent, IommufdVEventData, IommufdVEventQ, IommufdVIommu,
+    AttachHwpt, IommufdError, IommufdHwInfoData, IommufdHwQueue, IommufdHwptData,
+    IommufdInvalidateData, IommufdVDevice, IommufdVEvent, IommufdVEventData, IommufdVEventQ,
+    IommufdVIommu,
 };
 use log::{error, warn};
 use pci::{PasidCap, PciBdf};
@@ -28,7 +29,8 @@ use vmm_sys_util::epoll::{ControlOperation, Epoll, EpollEvent, EventSet};
 use vmm_sys_util::eventfd::{EFD_NONBLOCK, EventFd};
 
 use crate::iommu::{
-    Error as IommuError, HwInfo, Invalidation, PhysicalIommu, Smmuv3AcpiInfo, TableEntry,
+    Error as IommuError, HwInfo, HwQueueHandle, Invalidation, PhysicalIommu, Smmuv3AcpiInfo,
+    TableEntry,
 };
 use crate::smmuv3::{Error as Smmuv3Error, EventRecord, IDR0_COHACC, Smmuv3, Smmuv3Interrupts};
 
@@ -77,6 +79,8 @@ pub enum Error {
     SpawnFaultForwarder(#[source] io::Error),
     #[error("Failed to initialize the emulated SMMUv3 from host information")]
     DeviceInit(#[source] Smmuv3Error),
+    #[error("Failed to allocate a hardware queue")]
+    AllocateHwQueue(#[source] IommufdError),
 }
 
 impl From<Error> for IommuError {
@@ -252,7 +256,23 @@ impl PhysicalIommu for IommufdIommu {
 
         Ok(())
     }
+
+    fn allocate_hw_queue(
+        &self,
+        index: u32,
+        addr: u64,
+        size: u64,
+    ) -> Result<Box<dyn HwQueueHandle>, IommuError> {
+        let hw_queue = self
+            .viommu
+            .allocate_hw_queue(index, addr, size)
+            .map_err(Error::AllocateHwQueue)?;
+
+        Ok(Box::new(hw_queue))
+    }
 }
+
+impl HwQueueHandle for IommufdHwQueue {}
 
 /// Emulated SMMUv3 backed by iommufd.
 #[cfg(target_arch = "aarch64")]
