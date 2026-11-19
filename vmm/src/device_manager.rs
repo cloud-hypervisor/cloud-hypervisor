@@ -112,7 +112,8 @@ use vfio_ioctls::VfioIommufd;
 use vfio_ioctls::{VfioContainer, VfioDevice, VfioDeviceFd, VfioOps};
 use virtio_devices::block::Error as VirtioBlockError;
 use virtio_devices::transport::{
-    VIRTIO_CONFIG_BAR_INDEX, VirtioPciDevice, VirtioPciDeviceActivator, VirtioTransport,
+    VIRTIO_CONFIG_BAR_INDEX, VIRTIO_SHM_BAR_INDEX, VirtioPciDevice, VirtioPciDeviceActivator,
+    VirtioTransport,
 };
 use virtio_devices::vhost_user::{PostcopyHandler, VhostUserConfig};
 use virtio_devices::{
@@ -704,12 +705,16 @@ impl AddressManager {
     // Update the device_tree resources associated with the device
     fn update_device_tree(
         &self,
-        pci_dev: &dyn PciDevice,
+        pci_dev: &mut dyn PciDevice,
         bar_idx: usize,
+        old_base: u64,
         new_base: u64,
     ) -> result::Result<(), io::Error> {
         if let Some(id) = pci_dev.id() {
-            if let Some(node) = self.device_tree.lock().unwrap().get_mut(&id) {
+            let is_virtio_shm_bar =
+                bar_idx == VIRTIO_SHM_BAR_INDEX && pci_dev.as_any_mut().is::<VirtioPciDevice>();
+            let mut device_tree = self.device_tree.lock().unwrap();
+            let children = if let Some(node) = device_tree.get_mut(&id) {
                 let mut resource_updated = false;
                 for resource in node.resources.iter_mut() {
                     if let Resource::PciBar { index, base, .. } = resource
@@ -726,10 +731,26 @@ impl AddressManager {
                         "Couldn't find a resource for BAR {bar_idx} of device {id}"
                     )));
                 }
+
+                is_virtio_shm_bar.then(|| node.children.clone())
             } else {
                 return Err(io::Error::other(format!(
                     "Couldn't find device {id} from device tree"
                 )));
+            };
+
+            if let Some(children) = children {
+                for child_id in children {
+                    if let Some(child_node) = device_tree.get_mut(&child_id) {
+                        for resource in child_node.resources.iter_mut() {
+                            if let Resource::MmioAddressRange { base, .. } = resource
+                                && *base == old_base
+                            {
+                                *base = new_base;
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -853,7 +874,7 @@ impl DeviceRelocation for AddressManager {
 
         self.update_device(pci_dev, bar_idx, old_base, new_base)?;
 
-        self.update_device_tree(pci_dev, bar_idx, new_base)
+        self.update_device_tree(pci_dev, bar_idx, old_base, new_base)
     }
 }
 
