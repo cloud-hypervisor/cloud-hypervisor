@@ -62,6 +62,10 @@ As per adding CPUs to the guest, after a reboot the VM will be running with the 
 
 ## Memory Hot Plug
 
+ACPI memory hotplug is deprecated and will be removed in a future release.
+Use the [virtio-mem method](#virtio-mem-method) with
+`--memory hotplug_method=virtio-mem` instead.
+
 ### ACPI method
 
 Extra memory can be added from a running `cloud-hypervisor` instance. This is controlled by two mechanisms:

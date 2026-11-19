@@ -1193,7 +1193,8 @@ impl MemoryConfig {
         hotplug_method=acpi|virtio-mem,\
         hotplug_size=<hotpluggable_memory_size>,\
         hotplugged_size=<hotplugged_memory_size>,\
-        prefault=on|off,reserve=on|off,thp=on|off\"";
+        prefault=on|off,reserve=on|off,thp=on|off\" \
+        (ACPI memory hotplug is deprecated: use hotplug_method=virtio-mem)";
 
     #[expect(clippy::needless_pass_by_value)]
     pub fn parse(memory: &str, memory_zones: Option<Vec<&str>>) -> Result<Self> {

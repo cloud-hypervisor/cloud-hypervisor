@@ -52,10 +52,13 @@ Selects the way of adding and/or removing memory to/from a booted VM.
 
 Possible values are `acpi` and `virtio-mem`. Default value is `acpi`.
 
+ACPI memory hotplug is deprecated and will be removed in a future release.
+Use `hotplug_method=virtio-mem` instead.
+
 _Example_
 
 ```
---memory size=1G,hotplug_method=acpi
+--memory size=1G,hotplug_method=virtio-mem
 ```
 
 ### `hotplug_size`
@@ -67,7 +70,7 @@ Value is an unsigned integer of 64 bits. A value of 0 is invalid.
 _Example_
 
 ```
---memory size=1G,hotplug_size=1G
+--memory size=1G,hotplug_size=1G,hotplug_method=virtio-mem
 ```
 
 ### `hotplugged_size`
