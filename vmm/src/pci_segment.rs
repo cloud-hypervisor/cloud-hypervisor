@@ -125,6 +125,7 @@ impl PciSegment {
             end_of_mem64_area,
             slots: array::from_fn(|device_id| PciDevSlot {
                 device_id: device_id as u8,
+                ejectable: true,
             }),
             pci_irq_slots: *pci_irq_slots,
         };
@@ -304,6 +305,7 @@ impl PciSegment {
             end_of_mem64_area,
             slots: array::from_fn(|device_id| PciDevSlot {
                 device_id: device_id as u8,
+                ejectable: true,
             }),
             pci_irq_slots: *pci_irq_slots,
         };
@@ -323,29 +325,41 @@ impl PciSegment {
 
 pub(crate) struct PciDevSlot {
     pub(crate) device_id: u8,
+    pub(crate) ejectable: bool,
 }
 
 impl Aml for PciDevSlot {
     fn to_aml_bytes(&self, sink: &mut dyn acpi_tables::AmlSink) {
         let sun = self.device_id;
         let adr: u32 = (self.device_id as u32) << 16;
-        aml::Device::new(
-            format!("S{:03}", self.device_id).as_str().into(),
-            vec![
-                &aml::Name::new("_SUN".into(), &sun),
-                &aml::Name::new("_ADR".into(), &adr),
-                &aml::Method::new(
-                    "_EJ0".into(),
-                    1,
-                    true,
-                    vec![&aml::MethodCall::new(
-                        "\\_SB_.PHPR.PCEJ".into(),
-                        vec![&aml::Path::new("_SUN"), &aml::Path::new("_SEG")],
-                    )],
-                ),
-            ],
-        )
-        .to_aml_bytes(sink);
+        if self.ejectable {
+            aml::Device::new(
+                format!("S{:03}", self.device_id).as_str().into(),
+                vec![
+                    &aml::Name::new("_SUN".into(), &sun),
+                    &aml::Name::new("_ADR".into(), &adr),
+                    &aml::Method::new(
+                        "_EJ0".into(),
+                        1,
+                        true,
+                        vec![&aml::MethodCall::new(
+                            "\\_SB_.PHPR.PCEJ".into(),
+                            vec![&aml::Path::new("_SUN"), &aml::Path::new("_SEG")],
+                        )],
+                    ),
+                ],
+            )
+            .to_aml_bytes(sink);
+        } else {
+            aml::Device::new(
+                format!("S{:03}", self.device_id).as_str().into(),
+                vec![
+                    &aml::Name::new("_SUN".into(), &sun),
+                    &aml::Name::new("_ADR".into(), &adr),
+                ],
+            )
+            .to_aml_bytes(sink);
+        }
     }
 }
 
@@ -622,6 +636,24 @@ mod tests {
 
     fn setup() -> PciSegment {
         setup_segment(0)
+    }
+
+    #[test]
+    fn pci_slot_eject_method() {
+        for ejectable in [false, true] {
+            let slot = PciDevSlot {
+                device_id: 3,
+                ejectable,
+            };
+            let mut bytes = Vec::new();
+            slot.to_aml_bytes(&mut bytes);
+
+            assert!(bytes.windows(4).any(|w| w == b"S003"));
+            assert!(bytes.windows(4).any(|w| w == b"_SUN"));
+            assert!(bytes.windows(4).any(|w| w == b"_ADR"));
+            assert_eq!(bytes.windows(4).any(|w| w == b"_EJ0"), ejectable);
+            assert_eq!(bytes.windows(4).any(|w| w == b"PCEJ"), ejectable);
+        }
     }
 
     fn setup_segment(id: u16) -> PciSegment {
