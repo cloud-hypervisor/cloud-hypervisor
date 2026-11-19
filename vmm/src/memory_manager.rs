@@ -2067,6 +2067,12 @@ impl MemoryManager {
 
             if config.hotplug_size.is_some() {
                 allow_mem_hotplug = true;
+                if config.hotplug_method == HotplugMethod::Acpi {
+                    warn!(
+                        "ACPI memory hotplug is deprecated and will be removed in a future release. \
+                         Use --memory hotplug_method=virtio-mem instead."
+                    );
+                }
             }
 
             if let Some(hotplugged_size) = config.hotplugged_size {

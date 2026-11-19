@@ -1177,6 +1177,9 @@ components:
           type: string
           enum: ["Acpi", "VirtioMem"]
           default: "Acpi"
+          description: >-
+            ACPI memory hotplug is deprecated and will be removed in a future
+            release. Use VirtioMem instead.
         shared:
           type: boolean
           default: false
