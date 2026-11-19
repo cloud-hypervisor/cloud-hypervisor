@@ -108,6 +108,11 @@ pub trait PciDevice: Send {
 
     /// BDF of this device
     fn bdf(&self) -> PciBdf;
+
+    /// Whether the device supports removal from the PCI bus.
+    fn is_removable(&self) -> bool {
+        false
+    }
 }
 
 /// This trait defines a set of functions which can be triggered whenever a
