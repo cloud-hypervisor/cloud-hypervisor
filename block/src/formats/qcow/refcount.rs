@@ -4,6 +4,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use std::collections::HashSet;
 use std::{io, result};
 
 use libc::EINVAL;
@@ -87,6 +88,9 @@ pub(super) type Result<T> = result::Result<T, Error>;
 pub(super) struct RefCount {
     ref_table: VecCache<u64>,
     block_offsets: ClusterOffsets,
+    // Indexes of the table entries that changed since the table was last
+    // written. The table on disk does not point to their blocks.
+    unflushed_entries: HashSet<usize>,
     refcount_table_offset: u64,
     refblock_cache: CacheMap<VecCache<u64>>,
     refcount_block_entries: u64, // number of refcounts in a cluster.
@@ -135,6 +139,7 @@ impl RefCount {
         Ok(RefCount {
             block_offsets: ClusterOffsets::new(ref_table.get_values()),
             ref_table,
+            unflushed_entries: HashSet::new(),
             refcount_table_offset,
             refblock_cache: CacheMap::new(50),
             refcount_block_entries,
@@ -161,6 +166,9 @@ impl RefCount {
     }
 
     fn set_block_addr(&mut self, index: usize, addr: u64) {
+        if self.ref_table[index] != addr {
+            self.unflushed_entries.insert(index);
+        }
         self.block_offsets.replace(self.ref_table[index], addr);
         self.ref_table[index] = addr;
     }
@@ -236,8 +244,12 @@ impl RefCount {
             }
         }
 
+        // A block the table on disk does not point to is modified in place,
+        // also when it was evicted and read back clean.
         // Unwrap is safe here as the entry was filled directly above.
-        let dropped_cluster = if self.refblock_cache.get(table_index).unwrap().dirty() {
+        let dropped_cluster = if self.refblock_cache.get(table_index).unwrap().dirty()
+            || self.unflushed_entries.contains(&table_index)
+        {
             None
         } else {
             // Free the previously used block and use a new one. Writing modified counts to new
@@ -279,6 +291,8 @@ impl RefCount {
     /// Returns true if the table changed since the previous `flush_table()` call.
     pub(super) fn flush_table(&mut self, raw_file: &mut QcowRawFile) -> io::Result<bool> {
         if self.ref_table.dirty() {
+            // A write that fails may already have put some of the entries on disk.
+            self.unflushed_entries.clear();
             raw_file
                 .write_pointer_table_direct(self.refcount_table_offset, self.ref_table.iter())?;
             self.ref_table.mark_clean();
@@ -495,6 +509,64 @@ mod tests {
             assert_eq!(refs.ref_table[0], 0);
             assert!(!refs.refblock_cache.contains_key(0));
         }
+    }
+
+    #[test]
+    fn evicted_refcount_block_moves_once_per_table_flush() {
+        use super::super::metadata::{ClusterOffsets, MetadataLayout};
+        use super::super::vec_cache::{CacheMap, VecCache};
+
+        let cluster_size = 512;
+        let block_entries = cluster_size * 8 / 16;
+        let l2_offsets = ClusterOffsets::new(&[5 * cluster_size]);
+        let RefcountFixture {
+            image: _image,
+            mut raw_file,
+            mut refs,
+            header,
+        } = RefcountFixture::new();
+        let layout = MetadataLayout::new(&header, &l2_offsets);
+        refs.set_block_addr(0, 2 * cluster_size);
+        refs.set_block_addr(1, 3 * cluster_size);
+        refs.flush_table(&mut raw_file).unwrap();
+        // With one slot, updating either block evicts the other.
+        refs.refblock_cache = CacheMap::new(1);
+
+        // Sets a refcount in `block` and returns whether the block moved to `spare`.
+        let update = |refs: &mut RefCount, raw_file: &mut QcowRawFile, block: u64, spare: u64| {
+            let mut new_cluster = None;
+            let mut moved = false;
+            loop {
+                match refs.set_cluster_refcount(
+                    raw_file,
+                    block * block_entries * cluster_size,
+                    1,
+                    new_cluster.take(),
+                    layout,
+                ) {
+                    Ok(_) => return moved,
+                    Err(super::Error::NeedCluster(addr)) => {
+                        let counts = raw_file.read_refcount_block(addr).unwrap();
+                        new_cluster = Some((addr, VecCache::from_vec(counts)));
+                    }
+                    Err(super::Error::NeedNewCluster) => {
+                        moved = true;
+                        new_cluster = Some((spare, VecCache::new(block_entries as usize)));
+                    }
+                    Err(e) => panic!("{e}"),
+                }
+            }
+        };
+
+        assert!(update(&mut refs, &mut raw_file, 0, 6 * cluster_size));
+        assert!(update(&mut refs, &mut raw_file, 1, 7 * cluster_size));
+        // Block 0 is read back clean from the cluster it moved to.
+        assert!(!update(&mut refs, &mut raw_file, 0, 2 * cluster_size));
+
+        refs.flush_blocks(&mut raw_file, layout).unwrap();
+        refs.flush_table(&mut raw_file).unwrap();
+        // After the flush the table on disk points to that cluster.
+        assert!(update(&mut refs, &mut raw_file, 0, 2 * cluster_size));
     }
 
     // A refcount table whose entry count, refcounts-per-block and cluster size
