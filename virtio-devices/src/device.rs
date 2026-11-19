@@ -188,6 +188,11 @@ pub trait VirtioDevice: Send {
     fn access_platform(&self) -> Option<Arc<dyn AccessPlatform>> {
         None
     }
+
+    /// Whether the device supports removal from its transport.
+    fn is_removable(&self) -> bool {
+        false
+    }
 }
 
 /// Trait to define address translation for devices managed by virtio-iommu
