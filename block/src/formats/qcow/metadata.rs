@@ -1326,68 +1326,69 @@ impl QcowState {
 
     /// Sets the refcount for a cluster. Returns freed cluster addresses.
     fn set_cluster_refcount(&mut self, address: u64, refcount: u64) -> io::Result<Vec<u64>> {
-        let mut added_clusters = Vec::new();
         let mut unref_clusters = Vec::new();
-        let mut refcount_set = false;
-        let mut new_cluster = None;
+        // A refcount block that moves needs two more updates, one for the
+        // cluster it leaves and one for the cluster it moves to. Those can
+        // move further blocks, as many as the image has, so the updates are
+        // kept on a stack of their own. The last one added is applied first.
+        let mut pending = vec![(address, refcount)];
 
-        while !refcount_set {
-            match self.refcounts.set_cluster_refcount(
-                &mut self.raw_file,
-                address,
-                refcount,
-                new_cluster.take(),
-                MetadataLayout::new(&self.header, &self.l2_offsets),
-            ) {
-                Ok(None) => {
-                    refcount_set = true;
-                }
-                Ok(Some(freed_cluster)) => {
-                    let mut freed = self.set_cluster_refcount(freed_cluster, 0)?;
-                    unref_clusters.push(freed_cluster);
-                    unref_clusters.append(&mut freed);
-                    refcount_set = true;
-                }
-                Err(refcount::Error::EvictingRefCounts(e)) => {
-                    return Err(e);
-                }
-                Err(refcount::Error::InvalidIndex) => {
-                    self.set_corrupt_bit_best_effort();
-                    return Err(io::Error::from_raw_os_error(EINVAL));
-                }
-                Err(refcount::Error::NeedCluster(addr)) => {
-                    new_cluster = Some((
-                        addr,
-                        VecCache::from_vec(self.raw_file.read_refcount_block(addr)?),
-                    ));
-                }
-                Err(refcount::Error::NeedNewCluster) => {
-                    let addr = self.get_new_cluster(None)?;
-                    added_clusters.push(addr);
-                    new_cluster = Some((
-                        addr,
-                        VecCache::new(self.refcounts.refcounts_per_block() as usize),
-                    ));
-                }
-                Err(refcount::Error::ReadingRefCounts(e)) => {
-                    return Err(e);
-                }
-                Err(refcount::Error::RefcountOverflow { .. }) => {
-                    return Err(io::Error::from_raw_os_error(EINVAL));
-                }
-                Err(
-                    refcount::Error::RefblockUnaligned(_)
-                    | refcount::Error::InvalidRefblockOffset(_),
-                ) => {
-                    self.set_corrupt_bit_best_effort();
-                    return Err(io::Error::from_raw_os_error(EIO));
+        while let Some((address, refcount)) = pending.pop() {
+            let mut refcount_set = false;
+            let mut new_cluster = None;
+
+            while !refcount_set {
+                match self.refcounts.set_cluster_refcount(
+                    &mut self.raw_file,
+                    address,
+                    refcount,
+                    new_cluster.take(),
+                    MetadataLayout::new(&self.header, &self.l2_offsets),
+                ) {
+                    Ok(None) => {
+                        refcount_set = true;
+                    }
+                    Ok(Some(freed_cluster)) => {
+                        unref_clusters.push(freed_cluster);
+                        pending.push((freed_cluster, 0));
+                        refcount_set = true;
+                    }
+                    Err(refcount::Error::EvictingRefCounts(e)) => {
+                        return Err(e);
+                    }
+                    Err(refcount::Error::InvalidIndex) => {
+                        self.set_corrupt_bit_best_effort();
+                        return Err(io::Error::from_raw_os_error(EINVAL));
+                    }
+                    Err(refcount::Error::NeedCluster(addr)) => {
+                        new_cluster = Some((
+                            addr,
+                            VecCache::from_vec(self.raw_file.read_refcount_block(addr)?),
+                        ));
+                    }
+                    Err(refcount::Error::NeedNewCluster) => {
+                        let addr = self.get_new_cluster(None)?;
+                        pending.push((addr, 1));
+                        new_cluster = Some((
+                            addr,
+                            VecCache::new(self.refcounts.refcounts_per_block() as usize),
+                        ));
+                    }
+                    Err(refcount::Error::ReadingRefCounts(e)) => {
+                        return Err(e);
+                    }
+                    Err(refcount::Error::RefcountOverflow { .. }) => {
+                        return Err(io::Error::from_raw_os_error(EINVAL));
+                    }
+                    Err(
+                        refcount::Error::RefblockUnaligned(_)
+                        | refcount::Error::InvalidRefblockOffset(_),
+                    ) => {
+                        self.set_corrupt_bit_best_effort();
+                        return Err(io::Error::from_raw_os_error(EIO));
+                    }
                 }
             }
-        }
-
-        for addr in added_clusters {
-            let mut freed = self.set_cluster_refcount(addr, 1)?;
-            unref_clusters.append(&mut freed);
         }
         Ok(unref_clusters)
     }
@@ -2639,5 +2640,36 @@ mod tests {
         let mut buf = [0u8; 8];
         temp.as_file().read_exact_at(&mut buf, offset).unwrap();
         assert_eq!(buf, cluster_size.to_be_bytes());
+    }
+
+    #[test]
+    fn nested_refcount_updates_do_not_recurse() {
+        use std::thread;
+
+        let cluster_size: u64 = 512;
+        let block_size = (cluster_size * 8 / 16) * cluster_size;
+        let blocks = 2048;
+        let image = TestImage::with_cluster_bits((blocks + 2) * block_size, 9);
+        let mut state = open_state(&image);
+        // One free cluster in the range of each refcount block that does not
+        // exist yet. The block created for a cluster takes the next free
+        // cluster, which needs a block of its own, down to the first range.
+        state.avail_clusters = (1..=blocks).map(|block| block * block_size).collect();
+
+        // One stack frame per nested update would overflow this stack.
+        thread::Builder::new()
+            .stack_size(128 << 10)
+            .spawn(move || {
+                state
+                    .set_cluster_refcount((blocks + 1) * block_size, 1)
+                    .unwrap();
+                assert!(state.avail_clusters.is_empty());
+                for block in 1..=blocks + 1 {
+                    assert_eq!(state.cluster_refcount(block * block_size).unwrap(), 1);
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 }
