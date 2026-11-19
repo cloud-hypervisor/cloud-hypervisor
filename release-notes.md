@@ -4595,7 +4595,7 @@ setting.
 
 With the latest [hypervisor firmware](https://github.com/cloud-hypervisor/rust-hypervisor-firmware),
 we can now support the latest
-[Ubuntu 19.10 (Eoan Ermine)](http://releases.ubuntu.com/19.10/) cloud images.
+[Ubuntu 19.10 (Eoan Ermine)](https://old-releases.ubuntu.com/releases/19.10/) cloud images.
 
 ### Large memory guests
 
