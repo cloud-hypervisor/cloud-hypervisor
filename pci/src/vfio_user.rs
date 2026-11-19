@@ -393,6 +393,10 @@ impl PciDevice for VfioUserPciDevice {
     fn bdf(&self) -> PciBdf {
         self.bdf
     }
+
+    fn is_removable(&self) -> bool {
+        true
+    }
 }
 
 impl Drop for VfioUserPciDevice {
