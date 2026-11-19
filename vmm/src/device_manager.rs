@@ -4356,6 +4356,7 @@ impl DeviceManager {
             event_gsiv: event_irq,
             gerror_gsiv: gerror_irq,
             sync_gsiv: sync_irq,
+            iort_node_id: index as u32,
             ..Default::default()
         };
 
