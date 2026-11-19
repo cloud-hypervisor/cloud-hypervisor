@@ -74,6 +74,7 @@ pub struct Smmuv3AcpiInfo {
     pub coherent: bool,
     pub ats_supported: bool,
     pub attached_bdfs: Vec<PciBdf>,
+    pub iort_node_id: u32,
 }
 
 #[derive(Clone, Debug)]

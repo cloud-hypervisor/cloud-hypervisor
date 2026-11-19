@@ -823,7 +823,13 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
         .filter(|smmu| !smmu.attached_bdfs.is_empty())
         .count();
 
-    let mut next_id = 0;
+    // SMMUv3 nodes come with their identifiers, which their Tegra241 CMDQVs
+    // refer to. The other nodes are numbered after them.
+    let mut next_id = smmus
+        .iter()
+        .map(|smmu| smmu.iort_node_id + 1)
+        .max()
+        .unwrap_or(0);
 
     // IORT header
     let mut iort = Sdt::new(
@@ -899,7 +905,7 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
                 type_: ACPI_IORT_NODE_SMMU_V3,
                 length: (node_size + padding) as u16,
                 revision: 5,
-                node_id: next_node_id(&mut next_id),
+                node_id: smmu.iort_node_id,
                 num_id_mappings: num_id_mappings as u32,
                 id_mappings_array_offset: size_of::<IortSmmuV3Base>() as u32,
             },
