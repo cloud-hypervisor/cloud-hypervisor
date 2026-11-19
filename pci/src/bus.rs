@@ -142,6 +142,15 @@ impl PciBus {
         Ok(())
     }
 
+    /// Returns whether the device occupying this slot supports removal.
+    ///
+    /// Returns `None` if the slot has no device.
+    pub fn is_device_removable(&self, device_id: u8) -> Option<bool> {
+        self.devices
+            .get(&device_id)
+            .map(|device| device.lock().unwrap().is_removable())
+    }
+
     pub fn remove_by_device(&mut self, device: &Arc<Mutex<dyn PciDevice>>) -> Result<()> {
         self.devices.retain(|_, dev| !Arc::ptr_eq(dev, device));
         Ok(())
