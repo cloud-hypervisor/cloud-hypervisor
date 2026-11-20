@@ -427,6 +427,18 @@ impl GuestMemory {
         Ok(())
     }
 
+    /// Removes and returns the region matching the exact base and size.
+    pub fn remove_region(
+        &self,
+        base: GuestAddress,
+        size: GuestUsize,
+    ) -> Result<Arc<GuestRegion>, GuestRegionCollectionError> {
+        let guard = self.0.lock().unwrap();
+        let (map, region) = self.memory().remove_region(base, size)?;
+        guard.replace(map);
+        Ok(region)
+    }
+
     /// Creates guest memory from non-overlapping regions sorted by guest address.
     pub fn from_regions(regions: Vec<GuestRegion>) -> Result<Self, GuestRegionCollectionError> {
         GuestRegionCollection::from_regions(regions).map(Self::new)
