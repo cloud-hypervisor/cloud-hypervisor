@@ -1096,13 +1096,12 @@ impl Vm {
         Ok(())
     }
 
-    #[cfg(all(feature = "fw_cfg", target_arch = "x86_64"))]
     fn boot_guest_memory(&self) -> Result<GuestMemory> {
         let config = self.config.lock().unwrap();
         self.memory_manager
             .lock()
             .unwrap()
-            .boot_memory_from_zones(&config.memory)
+            .boot_guest_memory(&config.memory)
             .map_err(Error::MemoryManager)
     }
 
@@ -1749,7 +1748,7 @@ impl Vm {
                 let boot_memory = memory_manager
                     .lock()
                     .unwrap()
-                    .boot_memory_from_zones(memory_config)
+                    .boot_guest_memory(memory_config)
                     .map_err(Error::MemoryManager)?;
                 return Self::load_igvm(
                     igvm_file,
@@ -1846,7 +1845,7 @@ impl Vm {
     ) -> Result<()> {
         trace_scoped!("configure_system");
         info!("Configuring system");
-        let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
+        let mem = self.boot_guest_memory()?;
 
         let initramfs_config = match self.initramfs {
             Some(_) => Some(self.load_initramfs(&mem)?),
@@ -1894,7 +1893,7 @@ impl Vm {
             let cpu_manager = self.cpu_manager.lock().unwrap();
             (cpu_manager.get_mpidrs(), cpu_manager.get_vcpu_topology())
         };
-        let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
+        let mem = self.boot_guest_memory()?;
         let mut pci_space_info: Vec<PciSpaceInfo> = Vec::new();
         let initramfs_config = match self.initramfs {
             Some(_) => Some(self.load_initramfs(&mem)?),
@@ -1999,7 +1998,7 @@ impl Vm {
             &self.device_manager,
         )?;
         let num_vcpu = self.cpu_manager.lock().unwrap().vcpus().len();
-        let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
+        let mem = self.boot_guest_memory()?;
         let mut pci_space_info: Vec<PciSpaceInfo> = Vec::new();
         let initramfs_config = match self.initramfs {
             Some(_) => Some(self.load_initramfs(&mem)?),

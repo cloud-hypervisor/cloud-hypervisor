@@ -356,7 +356,6 @@ struct CowSource {
 }
 
 pub struct MemoryManager {
-    boot_guest_memory: GuestMemory,
     guest_memory: GuestMemoryAtomic<GuestMemory>,
     next_memory_slot: Arc<AtomicU32>,
     memory_slot_allocator: Arc<MemorySlotAllocator>,
@@ -2235,7 +2234,6 @@ impl MemoryManager {
             arch_mem_regions,
             memory_zones,
             guest_memory,
-            boot_guest_memory,
             hotplug_slots,
             selected_slot,
             next_hotplug_slot,
@@ -2251,7 +2249,6 @@ impl MemoryManager {
             )?;
             let guest_memory =
                 GuestMemory::from_arc_regions(regions).map_err(Error::GuestRegionCollection)?;
-            let boot_guest_memory = guest_memory.clone();
             (
                 GuestAddress(data.start_of_device_area),
                 data.boot_ram,
@@ -2259,7 +2256,6 @@ impl MemoryManager {
                 data.arch_mem_regions.clone(),
                 memory_zones,
                 guest_memory,
-                boot_guest_memory,
                 data.hotplug_slots.clone(),
                 data.selected_slot,
                 data.next_hotplug_slot,
@@ -2288,8 +2284,6 @@ impl MemoryManager {
 
             let mut guest_memory =
                 GuestMemory::from_arc_regions(mem_regions).map_err(Error::GuestRegionCollection)?;
-
-            let boot_guest_memory = guest_memory.clone();
 
             let mut start_of_device_area =
                 MemoryManager::start_addr(guest_memory.last_addr(), allow_mem_hotplug)?;
@@ -2378,7 +2372,6 @@ impl MemoryManager {
                 arch_mem_regions,
                 memory_zones,
                 guest_memory,
-                boot_guest_memory,
                 hotplug_slots,
                 0,
                 0,
@@ -2431,7 +2424,6 @@ impl MemoryManager {
 
         #[allow(unused_mut)]
         let mut memory_manager = MemoryManager {
-            boot_guest_memory,
             guest_memory,
             next_memory_slot,
             memory_slot_allocator,
@@ -2988,7 +2980,7 @@ impl MemoryManager {
         self.guest_memory.clone()
     }
 
-    pub fn boot_memory_from_zones(&self, config: &MemoryConfig) -> Result<GuestMemory, Error> {
+    pub fn boot_guest_memory(&self, config: &MemoryConfig) -> Result<GuestMemory, Error> {
         let zone = |id: &str| {
             self.memory_zones
                 .get(id)
@@ -3016,10 +3008,6 @@ impl MemoryManager {
             regions.push(Arc::clone(region));
         }
         GuestMemory::from_arc_regions(regions).map_err(Error::GuestRegionCollection)
-    }
-
-    pub fn boot_guest_memory(&self) -> GuestMemory {
-        self.boot_guest_memory.clone()
     }
 
     pub fn allocator(&self) -> Arc<Mutex<SystemAllocator>> {
