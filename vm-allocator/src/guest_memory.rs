@@ -488,6 +488,15 @@ impl GuestMemory {
     pub fn replace(&self, map: GuestMemoryMap) {
         self.0.lock().unwrap().replace(map);
     }
+
+    /// Adds a region. Overlapping regions will be rejected.
+    pub fn add_region(&self, region: Arc<GuestRegion>) -> Result<(), GuestRegionCollectionError> {
+        self.0
+            .lock()
+            .unwrap()
+            .replace(self.memory().insert_region(region)?);
+        Ok(())
+    }
 }
 
 impl GuestAddressSpace for GuestMemory {
