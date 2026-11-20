@@ -15,7 +15,7 @@ use virtio_devices::watchdog::WatchdogState;
 use virtio_devices::{VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
 use vm_allocator::{GuestMemory, GuestMemoryMap};
-use vm_memory::{Bytes, GuestAddress};
+use vm_memory::{Bytes, GuestAddress, GuestMemoryBackend};
 use vm_migration::{Pausable, Snapshottable};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
@@ -459,7 +459,7 @@ fn timer_pipe() -> Result<(std::fs::File, std::fs::File), ()> {
     }))
 }
 
-fn seed_memory(mem: &GuestMemoryMap, cursor: &mut FuzzCursor) -> Result<(), ()> {
+fn seed_memory<M: GuestMemoryBackend>(mem: &M, cursor: &mut FuzzCursor) -> Result<(), ()> {
     let mut seed = [0u8; 512];
     cursor.fill_slice(&mut seed);
     mem.write_slice(&seed, GuestAddress(DATA_ADDR))
@@ -494,8 +494,8 @@ fn setup_virt_queue(_cursor: &mut FuzzCursor, invalid_used_ring: bool) -> Result
     Ok(q)
 }
 
-fn populate_queue_memory(
-    mem: &GuestMemoryMap,
+fn populate_queue_memory<M: GuestMemoryBackend>(
+    mem: &M,
     desc_mode: DescriptorMode,
     cursor: &mut FuzzCursor,
 ) -> Result<(), ()> {
@@ -529,13 +529,13 @@ fn populate_queue_memory(
     Ok(())
 }
 
-fn write_u16(mem: &GuestMemoryMap, addr: u64, value: u16) -> Result<(), ()> {
+fn write_u16<M: GuestMemoryBackend>(mem: &M, addr: u64, value: u16) -> Result<(), ()> {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .map_err(|_| ())
 }
 
-fn write_desc(
-    mem: &GuestMemoryMap,
+fn write_desc<M: GuestMemoryBackend>(
+    mem: &M,
     index: u16,
     addr: u64,
     len: u32,
