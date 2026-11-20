@@ -73,7 +73,7 @@ impl PvPanicDevice {
         let pci_configuration_state = vm_migration::state_from_id(snapshot, PCI_CONFIGURATION_ID)
             .map_err(PvPanicError::RetrievePciConfigurationState)?;
 
-        let mut configuration = PciConfiguration::new(
+        let configuration = PciConfiguration::new(
             PVPANIC_VENDOR_ID,
             PVPANIC_DEVICE_ID,
             0x1, // modern pci devices
@@ -85,13 +85,6 @@ impl PvPanicDevice {
             PVPANIC_SUBSYSTEM_ID,
             None,
             pci_configuration_state,
-        );
-
-        let command: [u8; 2] = [0x03, 0x01];
-        let bar_reprogram = configuration.write_config_register(1, 0, &command);
-        assert!(
-            bar_reprogram.is_empty(),
-            "No bar reprogrammig is expected from writing to the COMMAND register"
         );
 
         let state: Option<PvPanicDeviceState> = snapshot
