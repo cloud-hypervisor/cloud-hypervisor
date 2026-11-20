@@ -117,8 +117,7 @@ impl CpuManager {
         vcpu_id: u32,
         vcpu_thread_barrier: Arc<Barrier>,
         vcpu_seccomp_filter: Arc<BpfProgram>,
-        inserting: bool,
-    ) -> Result<()> {
+    ) -> Result<thread::JoinHandle<()>> {
         let reset_evt = self.reset_evt.try_clone().map_err(Error::EventFdClone)?;
         let exit_evt = self.exit_evt.try_clone().map_err(Error::EventFdClone)?;
         let guest_exit_evt = self
@@ -190,54 +189,44 @@ impl CpuManager {
 
         debug!("Starting vCPU: cpu_id = {vcpu_id}");
 
-        let handle = Some(
-            thread::Builder::new()
-                .name(format!("vcpu{vcpu_id}"))
-                .spawn(move || {
-                    // Schedule the thread to run on the expected CPU set
-                    if let Some(cpuset) = cpuset.as_ref()
-                        && let Err(e) = set_vcpu_affinity(cpuset)
-                    {
-                        error!("Failed scheduling the vCPU {vcpu_id} on the expected CPU set: {e}");
-                        return;
-                    }
+        thread::Builder::new()
+            .name(format!("vcpu{vcpu_id}"))
+            .spawn(move || {
+                // Schedule the thread to run on the expected CPU set
+                if let Some(cpuset) = cpuset.as_ref()
+                    && let Err(e) = set_vcpu_affinity(cpuset)
+                {
+                    error!("Failed scheduling the vCPU {vcpu_id} on the expected CPU set: {e}");
+                    return;
+                }
 
-                    if !initialize_core_scheduling(
-                        vcpu_id,
-                        core_scheduling,
-                        &core_scheduling_group_leader,
-                    ) {
-                        return;
-                    }
+                if !initialize_core_scheduling(
+                    vcpu_id,
+                    core_scheduling,
+                    &core_scheduling_group_leader,
+                ) {
+                    return;
+                }
 
-                    // Apply seccomp filter for vcpu thread.
-                    if !vcpu_seccomp_filter.is_empty()
-                        && let Err(e) =
-                            apply_filter(&vcpu_seccomp_filter).map_err(Error::ApplySeccompFilter)
-                    {
-                        error!("Error applying seccomp filter: {e:?}");
-                        return;
-                    }
+                // Apply seccomp filter for vcpu thread.
+                if !vcpu_seccomp_filter.is_empty()
+                    && let Err(e) =
+                        apply_filter(&vcpu_seccomp_filter).map_err(Error::ApplySeccompFilter)
+                {
+                    error!("Error applying seccomp filter: {e:?}");
+                    return;
+                }
 
-                    extern "C" fn handle_signal(_: i32, _: *mut siginfo_t, _: *mut c_void) {}
-                    // This uses an async signal safe handler to kill the vcpu handles.
-                    register_signal_handler(SIGRTMIN(), handle_signal)
-                        .expect("Failed to register vcpu signal handler");
-                    // Block until all CPUs are ready.
-                    vcpu_thread_barrier.wait();
+                extern "C" fn handle_signal(_: i32, _: *mut siginfo_t, _: *mut c_void) {}
+                // This uses an async signal safe handler to kill the vcpu handles.
+                register_signal_handler(SIGRTMIN(), handle_signal)
+                    .expect("Failed to register vcpu signal handler");
+                // Block until all CPUs are ready.
+                vcpu_thread_barrier.wait();
 
-                    run_loop.run();
-                })
-                .map_err(Error::VcpuSpawn)?,
-        );
-
-        // On hot plug calls into this function entry_point is None. It is for
-        // those hotplug CPU additions that we need to set the inserting flag.
-        let mut vcpu_states = self.vcpu_states.lock().unwrap();
-        vcpu_states[usize::try_from(vcpu_id).unwrap()].handle = handle;
-        vcpu_states[usize::try_from(vcpu_id).unwrap()].inserting = inserting;
-
-        Ok(())
+                run_loop.run();
+            })
+            .map_err(Error::VcpuSpawn)
     }
 
     /// Start up as many vCPUs threads as needed to reach `desired_vcpus`
@@ -280,13 +269,16 @@ impl CpuManager {
             // This reuses any inactive vCPUs as well as any that were newly created
             for vcpu_id in present_vcpus..desired_vcpus {
                 let vcpu = Arc::clone(&self.vcpus[vcpu_id as usize]);
-                self.start_vcpu(
+                let handle = self.start_vcpu(
                     vcpu,
                     vcpu_id,
                     Arc::clone(&vcpu_thread_barrier),
                     Arc::clone(&vcpu_seccomp_filter),
-                    inserting,
                 )?;
+                let mut states = self.vcpu_states.lock().unwrap();
+                let state = &mut states[vcpu_id as usize];
+                state.handle = Some(handle);
+                state.inserting = inserting;
             }
         }
 
@@ -317,13 +309,15 @@ impl CpuManager {
             for (id, active) in state.active_vcpus.into_iter().enumerate() {
                 if active {
                     let inserting = self.vcpu_states.lock().unwrap()[id].inserting;
-                    self.start_vcpu(
+                    let handle = self.start_vcpu(
                         Arc::clone(&self.vcpus[id]),
                         id as u32,
                         Arc::clone(&barrier),
                         Arc::clone(&seccomp_filter),
-                        inserting,
                     )?;
+                    let mut states = self.vcpu_states.lock().unwrap();
+                    states[id].handle = Some(handle);
+                    states[id].inserting = inserting;
                 }
             }
             barrier.wait();
