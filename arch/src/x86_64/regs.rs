@@ -14,7 +14,6 @@ use hypervisor::arch::x86::{FpuState, SpecialRegisters};
 #[cfg(all(feature = "kvm", not(feature = "sev_snp")))]
 use log::error;
 use thiserror::Error;
-use vm_allocator::GuestMemoryMap;
 use vm_memory::{Address, Bytes, GuestMemoryBackend, GuestMemoryError};
 
 use crate::EntryPoint;
@@ -133,8 +132,8 @@ pub fn setup_regs(vcpu: &dyn hypervisor::Vcpu, entry_point: EntryPoint) -> Resul
 ///
 /// * `mem` - The memory that will be passed to the guest.
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
-pub fn setup_sregs(
-    mem: &GuestMemoryMap,
+pub fn setup_sregs<M: GuestMemoryBackend>(
+    mem: &M,
     vcpu: &dyn hypervisor::Vcpu,
     enable_x2_apic_mode: bool,
 ) -> Result<()> {
@@ -145,7 +144,7 @@ pub fn setup_sregs(
 
 const BOOT_GDT_MAX: usize = 4;
 
-fn write_gdt_table(table: &[u64], guest_mem: &GuestMemoryMap) -> Result<()> {
+fn write_gdt_table<M: GuestMemoryBackend>(table: &[u64], guest_mem: &M) -> Result<()> {
     let boot_gdt_addr = BOOT_GDT_START;
     for (index, entry) in table.iter().enumerate() {
         let addr = guest_mem
@@ -156,15 +155,15 @@ fn write_gdt_table(table: &[u64], guest_mem: &GuestMemoryMap) -> Result<()> {
     Ok(())
 }
 
-fn write_idt_value(val: u64, guest_mem: &GuestMemoryMap) -> Result<()> {
+fn write_idt_value<M: GuestMemoryBackend>(val: u64, guest_mem: &M) -> Result<()> {
     let boot_idt_addr = BOOT_IDT_START;
     guest_mem
         .write_obj(val, boot_idt_addr)
         .map_err(Error::WriteIdt)
 }
 
-pub fn configure_segments_and_sregs(
-    mem: &GuestMemoryMap,
+pub fn configure_segments_and_sregs<M: GuestMemoryBackend>(
+    mem: &M,
     sregs: &mut SpecialRegisters,
     enable_x2_apic_mode: bool,
 ) -> Result<()> {
@@ -212,6 +211,7 @@ pub fn configure_segments_and_sregs(
 
 #[cfg(test)]
 mod tests {
+    use vm_allocator::GuestMemoryMap;
     use vm_memory::GuestAddress;
 
     use super::*;
@@ -220,7 +220,7 @@ mod tests {
         GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap()
     }
 
-    fn read_u64(gm: &GuestMemoryMap, offset: GuestAddress) -> u64 {
+    fn read_u64<M: GuestMemoryBackend>(gm: &M, offset: GuestAddress) -> u64 {
         gm.read_obj(offset).unwrap()
     }
 
