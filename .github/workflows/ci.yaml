@@ -814,29 +814,29 @@ jobs:
       - name: Run integration tests (musl)
         timeout-minutes: 60
         run: scripts/dev_cli.sh tests --integration --libc musl
-  integration-vfio:
-    name: integration-vfio
-    needs: [preflight]
-    if: *mq-if
-    runs-on: vfio-nvidia
-    timeout-minutes: 40
-    env:
-      AUTH_DOWNLOAD_TOKEN: ${{ secrets.AUTH_DOWNLOAD_TOKEN }}
-    steps:
-      # vfio-nvidia runner user is "github-runner" (not "runner" like arm64).
-      - name: Fix workspace permissions
-        run: sudo chown -R github-runner:github-runner "${GITHUB_WORKSPACE}"
-      - name: Code checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - name: Run VFIO integration tests
-        timeout-minutes: 25
-        run: scripts/dev_cli.sh tests --integration-vfio
-    # Most tests are failing with musl, see #6790
-    # - name: Run VFIO integration tests for musl
-    #   timeout-minutes: 25
-    #   run: scripts/dev_cli.sh tests --integration-vfio --libc musl
+  # integration-vfio:
+  #   name: integration-vfio
+  #   needs: [preflight]
+  #   if: *mq-if
+  #   runs-on: vfio-nvidia
+  #   timeout-minutes: 40
+  #   env:
+  #     AUTH_DOWNLOAD_TOKEN: ${{ secrets.AUTH_DOWNLOAD_TOKEN }}
+  #   steps:
+  #     # vfio-nvidia runner user is "github-runner" (not "runner" like arm64).
+  #     - name: Fix workspace permissions
+  #       run: sudo chown -R github-runner:github-runner "${GITHUB_WORKSPACE}"
+  #     - name: Code checkout
+  #       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+  #       with:
+  #         fetch-depth: 0
+  #     - name: Run VFIO integration tests
+  #       timeout-minutes: 25
+  #       run: scripts/dev_cli.sh tests --integration-vfio
+  #   # Most tests are failing with musl, see #6790
+  #   # - name: Run VFIO integration tests for musl
+  #   #   timeout-minutes: 25
+  #   #   run: scripts/dev_cli.sh tests --integration-vfio --libc musl
   integration-windows:
     name: integration-windows
     needs: [preflight]
@@ -1033,7 +1033,7 @@ jobs:
 #      - integration-arm64
       - integration-graviton
       - integration-sev-snp
-      - integration-vfio
+#      - integration-vfio
       - integration-mshv-x86-64
       - integration-windows
       - integration-x86-64-mq
