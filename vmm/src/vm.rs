@@ -1594,6 +1594,7 @@ impl Vm {
     #[expect(clippy::needless_pass_by_value)]
     fn load_igvm(
         igvm_file: IgvmFile,
+        #[cfg(feature = "sev_snp")] boot_memory: &GuestMemory,
         memory_manager: Arc<Mutex<MemoryManager>>,
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
         #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))] measured_boot: Option<
@@ -1612,6 +1613,8 @@ impl Vm {
 
         let res = igvm_loader::load_igvm(
             igvm_file,
+            #[cfg(feature = "sev_snp")]
+            boot_memory,
             memory_manager,
             Arc::clone(&cpu_manager),
             "",
@@ -1692,6 +1695,7 @@ impl Vm {
     #[cfg(target_arch = "x86_64")]
     fn load_payload(
         payload: &PayloadConfig,
+        #[cfg(feature = "sev_snp")] memory_config: &crate::vm_config::MemoryConfig,
         memory_manager: Arc<Mutex<MemoryManager>>,
         #[cfg(feature = "igvm")] cpu_manager: Arc<Mutex<cpu::CpuManager>>,
         #[cfg(feature = "igvm")] igvm_file: Option<IgvmFile>,
@@ -1741,8 +1745,16 @@ impl Vm {
                 } else {
                     None
                 };
+                #[cfg(feature = "sev_snp")]
+                let boot_memory = memory_manager
+                    .lock()
+                    .unwrap()
+                    .boot_memory_from_zones(memory_config)
+                    .map_err(Error::MemoryManager)?;
                 return Self::load_igvm(
                     igvm_file,
+                    #[cfg(feature = "sev_snp")]
+                    &boot_memory,
                     memory_manager,
                     cpu_manager,
                     #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
@@ -1795,14 +1807,15 @@ impl Vm {
         #[cfg(feature = "igvm")] cpu_manager: &Arc<Mutex<cpu::CpuManager>>,
         #[cfg(feature = "igvm")] igvm_file: Option<IgvmFile>,
     ) -> Result<Option<thread::JoinHandle<Result<EntryPoint>>>> {
+        let config = config.lock().unwrap();
         config
-            .lock()
-            .unwrap()
             .payload
             .as_ref()
             .map(|payload| {
                 let memory_manager = Arc::clone(memory_manager);
                 let payload = payload.clone();
+                #[cfg(feature = "sev_snp")]
+                let memory_config = config.memory.clone();
                 #[cfg(feature = "igvm")]
                 let cpu_manager = Arc::clone(cpu_manager);
 
@@ -1811,6 +1824,8 @@ impl Vm {
                     .spawn(move || {
                         Self::load_payload(
                             &payload,
+                            #[cfg(feature = "sev_snp")]
+                            &memory_config,
                             memory_manager,
                             #[cfg(feature = "igvm")]
                             cpu_manager,

@@ -257,6 +257,7 @@ pub(crate) fn extract_sev_features(igvm_file: &IgvmFile) -> u64 {
 #[expect(clippy::needless_pass_by_value)]
 pub(crate) fn load_igvm(
     igvm_file: IgvmFile,
+    #[cfg(feature = "sev_snp")] boot_memory: &GuestMemory,
     memory_manager: Arc<Mutex<MemoryManager>>,
     cpu_manager: Arc<Mutex<CpuManager>>,
     cmdline: &str,
@@ -564,8 +565,7 @@ pub(crate) fn load_igvm(
             {
                 #[cfg(feature = "sev_snp")]
                 if sev_snp_enabled {
-                    let guest_mem = memory_manager.lock().unwrap().boot_guest_memory();
-                    let memory_map = generate_memory_map(&guest_mem)?;
+                    let memory_map = generate_memory_map(boot_memory)?;
                     import_parameter(&mut parameter_areas, _info, memory_map.as_bytes())?;
                 } else {
                     todo!("Not implemented");
