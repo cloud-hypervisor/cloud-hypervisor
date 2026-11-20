@@ -21,14 +21,14 @@ use std::ops::Deref;
 
 use virtio_queue::DescriptorChain;
 use vm_memory::{
-    Address, Bytes, GuestAddress, GuestMemoryBackend, ReadVolatile, VolatileMemoryError,
-    WriteVolatile,
+    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend, ReadVolatile,
+    VolatileMemoryError, WriteVolatile,
 };
 use vm_virtio::AccessPlatform;
 use vm_virtio::checked_descriptor::DescriptorChainExt;
 
 use super::{Result, VsockError, defs};
-use crate::GuestMemoryMap;
+use crate::GuestMemory;
 
 // The vsock packet header is defined by the C struct:
 //
@@ -114,7 +114,7 @@ fn set_hdr_field<const N: usize>(hdr: &mut [u8], offset: usize, field: [u8; N]) 
 ///   multiple virtq descriptors.
 enum PacketBuffer {
     Guest {
-        mem: GuestMemoryMap,
+        mem: GuestMemory,
         addr: GuestAddress,
         len: usize,
     },
@@ -122,9 +122,10 @@ enum PacketBuffer {
 }
 
 impl PacketBuffer {
-    fn guest(mem: GuestMemoryMap, addr: GuestAddress, len: usize) -> Result<Self> {
+    fn guest(mem: GuestMemory, addr: GuestAddress, len: usize) -> Result<Self> {
         // Validate the range before storing it.
-        mem.get_slice(addr, len)
+        mem.memory()
+            .get_slice(addr, len)
             .map_err(|_| VsockError::GuestMemory)?;
 
         Ok(Self::Guest { mem, addr, len })
@@ -161,6 +162,7 @@ impl PacketBuffer {
 
         match self {
             Self::Guest { mem, addr, .. } => {
+                let mem = mem.memory();
                 let addr = Self::guest_addr(*addr, offset)?;
                 let slice = mem
                     .get_slice(addr, dst.len())
@@ -185,6 +187,7 @@ impl PacketBuffer {
 
         match self {
             Self::Guest { mem, addr, .. } => {
+                let mem = mem.memory();
                 let addr = Self::guest_addr(*addr, offset)?;
                 let slice = mem
                     .get_slice(addr, src.len())
@@ -208,6 +211,7 @@ impl PacketBuffer {
 
         match self {
             Self::Guest { mem, addr, .. } => {
+                let mem = mem.memory();
                 let mut slice = mem.get_slice(*addr, len).map_err(|_| {
                     io::Error::new(ErrorKind::InvalidInput, "invalid guest memory range")
                 })?;
@@ -228,6 +232,7 @@ impl PacketBuffer {
 
         match self {
             Self::Guest { mem, addr, .. } => {
+                let mem = mem.memory();
                 let addr = Self::guest_addr(*addr, offset).map_err(|e| vsock_error_to_io(&e))?;
                 let slice = mem.get_slice(addr, len).map_err(|_| {
                     io::Error::new(ErrorKind::InvalidInput, "invalid guest memory range")
@@ -269,10 +274,12 @@ impl VsockPacket {
     /// creating the wrapper.
     pub fn from_tx_virtq_head<M>(
         desc_chain: &mut DescriptorChain<M>,
+        mem: &GuestMemory,
         access_platform: Option<&dyn AccessPlatform>,
     ) -> Result<Self>
     where
-        M: Clone + Deref<Target = GuestMemoryMap>,
+        M: Deref,
+        M::Target: GuestMemoryBackend,
     {
         let head = desc_chain
             .next_checked(access_platform)
@@ -334,11 +341,7 @@ impl VsockPacket {
                 .addr()
                 .checked_add(VSOCK_PKT_HDR_SIZE as u64)
                 .ok_or(VsockError::GuestMemory)?;
-            pkt.buf = Some(PacketBuffer::guest(
-                desc_chain.memory().clone(),
-                buf_addr,
-                total_len,
-            )?);
+            pkt.buf = Some(PacketBuffer::guest(mem.clone(), buf_addr, total_len)?);
 
             return Ok(pkt);
         }
@@ -398,7 +401,7 @@ impl VsockPacket {
                 return Err(VsockError::BufDescTooSmall);
             }
             pkt.buf = Some(PacketBuffer::guest(
-                desc_chain.memory().clone(),
+                mem.clone(),
                 buf_desc.addr(),
                 total_len,
             )?);
@@ -413,10 +416,12 @@ impl VsockPacket {
     /// descriptor. Bounds and pointer checks are performed when creating the wrapper.
     pub fn from_rx_virtq_head<M>(
         desc_chain: &mut DescriptorChain<M>,
+        mem: &GuestMemory,
         access_platform: Option<&dyn AccessPlatform>,
     ) -> Result<Self>
     where
-        M: Clone + Deref<Target = GuestMemoryMap>,
+        M: Deref,
+        M::Target: GuestMemoryBackend,
     {
         let head = desc_chain
             .next_checked(access_platform)
@@ -480,11 +485,7 @@ impl VsockPacket {
         };
 
         let buf = if let Some(addr) = buf_addr {
-            Some(PacketBuffer::guest(
-                desc_chain.memory().clone(),
-                addr,
-                buf_size,
-            )?)
+            Some(PacketBuffer::guest(mem.clone(), addr, buf_size)?)
         } else {
             None
         };
@@ -715,6 +716,7 @@ mod tests {
                     .unwrap()
                     .next()
                     .unwrap(),
+                &$handler_ctx.handler.mem,
                 None,
             ) {
                 Err($err) => (),
@@ -745,6 +747,7 @@ mod tests {
                     .unwrap()
                     .next()
                     .unwrap(),
+                &handler_ctx.handler.mem,
                 None,
             )
             .unwrap();
@@ -780,6 +783,7 @@ mod tests {
                     .unwrap()
                     .next()
                     .unwrap(),
+                &handler_ctx.handler.mem,
                 None,
             )
             .unwrap();
@@ -852,6 +856,7 @@ mod tests {
 
         let pkt = VsockPacket::from_tx_virtq_head(
             &mut queue.iter(&test_ctx.mem).unwrap().next().unwrap(),
+            &GuestMemory::new(test_ctx.mem.clone()),
             None,
         )
         .unwrap();
@@ -885,6 +890,7 @@ mod tests {
                     .unwrap()
                     .next()
                     .unwrap(),
+                &handler_ctx.handler.mem,
                 None,
             )
             .unwrap();
@@ -932,6 +938,7 @@ mod tests {
                 .unwrap()
                 .next()
                 .unwrap(),
+            &handler_ctx.handler.mem,
             None,
         )
         .unwrap();
@@ -1026,6 +1033,7 @@ mod tests {
                 .unwrap()
                 .next()
                 .unwrap(),
+            &handler_ctx.handler.mem,
             None,
         )
         .unwrap();
@@ -1064,6 +1072,7 @@ mod tests {
                 .unwrap()
                 .next()
                 .unwrap(),
+            &handler_ctx.handler.mem,
             None,
         )
         .unwrap();
@@ -1087,6 +1096,7 @@ mod tests {
                 .unwrap()
                 .next()
                 .unwrap(),
+            &handler_ctx.handler.mem,
             None,
         )
         .unwrap();
@@ -1121,6 +1131,7 @@ mod tests {
                 .unwrap()
                 .next()
                 .unwrap(),
+            &handler_ctx.handler.mem,
             None,
         )
         .unwrap();
@@ -1138,6 +1149,7 @@ mod tests {
                 .unwrap()
                 .next()
                 .unwrap(),
+            &handler_ctx.handler.mem,
             None,
         )
         .unwrap();
