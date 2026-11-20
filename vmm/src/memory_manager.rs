@@ -3827,7 +3827,7 @@ impl Transportable for MemoryManager {
             && source.ranges == self.snapshot_memory_ranges
         {
             match clone_file_range(&source.file, &memory_file, total_len) {
-                Ok(()) => return write_private_pages(&guest_memory, source, &mut memory_file),
+                Ok(()) => return write_private_pages(&*guest_memory, source, &mut memory_file),
                 Err(e) => {
                     warn!("Snapshot: restore source not cloned, writing all guest memory: {e}");
                 }
@@ -3873,7 +3873,7 @@ impl Transportable for MemoryManager {
                 // Dense fallback: anonymous mmap or hugetlbfs (no
                 // SEEK_HOLE).
                 write_guest_range(
-                    &guest_memory,
+                    &*guest_memory,
                     &mut memory_file,
                     file_cursor,
                     range.gpa,
@@ -3963,8 +3963,8 @@ impl Migratable for MemoryManager {
 }
 
 // Streams guest memory `[gpa, gpa + length)` into `file` at `file_offset`.
-fn write_guest_range(
-    guest_memory: &GuestMemory,
+fn write_guest_range<M: GuestMemoryBackend>(
+    guest_memory: &M,
     file: &mut File,
     file_offset: u64,
     gpa: u64,
@@ -3988,8 +3988,8 @@ fn write_guest_range(
 
 // Writes the guest pages that no longer read from the restore source over
 // the clone of that source in `file`.
-fn write_private_pages(
-    guest_memory: &GuestMemory,
+fn write_private_pages<M: GuestMemoryBackend>(
+    guest_memory: &M,
     source: &CowSource,
     file: &mut File,
 ) -> result::Result<(), MigratableError> {
