@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::os::unix::thread::JoinHandleExt;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Barrier, Mutex, mpsc};
 use std::{any, cmp, io, result, thread, time};
 
 #[cfg(target_arch = "aarch64")]
@@ -80,6 +80,7 @@ use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotData, Snapshottable, Transportable,
     snapshot_from_id,
 };
+use vmm_sys_util::errno;
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::SIGRTMIN;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
@@ -139,6 +140,25 @@ pub enum Error {
 
     #[error("Error spawning vCPU thread")]
     VcpuSpawn(#[source] io::Error),
+
+    #[error("Error initializing vCPU {vcpu_id}")]
+    VcpuStartup {
+        vcpu_id: u32,
+        #[source]
+        source: Box<Error>,
+    },
+
+    #[error("Thread exited before completing initialization")]
+    VcpuInitializationExited,
+
+    #[error("Failed setting CPU affinity")]
+    SetVcpuAffinity(#[source] io::Error),
+
+    #[error("Failed registering vCPU signal handler")]
+    RegisterVcpuSignal(#[source] errno::Error),
+
+    #[error("Failed receiving vCPU initialization result")]
+    VcpuStartupReceive(#[source] mpsc::RecvError),
 
     #[error("Error generating common CPUID")]
     CommonCpuId(#[source] arch::Error),
