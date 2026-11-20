@@ -15,6 +15,7 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::{Arc, Mutex, Weak};
 use std::{io, result};
@@ -29,7 +30,7 @@ use virtio_queue::{DescriptorChain, Queue, QueueT};
 use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend,
-    GuestMemoryError, GuestMemoryLoadGuard, GuestMemoryRegion,
+    GuestMemoryError, GuestMemoryRegion,
 };
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -43,7 +44,7 @@ use super::{
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::PauseCommon;
-use crate::{GuestMemory, GuestMemoryMap, GuestRegion, VirtioInterrupt, VirtioInterruptType};
+use crate::{GuestMemory, GuestRegion, VirtioInterrupt, VirtioInterruptType};
 
 const QUEUE_SIZE: u16 = 128;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];
@@ -272,9 +273,11 @@ struct Request {
 }
 
 impl Request {
-    fn parse(
-        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMap>>,
-    ) -> result::Result<Request, Error> {
+    fn parse<M>(desc_chain: &mut DescriptorChain<M>) -> result::Result<Request, Error>
+    where
+        M: Deref,
+        M::Target: GuestMemoryBackend,
+    {
         let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
         // The descriptor contains the request type which MUST be readable.
         if desc.is_write_only() {
@@ -322,9 +325,9 @@ impl Request {
         })
     }
 
-    fn send_response(
+    fn send_response<M: GuestMemoryBackend>(
         &self,
-        mem: &GuestMemoryMap,
+        mem: &M,
         resp_type: u16,
         state: u16,
     ) -> Result<u32, Error> {
