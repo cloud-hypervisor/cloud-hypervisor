@@ -18,7 +18,7 @@ use virtio_devices::{
 };
 use virtio_queue::{Queue, QueueT};
 use vm_allocator::{GuestMemory, GuestMemoryMap};
-use vm_memory::{Bytes, GuestAddress};
+use vm_memory::{Bytes, GuestAddress, GuestMemoryBackend};
 use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::{AccessPlatform, AccessType};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
@@ -146,23 +146,23 @@ fn queue_base(queue_index: usize) -> u64 {
     BASE_VIRT_QUEUE_ADDR + (QUEUE_BYTES_SIZE * queue_index) as u64
 }
 
-fn write_le16(mem: &GuestMemoryMap, addr: u64, value: u16) -> bool {
+fn write_le16<M: GuestMemoryBackend>(mem: &M, addr: u64, value: u16) -> bool {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .is_ok()
 }
 
-fn write_le32(mem: &GuestMemoryMap, addr: u64, value: u32) -> bool {
+fn write_le32<M: GuestMemoryBackend>(mem: &M, addr: u64, value: u32) -> bool {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .is_ok()
 }
 
-fn write_le64(mem: &GuestMemoryMap, addr: u64, value: u64) -> bool {
+fn write_le64<M: GuestMemoryBackend>(mem: &M, addr: u64, value: u64) -> bool {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .is_ok()
 }
 
-fn write_desc(
-    mem: &GuestMemoryMap,
+fn write_desc<M: GuestMemoryBackend>(
+    mem: &M,
     table_addr: u64,
     idx: u16,
     addr: u64,
@@ -177,7 +177,7 @@ fn write_desc(
         && write_le16(mem, desc_addr + 14, next)
 }
 
-fn write_avail(mem: &GuestMemoryMap, avail_addr: u64, ring: &[u16]) -> bool {
+fn write_avail<M: GuestMemoryBackend>(mem: &M, avail_addr: u64, ring: &[u16]) -> bool {
     if !write_le16(mem, avail_addr, 0) {
         return false;
     }
@@ -192,11 +192,11 @@ fn write_avail(mem: &GuestMemoryMap, avail_addr: u64, ring: &[u16]) -> bool {
     true
 }
 
-fn write_tx_hdr_len(mem: &GuestMemoryMap, hdr_addr: u64, len: u32) -> bool {
+fn write_tx_hdr_len<M: GuestMemoryBackend>(mem: &M, hdr_addr: u64, len: u32) -> bool {
     write_le32(mem, hdr_addr + VSOCK_HDR_LEN_OFF, len)
 }
 
-fn program_queue_memory(mem: &GuestMemoryMap, bytes: &[u8], edge: bool) -> bool {
+fn program_queue_memory<M: GuestMemoryBackend>(mem: &M, bytes: &[u8], edge: bool) -> bool {
     let rx_base = queue_base(0);
     let tx_base = queue_base(1);
     let evt_base = queue_base(2);
