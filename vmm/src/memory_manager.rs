@@ -793,19 +793,24 @@ impl MemoryManager {
         let mut zone_iter = zones.iter();
         let mut mem_regions = Vec::new();
         let mut zone = zone_iter.next().ok_or(Error::MissingMemoryZones)?;
-        let mut zone_align_size = memory_zone_get_align_size(zone)?;
         let mut zone_offset = 0u64;
         let mut memory_zones = HashMap::new();
-
-        if !is_aligned(zone.size, zone_align_size) {
-            return Err(Error::MisalignedMemorySize);
+        for zone in zones {
+            let align = memory_zone_get_align_size(zone)?;
+            if !is_aligned(zone.size, align) {
+                return Err(Error::MisalignedMemorySize);
+            }
+            if memory_zones
+                .insert(
+                    zone.id.clone(),
+                    MemoryZone::new(zone.shared, zone.hugepages, align, zone.mergeable),
+                )
+                .is_some()
+            {
+                error!("Memory zone identifier '{}' found more than once", zone.id);
+                return Err(Error::DuplicateZoneId);
+            }
         }
-
-        // Add zone id to the list of memory zones.
-        memory_zones.insert(
-            zone.id.clone(),
-            MemoryZone::new(zone.shared, zone.hugepages, zone_align_size, zone.mergeable),
-        );
 
         for ram_region in ram_regions.iter() {
             let mut ram_region_offset = 0;
@@ -815,6 +820,7 @@ impl MemoryManager {
                 let mut ram_region_consumed = false;
                 let mut pull_next_zone = false;
 
+                let zone_align_size = memory_zones[&zone.id].backing_page_size;
                 let ram_region_available_size =
                     align_down(ram_region.1 as u64 - ram_region_offset, zone_align_size);
                 if ram_region_available_size == 0 {
@@ -885,31 +891,6 @@ impl MemoryManager {
                         exit = true;
                         break;
                     }
-                    zone_align_size = memory_zone_get_align_size(zone)?;
-                    if !is_aligned(zone.size, zone_align_size) {
-                        return Err(Error::MisalignedMemorySize);
-                    }
-
-                    // Check if zone id already exist. In case it does, throw
-                    // an error as we need unique identifiers. Otherwise, add
-                    // the new zone id to the list of memory zones.
-                    if memory_zones.contains_key(&zone.id) {
-                        error!(
-                            "Memory zone identifier '{}' found more than once. \
-                            It must be unique",
-                            zone.id,
-                        );
-                        return Err(Error::DuplicateZoneId);
-                    }
-                    memory_zones.insert(
-                        zone.id.clone(),
-                        MemoryZone::new(
-                            zone.shared,
-                            zone.hugepages,
-                            zone_align_size,
-                            zone.mergeable,
-                        ),
-                    );
                 }
 
                 if ram_region_consumed {
