@@ -31,7 +31,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
 #[cfg(not(target_arch = "riscv64"))]
 use std::time::Instant;
-use std::{iter, path, result, sync};
+use std::{iter, path, process, result, sync};
 
 use acpi_tables::sdt::GenericAddress;
 use acpi_tables::{Aml, aml};
@@ -120,7 +120,10 @@ use virtio_devices::{
     balloon, mem, net, transport, vdpa, vhost_user, vsock,
 };
 use vm_allocator::page_size::get_page_size;
-use vm_allocator::{AddressAllocator, GuestRegionError, InterruptAllocError, SystemAllocator};
+use vm_allocator::{
+    AddressAllocator, GuestMemoryNotification, GuestRegionError, InterruptAllocError,
+    SystemAllocator,
+};
 use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptRemapping, LegacyIrqGroupConfig, MsiIrqGroupConfig,
@@ -504,10 +507,6 @@ pub enum DeviceManagerError {
     /// Cannot create virtio-mem device
     #[error("Cannot create virtio-mem device")]
     CreateVirtioMem(#[source] io::Error),
-
-    /// Failed to update guest memory for VFIO PCI device.
-    #[error("Failed to update guest memory for VFIO PCI device")]
-    UpdateMemoryForVfioPciDevice(#[source] ExternalDmaMappingError),
 
     /// Trying to use a directory for pmem but no size specified
     #[error("Trying to use a directory for pmem but no size specified")]
@@ -895,6 +894,26 @@ impl Clone for PtyPair {
 pub struct VfioContext {
     ops: Arc<dyn VfioOps>,
     dma_mapping: Arc<dyn ExternalDmaMapping>,
+}
+
+impl GuestMemoryNotification for VfioContext {
+    fn region_added(&self, region: &Arc<GuestRegion>) {
+        let gpa = region.start_addr().raw_value();
+        if let Err(e) = self.dma_mapping.map(gpa, gpa, region.len()) {
+            error!("VFIO: {}", flatten_error_chain_to_string(&e));
+            process::exit(1);
+        }
+    }
+
+    fn region_removed(&self, region: &Arc<GuestRegion>) {
+        if let Err(e) = self
+            .dma_mapping
+            .unmap(region.start_addr().raw_value(), region.len())
+        {
+            error!("VFIO: {}", flatten_error_chain_to_string(&e));
+            process::exit(1);
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -4609,7 +4628,8 @@ impl DeviceManager {
                 // Statically map all guest RAM into the IOMMU. Do not register
                 // virtio-mem regions, as they are handled directly by the
                 // virtio-mem device itself.
-                for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
+                let mm = self.memory_manager.lock().unwrap();
+                for zone in mm.memory_zones().values() {
                     for region in zone.regions() {
                         let gpa = region.start_addr().raw_value();
                         vfio_mapping
@@ -4617,6 +4637,8 @@ impl DeviceManager {
                             .map_err(|e| DeviceManagerError::VfioDmaMap(e, gpa, region.len()))?;
                     }
                 }
+                let notifier = Arc::downgrade(&vfio_context);
+                mm.guest_memory().add_notifier(notifier);
             }
 
             for virtio_mem_device in self.virtio_mem_devices.iter() {
@@ -5442,15 +5464,6 @@ impl DeviceManager {
                     .map(gpa, gpa, size)
                     .map_err(DeviceManagerError::VirtioDmaMap)?;
             }
-        }
-
-        // Take care of updating the memory for VFIO PCI devices.
-        if let Some(vfio_context) = self.vfio_context.upgrade() {
-            let gpa = new_region.start_addr().raw_value();
-            vfio_context
-                .dma_mapping
-                .map(gpa, gpa, new_region.len())
-                .map_err(DeviceManagerError::UpdateMemoryForVfioPciDevice)?;
         }
 
         // Take care of updating the memory for vfio-user devices.
