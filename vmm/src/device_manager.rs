@@ -1627,6 +1627,13 @@ impl DeviceManager {
             }
         }
 
+        for segment in &mut self.pci_segments {
+            let pci_bus = segment.pci_bus.lock().unwrap();
+            for slot in &mut segment.slots {
+                slot.ejectable = pci_bus.is_device_removable(slot.device_id).unwrap_or(true);
+            }
+        }
+
         Ok(())
     }
 
@@ -6753,6 +6760,107 @@ impl Drop for DeviceManager {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    fn check_pci_slot_aml(mut config: serde_json::Value, fixed_slots: &[&[u8]]) {
+        use vmm_sys_util::eventfd::EFD_NONBLOCK;
+
+        use crate::pci_segment::PciDevSlot;
+        use crate::vm::Vm;
+
+        let firmware = tempfile::NamedTempFile::new().unwrap();
+        firmware.as_file().set_len(0x200000).unwrap();
+        config["payload"] = serde_json::json!({"firmware": firmware.path()});
+        let vm = Vm::new(
+            Arc::new(Mutex::new(serde_json::from_value(config).unwrap())),
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+            #[cfg(feature = "guest_debug")]
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+            &SeccompAction::Allow,
+            hypervisor::new().unwrap(),
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+            Some(ConsoleInfo {
+                console: ConsoleTransport::Null,
+                serial: ConsoleTransport::Null,
+                debug: ConsoleTransport::Off,
+            }),
+            None,
+            Arc::new(Mutex::new(None)),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let manager = vm.device_manager().lock().unwrap();
+        assert_eq!(manager.pci_segments.len(), fixed_slots.len());
+        for (segment, fixed_slots) in manager.pci_segments.iter().zip(fixed_slots) {
+            let mut bytes = Vec::new();
+            segment.to_aml_bytes(&mut bytes);
+            let mut expected = Vec::new();
+            for device_id in 0..32 {
+                PciDevSlot {
+                    device_id,
+                    ejectable: !fixed_slots.contains(&device_id),
+                }
+                .to_aml_bytes(&mut expected);
+            }
+            assert!(
+                bytes.windows(expected.len()).any(|w| w == expected),
+                "Unexpected PCI slot AML on segment {}",
+                segment.id,
+            );
+        }
+    }
+
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    #[test]
+    fn pci_slot_aml_device_removal_support() {
+        let disk = tempfile::NamedTempFile::new().unwrap();
+        disk.as_file().set_len(0x100000).unwrap();
+        check_pci_slot_aml(
+            serde_json::json!({
+                "memory": {"size": 0x8000000, "hotplug_size": 0x8000000, "hotplug_method": "VirtioMem"},
+                "platform": {"num_pci_segments": 3},
+                "console": {"mode": "Null", "pci_device_id": 1},
+                "rng": {"src": "/dev/urandom", "pci_segment": 1, "pci_device_id": 0},
+                "disks": [{"path": disk.path(), "image_type": "Raw", "pci_segment": 1, "pci_device_id": 5}],
+                "pvpanic": true,
+                "watchdog": true,
+                "rtc": {"pci_segment": 1, "pci_device_id": 7},
+                "balloon": {"size": 0, "pci_segment": 1, "pci_device_id": 8}
+            }),
+            // Segment 0: host bridge, console, virtio-mem, watchdog and pvpanic.
+            // Segment 1: RNG, RTC and balloon. The disk remains ejectable.
+            // Segment 2 has no host bridge and all slots are available.
+            &[&[0, 1, 2, 3, 4], &[0, 7, 8], &[]],
+        );
+    }
+
+    #[cfg(all(
+        feature = "kvm",
+        feature = "pvmemcontrol",
+        feature = "ivshmem",
+        target_arch = "x86_64"
+    ))]
+    #[test]
+    fn pci_slot_aml_pvmemcontrol_and_ivshmem() {
+        let memory = tempfile::NamedTempFile::new().unwrap();
+        memory.as_file().set_len(0x200000).unwrap();
+        check_pci_slot_aml(
+            serde_json::json!({
+                "memory": {"size": 0x8000000},
+                "platform": {"num_pci_segments": 2},
+                "console": {"mode": "Null", "pci_device_id": 1},
+                "rng": {"src": "/dev/urandom", "pci_segment": 1, "pci_device_id": 0},
+                "pvmemcontrol": {},
+                "ivshmem": {"path": memory.path(), "size": 0x200000, "pci_segment": 1, "pci_device_id": 7}
+            }),
+            &[&[0, 1, 2], &[0, 7]],
+        );
+    }
+
     #[test]
     fn restore_preserves_pci_hotplug_flags() {
         let allocator = Arc::new(Mutex::new(
