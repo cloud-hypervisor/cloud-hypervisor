@@ -23,7 +23,7 @@ use vhost::vhost_user::{Error as VhostUserError, FrontendReqHandler, VhostUserFr
 use virtio_queue::{Error as QueueError, Queue};
 use vm_memory::guest_memory::Error as MmapError;
 use vm_memory::mmap::MmapRegionError;
-use vm_memory::{Address, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend};
+use vm_memory::{Address, GuestAddressSpace, GuestMemoryBackend};
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{MigratableError, Pausable, Snapshot};
 use vmm_sys_util::eventfd::EventFd;
@@ -33,9 +33,9 @@ use crate::seccomp_filters::Thread;
 use crate::thread_helper::PauseCommon;
 use crate::{
     ActivateError, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
-    GuestMemoryMap, GuestRegion, HostAddressRangeError, VIRTIO_F_IN_ORDER,
-    VIRTIO_F_NOTIFICATION_DATA, VIRTIO_F_ORDER_PLATFORM, VIRTIO_F_RING_EVENT_IDX,
-    VIRTIO_F_RING_INDIRECT_DESC, VIRTIO_F_VERSION_1, VirtioCommon, VirtioInterrupt,
+    GuestMemory, GuestRegion, HostAddressRangeError, VIRTIO_F_IN_ORDER, VIRTIO_F_NOTIFICATION_DATA,
+    VIRTIO_F_ORDER_PLATFORM, VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_RING_INDIRECT_DESC,
+    VIRTIO_F_VERSION_1, VirtioCommon, VirtioInterrupt,
 };
 
 pub mod blk;
@@ -296,7 +296,7 @@ pub struct Inflight {
 
 pub struct VhostUserEpollHandler<S: VhostUserFrontendReqHandler> {
     pub vu: Arc<Mutex<VhostUserHandle>>,
-    pub mem: GuestMemoryAtomic<GuestMemoryMap>,
+    pub mem: GuestMemory,
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
     pub queues: Vec<(u16, Queue, EventFd)>,
@@ -523,7 +523,7 @@ impl<C> VhostUserState<C> {
 pub struct VhostUserCommon {
     pub virtio_common: VirtioCommon,
     pub vu: Option<Arc<Mutex<VhostUserHandle>>>,
-    pub guest_memory: Option<GuestMemoryAtomic<GuestMemoryMap>>,
+    pub guest_memory: Option<GuestMemory>,
     pub acked_protocol_features: u64,
     pub socket_path: String,
     pub vu_num_queues: u16,
@@ -559,7 +559,7 @@ impl VhostUserCommon {
     #[expect(clippy::too_many_arguments)]
     pub fn activate<T: VhostUserFrontendReqHandler>(
         &mut self,
-        mem: GuestMemoryAtomic<GuestMemoryMap>,
+        mem: GuestMemory,
         queues: &[(u16, Queue, EventFd)],
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         acked_features: u64,
@@ -973,7 +973,7 @@ mod tests {
 
     use super::*;
     use crate::vsock::tests::NoopVirtioInterrupt;
-    use crate::{MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VirtioDevice};
+    use crate::{GuestMemoryMap, MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VirtioDevice};
 
     fn read_request(stream: &mut UnixStream, expected_request: FrontendReq) -> Vec<u8> {
         let mut header = [0u8; 12];

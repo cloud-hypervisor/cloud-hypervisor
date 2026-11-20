@@ -40,8 +40,8 @@ use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::mmap::MmapRegionError;
 use vm_memory::{
-    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend,
-    GuestMemoryError, GuestMemoryRegion, GuestUsize, MmapRegion,
+    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend, GuestMemoryError,
+    GuestMemoryRegion, GuestUsize, MmapRegion,
 };
 use vm_migration::protocol::{MemoryRange, MemoryRangeTable};
 use vm_migration::{
@@ -63,7 +63,9 @@ use crate::uffd::{
     self, FileUffdMemorySource, SocketUffdMemorySource, Uffd, UffdHole, UffdMemorySource, UffdRange,
 };
 use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
-use crate::{GuestMemoryMap, GuestRegion, MEMORY_MANAGER_SNAPSHOT_ID, prefault, userfaultfd};
+use crate::{
+    GuestMemory, GuestMemoryMap, GuestRegion, MEMORY_MANAGER_SNAPSHOT_ID, prefault, userfaultfd,
+};
 
 struct UffdHandler {
     stop_event: EventFd,
@@ -356,7 +358,7 @@ struct CowSource {
 }
 
 pub struct MemoryManager {
-    guest_memory: GuestMemoryAtomic<GuestMemoryMap>,
+    guest_memory: GuestMemory,
     next_memory_slot: Arc<AtomicU32>,
     memory_slot_allocator: Arc<MemorySlotAllocator>,
     start_of_device_area: GuestAddress,
@@ -2381,7 +2383,7 @@ impl MemoryManager {
             prefault,
         )?)?;
 
-        let guest_memory = GuestMemoryAtomic::new(guest_memory);
+        let guest_memory = GuestMemory::new(guest_memory);
 
         let allocator = Arc::new(Mutex::new(
             SystemAllocator::new(
@@ -2973,7 +2975,7 @@ impl MemoryManager {
         Ok(region)
     }
 
-    pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemoryMap> {
+    pub fn guest_memory(&self) -> GuestMemory {
         self.guest_memory.clone()
     }
 

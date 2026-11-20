@@ -21,7 +21,7 @@ use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
-use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic, guest_memory};
+use vm_memory::{Bytes, GuestAddressSpace, guest_memory};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::checked_descriptor::DescriptorChainExt;
 use vmm_sys_util::eventfd::EventFd;
@@ -34,7 +34,7 @@ use super::{
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::PauseCommon;
-use crate::{GuestMemoryMap, VirtioInterrupt, VirtioInterruptType};
+use crate::{GuestMemory, VirtioInterrupt, VirtioInterruptType};
 
 const QUEUE_SIZE: u16 = 8;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];
@@ -66,7 +66,7 @@ enum Error {
 }
 
 struct WatchdogEpollHandler {
-    mem: GuestMemoryAtomic<GuestMemoryMap>,
+    mem: GuestMemory,
     queue: Queue,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     queue_evt: EventFd,

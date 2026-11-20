@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
-use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic};
+use vm_memory::{Bytes, GuestAddressSpace};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
 use vm_virtio::checked_descriptor::DescriptorChainExt;
@@ -31,7 +31,7 @@ use super::{
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::PauseCommon;
-use crate::{GuestMemoryMap, VirtioInterrupt, VirtioInterruptType};
+use crate::{GuestMemory, VirtioInterrupt, VirtioInterruptType};
 
 const QUEUE_SIZE: u16 = 256;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];
@@ -46,7 +46,7 @@ enum Error {
 }
 
 struct RngEpollHandler {
-    mem: GuestMemoryAtomic<GuestMemoryMap>,
+    mem: GuestMemory,
     queue: Queue,
     random_file: File,
     interrupt_cb: Arc<dyn VirtioInterrupt>,

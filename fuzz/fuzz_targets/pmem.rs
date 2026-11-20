@@ -16,9 +16,9 @@ use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
 use virtio_devices::{Pmem, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
-use vm_allocator::{GuestMemoryMap, GuestRegion};
+use vm_allocator::{GuestMemory, GuestMemoryMap, GuestRegion};
 use vm_memory::guest_memory::FileOffset;
-use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, MmapRegion};
+use vm_memory::{Bytes, GuestAddress, MmapRegion};
 use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::{AccessPlatform, AccessType};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
@@ -100,7 +100,7 @@ fn run_pmem_case(
     }
 
     let queue = setup_virt_queue(cursor.next_bool(), bad_used_ring);
-    let guest_memory = GuestMemoryAtomic::new(mem);
+    let guest_memory = GuestMemory::new(mem);
     let evt = match EventFd::new(0) {
         Ok(evt) => evt,
         Err(_) => return false,
@@ -194,7 +194,7 @@ fn run_bad_activate_case(cursor: &mut FuzzCursor<'_>) -> bool {
     };
 
     pmem.activate(virtio_devices::ActivationContext {
-        mem: GuestMemoryAtomic::new(mem),
+        mem: GuestMemory::new(mem),
         interrupt_cb: Arc::new(HarnessInterrupt {
             fail_interrupt: false,
         }),

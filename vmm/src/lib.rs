@@ -38,8 +38,8 @@ use serde::{Deserialize, Serialize};
 use signal_hook::iterator::{Handle, Signals};
 use thiserror::Error;
 use tracer::trace_scoped;
-use vm_allocator::{GuestMemoryMap, GuestRegion};
-use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
+use vm_allocator::{GuestMemory, GuestMemoryMap, GuestRegion};
+use vm_memory::{Bytes, GuestAddress, GuestAddressSpace};
 use vm_migration::protocol::*;
 use vm_migration::{
     MemoryMigrationContext, Migratable, MigratableError, OngoingMigrationContext, Pausable,
@@ -754,7 +754,7 @@ const FAULT_CONNECTION_ACCEPT_TIMEOUT: Duration = Duration::from_secs(30);
 /// [`ReceiveMigrationState::Configured`]
 struct ReceiveMigrationConfiguredData {
     memory_manager: Arc<Mutex<MemoryManager>>,
-    guest_memory: GuestMemoryAtomic<GuestMemoryMap>,
+    guest_memory: GuestMemory,
     connections: ReceiveAdditionalConnections,
     shared_backing: bool,
     fault_rx: Receiver<SocketStream>,
@@ -1961,7 +1961,7 @@ impl Vmm {
     fn serve_postcopy(
         seccomp_filter: &BpfProgram,
         mut socket: SocketStream,
-        guest_memory: GuestMemoryAtomic<GuestMemoryMap>,
+        guest_memory: GuestMemory,
     ) -> result::Result<(), MigratableError> {
         // Apply the dedicated seccomp filter for this thread. It is empty when
         // seccomp is disabled (SeccompAction::Allow), in which case there is

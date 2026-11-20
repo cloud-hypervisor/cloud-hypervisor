@@ -18,8 +18,8 @@ use virtio_queue::{DescriptorChain, Queue, QueueT};
 use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
 use vm_device::interrupt::{InterruptRemapping, MsiIrqSourceConfig};
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-    GuestMemoryBackend, GuestMemoryError, GuestMemoryLoadGuard,
+    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend,
+    GuestMemoryError, GuestMemoryLoadGuard,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::{AccessPlatform, AccessType};
@@ -33,7 +33,7 @@ use super::{
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::PauseCommon;
-use crate::{DmaRemapping, GuestMemoryMap, VirtioInterrupt, VirtioInterruptType};
+use crate::{DmaRemapping, GuestMemory, GuestMemoryMap, VirtioInterrupt, VirtioInterruptType};
 
 /// Queues sizes
 const QUEUE_SIZE: u16 = 256;
@@ -902,7 +902,7 @@ fn detach_endpoint_from_domain(
 }
 
 struct IommuEpollHandler {
-    mem: GuestMemoryAtomic<GuestMemoryMap>,
+    mem: GuestMemory,
     request_queue: Queue,
     _event_queue: Queue,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
@@ -1548,7 +1548,7 @@ mod tests {
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::QueueT;
     use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
-    use vm_memory::{ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
+    use vm_memory::{ByteValued, Bytes, GuestAddress, GuestAddressSpace};
     use vm_virtio::AccessType;
     use vm_virtio::queue::testing::VirtQueue;
     use vmm_sys_util::eventfd::{EFD_NONBLOCK, EventFd};
@@ -1560,7 +1560,7 @@ mod tests {
         VirtioIommuReqAttach, VirtioIommuReqDetach, VirtioIommuReqHead, VirtioIommuReqMap,
         VirtioIommuReqTail, VirtioIommuReqUnmap,
     };
-    use crate::{DmaRemapping, GuestMemoryMap};
+    use crate::{DmaRemapping, GuestMemory, GuestMemoryMap};
 
     /// Test stub for VfioDmaMapping.
     struct MockMapping;
@@ -1764,7 +1764,7 @@ mod tests {
         vq.avail.idx.set(1);
 
         let mut queue = vq.create_queue();
-        let mem_atomic = GuestMemoryAtomic::new(mem.clone());
+        let mem_atomic = GuestMemory::new(mem.clone());
         let mut desc_chain = queue.pop_descriptor_chain(mem_atomic.memory()).unwrap();
         let result = Request::parse(&mut desc_chain, mapping, ext_mapping, (0, 0), &[], None);
         (result, mem.read_obj(tail_addr).unwrap())

@@ -21,8 +21,8 @@ use virtio_devices::{
     VirtioInterrupt, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
 };
 use virtio_queue::{Queue, QueueT};
-use vm_allocator::GuestMemoryMap;
-use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
+use vm_allocator::{GuestMemory, GuestMemoryMap};
+use vm_memory::{Bytes, GuestAddress};
 use vm_migration::{Migratable, Pausable, Snapshottable};
 use vm_virtio::{AccessPlatform, AccessType};
 use vmm::EpollContext;
@@ -766,7 +766,7 @@ fn run_stateful_activation(
         return;
     }
 
-    let guest_memory = GuestMemoryAtomic::new(mem);
+    let guest_memory = GuestMemory::new(mem);
     let mut queues = setup_virt_queues(BASE_VIRT_QUEUE_ADDR, input.next_bool());
 
     let input_queue = queues.remove(0);
@@ -924,7 +924,7 @@ fn exercise_bad_activate(guest_mac_addr: net_util::MacAddr) {
     let queue = Queue::new(QUEUE_SIZE).unwrap();
     let queue_evt = EventFd::new(EFD_NONBLOCK).unwrap();
     let _ = net.activate(virtio_devices::ActivationContext {
-        mem: GuestMemoryAtomic::new(mem),
+        mem: GuestMemory::new(mem),
         interrupt_cb: Arc::new(FuzzVirtioInterrupt {
             fault: InterruptFault::None,
         }),
@@ -979,7 +979,7 @@ fn new_direct_ctrl_handler(
     );
 
     Some(NetCtrlEpollHandler {
-        mem: GuestMemoryAtomic::new(mem),
+        mem: GuestMemory::new(mem),
         kill_evt: EventFd::new(EFD_NONBLOCK).ok()?,
         pause_evt: EventFd::new(EFD_NONBLOCK).ok()?,
         ctrl_q: net_util::CtrlQueue::new(
@@ -1283,7 +1283,7 @@ fn exercise_bad_tap_activation(guest_mac_addr: net_util::MacAddr, rx_avail_idx: 
 
     let _ = input_queue_evt.write(1);
     let activation = net.activate(virtio_devices::ActivationContext {
-        mem: GuestMemoryAtomic::new(mem),
+        mem: GuestMemory::new(mem),
         interrupt_cb: Arc::new(FuzzVirtioInterrupt {
             fault: InterruptFault::None,
         }),
@@ -1380,7 +1380,7 @@ fn exercise_bad_queue_activation(guest_mac_addr: net_util::MacAddr, bad_avail_ri
     let input_evt = EventFd::new(EFD_NONBLOCK).unwrap();
     let output_evt = EventFd::new(EFD_NONBLOCK).unwrap();
     let activation = net.activate(virtio_devices::ActivationContext {
-        mem: GuestMemoryAtomic::new(mem),
+        mem: GuestMemory::new(mem),
         interrupt_cb: Arc::new(FuzzVirtioInterrupt {
             fault: InterruptFault::None,
         }),

@@ -15,8 +15,8 @@ use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
 use virtio_devices::{Endpoint, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
-use vm_allocator::GuestMemoryMap;
-use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
+use vm_allocator::{GuestMemory, GuestMemoryMap};
+use vm_memory::{Bytes, GuestAddress};
 use vm_migration::{Pausable, Snapshot, Snapshottable};
 use vm_virtio::{AccessPlatform, AccessType};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
@@ -204,7 +204,7 @@ fn run_console_case(bytes: &[u8], cursor_offset: usize, mode: u8) -> Result<(), 
         }
     }
 
-    let guest_memory = GuestMemoryAtomic::new(mem);
+    let guest_memory = GuestMemory::new(mem);
 
     let input_queue = queues.remove(0);
     let input_evt = EventFd::new(0).map_err(|_| ())?;
@@ -338,7 +338,7 @@ fn exercise_queue_event_read_error(
 
     if console
         .activate(virtio_devices::ActivationContext {
-            mem: GuestMemoryAtomic::new(mem),
+            mem: GuestMemory::new(mem),
             interrupt_cb: Arc::new(FuzzVirtioInterrupt {
                 fail_config: false,
                 fail_queue: false,
@@ -370,7 +370,7 @@ fn exercise_activation_failure(
         None,
     )
     .map_err(|_| ())?;
-    let mem = GuestMemoryAtomic::new(
+    let mem = GuestMemory::new(
         GuestMemoryMap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).map_err(|_| ())?,
     );
 
@@ -430,7 +430,7 @@ fn exercise_restored_input_queue(
         }
     }
 
-    let guest_memory = GuestMemoryAtomic::new(mem);
+    let guest_memory = GuestMemory::new(mem);
     let input_queue = queues.remove(0);
     let input_evt = EventFd::new(0).map_err(|_| ())?;
     let input_queue_evt = dup_eventfd(&input_evt).map_err(|_| ())?;

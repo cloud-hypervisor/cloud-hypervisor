@@ -15,9 +15,9 @@ use virtio_devices::{
     AccessPlatformMapping, DmaRemapping, VirtioDevice, VirtioInterrupt, VirtioInterruptType,
 };
 use virtio_queue::{Queue, QueueT};
-use vm_allocator::GuestMemoryMap;
+use vm_allocator::{GuestMemory, GuestMemoryMap};
 use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
-use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
+use vm_memory::{Bytes, GuestAddress};
 use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::{AccessPlatform, AccessType};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
@@ -311,7 +311,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
         return Corpus::Reject;
     }
 
-    let guest_memory = GuestMemoryAtomic::new(mem);
+    let guest_memory = GuestMemory::new(mem);
 
     let request_evt = EventFd::new(0).unwrap();
     let event_evt = EventFd::new(0).unwrap();

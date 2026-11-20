@@ -215,7 +215,7 @@ pub mod tests {
 
     use libc::EFD_NONBLOCK;
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
-    use vm_memory::{GuestAddress, GuestMemoryAtomic};
+    use vm_memory::GuestAddress;
     use vm_virtio::queue::testing::VirtQueue as GuestQ;
     use vmm_sys_util::eventfd::EventFd;
 
@@ -224,7 +224,7 @@ pub mod tests {
     use super::*;
     use crate::device::{VirtioInterrupt, VirtioInterruptType};
     use crate::epoll_helper::EpollHelperHandler;
-    use crate::{EpollHelper, GuestMemoryMap};
+    use crate::{EpollHelper, GuestMemory, GuestMemoryMap};
 
     pub struct NoopVirtioInterrupt {}
 
@@ -407,7 +407,7 @@ pub mod tests {
                 guest_txvq,
                 guest_evvq,
                 handler: VsockEpollHandler {
-                    mem: GuestMemoryAtomic::new(self.mem.clone()),
+                    mem: GuestMemory::new(self.mem.clone()),
                     queues,
                     queue_evts,
                     kill_evt: EventFd::new(EFD_NONBLOCK).unwrap(),

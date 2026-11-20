@@ -41,9 +41,7 @@ use virtio_bindings::virtio_blk::*;
 use virtio_bindings::virtio_config::*;
 use virtio_bindings::virtio_ring::{VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC};
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
-use vm_memory::{
-    ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError,
-};
+use vm_memory::{ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryError};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
@@ -56,7 +54,7 @@ use super::{
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::PauseCommon;
-use crate::{GuestMemoryMap, VirtioInterrupt};
+use crate::{GuestMemory, VirtioInterrupt};
 
 const SECTOR_SHIFT: u8 = 9;
 pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
@@ -169,7 +167,7 @@ impl Drop for ActiveRequestGuard {
 struct BlockEpollHandler {
     queue_index: u16,
     queue: Queue,
-    mem: GuestMemoryAtomic<GuestMemoryMap>,
+    mem: GuestMemory,
     disk_image: Box<dyn AsyncIo>,
     disk_nsectors: Arc<AtomicU64>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
@@ -1393,6 +1391,7 @@ mod tests {
     use vmm_sys_util::eventfd::EFD_NONBLOCK;
 
     use super::*;
+    use crate::GuestMemoryMap;
 
     struct Noop(EventFd);
     impl VirtioInterrupt for Noop {
@@ -1500,7 +1499,7 @@ mod tests {
         BlockEpollHandler {
             queue_index: 0,
             queue,
-            mem: GuestMemoryAtomic::new(mem.clone()),
+            mem: GuestMemory::new(mem.clone()),
             disk_image,
             disk_nsectors: Arc::new(AtomicU64::new(0)),
             interrupt_cb: Arc::new(Noop(evt())),
@@ -1591,7 +1590,7 @@ mod tests {
 
         block
             .activate(ActivationContext {
-                mem: GuestMemoryAtomic::new(mem.clone()),
+                mem: GuestMemory::new(mem.clone()),
                 interrupt_cb: Arc::new(QueueInterruptSender(Mutex::new(tx))),
                 queues: vec![(1, vq.create_queue(), queue_evt.try_clone().unwrap())],
                 device_status: Arc::new(AtomicU8::new(0)),

@@ -74,7 +74,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracer::trace_scoped;
 use vm_device::Bus;
-use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
+use vm_memory::{Bytes, GuestAddress, GuestAddressSpace};
 use vm_migration::protocol::{MemoryRangeTable, Request, Response};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, snapshot_from_id,
@@ -112,7 +112,7 @@ use crate::vm_config::{
     NumaConfig, PayloadConfig, PmemConfig, UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
 };
 use crate::{
-    CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, GuestMemoryMap,
+    CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, GuestMemory, GuestMemoryMap,
     MEMORY_MANAGER_SNAPSHOT_ID, MemoryZoneUpdateError, PciDeviceInfo, acpi, cpu,
 };
 
@@ -381,7 +381,7 @@ impl VmState {
 }
 
 struct VmOpsHandler {
-    memory: GuestMemoryAtomic<GuestMemoryMap>,
+    memory: GuestMemory,
     #[cfg(target_arch = "x86_64")]
     io_bus: Arc<Bus>,
     mmio_bus: Arc<Bus>,
@@ -2720,7 +2720,7 @@ impl Vm {
         self.memory_manager.lock().unwrap().memory_range_table(mode)
     }
 
-    pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemoryMap> {
+    pub fn guest_memory(&self) -> GuestMemory {
         self.memory_manager.lock().unwrap().guest_memory()
     }
 
@@ -3220,7 +3220,7 @@ impl Debuggable for Vm {
 
     fn read_mem(
         &self,
-        guest_memory: &GuestMemoryAtomic<GuestMemoryMap>,
+        guest_memory: &GuestMemory,
         cpu_id: usize,
         vaddr: GuestAddress,
         len: usize,
@@ -3233,7 +3233,7 @@ impl Debuggable for Vm {
 
     fn write_mem(
         &self,
-        guest_memory: &GuestMemoryAtomic<GuestMemoryMap>,
+        guest_memory: &GuestMemory,
         cpu_id: usize,
         vaddr: &GuestAddress,
         data: &[u8],

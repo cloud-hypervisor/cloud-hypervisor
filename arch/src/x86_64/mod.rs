@@ -30,14 +30,13 @@ use linux_loader::loader::elf::start_info::{
 use log::{debug, error, info};
 use thiserror::Error;
 use vm_memory::{
-    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend,
-    GuestMemoryRegion,
+    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend, GuestMemoryRegion,
 };
 
 use crate::smbios::SmbiosConfig;
 use crate::x86_64::cpu_profile::CpuProfile;
 use crate::x86_64::cpu_profile::cpuid_adjustments::MissingCpuidEntriesError;
-use crate::{GuestMemoryMap, InitramfsConfig, RegionType, smbios};
+use crate::{GuestMemory, GuestMemoryMap, InitramfsConfig, RegionType, smbios};
 
 // While modern architectures support more than 255 CPUs via x2APIC,
 // legacy devices such as mptable support at most 254 CPUs.
@@ -1204,7 +1203,7 @@ fn required_common_cpuid_updates(
 pub fn configure_vcpu(
     vcpu: &dyn hypervisor::Vcpu,
     id: u32,
-    boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMap>)>,
+    boot_setup: Option<(EntryPoint, &GuestMemory)>,
     cpuid: Vec<CpuIdEntry>,
     kvm_hyperv: bool,
     cpu_vendor: CpuVendor,

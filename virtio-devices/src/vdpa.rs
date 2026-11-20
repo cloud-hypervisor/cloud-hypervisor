@@ -20,7 +20,7 @@ use vhost::{VhostBackend, VringConfigData};
 use virtio_queue::desc::RawDescriptor;
 use virtio_queue::{Queue, QueueT};
 use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
-use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend};
+use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryBackend};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
@@ -30,8 +30,8 @@ use vmm_sys_util::ioctl_io_nr;
 use crate::device::ActivationContext;
 use crate::{
     ActivateError, ActivateResult, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK,
-    DEVICE_FEATURES_OK, GuestMemoryMap, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon, VirtioDevice,
-    VirtioInterrupt, VirtioInterruptType, get_host_address_range,
+    DEVICE_FEATURES_OK, GuestMemory, GuestMemoryMap, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon,
+    VirtioDevice, VirtioInterrupt, VirtioInterruptType, get_host_address_range,
 };
 
 #[derive(Error, Debug)]
@@ -115,7 +115,7 @@ pub struct VdpaState {
 pub struct Vdpa {
     common: VirtioCommon,
     id: String,
-    vhost: Option<VhostKernVdpa<GuestMemoryAtomic<GuestMemoryMap>>>,
+    vhost: Option<VhostKernVdpa<GuestMemory>>,
     iova_range: VhostVdpaIovaRange,
     enabled_queues: BTreeMap<u16, bool>,
     backend_features: u64,
@@ -126,7 +126,7 @@ impl Vdpa {
     pub fn new(
         id: String,
         device_path: &str,
-        mem: GuestMemoryAtomic<GuestMemoryMap>,
+        mem: GuestMemory,
         num_queues: u16,
         state: Option<VdpaState>,
     ) -> Result<Self> {
@@ -659,7 +659,7 @@ mod tests {
     use vm_memory::GuestAddress;
 
     use super::*;
-    use crate::{GuestMemoryMap, VirtioInterruptType};
+    use crate::{GuestMemory, GuestMemoryMap, VirtioInterruptType};
 
     struct NoopInterrupt;
 
@@ -693,7 +693,7 @@ mod tests {
             migrating: false,
         };
         let context = ActivationContext {
-            mem: GuestMemoryAtomic::new(
+            mem: GuestMemory::new(
                 GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
             ),
             interrupt_cb: Arc::new(NoopInterrupt),
@@ -725,7 +725,7 @@ mod tests {
             migrating: false,
         };
         let context = ActivationContext {
-            mem: GuestMemoryAtomic::new(
+            mem: GuestMemory::new(
                 GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
             ),
             interrupt_cb: Arc::new(NoopInterrupt),

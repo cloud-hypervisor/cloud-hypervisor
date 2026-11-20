@@ -20,8 +20,8 @@ use thiserror::Error;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
 use vm_allocator::GuestRegion;
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-    GuestMemoryError, GuestMemoryLoadGuard,
+    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryError,
+    GuestMemoryLoadGuard,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
@@ -36,7 +36,7 @@ use super::{
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::PauseCommon;
-use crate::{GuestMemoryMap, VirtioInterrupt, VirtioInterruptType};
+use crate::{GuestMemory, GuestMemoryMap, VirtioInterrupt, VirtioInterruptType};
 
 const QUEUE_SIZE: u16 = 256;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];
@@ -155,7 +155,7 @@ impl Request {
 }
 
 struct PmemEpollHandler {
-    mem: GuestMemoryAtomic<GuestMemoryMap>,
+    mem: GuestMemory,
     queue: Queue,
     disk: File,
     interrupt_cb: Arc<dyn VirtioInterrupt>,

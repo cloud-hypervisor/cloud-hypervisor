@@ -20,7 +20,7 @@ use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
-use vm_memory::{GuestAddressSpace, GuestMemoryAtomic};
+use vm_memory::GuestAddressSpace;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
@@ -52,7 +52,7 @@ use crate::seccomp_filters::Thread;
 use crate::thread_helper::PauseCommon;
 use crate::{
     ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
-    Error as DeviceError, GuestMemoryMap, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_IN_ORDER,
+    Error as DeviceError, GuestMemory, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_IN_ORDER,
     VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt,
     VirtioInterruptType,
 };
@@ -94,7 +94,7 @@ enum Error {
 ///   - forward the event to the backend; then
 ///   - again, attempt to fetch any incoming packets queued by the backend into virtio RX buffers.
 pub(crate) struct VsockEpollHandler<B: VsockBackend> {
-    pub mem: GuestMemoryAtomic<GuestMemoryMap>,
+    pub mem: GuestMemory,
     pub queues: Vec<Queue>,
     pub queue_evts: Vec<EventFd>,
     pub kill_evt: EventFd,
@@ -672,7 +672,7 @@ mod tests {
         // A warning is, however, logged, if the guest driver attempts to write any config data.
         ctx.device.write_config(0, &data[..4]);
 
-        let memory = GuestMemoryAtomic::new(ctx.mem.clone());
+        let memory = GuestMemory::new(ctx.mem.clone());
 
         // Test a bad activation.
         let bad_activate = ctx.device.activate(ActivationContext {

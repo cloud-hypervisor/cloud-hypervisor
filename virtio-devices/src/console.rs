@@ -21,7 +21,7 @@ use serial_buffer::{SerialBuffer, SocketConsole};
 use smallvec::SmallVec;
 use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
-use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic};
+use vm_memory::{ByteValued, Bytes, GuestAddressSpace};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
 use vm_virtio::checked_descriptor::DescriptorChainExt;
@@ -35,7 +35,7 @@ use super::{
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::PauseCommon;
-use crate::{GuestMemoryMap, VirtioInterrupt};
+use crate::{GuestMemory, VirtioInterrupt};
 
 const QUEUE_SIZE: u16 = 256;
 const NUM_QUEUES: u16 = 2;
@@ -86,7 +86,7 @@ impl Default for VirtioConsoleConfig {
 unsafe impl ByteValued for VirtioConsoleConfig {}
 
 struct ConsoleEpollHandler {
-    mem: GuestMemoryAtomic<GuestMemoryMap>,
+    mem: GuestMemory,
     input_queue: Queue,
     output_queue: Queue,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
@@ -151,7 +151,7 @@ impl Endpoint {
 impl ConsoleEpollHandler {
     #[expect(clippy::too_many_arguments)]
     fn new(
-        mem: GuestMemoryAtomic<GuestMemoryMap>,
+        mem: GuestMemory,
         input_queue: Queue,
         output_queue: Queue,
         interrupt_cb: Arc<dyn VirtioInterrupt>,

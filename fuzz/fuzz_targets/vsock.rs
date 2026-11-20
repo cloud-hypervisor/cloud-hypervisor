@@ -17,8 +17,8 @@ use virtio_devices::{
     ActivationContext, VirtioDevice, VirtioInterrupt, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
 };
 use virtio_queue::{Queue, QueueT};
-use vm_allocator::GuestMemoryMap;
-use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
+use vm_allocator::{GuestMemory, GuestMemoryMap};
+use vm_memory::{Bytes, GuestAddress};
 use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::{AccessPlatform, AccessType};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
@@ -403,7 +403,7 @@ fn run_worker_scenario(
         return false;
     }
 
-    let guest_memory = GuestMemoryAtomic::new(mem);
+    let guest_memory = GuestMemory::new(mem);
     let mut queues_with_evts = Vec::with_capacity(NUM_QUEUES as usize);
     for i in 0..NUM_QUEUES {
         let q = match build_queue(
@@ -634,7 +634,7 @@ fn exercise_device_paths(bytes: &[u8]) {
         Ok(mem) => mem,
         Err(_) => return,
     };
-    let memory = GuestMemoryAtomic::new(mem);
+    let memory = GuestMemory::new(mem);
     let _ = device.activate(ActivationContext {
         mem: memory.clone(),
         interrupt_cb: Arc::new(HarnessInterrupt {

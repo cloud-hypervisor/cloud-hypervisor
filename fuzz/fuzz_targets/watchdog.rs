@@ -14,8 +14,8 @@ use seccompiler::SeccompAction;
 use virtio_devices::watchdog::WatchdogState;
 use virtio_devices::{VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
-use vm_allocator::GuestMemoryMap;
-use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
+use vm_allocator::{GuestMemory, GuestMemoryMap};
+use vm_memory::{Bytes, GuestAddress};
 use vm_migration::{Pausable, Snapshottable};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
@@ -341,7 +341,7 @@ fn run_watchdog_case(bytes: &[u8], mode: usize) -> Result<(), ()> {
     seed_memory(&mem, &mut cursor)?;
     let queue = setup_virt_queue(&mut cursor, config.invalid_used_ring)?;
     populate_queue_memory(&mem, config.desc_mode, &mut cursor)?;
-    let guest_memory = GuestMemoryAtomic::new(mem);
+    let guest_memory = GuestMemory::new(mem);
 
     let (evt, queue_evt) = make_queue_event(config.queue_event_mode, config.pre_kicks)?;
 

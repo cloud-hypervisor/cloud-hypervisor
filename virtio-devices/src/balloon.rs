@@ -32,8 +32,8 @@ use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
 use vm_allocator::page_size::{align_page_size_down, get_page_size};
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-    GuestMemoryBackend, GuestMemoryError, GuestMemoryRegion,
+    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend,
+    GuestMemoryError, GuestMemoryRegion,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
@@ -47,8 +47,8 @@ use crate::seccomp_filters::Thread;
 use crate::thread_helper::PauseCommon;
 use crate::{
     ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
-    GuestMemoryMap, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice,
-    VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
+    GuestMemory, GuestMemoryMap, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_VERSION_1, VirtioCommon,
+    VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
 };
 
 const QUEUE_SIZE: u16 = 128;
@@ -284,7 +284,7 @@ struct BalloonStatsHandler {
 }
 
 struct BalloonEpollHandler {
-    mem: GuestMemoryAtomic<GuestMemoryMap>,
+    mem: GuestMemory,
     queues: Vec<Queue>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     inflate_queue_evt: EventFd,
@@ -1157,7 +1157,7 @@ mod tests {
         let (_, request_receiver) = mpsc::channel();
 
         BalloonEpollHandler {
-            mem: GuestMemoryAtomic::new(memory.clone()),
+            mem: GuestMemory::new(memory.clone()),
             queues: vec![queue],
             interrupt_cb: Arc::new(NoopInterrupt),
             inflate_queue_evt: EventFd::new(EFD_NONBLOCK).unwrap(),

@@ -37,7 +37,7 @@ pub mod vhost_user;
 pub mod vsock;
 pub mod watchdog;
 
-use vm_allocator::{GuestMemoryMap, GuestRegion};
+use vm_allocator::{GuestMemory, GuestMemoryMap, GuestRegion};
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{GuestAddress, GuestMemoryBackend, GuestMemoryError};
 use vm_virtio::VirtioDeviceType;

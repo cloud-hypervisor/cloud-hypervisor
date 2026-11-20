@@ -16,7 +16,7 @@ use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
-use vm_memory::{Address, ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, guest_memory};
+use vm_memory::{Address, ByteValued, Bytes, GuestAddressSpace, guest_memory};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
 use vm_virtio::checked_descriptor::DescriptorChainExt;
@@ -30,7 +30,7 @@ use super::{
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::PauseCommon;
-use crate::{GuestMemoryMap, VirtioInterrupt, VirtioInterruptType};
+use crate::{GuestMemory, VirtioInterrupt, VirtioInterruptType};
 
 const QUEUE_SIZE: u16 = 256;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];
@@ -186,7 +186,7 @@ enum Error {
 }
 
 struct RtcEpollHandler {
-    mem: GuestMemoryAtomic<GuestMemoryMap>,
+    mem: GuestMemory,
     queue: Queue,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     queue_evt: EventFd,

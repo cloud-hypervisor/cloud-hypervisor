@@ -23,8 +23,7 @@ use iommufd_ioctls::{
 use log::{error, warn};
 use pci::{PasidCap, PciBdf};
 use thiserror::Error;
-use vm_allocator::GuestMemoryMap;
-use vm_memory::GuestMemoryAtomic;
+use vm_allocator::GuestMemory;
 use vmm_sys_util::epoll::{ControlOperation, Epoll, EpollEvent, EventSet};
 use vmm_sys_util::eventfd::{EFD_NONBLOCK, EventFd};
 
@@ -271,7 +270,7 @@ pub struct Smmuv3Iommufd {
 impl Smmuv3Iommufd {
     pub fn new(
         id: String,
-        mem: GuestMemoryAtomic<GuestMemoryMap>,
+        mem: GuestMemory,
         interrupts: Smmuv3Interrupts,
         acpi_info: Smmuv3AcpiInfo,
         viommu: Arc<IommufdVIommu>,

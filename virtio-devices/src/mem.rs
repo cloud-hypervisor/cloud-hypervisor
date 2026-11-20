@@ -28,8 +28,8 @@ use thiserror::Error;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
 use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-    GuestMemoryBackend, GuestMemoryError, GuestMemoryLoadGuard, GuestMemoryRegion,
+    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend,
+    GuestMemoryError, GuestMemoryLoadGuard, GuestMemoryRegion,
 };
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -43,7 +43,7 @@ use super::{
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::PauseCommon;
-use crate::{GuestMemoryMap, GuestRegion, VirtioInterrupt, VirtioInterruptType};
+use crate::{GuestMemory, GuestMemoryMap, GuestRegion, VirtioInterrupt, VirtioInterruptType};
 
 const QUEUE_SIZE: u16 = 128;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];
@@ -399,7 +399,7 @@ impl BlocksState {
 }
 
 struct MemEpollHandler {
-    mem: GuestMemoryAtomic<GuestMemoryMap>,
+    mem: GuestMemory,
     region: Arc<GuestRegion>,
     host_fd: Option<RawFd>,
     blocks_state: Arc<Mutex<BlocksState>>,
