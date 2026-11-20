@@ -6,7 +6,7 @@
 use std::any::Any;
 use std::os::unix::prelude::AsRawFd;
 use std::sync::{Arc, Barrier, Mutex};
-use std::{io, result};
+use std::{io, process, result};
 
 use log::{error, info};
 use thiserror::Error;
@@ -14,7 +14,8 @@ use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::VfioIrq;
 use vfio_user::{Client, Error as VfioUserError};
 use vm_allocator::{
-    AddressAllocator, GuestRegion, GuestRegionError, MemorySlotAllocator, SystemAllocator,
+    AddressAllocator, GuestMemoryNotification, GuestRegion, GuestRegionError, MemorySlotAllocator,
+    SystemAllocator,
 };
 use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
 use vm_device::interrupt::{InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig};
@@ -509,6 +510,30 @@ where
                 size,
                 source: e.into(),
             })
+    }
+}
+
+impl<M: GuestAddressSpace + Send + Sync> GuestMemoryNotification for VfioUserDmaMapping<M>
+where
+    M::M: GuestMemoryBackend,
+{
+    fn region_added(&self, region: &Arc<GuestRegion>) {
+        if region.file_offset().is_some() {
+            let gpa = region.start_addr().raw_value();
+            if let Err(e) = self.map(gpa, gpa, region.len()) {
+                error!("FATAL: vfio-user: {e:?}");
+                process::exit(1);
+            }
+        }
+    }
+
+    fn region_removed(&self, region: &Arc<GuestRegion>) {
+        if region.file_offset().is_some()
+            && let Err(e) = self.unmap(region.start_addr().raw_value(), region.len())
+        {
+            error!("FATAL: vfio-user: {e:?}");
+            process::exit(1);
+        }
     }
 }
 
