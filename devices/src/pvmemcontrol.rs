@@ -803,7 +803,7 @@ impl PvmemcontrolDevice {
         mem: GuestMemoryAtomic<GuestMemory>,
     ) -> (PvmemcontrolPciDevice, PvmemcontrolBusDevice) {
         let dev = RwLock::new(PvmemcontrolDevice::error());
-        let mut configuration = PciConfiguration::new(
+        let configuration = PciConfiguration::new(
             PVMEMCONTROL_VENDOR_ID,
             PVMEMCONTROL_DEVICE_ID,
             0x1,
@@ -816,9 +816,6 @@ impl PvmemcontrolDevice {
             None,
             None,
         );
-        let command: [u8; 2] = [0x03, 0x01]; // memory, io, SERR#
-
-        configuration.write_config_register(1, 0, &command);
         (
             PvmemcontrolPciDevice {
                 id,
