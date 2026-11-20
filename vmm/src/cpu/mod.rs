@@ -101,6 +101,7 @@ use crate::vm::physical_bits;
 use crate::vm_config::CpusConfig;
 use crate::{CPU_MANAGER_SNAPSHOT_ID, GuestMemory};
 
+mod run;
 mod startup;
 
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
