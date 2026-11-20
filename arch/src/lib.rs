@@ -15,7 +15,7 @@ use std::{fmt, result};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use vm_allocator::{GuestMemory, GuestRegion};
+use vm_allocator::{GuestMemoryMap, GuestRegion};
 
 /// Type for returning error code.
 #[derive(Debug, Error)]

@@ -46,7 +46,7 @@ use super::{
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::PauseCommon;
-use crate::{GuestMemory, VirtioInterrupt};
+use crate::{GuestMemoryMap, VirtioInterrupt};
 
 /// Control queue
 // Event available on the control queue.
@@ -60,7 +60,7 @@ const RETRY_ANNOUNCEMENTS_EVENT: u16 = START_ANNOUNCEMENTS_EVENT + 1;
 pub const MIN_MTU: u16 = 1280;
 
 pub struct NetCtrlEpollHandler {
-    pub mem: GuestMemoryAtomic<GuestMemory>,
+    pub mem: GuestMemoryAtomic<GuestMemoryMap>,
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
     pub ctrl_q: CtrlQueue,
@@ -227,7 +227,7 @@ pub type Result<T> = result::Result<T, Error>;
 
 struct NetEpollHandler {
     net: NetQueuePair,
-    mem: GuestMemoryAtomic<GuestMemory>,
+    mem: GuestMemoryAtomic<GuestMemoryMap>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     kill_evt: EventFd,
     pause_evt: EventFd,

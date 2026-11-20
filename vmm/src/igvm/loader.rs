@@ -10,14 +10,14 @@ use vm_memory::{
     GuestMemoryRegion,
 };
 
-use crate::GuestMemory;
+use crate::GuestMemoryMap;
 use crate::igvm::{BootPageAcceptance, HV_PAGE_SIZE, StartupMemoryType};
 
 /// Structure to hold the guest memory info/layout to check
 /// the if the memory is accepted within the layout.
 /// Adds up the total bytes written to the guest memory
 pub(super) struct Loader {
-    memory: GuestMemoryAtomic<GuestMemory>,
+    memory: GuestMemoryAtomic<GuestMemoryMap>,
     accepted_ranges: RangeMap<u64, BootPageAcceptance>,
     bytes_written: u64,
 }
@@ -42,7 +42,7 @@ pub enum Error {
 }
 
 impl Loader {
-    pub(super) fn new(memory: GuestMemoryAtomic<GuestMemory>) -> Loader {
+    pub(super) fn new(memory: GuestMemoryAtomic<GuestMemoryMap>) -> Loader {
         Loader {
             memory,
             accepted_ranges: RangeMap::new(),

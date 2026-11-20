@@ -34,7 +34,7 @@ use super::{
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::PauseCommon;
-use crate::{GuestMemory, VirtioInterrupt, VirtioInterruptType};
+use crate::{GuestMemoryMap, VirtioInterrupt, VirtioInterruptType};
 
 const QUEUE_SIZE: u16 = 8;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];
@@ -66,7 +66,7 @@ enum Error {
 }
 
 struct WatchdogEpollHandler {
-    mem: GuestMemoryAtomic<GuestMemory>,
+    mem: GuestMemoryAtomic<GuestMemoryMap>,
     queue: Queue,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     queue_evt: EventFd,

@@ -33,9 +33,9 @@ use crate::seccomp_filters::Thread;
 use crate::thread_helper::PauseCommon;
 use crate::{
     ActivateError, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
-    GuestMemory, GuestRegion, HostAddressRangeError, VIRTIO_F_IN_ORDER, VIRTIO_F_NOTIFICATION_DATA,
-    VIRTIO_F_ORDER_PLATFORM, VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_RING_INDIRECT_DESC,
-    VIRTIO_F_VERSION_1, VirtioCommon, VirtioInterrupt,
+    GuestMemoryMap, GuestRegion, HostAddressRangeError, VIRTIO_F_IN_ORDER,
+    VIRTIO_F_NOTIFICATION_DATA, VIRTIO_F_ORDER_PLATFORM, VIRTIO_F_RING_EVENT_IDX,
+    VIRTIO_F_RING_INDIRECT_DESC, VIRTIO_F_VERSION_1, VirtioCommon, VirtioInterrupt,
 };
 
 pub mod blk;
@@ -296,7 +296,7 @@ pub struct Inflight {
 
 pub struct VhostUserEpollHandler<S: VhostUserFrontendReqHandler> {
     pub vu: Arc<Mutex<VhostUserHandle>>,
-    pub mem: GuestMemoryAtomic<GuestMemory>,
+    pub mem: GuestMemoryAtomic<GuestMemoryMap>,
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
     pub queues: Vec<(u16, Queue, EventFd)>,
@@ -523,7 +523,7 @@ impl<C> VhostUserState<C> {
 pub struct VhostUserCommon {
     pub virtio_common: VirtioCommon,
     pub vu: Option<Arc<Mutex<VhostUserHandle>>>,
-    pub guest_memory: Option<GuestMemoryAtomic<GuestMemory>>,
+    pub guest_memory: Option<GuestMemoryAtomic<GuestMemoryMap>>,
     pub acked_protocol_features: u64,
     pub socket_path: String,
     pub vu_num_queues: u16,
@@ -559,7 +559,7 @@ impl VhostUserCommon {
     #[expect(clippy::too_many_arguments)]
     pub fn activate<T: VhostUserFrontendReqHandler>(
         &mut self,
-        mem: GuestMemoryAtomic<GuestMemory>,
+        mem: GuestMemoryAtomic<GuestMemoryMap>,
         queues: &[(u16, Queue, EventFd)],
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         acked_features: u64,
@@ -1157,7 +1157,7 @@ mod tests {
             .open(temp_dir.as_path().join("memory"))
             .unwrap();
         file.set_len(0x1000).unwrap();
-        let mem = GuestMemory::from_ranges_with_files(&[(
+        let mem = GuestMemoryMap::from_ranges_with_files(&[(
             GuestAddress(0),
             0x1000,
             Some(FileOffset::new(file, 0)),

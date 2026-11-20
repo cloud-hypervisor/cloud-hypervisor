@@ -112,8 +112,8 @@ use crate::vm_config::{
     NumaConfig, PayloadConfig, PmemConfig, UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
 };
 use crate::{
-    CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, GuestMemory, MEMORY_MANAGER_SNAPSHOT_ID,
-    MemoryZoneUpdateError, PciDeviceInfo, acpi, cpu,
+    CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, GuestMemoryMap,
+    MEMORY_MANAGER_SNAPSHOT_ID, MemoryZoneUpdateError, PciDeviceInfo, acpi, cpu,
 };
 
 /// Errors associated with VM management
@@ -381,7 +381,7 @@ impl VmState {
 }
 
 struct VmOpsHandler {
-    memory: GuestMemoryAtomic<GuestMemory>,
+    memory: GuestMemoryAtomic<GuestMemoryMap>,
     #[cfg(target_arch = "x86_64")]
     io_bus: Arc<Bus>,
     mmio_bus: Arc<Bus>,
@@ -1096,7 +1096,7 @@ impl Vm {
         Ok(())
     }
 
-    fn boot_guest_memory(&self) -> Result<GuestMemory> {
+    fn boot_guest_memory(&self) -> Result<GuestMemoryMap> {
         let config = self.config.lock().unwrap();
         self.memory_manager
             .lock()
@@ -1176,7 +1176,7 @@ impl Vm {
         fw_cfg_config: &FwCfgConfig,
         device_manager: &Arc<Mutex<DeviceManager>>,
         config: &Arc<Mutex<VmConfig>>,
-        #[cfg(target_arch = "x86_64")] boot_memory: Option<&GuestMemory>,
+        #[cfg(target_arch = "x86_64")] boot_memory: Option<&GuestMemoryMap>,
         #[cfg(target_arch = "x86_64")] kvm_sev_snp_enabled: bool,
     ) -> Result<()> {
         let mut kernel_option: Option<File> = None;
@@ -1485,7 +1485,7 @@ impl Vm {
         Ok(vm)
     }
 
-    fn load_initramfs(&mut self, guest_mem: &GuestMemory) -> Result<arch::InitramfsConfig> {
+    fn load_initramfs(&mut self, guest_mem: &GuestMemoryMap) -> Result<arch::InitramfsConfig> {
         let initramfs = self.initramfs.as_mut().unwrap();
         let size: usize = initramfs
             .seek(SeekFrom::End(0))
@@ -1591,7 +1591,7 @@ impl Vm {
     #[expect(clippy::needless_pass_by_value)]
     fn load_igvm(
         igvm_file: IgvmFile,
-        #[cfg(feature = "sev_snp")] boot_memory: &GuestMemory,
+        #[cfg(feature = "sev_snp")] boot_memory: &GuestMemoryMap,
         memory_manager: Arc<Mutex<MemoryManager>>,
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
         #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))] measured_boot: Option<
@@ -2720,7 +2720,7 @@ impl Vm {
         self.memory_manager.lock().unwrap().memory_range_table(mode)
     }
 
-    pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemory> {
+    pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemoryMap> {
         self.memory_manager.lock().unwrap().guest_memory()
     }
 
@@ -3220,7 +3220,7 @@ impl Debuggable for Vm {
 
     fn read_mem(
         &self,
-        guest_memory: &GuestMemoryAtomic<GuestMemory>,
+        guest_memory: &GuestMemoryAtomic<GuestMemoryMap>,
         cpu_id: usize,
         vaddr: GuestAddress,
         len: usize,
@@ -3233,7 +3233,7 @@ impl Debuggable for Vm {
 
     fn write_mem(
         &self,
-        guest_memory: &GuestMemoryAtomic<GuestMemory>,
+        guest_memory: &GuestMemoryAtomic<GuestMemoryMap>,
         cpu_id: usize,
         vaddr: &GuestAddress,
         data: &[u8],
@@ -3418,7 +3418,7 @@ mod tests {
             hypervisor::MemoryVisibility::Shared,
         )
         .unwrap();
-        let mem = GuestMemory::from_regions(vec![region]).unwrap();
+        let mem = GuestMemoryMap::from_regions(vec![region]).unwrap();
         mem.write_slice(&code, load_addr)
             .expect("Writing code to memory failed");
         for region in mem.iter() {
@@ -3470,7 +3470,7 @@ mod tests {
             arch::aarch64::layout::RAM_START,
             (arch::aarch64::layout::FDT_MAX_SIZE + 0x1000) as usize,
         )];
-        let mem = GuestMemory::from_ranges(&regions).expect("Cannot initialize memory");
+        let mem = GuestMemoryMap::from_ranges(&regions).expect("Cannot initialize memory");
 
         let dev_info: HashMap<(DeviceType, String), MmioDeviceInfo> = [
             (

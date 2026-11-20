@@ -30,7 +30,7 @@ use crate::cpu::CpuManager;
 use crate::device_manager::DeviceManager;
 use crate::memory_manager::MemoryManager;
 use crate::pci_segment::PciSegment;
-use crate::{GuestMemory, GuestRegion};
+use crate::{GuestMemoryMap, GuestRegion};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -1376,7 +1376,7 @@ pub(crate) fn create_acpi_tables_for_fw_cfg(
 }
 
 pub(crate) fn create_acpi_tables(
-    guest_mem: &GuestMemory,
+    guest_mem: &GuestMemoryMap,
     device_manager: &DeviceManager,
     cpu_manager: &CpuManager,
     memory_manager: &MemoryManager,

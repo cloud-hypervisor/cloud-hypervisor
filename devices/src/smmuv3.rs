@@ -9,7 +9,7 @@ use std::sync::{Arc, Barrier};
 use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error as ThisError;
-use vm_allocator::GuestMemory;
+use vm_allocator::GuestMemoryMap;
 use vm_device::BusDevice;
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError};
@@ -420,7 +420,7 @@ pub struct Smmuv3 {
     stream_ids: BTreeSet<u32>,
     restored: bool,
 
-    mem: GuestMemoryAtomic<GuestMemory>,
+    mem: GuestMemoryAtomic<GuestMemoryMap>,
     interrupts: Smmuv3Interrupts,
     backend: Arc<dyn PhysicalIommu>,
 }
@@ -428,7 +428,7 @@ pub struct Smmuv3 {
 impl Smmuv3 {
     pub fn new(
         id: String,
-        mem: GuestMemoryAtomic<GuestMemory>,
+        mem: GuestMemoryAtomic<GuestMemoryMap>,
         interrupts: Smmuv3Interrupts,
         backend: Arc<dyn PhysicalIommu>,
         state: Option<Smmuv3State>,
@@ -1076,7 +1076,7 @@ mod tests {
 
     fn test_smmuv3() -> Smmuv3 {
         let mem = GuestMemoryAtomic::new(
-            GuestMemory::from_ranges(&[(GuestAddress(0), 0x1_0000)]).unwrap(),
+            GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x1_0000)]).unwrap(),
         );
         let group = || Arc::new(NoopInterrupts) as Arc<dyn InterruptSourceGroup>;
 
@@ -1181,7 +1181,7 @@ mod tests {
 
     fn smmuv3_with_host_info(backend: &Arc<HostInfoBackend>) -> Smmuv3 {
         let mem = GuestMemoryAtomic::new(
-            GuestMemory::from_ranges(&[(GuestAddress(0), 0x1_0000)]).unwrap(),
+            GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x1_0000)]).unwrap(),
         );
         let group = || Arc::new(NoopInterrupts) as Arc<dyn InterruptSourceGroup>;
 
@@ -1206,7 +1206,7 @@ mod tests {
 
     fn smmuv3_with_command(failing: &Arc<AtomicBool>, word0: u64) -> Smmuv3 {
         let mem = GuestMemoryAtomic::new(
-            GuestMemory::from_ranges(&[(GuestAddress(0), 0x1_0000)]).unwrap(),
+            GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x1_0000)]).unwrap(),
         );
         mem.memory()
             .write_obj::<u64>(word0, GuestAddress(TEST_CMDQ_BASE))

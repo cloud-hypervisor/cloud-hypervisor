@@ -36,7 +36,7 @@ use super::{
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::PauseCommon;
-use crate::{GuestMemory, VirtioInterrupt, VirtioInterruptType};
+use crate::{GuestMemoryMap, VirtioInterrupt, VirtioInterruptType};
 
 const QUEUE_SIZE: u16 = 256;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];
@@ -107,7 +107,7 @@ struct Request {
 
 impl Request {
     fn parse(
-        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemory>>,
+        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMap>>,
         access_platform: Option<&dyn AccessPlatform>,
     ) -> result::Result<Request, Error> {
         let desc = desc_chain
@@ -155,7 +155,7 @@ impl Request {
 }
 
 struct PmemEpollHandler {
-    mem: GuestMemoryAtomic<GuestMemory>,
+    mem: GuestMemoryAtomic<GuestMemoryMap>,
     queue: Queue,
     disk: File,
     interrupt_cb: Arc<dyn VirtioInterrupt>,

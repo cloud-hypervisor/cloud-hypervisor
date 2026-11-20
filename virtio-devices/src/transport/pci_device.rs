@@ -42,7 +42,7 @@ use super::pci_common_config::VirtioPciCommonConfigState;
 use crate::transport::{VIRTIO_PCI_COMMON_CONFIG_ID, VirtioPciCommonConfig, VirtioTransport};
 use crate::{
     ActivateResult, ActivationContext, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK,
-    DEVICE_FAILED, DEVICE_FEATURES_OK, DEVICE_INIT, GuestMemory, VirtioDevice, VirtioDeviceType,
+    DEVICE_FAILED, DEVICE_FEATURES_OK, DEVICE_INIT, GuestMemoryMap, VirtioDevice, VirtioDeviceType,
     VirtioInterrupt, VirtioInterruptType, mark_device_needs_reset,
 };
 
@@ -324,7 +324,7 @@ pub(super) struct VirtioPciDeviceState {
 
 pub struct VirtioPciDeviceActivator {
     interrupt: Arc<dyn VirtioInterrupt>,
-    memory: Option<GuestMemoryAtomic<GuestMemory>>,
+    memory: Option<GuestMemoryAtomic<GuestMemoryMap>>,
     device: Arc<Mutex<dyn VirtioDevice>>,
     device_activated: Arc<AtomicBool>,
     queues: Option<Vec<(u16, Queue, EventFd)>>,
@@ -399,7 +399,7 @@ pub struct VirtioPciDevice {
     queue_evts: Vec<EventFd>,
 
     // Guest memory
-    memory: GuestMemoryAtomic<GuestMemory>,
+    memory: GuestMemoryAtomic<GuestMemoryMap>,
 
     // Whether to use 64-bit bar location or 32-bit
     use_64bit_bar: bool,
@@ -432,7 +432,7 @@ impl VirtioPciDevice {
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
-        memory: GuestMemoryAtomic<GuestMemory>,
+        memory: GuestMemoryAtomic<GuestMemoryMap>,
         device: Arc<Mutex<dyn VirtioDevice>>,
         access_platform: Option<&Arc<dyn AccessPlatform>>,
         interrupt_manager: &dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>,
@@ -1689,8 +1689,9 @@ mod tests {
         let device = Arc::new(Mutex::new(TestVirtioDevice {
             result: Mutex::new(Some(result)),
         }));
-        let memory =
-            GuestMemoryAtomic::new(GuestMemory::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap());
+        let memory = GuestMemoryAtomic::new(
+            GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
         let barrier = Arc::new(Barrier::new(2));
         let interrupt_cb = Arc::clone(&interrupt) as Arc<dyn VirtioInterrupt>;
         let activator = VirtioPciDeviceActivator {
@@ -1769,8 +1770,9 @@ mod tests {
     }
 
     fn make_virtio_pci_device() -> VirtioPciDevice {
-        let memory =
-            GuestMemoryAtomic::new(GuestMemory::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap());
+        let memory = GuestMemoryAtomic::new(
+            GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
         let device = Arc::new(Mutex::new(TestVirtioDevice {
             result: Mutex::new(None),
         }));
@@ -1849,8 +1851,9 @@ mod tests {
     }
 
     fn make_virtio_pci_device_with_queues(num_queues: u16) -> VirtioPciDevice {
-        let memory =
-            GuestMemoryAtomic::new(GuestMemory::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap());
+        let memory = GuestMemoryAtomic::new(
+            GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
         let device = Arc::new(Mutex::new(QueuedTestDevice {
             queue_sizes: vec![256; num_queues as usize],
         }));

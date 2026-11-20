@@ -21,7 +21,7 @@ use virtio_devices::{
     VirtioInterrupt, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
 };
 use virtio_queue::{Queue, QueueT};
-use vm_allocator::GuestMemory;
+use vm_allocator::GuestMemoryMap;
 use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
 use vm_migration::{Migratable, Pausable, Snapshottable};
 use vm_virtio::{AccessPlatform, AccessType};
@@ -466,7 +466,7 @@ fn build_ctrl_queue_layout(queue_bytes: &mut [u8]) {
 }
 
 fn write_ctrl_plane(
-    mem: &GuestMemory,
+    mem: &GuestMemoryMap,
     input: &mut FuzzCursor,
     announce_mode: CtrlAnnounceMode,
 ) -> bool {
@@ -724,7 +724,7 @@ fn run_stateful_activation(
         set_avail_idx(&mut queue_bytes, RX_QUEUE_INDEX, rx_avail_idx);
     }
 
-    let mem = match GuestMemory::from_ranges(&[
+    let mem = match GuestMemoryMap::from_ranges(&[
         (GuestAddress(0), MEM_SIZE),
         (GuestAddress(BASE_VIRT_QUEUE_ADDR), queue_bytes.len()),
     ]) {
@@ -917,7 +917,7 @@ fn exercise_bad_activate(guest_mac_addr: net_util::MacAddr) {
         Ok(net) => net,
         Err(_) => return,
     };
-    let mem = match GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
+    let mem = match GuestMemoryMap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
         Ok(mem) => mem,
         Err(_) => return,
     };
@@ -935,7 +935,7 @@ fn exercise_bad_activate(guest_mac_addr: net_util::MacAddr) {
 }
 
 fn write_desc_to_mem(
-    mem: &GuestMemory,
+    mem: &GuestMemoryMap,
     table_addr: u64,
     desc_index: u16,
     addr: u64,
@@ -962,7 +962,7 @@ fn dispatch_ctrl_handler_event(handler: &mut NetCtrlEpollHandler, event_id: u16)
 }
 
 fn new_direct_ctrl_handler(
-    mem: GuestMemory,
+    mem: GuestMemoryMap,
     queue: Queue,
     queue_evt: EventFd,
     announce_evt: EventFd,
@@ -1003,7 +1003,7 @@ fn new_direct_ctrl_handler(
 }
 
 fn exercise_ctrl_handler_edges(input: &mut FuzzCursor) {
-    let mem = match GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
+    let mem = match GuestMemoryMap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
         Ok(mem) => mem,
         Err(_) => return,
     };
@@ -1045,7 +1045,7 @@ fn exercise_ctrl_handler_edges(input: &mut FuzzCursor) {
 }
 
 fn exercise_ctrl_start_success(retries_left: u8) {
-    let mem = match GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
+    let mem = match GuestMemoryMap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
         Ok(mem) => mem,
         Err(_) => return,
     };
@@ -1074,7 +1074,7 @@ fn exercise_ctrl_start_success(retries_left: u8) {
 }
 
 fn exercise_ctrl_retry_spurious() {
-    let mem = match GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
+    let mem = match GuestMemoryMap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
         Ok(mem) => mem,
         Err(_) => return,
     };
@@ -1110,7 +1110,7 @@ fn exercise_ctrl_needs_notification_error() {
     const DIRECT_USED_RING_ADDR: u64 = 0x2_000;
     const DIRECT_AVAIL_RING_ADDR: u64 = MEM_SIZE as u64 - 64;
 
-    let mem = match GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
+    let mem = match GuestMemoryMap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
         Ok(mem) => mem,
         Err(_) => return,
     };
@@ -1257,7 +1257,7 @@ fn exercise_bad_tap_activation(guest_mac_addr: net_util::MacAddr, rx_avail_idx: 
     );
     set_avail_idx(&mut queue_bytes, RX_QUEUE_INDEX, rx_avail_idx);
 
-    let mem = match GuestMemory::from_ranges(&[
+    let mem = match GuestMemoryMap::from_ranges(&[
         (GuestAddress(0), MEM_SIZE),
         (GuestAddress(BASE_VIRT_QUEUE_ADDR), queue_bytes.len()),
     ]) {
@@ -1330,7 +1330,7 @@ fn exercise_bad_queue_activation(guest_mac_addr: net_util::MacAddr, bad_avail_ri
         Err(_) => return,
     };
 
-    let mem = match GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
+    let mem = match GuestMemoryMap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
         Ok(mem) => mem,
         Err(_) => return,
     };

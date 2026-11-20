@@ -10,7 +10,7 @@ use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
 use virtio_devices::{VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
-use vm_allocator::GuestMemory;
+use vm_allocator::GuestMemoryMap;
 use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryAtomic};
 use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::{AccessPlatform, AccessType};
@@ -497,7 +497,7 @@ fn bounded_pfn(v: u8) -> u32 {
     u32::from(v) & ((MEM_SIZE as u32 >> 12) - 1)
 }
 
-fn create_guest_memory(shared: bool) -> Option<GuestMemory> {
+fn create_guest_memory(shared: bool) -> Option<GuestMemoryMap> {
     let mem_region = vmm::memory_manager::MemoryManager::create_ram_region_raw(
         &None, 0, MEM_SIZE, false, false, shared, None, None, None, false,
     )
@@ -537,7 +537,7 @@ fn create_guest_memory(shared: bool) -> Option<GuestMemory> {
         vm_memory::GuestRegionMmap::new(queue_region, GuestAddress(QUEUE_REGION_BASE))?.into(),
     );
 
-    GuestMemory::from_arc_regions(vec![mem_region, reporting_tail_region, queue_region]).ok()
+    GuestMemoryMap::from_arc_regions(vec![mem_region, reporting_tail_region, queue_region]).ok()
 }
 
 fn run_failing_interrupt_case(
@@ -774,7 +774,11 @@ fn activate_reporting_available_unacked(queue_data: &[u8]) {
     balloon.reset();
 }
 
-fn populate_queue_memory(mem: &GuestMemory, queue_layouts: &[QueueLayout], bytes: &[u8]) -> bool {
+fn populate_queue_memory(
+    mem: &GuestMemoryMap,
+    queue_layouts: &[QueueLayout],
+    bytes: &[u8],
+) -> bool {
     if queue_layouts.len() != QUEUE_NUM as usize {
         return false;
     }
@@ -925,7 +929,7 @@ fn populate_queue_memory(mem: &GuestMemory, queue_layouts: &[QueueLayout], bytes
     ) && write_avail_ring(mem, reporting.avail_ring_addr, &[0, 1, 2, 3])
 }
 
-fn write_avail_ring(mem: &GuestMemory, avail_ring_addr: u64, heads: &[u16]) -> bool {
+fn write_avail_ring(mem: &GuestMemoryMap, avail_ring_addr: u64, heads: &[u16]) -> bool {
     if !write_obj(mem, 0u16, avail_ring_addr)
         || !write_obj(mem, heads.len() as u16, avail_ring_addr + 2)
     {
@@ -942,7 +946,7 @@ fn write_avail_ring(mem: &GuestMemory, avail_ring_addr: u64, heads: &[u16]) -> b
 }
 
 fn write_descriptor(
-    mem: &GuestMemory,
+    mem: &GuestMemoryMap,
     desc_table_addr: u64,
     index: u16,
     addr: u64,
@@ -957,6 +961,6 @@ fn write_descriptor(
         && write_obj(mem, next, offset + 14)
 }
 
-fn write_obj<T: ByteValued>(mem: &GuestMemory, value: T, addr: u64) -> bool {
+fn write_obj<T: ByteValued>(mem: &GuestMemoryMap, value: T, addr: u64) -> bool {
     mem.write_obj(value, GuestAddress(addr)).is_ok()
 }

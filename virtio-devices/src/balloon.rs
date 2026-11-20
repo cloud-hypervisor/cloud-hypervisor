@@ -47,7 +47,7 @@ use crate::seccomp_filters::Thread;
 use crate::thread_helper::PauseCommon;
 use crate::{
     ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
-    GuestMemory, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice,
+    GuestMemoryMap, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice,
     VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
 };
 
@@ -284,7 +284,7 @@ struct BalloonStatsHandler {
 }
 
 struct BalloonEpollHandler {
-    mem: GuestMemoryAtomic<GuestMemory>,
+    mem: GuestMemoryAtomic<GuestMemoryMap>,
     queues: Vec<Queue>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     inflate_queue_evt: EventFd,
@@ -307,7 +307,7 @@ impl BalloonEpollHandler {
     }
 
     fn advise_memory_range(
-        memory: &GuestMemory,
+        memory: &GuestMemoryMap,
         range_base: GuestAddress,
         range_len: usize,
         advice: libc::c_int,
@@ -328,7 +328,7 @@ impl BalloonEpollHandler {
     }
 
     fn release_memory_range(
-        memory: &GuestMemory,
+        memory: &GuestMemoryMap,
         range_base: GuestAddress,
         range_len: usize,
     ) -> result::Result<(), Error> {
@@ -379,7 +379,7 @@ impl BalloonEpollHandler {
 
     fn release_memory_range_partial_page(
         pbp: &mut Option<PartiallyBalloonedPage>,
-        memory: &GuestMemory,
+        memory: &GuestMemoryMap,
         range_base: GuestAddress,
     ) -> result::Result<(), Error> {
         let page_size: u64 = get_page_size();
@@ -409,7 +409,7 @@ impl BalloonEpollHandler {
 
     fn process_inflate_addresses(
         &mut self,
-        memory: &GuestMemory,
+        memory: &GuestMemoryMap,
         addresses: &mut SmallVec<[GuestAddress; VIRTIO_BALLOON_PFNS_PER_BATCH]>,
     ) {
         // The balloon always deals with 4 KiB pages. Use partial page handling
@@ -541,7 +541,7 @@ impl BalloonEpollHandler {
         access_platform: Option<&dyn AccessPlatform>,
     ) -> BalloonStatsResult
     where
-        M: Deref<Target = GuestMemory>,
+        M: Deref<Target = GuestMemoryMap>,
     {
         let results: SmallVec<[_; 4]> = desc_chain.checked_iter(access_platform).collect();
         let mut data = Vec::new();
@@ -1130,7 +1130,7 @@ mod tests {
 
     use super::*;
 
-    type TestMemory = GuestMemory;
+    type TestMemory = GuestMemoryMap;
 
     struct NoopInterrupt;
 
@@ -1214,7 +1214,7 @@ mod tests {
         let region = vm_memory::GuestRegionMmap::new(mmap, GuestAddress(0))
             .unwrap()
             .into();
-        let memory = GuestMemory::from_regions(vec![region]).unwrap();
+        let memory = GuestMemoryMap::from_regions(vec![region]).unwrap();
         memory.write_slice(&[0xa5], GuestAddress(0)).unwrap();
         assert_eq!(memory.read_obj::<u8>(GuestAddress(0)).unwrap(), 0xa5);
 

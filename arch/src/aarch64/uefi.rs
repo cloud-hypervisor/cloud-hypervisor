@@ -15,7 +15,7 @@ use vm_memory::{
 };
 
 use super::layout;
-use crate::GuestMemory;
+use crate::GuestMemoryMap;
 
 /// Errors while loading UEFI or writing boot tables.
 #[derive(Debug, Error)]
@@ -102,7 +102,10 @@ struct MemoryDescriptor {
 // SAFETY: All fields are integers and the C layout has no implicit padding.
 unsafe impl ByteValued for MemoryDescriptor {}
 
-pub(super) fn create_uefi_stub_tables(guest_mem: &GuestMemory, rsdp: GuestAddress) -> Result<u32> {
+pub(super) fn create_uefi_stub_tables(
+    guest_mem: &GuestMemoryMap,
+    rsdp: GuestAddress,
+) -> Result<u32> {
     let configuration_table = layout::EFI_TABLES_START.0 + size_of::<SystemTable>() as u64;
     let runtime_properties = configuration_table + 4 * size_of::<ConfigurationTable>() as u64;
     let memory_reserve = runtime_properties + 8;

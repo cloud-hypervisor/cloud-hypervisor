@@ -63,7 +63,7 @@ use crate::uffd::{
     self, FileUffdMemorySource, SocketUffdMemorySource, Uffd, UffdHole, UffdMemorySource, UffdRange,
 };
 use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
-use crate::{GuestMemory, GuestRegion, MEMORY_MANAGER_SNAPSHOT_ID, prefault, userfaultfd};
+use crate::{GuestMemoryMap, GuestRegion, MEMORY_MANAGER_SNAPSHOT_ID, prefault, userfaultfd};
 
 struct UffdHandler {
     stop_event: EventFd,
@@ -356,7 +356,7 @@ struct CowSource {
 }
 
 pub struct MemoryManager {
-    guest_memory: GuestMemoryAtomic<GuestMemory>,
+    guest_memory: GuestMemoryAtomic<GuestMemoryMap>,
     next_memory_slot: Arc<AtomicU32>,
     memory_slot_allocator: Arc<MemorySlotAllocator>,
     start_of_device_area: GuestAddress,
@@ -2245,7 +2245,7 @@ impl MemoryManager {
                 dynamic,
             )?;
             let guest_memory =
-                GuestMemory::from_arc_regions(regions).map_err(Error::GuestRegionCollection)?;
+                GuestMemoryMap::from_arc_regions(regions).map_err(Error::GuestRegionCollection)?;
             (
                 GuestAddress(data.start_of_device_area),
                 data.boot_ram,
@@ -2279,8 +2279,8 @@ impl MemoryManager {
                 dynamic,
             )?;
 
-            let mut guest_memory =
-                GuestMemory::from_arc_regions(mem_regions).map_err(Error::GuestRegionCollection)?;
+            let mut guest_memory = GuestMemoryMap::from_arc_regions(mem_regions)
+                .map_err(Error::GuestRegionCollection)?;
 
             let mut start_of_device_area =
                 MemoryManager::start_addr(guest_memory.last_addr(), allow_mem_hotplug)?;
@@ -2973,11 +2973,11 @@ impl MemoryManager {
         Ok(region)
     }
 
-    pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemory> {
+    pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemoryMap> {
         self.guest_memory.clone()
     }
 
-    pub fn boot_guest_memory(&self, config: &MemoryConfig) -> Result<GuestMemory, Error> {
+    pub fn boot_guest_memory(&self, config: &MemoryConfig) -> Result<GuestMemoryMap, Error> {
         let zone = |id: &str| {
             self.memory_zones
                 .get(id)
@@ -3004,7 +3004,7 @@ impl MemoryManager {
                 .ok_or(Error::MissingBootRegion(range.start.0, range.size))?;
             regions.push(Arc::clone(region));
         }
-        GuestMemory::from_arc_regions(regions).map_err(Error::GuestRegionCollection)
+        GuestMemoryMap::from_arc_regions(regions).map_err(Error::GuestRegionCollection)
     }
 
     pub fn allocator(&self) -> Arc<Mutex<SystemAllocator>> {
@@ -3935,7 +3935,7 @@ impl Migratable for MemoryManager {
 
 // Streams guest memory `[gpa, gpa + length)` into `file` at `file_offset`.
 fn write_guest_range(
-    guest_memory: &GuestMemory,
+    guest_memory: &GuestMemoryMap,
     file: &mut File,
     file_offset: u64,
     gpa: u64,
@@ -3960,7 +3960,7 @@ fn write_guest_range(
 // Writes the guest pages that no longer read from the restore source over
 // the clone of that source in `file`.
 fn write_private_pages(
-    guest_memory: &GuestMemory,
+    guest_memory: &GuestMemoryMap,
     source: &CowSource,
     file: &mut File,
 ) -> result::Result<(), MigratableError> {
@@ -3993,7 +3993,10 @@ fn write_private_pages(
 // single plain private-anonymous guest region — the MAP_FIXED overlay
 // preconditions. File-backed regions are rejected: their stale mapping
 // metadata would misdirect a later snapshot or fd consumer.
-fn is_restore_cow_compatible(guest_memory: &GuestMemory, saved_regions: &MemoryRangeTable) -> bool {
+fn is_restore_cow_compatible(
+    guest_memory: &GuestMemoryMap,
+    saved_regions: &MemoryRangeTable,
+) -> bool {
     let page_size = get_page_size();
     let mut file_offset: u64 = 0;
     for range in saved_regions.ranges() {
@@ -4026,7 +4029,7 @@ fn is_restore_cow_compatible(guest_memory: &GuestMemory, saved_regions: &MemoryR
 // region's reserve policy and the THP policy. Ranges must have passed
 // `is_restore_cow_compatible`.
 fn do_mmap_cow_saved_regions(
-    guest_memory: &GuestMemory,
+    guest_memory: &GuestMemoryMap,
     memory_file: &File,
     saved_regions: &MemoryRangeTable,
     thp: bool,
@@ -4305,7 +4308,7 @@ mod tests {
     #[test]
     fn cow_restore_maps_data_and_reads_holes_as_zero() {
         let page = get_page_size();
-        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), (2 * page) as usize)]).unwrap();
+        let gm = GuestMemoryMap::from_ranges(&[(GuestAddress(0), (2 * page) as usize)]).unwrap();
 
         let mut file = tempfile::tempfile().unwrap();
         file.write_all(&vec![0xabu8; page as usize]).unwrap();
@@ -4337,7 +4340,7 @@ mod tests {
     #[test]
     fn cow_snapshot_writes_private_pages_over_the_source() {
         let page = get_page_size();
-        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), (16 * page) as usize)]).unwrap();
+        let gm = GuestMemoryMap::from_ranges(&[(GuestAddress(0), (16 * page) as usize)]).unwrap();
         let mut file = tempfile::tempfile().unwrap();
         for i in 0..16u8 {
             file.write_all(&vec![i + 1; page as usize]).unwrap();
@@ -4375,7 +4378,7 @@ mod tests {
     #[test]
     fn cow_restore_rejects_unaligned_or_out_of_region_ranges() {
         let page = get_page_size();
-        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), page as usize)]).unwrap();
+        let gm = GuestMemoryMap::from_ranges(&[(GuestAddress(0), page as usize)]).unwrap();
 
         let mut unaligned = MemoryRangeTable::default();
         unaligned.push(MemoryRange {
@@ -4404,7 +4407,7 @@ mod tests {
             libc::MAP_SHARED,
         )
         .unwrap();
-        let gm = GuestMemory::from_regions(vec![
+        let gm = GuestMemoryMap::from_regions(vec![
             vm_memory::GuestRegionMmap::new(region, GuestAddress(0))
                 .unwrap()
                 .into(),
@@ -4433,7 +4436,7 @@ mod tests {
                 libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | extra_flags,
             )
             .unwrap();
-            let gm = GuestMemory::from_regions(vec![
+            let gm = GuestMemoryMap::from_regions(vec![
                 vm_memory::GuestRegionMmap::new(region, GuestAddress(0))
                     .unwrap()
                     .into(),

@@ -409,9 +409,9 @@ impl Drop for GuestRegion {
 
 /// A sorted collection of non-overlapping guest memory regions.
 #[derive(Clone, Debug, Default)]
-pub struct GuestMemory(GuestRegionCollection<GuestRegion>);
+pub struct GuestMemoryMap(GuestRegionCollection<GuestRegion>);
 
-impl GuestMemory {
+impl GuestMemoryMap {
     /// The regions must be sorted by guest address and must not overlap.
     pub fn from_regions(regions: Vec<GuestRegion>) -> Result<Self, GuestRegionCollectionError> {
         GuestRegionCollection::from_regions(regions).map(Self)
@@ -457,7 +457,7 @@ impl GuestMemory {
     }
 }
 
-impl GuestMemoryBackend for GuestMemory {
+impl GuestMemoryBackend for GuestMemoryMap {
     type R = GuestRegion;
 
     fn num_regions(&self) -> usize {

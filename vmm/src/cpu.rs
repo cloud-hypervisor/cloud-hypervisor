@@ -102,7 +102,7 @@ use crate::seccomp_filters::{Thread, get_seccomp_filter};
 #[cfg(target_arch = "x86_64")]
 use crate::vm::physical_bits;
 use crate::vm_config::{CoreScheduling, CpusConfig};
-use crate::{CPU_MANAGER_SNAPSHOT_ID, GuestMemory};
+use crate::{CPU_MANAGER_SNAPSHOT_ID, GuestMemoryMap};
 
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 /// Extract the specified bits of a 64-bit integer.
@@ -544,7 +544,7 @@ impl Vcpu {
     /// * `cpuid` - (x86_64) CpuId, wrapper over the `kvm_cpuid2` structure.
     pub fn configure(
         &mut self,
-        boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemory>)>,
+        boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMap>)>,
         #[cfg(target_arch = "aarch64")] nested: bool,
         #[cfg(target_arch = "x86_64")] cpuid: Vec<CpuIdEntry>,
         #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
@@ -1097,7 +1097,7 @@ impl CpuManager {
     pub fn configure_vcpu(
         &self,
         vcpu: &mut Vcpu,
-        boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemory>)>,
+        boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMap>)>,
     ) -> Result<()> {
         #[cfg(all(feature = "sev_snp", feature = "mshv"))]
         if self.sev_snp_enabled
@@ -2271,7 +2271,7 @@ impl CpuManager {
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     fn translate_gva(
         &self,
-        _guest_memory: &GuestMemoryAtomic<GuestMemory>,
+        _guest_memory: &GuestMemoryAtomic<GuestMemoryMap>,
         cpu_id: u8,
         gva: u64,
     ) -> Result<u64> {
@@ -2301,7 +2301,7 @@ impl CpuManager {
     #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
     fn translate_gva(
         &self,
-        guest_memory: &GuestMemoryAtomic<GuestMemory>,
+        guest_memory: &GuestMemoryAtomic<GuestMemoryMap>,
         cpu_id: u8,
         gva: u64,
     ) -> Result<u64> {
@@ -3104,7 +3104,7 @@ impl Debuggable for CpuManager {
 
     fn read_mem(
         &self,
-        guest_memory: &GuestMemoryAtomic<GuestMemory>,
+        guest_memory: &GuestMemoryAtomic<GuestMemoryMap>,
         cpu_id: usize,
         vaddr: GuestAddress,
         len: usize,
@@ -3135,7 +3135,7 @@ impl Debuggable for CpuManager {
 
     fn write_mem(
         &self,
-        guest_memory: &GuestMemoryAtomic<GuestMemory>,
+        guest_memory: &GuestMemoryAtomic<GuestMemoryMap>,
         cpu_id: usize,
         vaddr: &GuestAddress,
         data: &[u8],

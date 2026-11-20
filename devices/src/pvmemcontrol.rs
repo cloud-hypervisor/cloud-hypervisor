@@ -17,7 +17,7 @@ use pci::{
 };
 use thiserror::Error;
 use vm_allocator::page_size::get_page_size;
-use vm_allocator::{AddressAllocator, GuestMemory, SystemAllocator};
+use vm_allocator::{AddressAllocator, GuestMemoryMap, SystemAllocator};
 use vm_device::{BusDeviceSync, Resource};
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
@@ -351,7 +351,7 @@ impl PvmemcontrolDevice {
 
 impl PvmemcontrolDevice {
     fn register_percpu_buf(
-        guest_memory: &GuestMemoryAtomic<GuestMemory>,
+        guest_memory: &GuestMemoryAtomic<GuestMemoryMap>,
         mut state: PercpuInitState,
         PvmemcontrolTransportRegister { buf_phys_addr }: PvmemcontrolTransportRegister,
     ) -> Self {
@@ -412,7 +412,7 @@ impl PvmemcontrolDevice {
 
     fn run_command(
         &mut self,
-        guest_memory: &GuestMemoryAtomic<GuestMemory>,
+        guest_memory: &GuestMemoryAtomic<GuestMemoryMap>,
         command: PvmemcontrolTransportCommand,
     ) {
         let state = mem::replace(&mut self.state, PvmemcontrolState::Broken);
@@ -482,7 +482,7 @@ impl PvmemcontrolDevice {
 }
 
 pub struct PvmemcontrolBusDevice {
-    mem: GuestMemoryAtomic<GuestMemory>,
+    mem: GuestMemoryAtomic<GuestMemoryMap>,
     dev: RwLock<PvmemcontrolDevice>,
 }
 
@@ -800,7 +800,7 @@ impl PvmemcontrolDevice {
     pub fn make_device(
         id: String,
         bdf: PciBdf,
-        mem: GuestMemoryAtomic<GuestMemory>,
+        mem: GuestMemoryAtomic<GuestMemoryMap>,
     ) -> (PvmemcontrolPciDevice, PvmemcontrolBusDevice) {
         let dev = RwLock::new(PvmemcontrolDevice::error());
         let mut configuration = PciConfiguration::new(
@@ -1020,7 +1020,7 @@ mod tests {
         file.write_all_at(&vec![0xaa; REGION_SIZE], REGION_SIZE as u64)
             .unwrap();
 
-        let mem = GuestMemory::from_ranges_with_files([(
+        let mem = GuestMemoryMap::from_ranges_with_files([(
             GuestAddress(0),
             REGION_SIZE,
             Some(FileOffset::new(file.try_clone().unwrap(), 0)),

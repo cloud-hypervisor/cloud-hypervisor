@@ -39,7 +39,7 @@ use vm_allocator::page_size::{
     is_page_size_aligned,
 };
 use vm_allocator::{
-    AddressAllocator, GuestMemory, GuestRegion, GuestRegionError, MemorySlotAllocator,
+    AddressAllocator, GuestMemoryMap, GuestRegion, GuestRegionError, MemorySlotAllocator,
     SystemAllocator,
 };
 use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
@@ -2489,7 +2489,7 @@ pub struct VfioPciDevice {
     memory_slot_allocator: Arc<MemorySlotAllocator>,
     // Guest memory layout, used to enumerate the IOVA ranges to track when
     // programming VFIO DMA logging.
-    memory: GuestMemoryAtomic<GuestMemory>,
+    memory: GuestMemoryAtomic<GuestMemoryMap>,
     bdf: PciBdf,
     device_path: PathBuf,
 }
@@ -2508,7 +2508,7 @@ impl VfioPciDevice {
         p2p_dma: bool,
         bdf: PciBdf,
         memory_slot_allocator: Arc<MemorySlotAllocator>,
-        memory: GuestMemoryAtomic<GuestMemory>,
+        memory: GuestMemoryAtomic<GuestMemoryMap>,
         snapshot: Option<&Snapshot>,
         x_nv_gpudirect_clique: Option<u8>,
         x_exclude_mmap_bars: Vec<u8>,

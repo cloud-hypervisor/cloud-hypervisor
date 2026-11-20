@@ -14,7 +14,7 @@ use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
 use virtio_devices::{VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
-use vm_allocator::GuestMemory;
+use vm_allocator::GuestMemoryMap;
 use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
 use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::{AccessPlatform, AccessType};
@@ -122,7 +122,7 @@ fn run_rng_case(bytes: &[u8], offset: usize, mode: u8) -> Result<(), ()> {
     let _ = rng.snapshot();
 
     let mut q = setup_virt_queue(&mut cursor);
-    let mem = GuestMemory::from_ranges(&[
+    let mem = GuestMemoryMap::from_ranges(&[
         (GuestAddress(0), MEM_SIZE),
         (GuestAddress(DESC_TABLE_ADDR), QUEUE_BYTES_SIZE),
     ])
@@ -230,7 +230,7 @@ fn run_bad_activate_case(bytes: &[u8]) {
     ) else {
         return;
     };
-    let Ok(mem) = GuestMemory::from_ranges(&[(GuestAddress(0), 0x4000)]) else {
+    let Ok(mem) = GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x4000)]) else {
         return;
     };
     let _ = rng.activate(virtio_devices::ActivationContext {
@@ -318,7 +318,7 @@ fn setup_virt_queue(cursor: &mut FuzzCursor) -> Queue {
 }
 
 fn populate_queue_memory(
-    mem: &GuestMemory,
+    mem: &GuestMemoryMap,
     q: &mut Queue,
     cursor: &mut FuzzCursor,
     mode: u8,
@@ -376,13 +376,13 @@ fn populate_queue_memory(
     Ok(())
 }
 
-fn write_u16(mem: &GuestMemory, addr: u64, value: u16) -> Result<(), ()> {
+fn write_u16(mem: &GuestMemoryMap, addr: u64, value: u16) -> Result<(), ()> {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .map_err(|_| ())
 }
 
 fn write_desc(
-    mem: &GuestMemory,
+    mem: &GuestMemoryMap,
     index: u16,
     addr: u64,
     len: u32,

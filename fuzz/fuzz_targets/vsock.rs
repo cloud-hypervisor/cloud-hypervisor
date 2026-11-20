@@ -17,7 +17,7 @@ use virtio_devices::{
     ActivationContext, VirtioDevice, VirtioInterrupt, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
 };
 use virtio_queue::{Queue, QueueT};
-use vm_allocator::GuestMemory;
+use vm_allocator::GuestMemoryMap;
 use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
 use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::{AccessPlatform, AccessType};
@@ -146,23 +146,23 @@ fn queue_base(queue_index: usize) -> u64 {
     BASE_VIRT_QUEUE_ADDR + (QUEUE_BYTES_SIZE * queue_index) as u64
 }
 
-fn write_le16(mem: &GuestMemory, addr: u64, value: u16) -> bool {
+fn write_le16(mem: &GuestMemoryMap, addr: u64, value: u16) -> bool {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .is_ok()
 }
 
-fn write_le32(mem: &GuestMemory, addr: u64, value: u32) -> bool {
+fn write_le32(mem: &GuestMemoryMap, addr: u64, value: u32) -> bool {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .is_ok()
 }
 
-fn write_le64(mem: &GuestMemory, addr: u64, value: u64) -> bool {
+fn write_le64(mem: &GuestMemoryMap, addr: u64, value: u64) -> bool {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .is_ok()
 }
 
 fn write_desc(
-    mem: &GuestMemory,
+    mem: &GuestMemoryMap,
     table_addr: u64,
     idx: u16,
     addr: u64,
@@ -177,7 +177,7 @@ fn write_desc(
         && write_le16(mem, desc_addr + 14, next)
 }
 
-fn write_avail(mem: &GuestMemory, avail_addr: u64, ring: &[u16]) -> bool {
+fn write_avail(mem: &GuestMemoryMap, avail_addr: u64, ring: &[u16]) -> bool {
     if !write_le16(mem, avail_addr, 0) {
         return false;
     }
@@ -192,11 +192,11 @@ fn write_avail(mem: &GuestMemory, avail_addr: u64, ring: &[u16]) -> bool {
     true
 }
 
-fn write_tx_hdr_len(mem: &GuestMemory, hdr_addr: u64, len: u32) -> bool {
+fn write_tx_hdr_len(mem: &GuestMemoryMap, hdr_addr: u64, len: u32) -> bool {
     write_le32(mem, hdr_addr + VSOCK_HDR_LEN_OFF, len)
 }
 
-fn program_queue_memory(mem: &GuestMemory, bytes: &[u8], edge: bool) -> bool {
+fn program_queue_memory(mem: &GuestMemoryMap, bytes: &[u8], edge: bool) -> bool {
     let rx_base = queue_base(0);
     let tx_base = queue_base(1);
     let evt_base = queue_base(2);
@@ -379,7 +379,7 @@ fn run_worker_scenario(
         let _ = backend.evfd.write(1);
     }
 
-    let mem = match GuestMemory::from_ranges(&[
+    let mem = match GuestMemoryMap::from_ranges(&[
         (GuestAddress(0), MEM_SIZE),
         (
             GuestAddress(BASE_VIRT_QUEUE_ADDR),
@@ -630,7 +630,7 @@ fn exercise_device_paths(bytes: &[u8]) {
     let _ = device.snapshot();
     let _ = device.id();
 
-    let mem = match GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
+    let mem = match GuestMemoryMap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
         Ok(mem) => mem,
         Err(_) => return,
     };

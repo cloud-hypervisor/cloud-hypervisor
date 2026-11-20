@@ -28,7 +28,7 @@ use crate::epoll_helper::EpollHelperError;
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::{
-    ActivateError, ActivateResult, Error, GuestMemory, GuestRegion, PauseCommon,
+    ActivateError, ActivateResult, Error, GuestMemoryMap, GuestRegion, PauseCommon,
     VIRTIO_F_RING_INDIRECT_DESC,
 };
 
@@ -63,7 +63,7 @@ pub struct VirtioSharedMemoryList {
 }
 
 pub struct ActivationContext {
-    pub mem: GuestMemoryAtomic<GuestMemory>,
+    pub mem: GuestMemoryAtomic<GuestMemoryMap>,
     pub interrupt_cb: Arc<dyn VirtioInterrupt>,
     pub queues: Vec<(u16, Queue, EventFd)>,
     pub device_status: Arc<AtomicU8>,

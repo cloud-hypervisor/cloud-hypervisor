@@ -43,7 +43,7 @@ use super::{
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::PauseCommon;
-use crate::{GuestMemory, GuestRegion, VirtioInterrupt, VirtioInterruptType};
+use crate::{GuestMemoryMap, GuestRegion, VirtioInterrupt, VirtioInterruptType};
 
 const QUEUE_SIZE: u16 = 128;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];
@@ -273,7 +273,7 @@ struct Request {
 
 impl Request {
     fn parse(
-        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemory>>,
+        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMap>>,
     ) -> result::Result<Request, Error> {
         let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
         // The descriptor contains the request type which MUST be readable.
@@ -322,7 +322,12 @@ impl Request {
         })
     }
 
-    fn send_response(&self, mem: &GuestMemory, resp_type: u16, state: u16) -> Result<u32, Error> {
+    fn send_response(
+        &self,
+        mem: &GuestMemoryMap,
+        resp_type: u16,
+        state: u16,
+    ) -> Result<u32, Error> {
         let resp = VirtioMemResp {
             resp_type,
             state,
@@ -394,7 +399,7 @@ impl BlocksState {
 }
 
 struct MemEpollHandler {
-    mem: GuestMemoryAtomic<GuestMemory>,
+    mem: GuestMemoryAtomic<GuestMemoryMap>,
     region: Arc<GuestRegion>,
     host_fd: Option<RawFd>,
     blocks_state: Arc<Mutex<BlocksState>>,

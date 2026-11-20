@@ -52,7 +52,7 @@ use crate::seccomp_filters::Thread;
 use crate::thread_helper::PauseCommon;
 use crate::{
     ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
-    Error as DeviceError, GuestMemory, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_IN_ORDER,
+    Error as DeviceError, GuestMemoryMap, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_IN_ORDER,
     VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt,
     VirtioInterruptType,
 };
@@ -94,7 +94,7 @@ enum Error {
 ///   - forward the event to the backend; then
 ///   - again, attempt to fetch any incoming packets queued by the backend into virtio RX buffers.
 pub(crate) struct VsockEpollHandler<B: VsockBackend> {
-    pub mem: GuestMemoryAtomic<GuestMemory>,
+    pub mem: GuestMemoryAtomic<GuestMemoryMap>,
     pub queues: Vec<Queue>,
     pub queue_evts: Vec<EventFd>,
     pub kill_evt: EventFd,
