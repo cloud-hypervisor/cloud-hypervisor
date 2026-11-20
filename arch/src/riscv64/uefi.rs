@@ -7,7 +7,7 @@ use std::os::fd::AsFd;
 use std::result;
 
 use thiserror::Error;
-use vm_memory::{Bytes, GuestAddress, GuestMemory};
+use vm_memory::{GuestMemoryRegionBytes, MemoryRegionAddress};
 
 /// Errors thrown while loading UEFI binary
 #[derive(Debug, Error)]
@@ -27,11 +27,7 @@ pub enum Error {
 }
 type Result<T> = result::Result<T, Error>;
 
-pub fn load_uefi<F, M: GuestMemory>(
-    guest_mem: &M,
-    guest_addr: GuestAddress,
-    uefi_image: &mut F,
-) -> Result<()>
+pub fn load_uefi<F, M: GuestMemoryRegionBytes>(guest_region: &M, uefi_image: &mut F) -> Result<()>
 where
     F: Read + Seek + AsFd,
 {
@@ -44,7 +40,7 @@ where
         return Err(Error::UefiTooBig);
     }
     uefi_image.rewind().map_err(|_| Error::SeekUefiStart)?;
-    guest_mem
-        .read_exact_volatile_from(guest_addr, &mut uefi_image.as_fd(), uefi_size)
+    guest_region
+        .read_exact_volatile_from(MemoryRegionAddress(0), &mut uefi_image.as_fd(), uefi_size)
         .map_err(|_| Error::ReadUefiImage)
 }

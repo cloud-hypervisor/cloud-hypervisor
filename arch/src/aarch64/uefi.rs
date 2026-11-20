@@ -9,7 +9,10 @@ use std::result;
 use crc_any::CRCu32;
 use thiserror::Error;
 use uuid::Uuid;
-use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryBackend, GuestMemoryRegion};
+use vm_memory::{
+    ByteValued, Bytes, GuestAddress, GuestMemoryBackend, GuestMemoryRegion, GuestMemoryRegionBytes,
+    MemoryRegionAddress,
+};
 
 use super::layout;
 use crate::GuestMemory;
@@ -202,11 +205,7 @@ pub(super) fn create_uefi_stub_tables(guest_mem: &GuestMemory, rsdp: GuestAddres
     Ok(memory_map_size as u32)
 }
 
-pub fn load_uefi<F, M: vm_memory::GuestMemory>(
-    guest_mem: &M,
-    guest_addr: GuestAddress,
-    uefi_image: &mut F,
-) -> Result<()>
+pub fn load_uefi<F, M: GuestMemoryRegionBytes>(guest_region: &M, uefi_image: &mut F) -> Result<()>
 where
     F: Read + Seek + AsFd,
 {
@@ -219,7 +218,7 @@ where
         return Err(Error::UefiTooBig);
     }
     uefi_image.rewind().map_err(|_| Error::SeekUefiStart)?;
-    guest_mem
-        .read_exact_volatile_from(guest_addr, &mut uefi_image.as_fd(), uefi_size)
+    guest_region
+        .read_exact_volatile_from(MemoryRegionAddress(0), &mut uefi_image.as_fd(), uefi_size)
         .map_err(|_| Error::ReadUefiImage)
 }
