@@ -18,7 +18,7 @@ use virtio_devices::{Pmem, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
 use vm_allocator::{GuestMemory, GuestMemoryMap, GuestRegion};
 use vm_memory::guest_memory::FileOffset;
-use vm_memory::{Bytes, GuestAddress, MmapRegion};
+use vm_memory::{Bytes, GuestAddress, GuestMemoryBackend, MmapRegion};
 use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::{AccessPlatform, AccessType};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
@@ -328,7 +328,7 @@ fn build_chain_cases(cursor: &mut FuzzCursor<'_>) -> Vec<ChainCase> {
     ]
 }
 
-fn populate_queue(mem: &GuestMemoryMap, chain_cases: &[ChainCase]) -> bool {
+fn populate_queue<M: GuestMemoryBackend>(mem: &M, chain_cases: &[ChainCase]) -> bool {
     if chain_cases.is_empty() || chain_cases.len() > (QUEUE_SIZE as usize / 2) {
         return false;
     }
@@ -395,7 +395,14 @@ fn populate_queue(mem: &GuestMemoryMap, chain_cases: &[ChainCase]) -> bool {
     write_u16(mem, AVAIL_RING_ADDR + 2, chain_cases.len() as u16)
 }
 
-fn write_desc(mem: &GuestMemoryMap, idx: u16, addr: u64, len: u32, flags: u16, next: u16) -> bool {
+fn write_desc<M: GuestMemoryBackend>(
+    mem: &M,
+    idx: u16,
+    addr: u64,
+    len: u32,
+    flags: u16,
+    next: u16,
+) -> bool {
     let desc_addr = DESC_TABLE_ADDR + u64::from(idx) * 16;
     write_u64(mem, desc_addr, addr)
         && write_u32(mem, desc_addr + 8, len)
@@ -403,17 +410,17 @@ fn write_desc(mem: &GuestMemoryMap, idx: u16, addr: u64, len: u32, flags: u16, n
         && write_u16(mem, desc_addr + 14, next)
 }
 
-fn write_u16(mem: &GuestMemoryMap, addr: u64, value: u16) -> bool {
+fn write_u16<M: GuestMemoryBackend>(mem: &M, addr: u64, value: u16) -> bool {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .is_ok()
 }
 
-fn write_u32(mem: &GuestMemoryMap, addr: u64, value: u32) -> bool {
+fn write_u32<M: GuestMemoryBackend>(mem: &M, addr: u64, value: u32) -> bool {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .is_ok()
 }
 
-fn write_u64(mem: &GuestMemoryMap, addr: u64, value: u64) -> bool {
+fn write_u64<M: GuestMemoryBackend>(mem: &M, addr: u64, value: u64) -> bool {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .is_ok()
 }
