@@ -34,6 +34,15 @@ use crate::gdb::get_raw_tid;
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::vm_config::CoreScheduling;
 
+fn set_vcpu_affinity(cpuset: &libc::cpu_set_t) -> io::Result<()> {
+    // SAFETY: cpuset is a valid initialized set of the supplied size, and pid
+    // zero applies the affinity to the calling thread.
+    if unsafe { libc::sched_setaffinity(0, size_of::<libc::cpu_set_t>(), cpuset) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 impl CpuManager {
     fn start_vcpu(
         &mut self,
@@ -93,21 +102,11 @@ impl CpuManager {
                 .name(format!("vcpu{vcpu_id}"))
                 .spawn(move || {
                     // Schedule the thread to run on the expected CPU set
-                    if let Some(cpuset) = cpuset.as_ref() {
-                        let cpuset: *const libc::cpu_set_t = cpuset;
-                        // SAFETY: FFI call with correct arguments
-                        let ret = unsafe {
-                            libc::sched_setaffinity(0, size_of::<libc::cpu_set_t>(), cpuset)
-                        };
-
-                        if ret != 0 {
-                            error!(
-                                "Failed scheduling the vCPU {} on the expected CPU set: {}",
-                                vcpu_id,
-                                io::Error::last_os_error()
-                            );
-                            return;
-                        }
+                    if let Some(cpuset) = cpuset.as_ref()
+                        && let Err(e) = set_vcpu_affinity(cpuset)
+                    {
+                        error!("Failed scheduling the vCPU {vcpu_id} on the expected CPU set: {e}");
+                        return;
                     }
 
                     // Set up core scheduling before seccomp locks down prctl.
