@@ -1148,11 +1148,11 @@ impl Vm {
     }
 
     #[cfg(feature = "fw_cfg")]
-    fn populate_fw_cfg_items(
+    fn populate_fw_cfg_items<#[cfg(target_arch = "x86_64")] M: vm_memory::GuestMemoryBackend>(
         fw_cfg_config: &FwCfgConfig,
         device_manager: &Arc<Mutex<DeviceManager>>,
         config: &Arc<Mutex<VmConfig>>,
-        #[cfg(target_arch = "x86_64")] boot_memory: &GuestMemory,
+        #[cfg(target_arch = "x86_64")] boot_memory: &M,
         #[cfg(target_arch = "x86_64")] kvm_sev_snp_enabled: bool,
     ) -> Result<()> {
         let mut kernel_option: Option<File> = None;

@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 use vm_allocator::GuestMemory;
 use vm_device::BusDevice;
 #[cfg(target_arch = "x86_64")]
-use vm_memory::ByteValued;
+use vm_memory::{ByteValued, GuestMemoryBackend};
 use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::sock_ctrl_msg::IntoIovec;
@@ -439,7 +439,11 @@ impl FwCfg {
     }
 
     #[cfg(target_arch = "x86_64")]
-    pub fn add_e820(&mut self, boot_memory: &GuestMemory, kvm_sev_snp_enabled: bool) -> Result<()> {
+    pub fn add_e820<M: GuestMemoryBackend>(
+        &mut self,
+        boot_memory: &M,
+        kvm_sev_snp_enabled: bool,
+    ) -> Result<()> {
         let mut entries = generate_e820_memory_map(boot_memory).map_err(Error::other)?;
         if kvm_sev_snp_enabled {
             entries.push((STAGE0_START_ADDRESS.0, STAGE0_SIZE as u64, E820_RESERVED));
@@ -836,6 +840,7 @@ mod tests {
     use std::ffi::CString;
     use std::io::Write;
 
+    use vm_memory::GuestMemoryBackend;
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
@@ -1165,7 +1170,12 @@ mod tests {
     const DMA_DESCRIPTOR: GuestAddress = GuestAddress(0x1000);
     const DMA_BUFFER: GuestAddress = GuestAddress(0x1800);
 
-    fn run_dma(fw_cfg: &mut FwCfg, mem: &GuestMemory, control: AccessControl, len: u32) -> u32 {
+    fn run_dma<M: GuestMemoryBackend>(
+        fw_cfg: &mut FwCfg,
+        mem: &M,
+        control: AccessControl,
+        len: u32,
+    ) -> u32 {
         let mut access = FwCfgDmaAccess {
             control_be: control.0.to_be(),
             length_be: len.to_be(),
@@ -1185,7 +1195,7 @@ mod tests {
         u32::from_be_bytes(status)
     }
 
-    fn dma_buffer(mem: &GuestMemory, len: usize) -> Vec<u8> {
+    fn dma_buffer<M: GuestMemoryBackend>(mem: &M, len: usize) -> Vec<u8> {
         let mut data = vec![0u8; len];
         mem.read(&mut data, DMA_BUFFER).unwrap();
         data
