@@ -215,7 +215,7 @@ pub mod tests {
 
     use libc::EFD_NONBLOCK;
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
-    use vm_memory::GuestAddress;
+    use vm_memory::{GuestAddress, GuestAddressSpace};
     use vm_virtio::queue::testing::VirtQueue as GuestQ;
     use vmm_sys_util::eventfd::EventFd;
 
@@ -224,7 +224,7 @@ pub mod tests {
     use super::*;
     use crate::device::{VirtioInterrupt, VirtioInterruptType};
     use crate::epoll_helper::EpollHelperHandler;
-    use crate::{EpollHelper, GuestMemory, GuestMemoryMap};
+    use crate::{EpollHelper, GuestMemory};
 
     pub struct NoopVirtioInterrupt {}
 
@@ -336,7 +336,8 @@ pub mod tests {
 
     pub struct TestContext {
         pub cid: u64,
-        pub mem: GuestMemoryMap,
+        pub(crate) mem: GuestMemory,
+        pub map: <GuestMemory as GuestAddressSpace>::T,
         pub device: Vsock<TestBackend>,
     }
 
@@ -345,9 +346,11 @@ pub mod tests {
         pub fn new() -> Self {
             const CID: u32 = 52;
             const MEM_SIZE: usize = 1024 * 1024 * 128;
+            let mem = GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap();
             Self {
                 cid: CID as u64,
-                mem: GuestMemoryMap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap(),
+                map: mem.memory(),
+                mem,
                 device: Vsock::new(
                     String::from("vsock"),
                     CID,
@@ -365,9 +368,9 @@ pub mod tests {
         pub fn create_epoll_handler_context(&self) -> EpollHandlerContext<'_> {
             const QSIZE: u16 = 2;
 
-            let guest_rxvq = GuestQ::new(GuestAddress(0x0010_0000), &self.mem, QSIZE);
-            let guest_txvq = GuestQ::new(GuestAddress(0x0020_0000), &self.mem, QSIZE);
-            let guest_evvq = GuestQ::new(GuestAddress(0x0030_0000), &self.mem, QSIZE);
+            let guest_rxvq = GuestQ::new(GuestAddress(0x0010_0000), &*self.map, QSIZE);
+            let guest_txvq = GuestQ::new(GuestAddress(0x0020_0000), &*self.map, QSIZE);
+            let guest_evvq = GuestQ::new(GuestAddress(0x0030_0000), &*self.map, QSIZE);
             let rxvq = guest_rxvq.create_queue();
             let txvq = guest_txvq.create_queue();
             let evvq = guest_evvq.create_queue();
@@ -407,7 +410,7 @@ pub mod tests {
                 guest_txvq,
                 guest_evvq,
                 handler: VsockEpollHandler {
-                    mem: GuestMemory::new(self.mem.clone()),
+                    mem: self.mem.clone(),
                     queues,
                     queue_evts,
                     kill_evt: EventFd::new(EFD_NONBLOCK).unwrap(),
@@ -424,9 +427,9 @@ pub mod tests {
 
     pub struct EpollHandlerContext<'a> {
         pub(crate) handler: VsockEpollHandler<TestBackend>,
-        pub guest_rxvq: GuestQ<'a, GuestMemoryMap>,
-        pub guest_txvq: GuestQ<'a, GuestMemoryMap>,
-        pub guest_evvq: GuestQ<'a, GuestMemoryMap>,
+        pub guest_rxvq: GuestQ<'a, <GuestMemory as GuestAddressSpace>::M>,
+        pub guest_txvq: GuestQ<'a, <GuestMemory as GuestAddressSpace>::M>,
+        pub guest_evvq: GuestQ<'a, <GuestMemory as GuestAddressSpace>::M>,
     }
 
     // The event helpers are inline so external callers instantiate the

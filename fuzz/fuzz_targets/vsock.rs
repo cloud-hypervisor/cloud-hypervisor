@@ -17,8 +17,8 @@ use virtio_devices::{
     ActivationContext, VirtioDevice, VirtioInterrupt, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
 };
 use virtio_queue::{Queue, QueueT};
-use vm_allocator::{GuestMemory, GuestMemoryMap};
-use vm_memory::{Bytes, GuestAddress, GuestMemoryBackend};
+use vm_allocator::GuestMemory;
+use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend};
 use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::{AccessPlatform, AccessType};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
@@ -379,17 +379,18 @@ fn run_worker_scenario(
         let _ = backend.evfd.write(1);
     }
 
-    let mem = match GuestMemoryMap::from_ranges(&[
+    let guest_memory = match GuestMemory::from_ranges(&[
         (GuestAddress(0), MEM_SIZE),
         (
             GuestAddress(BASE_VIRT_QUEUE_ADDR),
             QUEUE_BYTES_SIZE * NUM_QUEUES as usize,
         ),
     ]) {
-        Ok(mem) => mem,
+        Ok(guest_memory) => guest_memory,
         Err(_) => return false,
     };
 
+    let mem = guest_memory.memory();
     if mem
         .write_slice(queue_bytes_all, GuestAddress(BASE_VIRT_QUEUE_ADDR))
         .is_err()
@@ -399,11 +400,10 @@ fn run_worker_scenario(
     if mem.write_slice(mem_bytes, GuestAddress(0)).is_err() {
         return false;
     }
-    if !program_queue_memory(&mem, bytes, edge) {
+    if !program_queue_memory(&*mem, bytes, edge) {
         return false;
     }
 
-    let guest_memory = GuestMemory::new(mem);
     let mut queues_with_evts = Vec::with_capacity(NUM_QUEUES as usize);
     for i in 0..NUM_QUEUES {
         let q = match build_queue(
@@ -519,11 +519,11 @@ fn configure_handler_context(
         3 => {
             let len = VSOCK_PKT_HDR_SIZE + 64;
             ctx.guest_txvq.dtable[0].set(0x0050_0000, len, 0, 0);
-            let _ = write_tx_hdr_len(&test_ctx.mem, 0x0050_0000, len - VSOCK_PKT_HDR_SIZE);
+            let _ = write_tx_hdr_len(&*test_ctx.map, 0x0050_0000, len - VSOCK_PKT_HDR_SIZE);
         }
         4 => {
             ctx.guest_txvq.dtable[1].set(0x0050_1000, 16, 0, 0);
-            let _ = write_tx_hdr_len(&test_ctx.mem, 0x0050_0000, 4096);
+            let _ = write_tx_hdr_len(&*test_ctx.map, 0x0050_0000, 4096);
         }
         5 => ctx.guest_rxvq.dtable[0].len.set(0),
         6 => ctx.guest_rxvq.dtable[0].set(0x0040_0000, VSOCK_PKT_HDR_SIZE, 0, 0),
@@ -535,11 +535,11 @@ fn configure_handler_context(
         ),
         8 => {
             let rx_hdr_addr = ctx.guest_rxvq.dtable[0].addr.get();
-            let _ = write_tx_hdr_len(&test_ctx.mem, rx_hdr_addr, 70_000);
+            let _ = write_tx_hdr_len(&*test_ctx.map, rx_hdr_addr, 70_000);
         }
         _ => {
             let tx_hdr_addr = ctx.guest_txvq.dtable[0].addr.get();
-            let _ = write_tx_hdr_len(&test_ctx.mem, tx_hdr_addr, 70_000);
+            let _ = write_tx_hdr_len(&*test_ctx.map, tx_hdr_addr, 70_000);
         }
     }
 }
@@ -630,11 +630,10 @@ fn exercise_device_paths(bytes: &[u8]) {
     let _ = device.snapshot();
     let _ = device.id();
 
-    let mem = match GuestMemoryMap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
-        Ok(mem) => mem,
+    let memory = match GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
+        Ok(memory) => memory,
         Err(_) => return,
     };
-    let memory = GuestMemory::new(mem);
     let _ = device.activate(ActivationContext {
         mem: memory.clone(),
         interrupt_cb: Arc::new(HarnessInterrupt {
