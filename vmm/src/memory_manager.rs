@@ -396,7 +396,7 @@ pub struct MemoryManager {
 
     pub acpi_address: Option<GuestAddress>,
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
-    uefi_flash: Option<GuestMemoryAtomic<GuestMemory>>,
+    uefi_flash: Option<GuestRegion>,
 }
 
 #[derive(Error, Debug)]
@@ -2213,10 +2213,7 @@ impl MemoryManager {
         )
         .map_err(Error::CreateUefiFlash)?;
         uefi_region.register().map_err(Error::CreateUefiFlash)?;
-        let uefi_flash =
-            GuestMemoryAtomic::new(GuestMemory::from_regions(vec![uefi_region]).unwrap());
-
-        self.uefi_flash = Some(uefi_flash);
+        self.uefi_flash = Some(uefi_region);
 
         Ok(())
     }
@@ -3293,8 +3290,8 @@ impl MemoryManager {
     }
 
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
-    pub fn uefi_flash(&self) -> GuestMemoryAtomic<GuestMemory> {
-        self.uefi_flash.as_ref().unwrap().clone()
+    pub fn uefi_flash(&self) -> &GuestRegion {
+        self.uefi_flash.as_ref().unwrap()
     }
 
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
