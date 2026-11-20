@@ -1096,6 +1096,16 @@ impl Vm {
         Ok(())
     }
 
+    #[cfg(all(feature = "fw_cfg", target_arch = "x86_64"))]
+    fn boot_guest_memory(&self) -> Result<GuestMemory> {
+        let config = self.config.lock().unwrap();
+        self.memory_manager
+            .lock()
+            .unwrap()
+            .boot_memory_from_zones(&config.memory)
+            .map_err(Error::MemoryManager)
+    }
+
     #[cfg(feature = "fw_cfg")]
     fn populate_fw_cfg(&self) -> Result<()> {
         let fw_cfg_enabled = self
@@ -1134,13 +1144,16 @@ impl Vm {
         };
 
         #[cfg(target_arch = "x86_64")]
-        let boot_memory = self.memory_manager.lock().unwrap().boot_guest_memory();
+        let boot_memory = fw_cfg_config
+            .e820
+            .then(|| self.boot_guest_memory())
+            .transpose()?;
         Self::populate_fw_cfg_items(
             &fw_cfg_config,
             &self.device_manager,
             &self.config,
             #[cfg(target_arch = "x86_64")]
-            &boot_memory,
+            boot_memory.as_ref(),
             #[cfg(target_arch = "x86_64")]
             kvm_sev_snp_enabled,
         )?;
@@ -1164,7 +1177,7 @@ impl Vm {
         fw_cfg_config: &FwCfgConfig,
         device_manager: &Arc<Mutex<DeviceManager>>,
         config: &Arc<Mutex<VmConfig>>,
-        #[cfg(target_arch = "x86_64")] boot_memory: &GuestMemory,
+        #[cfg(target_arch = "x86_64")] boot_memory: Option<&GuestMemory>,
         #[cfg(target_arch = "x86_64")] kvm_sev_snp_enabled: bool,
     ) -> Result<()> {
         let mut kernel_option: Option<File> = None;
@@ -1240,7 +1253,7 @@ impl Vm {
 
         let mut fw_cfg = fw_cfg.lock().unwrap();
         #[cfg(target_arch = "x86_64")]
-        if fw_cfg_config.e820 {
+        if let Some(boot_memory) = boot_memory {
             fw_cfg
                 .add_e820(boot_memory, kvm_sev_snp_enabled)
                 .map_err(Error::ErrorPopulatingFwCfg)?;

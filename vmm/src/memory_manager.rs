@@ -417,6 +417,9 @@ pub enum Error {
     #[error("Guest region collection error")]
     GuestRegionCollection(#[source] vm_memory::GuestRegionCollectionError),
 
+    #[error("Boot RAM mapping missing at {0:#x} (size {1:#x})")]
+    MissingBootRegion(u64, u64),
+
     /// Failed to allocate a memory range.
     #[error("Failed to allocate a memory range")]
     MemoryRangeAllocation,
@@ -2983,6 +2986,36 @@ impl MemoryManager {
 
     pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemory> {
         self.guest_memory.clone()
+    }
+
+    pub fn boot_memory_from_zones(&self, config: &MemoryConfig) -> Result<GuestMemory, Error> {
+        let zone = |id: &str| {
+            self.memory_zones
+                .get(id)
+                .ok_or(Error::MissingZoneIdentifier)
+        };
+        let zones = if let Some(configs) = &config.zones {
+            configs
+                .iter()
+                .map(|z| Ok((zone(&z.id)?, z.size)))
+                .collect::<Result<Vec<_>, Error>>()?
+        } else {
+            vec![(zone(DEFAULT_MEMORY_ZONE)?, self.boot_ram)]
+        };
+        let sizes = zones
+            .iter()
+            .map(|(zone, size)| (*size, zone.backing_page_size));
+        let mut regions = Vec::new();
+        for range in Self::zone_ranges(&self.arch_mem_regions, sizes)? {
+            let region = zones[range.zone_index]
+                .0
+                .regions
+                .iter()
+                .find(|r| r.start_addr() == range.start && r.len() == range.size)
+                .ok_or(Error::MissingBootRegion(range.start.0, range.size))?;
+            regions.push(Arc::clone(region));
+        }
+        GuestMemory::from_arc_regions(regions).map_err(Error::GuestRegionCollection)
     }
 
     pub fn boot_guest_memory(&self) -> GuestMemory {
