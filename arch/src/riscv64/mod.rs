@@ -19,7 +19,6 @@ use std::sync::{Arc, Mutex};
 use hypervisor::arch::riscv64::aia::Vaia;
 use log::{Level, log_enabled};
 use thiserror::Error;
-use vm_allocator::GuestMemoryMap;
 use vm_memory::{Address, GuestAddress, GuestMemoryBackend};
 
 pub use self::fdt::DeviceInfoForFdt;
@@ -161,8 +160,12 @@ fn isa_string_from_host() -> Result<String, Error> {
 }
 
 /// Configures the system and should be called once per vm before starting vcpu threads.
-pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHasher>(
-    guest_mem: &GuestMemoryMap,
+pub fn configure_system<
+    T: DeviceInfoForFdt + Clone + Debug,
+    S: ::std::hash::BuildHasher,
+    M: GuestMemoryBackend,
+>(
+    guest_mem: &M,
     cmdline: &str,
     num_vcpu: u32,
     device_info: &HashMap<(DeviceType, String), T, S>,
@@ -195,8 +198,8 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
 }
 
 /// Returns the memory address where the initramfs could be loaded.
-pub fn initramfs_load_addr(
-    guest_mem: &GuestMemoryMap,
+pub fn initramfs_load_addr<M: GuestMemoryBackend>(
+    guest_mem: &M,
     initramfs_size: usize,
 ) -> super::Result<u64> {
     let round_to_pagesize = |size| (size + (super::PAGE_SIZE - 1)) & !(super::PAGE_SIZE - 1);
