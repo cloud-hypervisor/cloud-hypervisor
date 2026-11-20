@@ -1429,7 +1429,7 @@ mod tests {
     use vm_device::interrupt::InterruptSourceConfig;
 
     use super::*;
-    use crate::{ActivateError, DEVICE_NEEDS_RESET, GuestMemoryMap};
+    use crate::{ActivateError, DEVICE_NEEDS_RESET, GuestMemory};
 
     struct TestInterruptSourceGroup {
         event_fd: EventFd,
@@ -1686,8 +1686,7 @@ mod tests {
         let device = Arc::new(Mutex::new(TestVirtioDevice {
             result: Mutex::new(Some(result)),
         }));
-        let memory =
-            GuestMemory::new(GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap());
+        let memory = GuestMemory::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
         let barrier = Arc::new(Barrier::new(2));
         let interrupt_cb = Arc::clone(&interrupt) as Arc<dyn VirtioInterrupt>;
         let activator = VirtioPciDeviceActivator {
@@ -1766,8 +1765,7 @@ mod tests {
     }
 
     fn make_virtio_pci_device() -> VirtioPciDevice {
-        let memory =
-            GuestMemory::new(GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap());
+        let memory = GuestMemory::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
         let device = Arc::new(Mutex::new(TestVirtioDevice {
             result: Mutex::new(None),
         }));
@@ -1846,8 +1844,7 @@ mod tests {
     }
 
     fn make_virtio_pci_device_with_queues(num_queues: u16) -> VirtioPciDevice {
-        let memory =
-            GuestMemory::new(GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap());
+        let memory = GuestMemory::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
         let device = Arc::new(Mutex::new(QueuedTestDevice {
             queue_sizes: vec![256; num_queues as usize],
         }));
