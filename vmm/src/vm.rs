@@ -2479,7 +2479,7 @@ impl Vm {
         let mem = self.memory_manager.lock().unwrap().guest_memory().memory();
         let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
         let rsdp_addr = acpi::create_acpi_tables(
-            &mem,
+            mem.deref(),
             &self.device_manager.lock().unwrap(),
             &self.cpu_manager.lock().unwrap(),
             &self.memory_manager.lock().unwrap(),

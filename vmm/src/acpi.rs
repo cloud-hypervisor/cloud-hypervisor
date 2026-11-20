@@ -23,14 +23,14 @@ use log::{info, warn};
 use pci::PciBdf;
 use thiserror::Error;
 use tracer::trace_scoped;
-use vm_memory::{Address, Bytes, GuestAddress, GuestMemoryRegion};
+use vm_memory::{Address, Bytes, GuestAddress, GuestMemoryBackend, GuestMemoryRegion};
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
+use crate::GuestRegion;
 use crate::cpu::CpuManager;
 use crate::device_manager::DeviceManager;
 use crate::memory_manager::MemoryManager;
 use crate::pci_segment::PciSegment;
-use crate::{GuestMemoryMap, GuestRegion};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -1375,8 +1375,8 @@ pub(crate) fn create_acpi_tables_for_fw_cfg(
         .map_err(Error::FwCfg)
 }
 
-pub(crate) fn create_acpi_tables(
-    guest_mem: &GuestMemoryMap,
+pub(crate) fn create_acpi_tables<M: GuestMemoryBackend>(
+    guest_mem: &M,
     device_manager: &DeviceManager,
     cpu_manager: &CpuManager,
     memory_manager: &MemoryManager,
