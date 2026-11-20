@@ -599,10 +599,6 @@ pub enum DeviceManagerError {
     #[error("Failed to DMA map VFIO user device")]
     VfioUserDmaMap(#[source] ExternalDmaMappingError),
 
-    /// Failed to update memory mappings for VFIO user device
-    #[error("Failed to update memory mappings for VFIO user device")]
-    UpdateMemoryForVfioUserPciDevice(#[source] ExternalDmaMappingError),
-
     /// vfio-user cannot be hot-added while SEV-SNP shared-page tracking is active
     #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
     #[error("Cannot hot-add a vfio-user device while SEV-SNP shared-page tracking is active")]
@@ -4956,9 +4952,10 @@ impl DeviceManager {
         )
         .map_err(DeviceManagerError::VfioUserCreate)?;
 
-        let memory = self.memory_manager.lock().unwrap().guest_memory();
-        let vfio_user_mapping: Arc<dyn ExternalDmaMapping> =
-            Arc::new(VfioUserDmaMapping::new(client, Arc::new(memory)));
+        let memory = Arc::new(memory_manager.lock().unwrap().guest_memory());
+        let mapping = Arc::new(VfioUserDmaMapping::new(client, Arc::clone(&memory)));
+        let notifier = Arc::downgrade(&mapping);
+        let vfio_user_mapping: Arc<dyn ExternalDmaMapping> = mapping;
         for virtio_mem_device in self.virtio_mem_devices.iter() {
             virtio_mem_device
                 .lock()
@@ -4970,15 +4967,19 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
         }
 
-        for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
-            for region in zone.regions() {
-                if region.file_offset().is_some() {
-                    let gpa = region.start_addr().raw_value();
-                    vfio_user_mapping
-                        .map(gpa, gpa, region.len())
-                        .map_err(DeviceManagerError::VfioUserDmaMap)?;
+        {
+            let mm = memory_manager.lock().unwrap();
+            for zone in mm.memory_zones().values() {
+                for region in zone.regions() {
+                    if region.file_offset().is_some() {
+                        let gpa = region.start_addr().raw_value();
+                        vfio_user_mapping
+                            .map(gpa, gpa, region.len())
+                            .map_err(DeviceManagerError::VfioUserDmaMap)?;
+                    }
                 }
             }
+            memory.add_notifier(notifier);
         }
 
         let vfio_user_pci_device = Arc::new(Mutex::new(vfio_user_pci_device));
@@ -5475,23 +5476,6 @@ impl DeviceManager {
                 dma_handler
                     .map(gpa, gpa, size)
                     .map_err(DeviceManagerError::VirtioDmaMap)?;
-            }
-        }
-
-        // Take care of updating the memory for vfio-user devices.
-        if new_region.file_offset().is_some() {
-            let device_tree = self.device_tree.lock().unwrap();
-            for pci_device_node in device_tree.pci_devices() {
-                if let PciDeviceHandle::VfioUser { dma_mapping, .. } = pci_device_node
-                    .pci_device_handle
-                    .as_ref()
-                    .ok_or(DeviceManagerError::MissingPciDevice)?
-                {
-                    let gpa = new_region.start_addr().raw_value();
-                    dma_mapping
-                        .map(gpa, gpa, new_region.len())
-                        .map_err(DeviceManagerError::UpdateMemoryForVfioUserPciDevice)?;
-                }
             }
         }
 
