@@ -23,7 +23,7 @@ use vm_memory::{ByteValued, Bytes, GuestMemoryBackend, GuestMemoryError};
 use vm_virtio::{AccessPlatform, AccessType, Translatable};
 
 use super::virtio_features_to_tap_offload;
-use crate::{Tap, associate_taps};
+use crate::TapQueues;
 
 const GUEST_OFFLOAD_FEATURES: u64 = (1 << VIRTIO_NET_F_GUEST_CSUM)
     | (1 << VIRTIO_NET_F_GUEST_TSO4)
@@ -91,7 +91,7 @@ fn is_tolerated_ctrl_command(ctrl_hdr: ControlHeader) -> bool {
 }
 
 pub struct CtrlQueue {
-    pub taps: Vec<Tap>,
+    pub tap_queues: Arc<TapQueues>,
     pub announce_pending: Arc<AtomicBool>,
     pub max_virtqueue_pairs: u16,
     pub curr_queue_pairs: Arc<AtomicU16>,
@@ -100,14 +100,14 @@ pub struct CtrlQueue {
 
 impl CtrlQueue {
     pub fn new(
-        taps: Vec<Tap>,
+        tap_queues: Arc<TapQueues>,
         announce_pending: Arc<AtomicBool>,
         max_virtqueue_pairs: u16,
         curr_queue_pairs: Arc<AtomicU16>,
         acked_features: u64,
     ) -> Self {
         CtrlQueue {
-            taps,
+            tap_queues,
             announce_pending,
             max_virtqueue_pairs,
             curr_queue_pairs,
@@ -166,7 +166,8 @@ impl CtrlQueue {
                         false
                     } else {
                         info!("Number of MQ pairs requested: {queue_pairs}");
-                        associate_taps(&self.taps, queue_pairs.into())
+                        self.tap_queues
+                            .associate(queue_pairs.into())
                             .inspect(|()| {
                                 self.curr_queue_pairs.store(queue_pairs, Ordering::Release);
                             })
@@ -218,9 +219,11 @@ impl CtrlQueue {
                     } else {
                         // Try reprogramming each TAP with the requested offloads negotiated at feature setup.
                         let mut ok = true;
-                        for tap in self.taps.iter_mut() {
+                        for tap in &self.tap_queues.taps {
                             info!("Reprogramming tap offload with features: {features}");
-                            tap.set_offload(virtio_features_to_tap_offload(features))
+                            tap.lock()
+                                .unwrap()
+                                .set_offload(virtio_features_to_tap_offload(features))
                                 .map_err(|e| {
                                     error!("Error programming tap offload: {e:?}");
                                     ok = false;
@@ -356,7 +359,7 @@ mod tests {
 
         let announce_pending = Arc::new(AtomicBool::new(true));
         let mut ctrl_q = CtrlQueue::new(
-            Vec::new(),
+            Arc::new(TapQueues::new(Vec::new())),
             Arc::clone(&announce_pending),
             1,
             Arc::new(AtomicU16::new(1)),
@@ -416,7 +419,7 @@ mod tests {
 
         let curr_queue_pairs = Arc::new(AtomicU16::new(1));
         let mut ctrl_q = CtrlQueue::new(
-            Vec::new(),
+            Arc::new(TapQueues::new(Vec::new())),
             Arc::new(AtomicBool::new(false)),
             max_virtqueue_pairs,
             Arc::clone(&curr_queue_pairs),
@@ -479,7 +482,7 @@ mod tests {
         .unwrap();
 
         let mut ctrl_q = CtrlQueue::new(
-            Vec::new(),
+            Arc::new(TapQueues::new(Vec::new())),
             Arc::new(AtomicBool::new(false)),
             1,
             Arc::new(AtomicU16::new(1)),
@@ -535,7 +538,7 @@ mod tests {
         mem.write_obj(0xff_u8, GuestAddress(STATUS_ADDR)).unwrap();
 
         let mut ctrl_q = CtrlQueue::new(
-            Vec::new(),
+            Arc::new(TapQueues::new(Vec::new())),
             Arc::new(AtomicBool::new(false)),
             1,
             Arc::new(AtomicU16::new(1)),

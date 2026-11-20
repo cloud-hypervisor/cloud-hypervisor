@@ -23,7 +23,7 @@ use vm_memory::bitmap::Bitmap;
 use vm_memory::{Bytes, GuestAddress, GuestMemoryBackend};
 use vm_virtio::{AccessPlatform, AccessType, Translatable};
 
-use super::{Tap, register_listener, unregister_listener, vnet_hdr_len};
+use super::{Tap, TapQueues, register_listener, unregister_listener, vnet_hdr_len};
 
 /// Linux sets MAX_SKB_FRAGS + 2 descriptors per RX chain when guest offloads
 /// are on and mergeable RX buffers are off, as with this device [0, 1, 2], and
@@ -111,10 +111,13 @@ impl TxVirtio {
                     && gso_type == VIRTIO_NET_HDR_GSO_NONE))
     }
 
+    /// A frame that `tap` answers with EAGAIN is retried if `retry` is set,
+    /// and dropped otherwise.
     pub fn process_desc_chain<M: GuestMemoryBackend>(
         &mut self,
         mem: &M,
         tap: &Tap,
+        retry: bool,
         queue: &mut Queue,
         rate_limiter: &mut Option<RateLimiter>,
         access_platform: Option<&dyn AccessPlatform>,
@@ -226,7 +229,7 @@ impl TxVirtio {
                     let e = io::Error::last_os_error();
 
                     /* EAGAIN */
-                    if e.kind() == io::ErrorKind::WouldBlock {
+                    if e.kind() == io::ErrorKind::WouldBlock && retry {
                         queue.go_to_previous_position();
                         retry_write = true;
                         break;
@@ -529,6 +532,9 @@ pub struct NetQueuePair {
     // device so that we can send EPOLLOUT and EPOLLIN to separate
     // events.
     pub tap_for_write_epoll: Tap,
+    // TX frames go through `tap_queues`, where `tap` is at `tap_queue_index`.
+    pub tap_queues: Arc<TapQueues>,
+    pub tap_queue_index: usize,
     pub rx: RxVirtio,
     pub tx: TxVirtio,
     pub epoll_fd: Option<RawFd>,
@@ -549,13 +555,33 @@ impl NetQueuePair {
         mem: &M,
         queue: &mut Queue,
     ) -> Result<bool, NetQueuePairError> {
-        let tx_tap_retry = self.tx.process_desc_chain(
-            mem,
-            &self.tap,
-            queue,
-            &mut self.tx_rate_limiter,
-            self.access_platform.as_deref(),
-        )?;
+        let tx_tap_retry = {
+            let tap = self.tap_queues.taps[self.tap_queue_index].lock().unwrap();
+
+            if tap.attached {
+                self.tx.process_desc_chain(
+                    mem,
+                    &tap,
+                    true,
+                    queue,
+                    &mut self.tx_rate_limiter,
+                    self.access_platform.as_deref(),
+                )?
+            } else {
+                // The worker waits for EPOLLOUT on its own queue, which always
+                // polls writable while detached, so drop the frames the first
+                // queue cannot take.
+                let first_tap = self.tap_queues.taps[0].lock().unwrap();
+                self.tx.process_desc_chain(
+                    mem,
+                    &first_tap,
+                    false,
+                    queue,
+                    &mut self.tx_rate_limiter,
+                    self.access_platform.as_deref(),
+                )?
+            }
+        };
 
         // We got told to try again when writing to the tap. Wait for the TAP to be writable
         if tx_tap_retry && !self.tx_tap_listening {
@@ -770,7 +796,7 @@ mod tests {
         // with ENOBUFS for a frame it cannot allocate. The device must drop
         // that frame and still send the next one.
         TxVirtio::new(0)
-            .process_desc_chain(&mem, &tap, &mut queue, &mut None, None)
+            .process_desc_chain(&mem, &tap, true, &mut queue, &mut None, None)
             .expect("an undeliverable frame should be dropped");
 
         assert_eq!(u16::from_le(vq.used().idx().load()), 2);
@@ -886,5 +912,31 @@ mod tests {
         let mut buf = [0u8; 16];
         mem.read_slice(&mut buf, GuestAddress(BUF0)).unwrap();
         assert_eq!(buf, [CANARY; 16]);
+    }
+
+    #[test]
+    fn tx_drops_frame_on_eagain_without_retry() {
+        const FRAME: u64 = 0x10000;
+
+        let (full, _peer) = UnixDatagram::pair().unwrap();
+        full.set_nonblocking(true).unwrap();
+        while full.send(&[0; 64]).is_ok() {}
+        let tap = Tap::new_for_fuzzing(File::from(OwnedFd::from(full)), "test");
+
+        for retry in [true, false] {
+            let mem = GuestMemoryMmap::<AtomicBitmap>::from_ranges(&[(GuestAddress(0), 0x10_0000)])
+                .unwrap();
+            let vq = MockSplitQueue::new(&mem, 16);
+            vq.add_desc_chains(&[RawDescriptor::from(Descriptor::new(FRAME, 64, 0, 0))], 0)
+                .unwrap();
+            let mut queue: Queue = vq.create_queue().unwrap();
+
+            let result = TxVirtio::new(0)
+                .process_desc_chain(&mem, &tap, retry, &mut queue, &mut None, None)
+                .unwrap();
+
+            assert_eq!(result, retry);
+            assert_eq!(queue.next_used(), u16::from(!retry));
+        }
     }
 }
