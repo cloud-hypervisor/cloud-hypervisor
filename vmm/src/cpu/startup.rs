@@ -629,4 +629,80 @@ mod tests {
             .finish(|threads| assert!(threads.is_empty()))
             .unwrap();
     }
+
+    #[test]
+    fn invalid_affinity_returns_initialization_error() {
+        let mut startup = VcpuStartup::new();
+        startup
+            .spawn(0, false, |mut guard| {
+                Ok(thread::spawn(move || {
+                    // SAFETY: all zero bits form a valid, empty cpu_set_t.
+                    let empty = unsafe { mem::zeroed() };
+                    match set_vcpu_affinity(&empty) {
+                        Err(e) => guard.fail(Error::SetVcpuAffinity(e)),
+                        Ok(()) => panic!("An empty CPU affinity mask must be rejected"),
+                    }
+                }))
+            })
+            .unwrap();
+        let error = startup
+            .finish(|_| panic!("The vCPU with invalid affinity must not run"))
+            .unwrap_err();
+        let Error::VcpuStartup { vcpu_id, source } = error else {
+            panic!("Unexpected startup error: {error}");
+        };
+        assert_eq!(vcpu_id, 0);
+        let Error::SetVcpuAffinity(source) = *source else {
+            panic!("Unexpected initialization error");
+        };
+        assert_eq!(source.raw_os_error(), Some(libc::EINVAL));
+    }
+
+    #[test]
+    fn startup_handshake_with_vcpu_seccomp_filter() {
+        use hypervisor::HypervisorType;
+        use seccompiler::{SeccompAction, apply_filter};
+
+        use crate::seccomp_filters::{Thread, get_seccomp_filter};
+
+        let hypervisors = [
+            #[cfg(feature = "kvm")]
+            HypervisorType::Kvm,
+            #[cfg(feature = "mshv")]
+            HypervisorType::Mshv,
+        ];
+        for hypervisor in hypervisors {
+            let filter =
+                get_seccomp_filter(&SeccompAction::Trap, Thread::Vcpu, Some(hypervisor)).unwrap();
+            for failure in [false, true] {
+                let filter = filter.clone();
+                let mut startup = VcpuStartup::new();
+                startup
+                    .spawn(0, false, |mut guard| {
+                        thread::Builder::new()
+                            .spawn(move || {
+                                apply_filter(&filter).unwrap();
+                                if failure {
+                                    guard.fail(Error::VcpuInitializationExited);
+                                } else {
+                                    assert!(guard.ready());
+                                }
+                            })
+                            .map_err(Error::VcpuSpawn)
+                    })
+                    .unwrap();
+                let mut registered = Vec::new();
+                let result = startup.finish(|threads| registered = threads);
+                if failure {
+                    assert!(matches!(result, Err(Error::VcpuStartup { vcpu_id: 0, .. })));
+                    assert!(registered.is_empty());
+                } else {
+                    result.unwrap();
+                    for (_, _, handle) in registered {
+                        handle.join().unwrap();
+                    }
+                }
+            }
+        }
+    }
 }
