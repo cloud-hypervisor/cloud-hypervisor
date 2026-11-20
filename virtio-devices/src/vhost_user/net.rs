@@ -33,8 +33,8 @@ use crate::vhost_user::{
     DEFAULT_VIRTIO_FEATURES, Error, PostcopyHandler, Result, VhostUserCommon, VhostUserState,
 };
 use crate::{
-    ActivateError, ActivateResult, GuestRegion, NetCtrlEpollHandler, VIRTIO_F_ACCESS_PLATFORM,
-    VirtioCommon, VirtioDevice, VirtioDeviceType,
+    ActivateError, ActivateResult, NetCtrlEpollHandler, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon,
+    VirtioDevice, VirtioDeviceType,
 };
 
 const DEFAULT_QUEUE_NUMBER: u16 = 2;
@@ -475,10 +475,6 @@ impl VirtioDevice for Net {
 
     fn shutdown(&mut self) {
         self.vu_common.shutdown();
-    }
-
-    fn add_memory_region(&mut self, region: &Arc<GuestRegion>) -> result::Result<(), crate::Error> {
-        self.vu_common.add_memory_region(region)
     }
 
     fn is_removable(&self) -> bool {

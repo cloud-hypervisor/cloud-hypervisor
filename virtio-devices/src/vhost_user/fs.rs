@@ -22,8 +22,8 @@ use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::vhost_user::{PostcopyHandler, VhostUserCommon, VhostUserState};
 use crate::{
-    ActivateResult, GuestRegion, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon, VirtioDevice,
-    VirtioDeviceType, VirtioSharedMemoryList,
+    ActivateResult, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon, VirtioDevice, VirtioDeviceType,
+    VirtioSharedMemoryList,
 };
 
 const NUM_QUEUE_OFFSET: u16 = 1;
@@ -305,10 +305,6 @@ impl VirtioDevice for Fs {
         } else {
             Err(crate::Error::SetShmRegionsNotSupported)
         }
-    }
-
-    fn add_memory_region(&mut self, region: &Arc<GuestRegion>) -> result::Result<(), crate::Error> {
-        self.vu_common.add_memory_region(region)
     }
 
     fn is_removable(&self) -> bool {

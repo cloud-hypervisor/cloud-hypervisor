@@ -425,6 +425,9 @@ pub enum Error {
     #[error("Error from region creation")]
     GuestMemoryRegion(#[source] MmapRegionError),
 
+    #[error("Cannot hotplug RAM during on-demand restore")]
+    HotplugDuringRestore,
+
     /// No ACPI slot available
     #[error("No ACPI slot available")]
     NoSlotAvailable,
@@ -2947,6 +2950,9 @@ impl MemoryManager {
 
     fn hotplug_ram_region(&mut self, size: usize) -> Result<Arc<GuestRegion>, Error> {
         info!("Hotplugging new RAM: {size}");
+        if self.restoring() {
+            return Err(Error::HotplugDuringRestore);
+        }
 
         // Check that there is a free slot
         if self.next_hotplug_slot >= HOTPLUG_COUNT {
