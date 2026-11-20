@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
-use std::{io, result};
+use std::{io, process, result};
 
 use anyhow::anyhow;
 use event_monitor::event;
@@ -19,8 +19,9 @@ use vhost::vhost_kern::vhost_binding::{VHOST, VHOST_BACKEND_F_SUSPEND};
 use vhost::{VhostBackend, VringConfigData};
 use virtio_queue::desc::RawDescriptor;
 use virtio_queue::{Queue, QueueT};
+use vm_allocator::{GuestMemoryNotification, GuestRegion};
 use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
-use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryBackend};
+use vm_memory::{Address, GuestAddress, GuestAddressSpace, GuestMemoryBackend, GuestMemoryRegion};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
@@ -647,6 +648,26 @@ where
                 size,
                 source: e.into(),
             })
+    }
+}
+
+impl<M: GuestAddressSpace + Send + Sync> GuestMemoryNotification for VdpaDmaMapping<M>
+where
+    M::M: GuestMemoryBackend,
+{
+    fn region_added(&self, region: &Arc<GuestRegion>) {
+        let gpa = region.start_addr().raw_value();
+        if let Err(e) = self.map(gpa, gpa, region.len()) {
+            error!("vDPA: {e:?}");
+            process::exit(1);
+        }
+    }
+
+    fn region_removed(&self, region: &Arc<GuestRegion>) {
+        if let Err(e) = self.unmap(region.start_addr().raw_value(), region.len()) {
+            error!("vDPA: {e:?}");
+            process::exit(1);
+        }
     }
 }
 

@@ -4069,11 +4069,12 @@ impl DeviceManager {
             .to_str()
             .ok_or(DeviceManagerError::CreateVdpaConvertPath)?;
 
+        let memory = self.memory_manager.lock().unwrap().guest_memory();
         let vdpa_device = Arc::new(Mutex::new(
             virtio_devices::Vdpa::new(
                 id.clone(),
                 device_path,
-                self.memory_manager.lock().unwrap().guest_memory(),
+                memory.clone(),
                 vdpa_cfg.num_queues,
                 state_from_id(snapshot, id.as_str())
                     .map_err(DeviceManagerError::RestoreGetState)?,
@@ -4084,8 +4085,23 @@ impl DeviceManager {
         // Create the DMA handler that is required by the vDPA device
         let vdpa_mapping = Arc::new(VdpaDmaMapping::new(
             Arc::clone(&vdpa_device),
-            Arc::new(self.memory_manager.lock().unwrap().guest_memory()),
+            Arc::new(memory.clone()),
         ));
+
+        if !vdpa_cfg.pci_common.iommu.attached() {
+            // Virtio-mem maps individual blocks through its DMA handler.
+            let mm = self.memory_manager.lock().unwrap();
+            for zone in mm.memory_zones().values() {
+                for region in zone.regions() {
+                    let gpa = region.start_addr().raw_value();
+                    vdpa_mapping
+                        .map(gpa, gpa, region.len())
+                        .map_err(DeviceManagerError::VirtioDmaMap)?;
+                }
+            }
+            let notifier = Arc::downgrade(&vdpa_mapping);
+            memory.add_notifier(notifier);
+        }
 
         self.device_tree
             .lock()
@@ -5118,18 +5134,6 @@ impl DeviceManager {
                         )
                         .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
                 }
-
-                // Do not register virtio-mem regions, as they are handled directly by
-                // virtio-mem devices.
-                for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
-                    for region in zone.regions() {
-                        let gpa = region.start_addr().0;
-                        let size = region.len();
-                        dma_handler
-                            .map(gpa, gpa, size)
-                            .map_err(DeviceManagerError::VirtioDmaMap)?;
-                    }
-                }
             }
         }
 
@@ -5441,22 +5445,6 @@ impl DeviceManager {
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     pub fn cmdline_additions(&self) -> &[String] {
         self.cmdline_additions.as_slice()
-    }
-
-    pub fn add_memory_region(&self, new_region: &Arc<GuestRegion>) -> DeviceManagerResult<()> {
-        for handle in self.virtio_devices.iter() {
-            if let Some(dma_handler) = &handle.dma_handler
-                && !handle.pci_common.iommu.attached()
-            {
-                let gpa = new_region.start_addr().0;
-                let size = new_region.len();
-                dma_handler
-                    .map(gpa, gpa, size)
-                    .map_err(DeviceManagerError::VirtioDmaMap)?;
-            }
-        }
-
-        Ok(())
     }
 
     pub fn activate_virtio_devices(&self) -> DeviceManagerResult<()> {
@@ -5883,9 +5871,6 @@ impl DeviceManager {
         &mut self,
         handle: MetaVirtioDevice,
     ) -> DeviceManagerResult<PciDeviceInfo> {
-        // Add the virtio device to the device manager list. This is important
-        // as the list is used to notify virtio devices about memory updates
-        // for instance.
         self.virtio_devices.push(handle.clone());
 
         let mapping: Option<Arc<IommuMapping>> = if handle.pci_common.iommu.attached() {
