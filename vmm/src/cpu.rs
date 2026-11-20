@@ -3533,6 +3533,8 @@ impl BusDevice for AcpiCpuHotplugController {
                     debug!("Invalid sized read of CPU status register: {}", data.len());
                     return;
                 }
+                // The Linux kernel, quite reasonably, doesn't zero the memory it gives us.
+                data.fill(0);
                 if self.selected_cpu < self.max_vcpus {
                     let state = &vcpu_states[usize::try_from(self.selected_cpu).unwrap()];
                     if state.active() {
@@ -3612,6 +3614,50 @@ impl BusDevice for AcpiCpuHotplugController {
             }
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod acpi_cpu_hotplug_tests {
+    use super::*;
+
+    fn new_controller(max_vcpus: u32) -> AcpiCpuHotplugController {
+        let mut vcpu_states = Vec::new();
+        vcpu_states.resize_with(usize::try_from(max_vcpus).unwrap(), VcpuState::default);
+
+        AcpiCpuHotplugController {
+            selected_cpu: 0,
+            vcpu_states: Arc::new(Mutex::new(vcpu_states)),
+            max_vcpus,
+        }
+    }
+
+    #[test]
+    fn status_read_ignores_the_previous_buffer_contents() {
+        let mut controller = new_controller(1);
+
+        let mut data = [0xff];
+        controller.read(0, AcpiCpuHotplugController::CPU_STATUS_OFFSET, &mut data);
+        assert_eq!(data, [0]);
+
+        controller.vcpu_states.lock().unwrap()[0].inserting = true;
+        let mut data = [0xff];
+        controller.read(0, AcpiCpuHotplugController::CPU_STATUS_OFFSET, &mut data);
+        assert_eq!(data, [1 << AcpiCpuHotplugController::CPU_INSERTING_FLAG]);
+    }
+
+    #[test]
+    fn status_read_of_an_out_of_range_vcpu_reports_nothing() {
+        let mut controller = new_controller(1);
+        controller.write(
+            0,
+            AcpiCpuHotplugController::CPU_SELECTION_OFFSET,
+            &1u32.to_le_bytes(),
+        );
+
+        let mut data = [0xff];
+        controller.read(0, AcpiCpuHotplugController::CPU_STATUS_OFFSET, &mut data);
+        assert_eq!(data, [0]);
     }
 }
 
