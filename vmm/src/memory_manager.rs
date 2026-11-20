@@ -764,36 +764,69 @@ pub enum MemoryRangePolicy {
     Sparse,
 }
 
+struct ZoneRange {
+    zone_index: usize,
+    file_offset: u64,
+    start: GuestAddress,
+    size: u64,
+}
+
 impl MemoryManager {
-    /// Creates all memory regions based on the available RAM ranges defined
-    /// by `ram_regions`, and based on the description of the memory zones.
-    /// In practice, this function can perform multiple memory mappings of the
-    /// same backing file if there's a hole in the address space between two
-    /// RAM ranges.
-    ///
-    /// One example might be ram_regions containing 2 regions (0-3G and 4G-6G)
-    /// and zones containing two zones (size 1G and size 4G).
-    ///
-    /// This function will create 3 resulting memory regions:
-    /// - First one mapping entirely the first memory zone on 0-1G range
-    /// - Second one mapping partially the second memory zone on 1G-3G range
-    /// - Third one mapping partially the second memory zone on 4G-6G range
-    ///
-    /// Also, all memory regions are page-size aligned (e.g. their sizes must
-    /// be multiple of page-size), which may leave an additional hole in the
-    /// address space when hugepage is used.
+    /// Split zones (size, alignment) across the architecture's RAM windows.
+    /// A zone spanning a hole continues at the same file offset in the next
+    /// window. Leave any tail smaller than the zone alignment unmapped.
+    fn zone_ranges(
+        arch_regions: &[ArchMemRegion],
+        zones: impl IntoIterator<Item = (u64, u64)>,
+    ) -> Result<Vec<ZoneRange>, Error> {
+        let mut zones = zones.into_iter().enumerate();
+        let mut zone = zones.next().ok_or(Error::MissingMemoryZones)?;
+        let mut zone_offset = 0;
+        let mut ranges = Vec::new();
+        for window in arch_regions.iter().filter(|r| r.r_type == RegionType::Ram) {
+            let mut offset = 0;
+            loop {
+                let (zone_index, (zone_size, align)) = zone;
+                let available = align_down(window.size as u64 - offset, align);
+                if available == 0 {
+                    break;
+                }
+                let size = available.min(zone_size - zone_offset);
+                let start = GuestAddress(window.base)
+                    .checked_add(offset)
+                    .ok_or(Error::GuestAddressOverFlow)?;
+                ranges.push(ZoneRange {
+                    zone_index,
+                    file_offset: zone_offset,
+                    start,
+                    size,
+                });
+                zone_offset += size;
+                offset += size;
+                if zone_offset == zone_size {
+                    let Some(next) = zones.next() else {
+                        return Ok(ranges);
+                    };
+                    zone = next;
+                    zone_offset = 0;
+                }
+                if size == available {
+                    break;
+                }
+            }
+        }
+        Ok(ranges)
+    }
+
     fn create_memory_regions_from_zones(
-        ram_regions: &[(GuestAddress, usize)],
+        arch_regions: &[ArchMemRegion],
         zones: &[MemoryZoneConfig],
         thp: bool,
         vm: &Arc<dyn hypervisor::Vm>,
         slot_allocator: &Arc<MemorySlotAllocator>,
         log_dirty: bool,
     ) -> Result<(Vec<Arc<GuestRegion>>, MemoryZones), Error> {
-        let mut zone_iter = zones.iter();
         let mut mem_regions = Vec::new();
-        let mut zone = zone_iter.next().ok_or(Error::MissingMemoryZones)?;
-        let mut zone_offset = 0u64;
         let mut memory_zones = HashMap::new();
         for zone in zones {
             let align = memory_zone_get_align_size(zone)?;
@@ -812,95 +845,46 @@ impl MemoryManager {
             }
         }
 
-        for ram_region in ram_regions.iter() {
-            let mut ram_region_offset = 0;
-            let mut exit = false;
+        let sizes = zones
+            .iter()
+            .map(|z| (z.size, memory_zones[&z.id].backing_page_size));
+        for range in Self::zone_ranges(arch_regions, sizes)? {
+            let zone = &zones[range.zone_index];
+            let region_start = range.start;
+            let region_size = range.size;
+            let file_offset = range.file_offset;
+            info!(
+                "create ram region for zone {}, region_start: {:#x}, region_size: {:#x}",
+                zone.id,
+                region_start.raw_value(),
+                region_size
+            );
+            let region = MemoryManager::create_ram_region(
+                &zone.file,
+                file_offset,
+                region_start,
+                region_size as usize,
+                zone.reserve.unwrap_or(zone.hugepages),
+                zone.shared,
+                zone.hugepages,
+                zone.hugepage_size,
+                zone.host_numa_node,
+                None,
+                thp,
+                Arc::clone(vm),
+                Arc::clone(slot_allocator),
+                zone.mergeable,
+                log_dirty,
+                hypervisor::MemoryVisibility::Private,
+            )?;
 
-            loop {
-                let mut ram_region_consumed = false;
-                let mut pull_next_zone = false;
-
-                let zone_align_size = memory_zones[&zone.id].backing_page_size;
-                let ram_region_available_size =
-                    align_down(ram_region.1 as u64 - ram_region_offset, zone_align_size);
-                if ram_region_available_size == 0 {
-                    break;
-                }
-                let zone_sub_size = zone.size - zone_offset;
-
-                let file_offset = zone_offset;
-                let region_start = ram_region
-                    .0
-                    .checked_add(ram_region_offset)
-                    .ok_or(Error::GuestAddressOverFlow)?;
-                let region_size = if zone_sub_size <= ram_region_available_size {
-                    if zone_sub_size == ram_region_available_size {
-                        ram_region_consumed = true;
-                    }
-
-                    ram_region_offset += zone_sub_size;
-                    pull_next_zone = true;
-
-                    zone_sub_size
-                } else {
-                    zone_offset += ram_region_available_size;
-                    ram_region_consumed = true;
-
-                    ram_region_available_size
-                };
-
-                info!(
-                    "create ram region for zone {}, region_start: {:#x}, region_size: {:#x}",
-                    zone.id,
-                    region_start.raw_value(),
-                    region_size
-                );
-                let region = MemoryManager::create_ram_region(
-                    &zone.file,
-                    file_offset,
-                    region_start,
-                    region_size as usize,
-                    zone.reserve.unwrap_or(zone.hugepages),
-                    zone.shared,
-                    zone.hugepages,
-                    zone.hugepage_size,
-                    zone.host_numa_node,
-                    None,
-                    thp,
-                    Arc::clone(vm),
-                    Arc::clone(slot_allocator),
-                    zone.mergeable,
-                    log_dirty,
-                    hypervisor::MemoryVisibility::Private,
-                )?;
-
-                // Add region to the list of regions associated with the
-                // current memory zone.
-                if let Some(memory_zone) = memory_zones.get_mut(&zone.id) {
-                    memory_zone.regions.push(Arc::clone(&region));
-                }
-
-                mem_regions.push(region);
-
-                if pull_next_zone {
-                    // Get the next zone and reset the offset.
-                    zone_offset = 0;
-                    if let Some(z) = zone_iter.next() {
-                        zone = z;
-                    } else {
-                        exit = true;
-                        break;
-                    }
-                }
-
-                if ram_region_consumed {
-                    break;
-                }
+            // Add region to the list of regions associated with the
+            // current memory zone.
+            if let Some(memory_zone) = memory_zones.get_mut(&zone.id) {
+                memory_zone.regions.push(Arc::clone(&region));
             }
 
-            if exit {
-                break;
-            }
+            mem_regions.push(region);
         }
 
         Ok((mem_regions, memory_zones))
@@ -2281,12 +2265,6 @@ impl MemoryManager {
             // Init guest memory
             let arch_mem_regions = arch::arch_memory_regions();
 
-            let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
-                .iter()
-                .filter(|r| r.2 == RegionType::Ram)
-                .map(|r| (r.0, r.1))
-                .collect();
-
             let arch_mem_regions: Vec<ArchMemRegion> = arch_mem_regions
                 .iter()
                 .map(|(a, b, c)| ArchMemRegion {
@@ -2297,7 +2275,7 @@ impl MemoryManager {
                 .collect();
 
             let (mem_regions, mut memory_zones) = Self::create_memory_regions_from_zones(
-                &ram_regions,
+                &arch_mem_regions,
                 &zones,
                 config.thp,
                 &vm,
