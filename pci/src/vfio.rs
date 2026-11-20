@@ -1972,6 +1972,23 @@ impl VfioCommon {
                 .contains(&offset)
     }
 
+    #[cfg(feature = "kvm")]
+    pub(crate) fn is_nvidia_bar0_command_reg_mirror(&self, base: u64, offset: u64) -> bool {
+        if self.vendor_id != VENDOR_NVIDIA {
+            return false;
+        }
+        let addr = base + offset;
+        let Some(region) = self.find_region(addr) else {
+            return false;
+        };
+        let region_offset = addr - region.start.raw_value();
+        if !self.is_nvidia_bar0_config_mirror(region.index, region_offset) {
+            return false;
+        }
+        let config_offset = region_offset - NVIDIA_BAR0_CONFIG_MIRROR_OFFSET;
+        (config_offset / PCI_CONFIG_REGISTER_SIZE as u64) as usize == COMMAND_REG
+    }
+
     pub(crate) fn read_bar(&mut self, base: u64, offset: u64, data: &mut [u8]) {
         let addr = base + offset;
         if let Some(region) = self.find_region(addr) {
@@ -3103,7 +3120,20 @@ impl PciDevice for VfioPciDevice {
     }
 
     fn write_bar(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
-        self.common.write_bar(base, offset, data)
+        #[cfg(feature = "kvm")]
+        let update_dma =
+            self.p2p_dma && self.common.is_nvidia_bar0_command_reg_mirror(base, offset);
+        #[cfg(feature = "kvm")]
+        let memory_space_enabled = update_dma && self.is_memory_space_enabled();
+
+        let ret = self.common.write_bar(base, offset, data);
+
+        #[cfg(feature = "kvm")]
+        if update_dma {
+            self.update_dma_buffers(memory_space_enabled);
+        }
+
+        ret
     }
 
     fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> Result<(), io::Error> {
@@ -4739,6 +4769,15 @@ mod tests {
             index: VFIO_PCI_BAR0_REGION_INDEX,
             bar_memory_regions: Vec::new(),
         });
+
+        #[cfg(feature = "kvm")]
+        {
+            assert!(common.is_nvidia_bar0_command_reg_mirror(bar0_gpa, 0x88004));
+            assert!(common.is_nvidia_bar0_command_reg_mirror(bar0_gpa, 0x88006));
+            assert!(!common.is_nvidia_bar0_command_reg_mirror(bar0_gpa, 0x88000));
+            assert!(!common.is_nvidia_bar0_command_reg_mirror(bar0_gpa, 0x88008));
+            assert!(!common.is_nvidia_bar0_command_reg_mirror(bar0_gpa, 0x80004));
+        }
 
         // Queue a pending BAR reprogramming while MSE is disabled.
         let new_bar0_gpa: u32 = 0xd000_0000;
