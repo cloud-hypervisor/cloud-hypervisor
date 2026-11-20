@@ -47,7 +47,7 @@ use crate::seccomp_filters::Thread;
 use crate::thread_helper::PauseCommon;
 use crate::{
     ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
-    GuestMemory, GuestMemoryMap, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_VERSION_1, VirtioCommon,
+    GuestMemory, GuestRegion, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_VERSION_1, VirtioCommon,
     VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
 };
 
@@ -327,8 +327,8 @@ impl BalloonEpollHandler {
         Ok(())
     }
 
-    fn release_memory_range(
-        memory: &GuestMemoryMap,
+    fn release_memory_range<M: GuestMemoryBackend<R = GuestRegion>>(
+        memory: &M,
         range_base: GuestAddress,
         range_len: usize,
     ) -> result::Result<(), Error> {
@@ -377,9 +377,9 @@ impl BalloonEpollHandler {
         }
     }
 
-    fn release_memory_range_partial_page(
+    fn release_memory_range_partial_page<M: GuestMemoryBackend<R = GuestRegion>>(
         pbp: &mut Option<PartiallyBalloonedPage>,
-        memory: &GuestMemoryMap,
+        memory: &M,
         range_base: GuestAddress,
     ) -> result::Result<(), Error> {
         let page_size: u64 = get_page_size();
@@ -407,9 +407,9 @@ impl BalloonEpollHandler {
         Ok(())
     }
 
-    fn process_inflate_addresses(
+    fn process_inflate_addresses<M: GuestMemoryBackend<R = GuestRegion>>(
         &mut self,
-        memory: &GuestMemoryMap,
+        memory: &M,
         addresses: &mut SmallVec<[GuestAddress; VIRTIO_BALLOON_PFNS_PER_BATCH]>,
     ) {
         // The balloon always deals with 4 KiB pages. Use partial page handling
@@ -1130,6 +1130,7 @@ mod tests {
     use vm_virtio::queue::testing::VirtQueue;
 
     use super::*;
+    use crate::GuestMemoryMap;
 
     type TestMemory = GuestMemoryMap;
 
