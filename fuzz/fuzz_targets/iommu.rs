@@ -17,7 +17,7 @@ use virtio_devices::{
 use virtio_queue::{Queue, QueueT};
 use vm_allocator::{GuestMemory, GuestMemoryMap};
 use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
-use vm_memory::{Bytes, GuestAddress};
+use vm_memory::{Bytes, GuestAddress, GuestMemoryBackend};
 use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::{AccessPlatform, AccessType};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
@@ -976,7 +976,7 @@ fn append_u64(vec: &mut Vec<u8>, value: u64) {
     vec.extend_from_slice(&value.to_le_bytes());
 }
 
-fn write_request_queue(mem: &GuestMemoryMap, chains: &[ChainSpec]) -> Result<(), ()> {
+fn write_request_queue<M: GuestMemoryBackend>(mem: &M, chains: &[ChainSpec]) -> Result<(), ()> {
     let mut next_desc: u16 = 0;
     let mut next_payload_addr = PAYLOAD_ADDR_START;
     let mut avail_count: u16 = 0;
@@ -1080,7 +1080,7 @@ fn allocate_payload(next_payload_addr: &mut u64, len: u32) -> Option<u64> {
     Some(start)
 }
 
-fn write_desc(mem: &GuestMemoryMap, desc_index: u16, desc: VirtqDesc) -> Result<(), ()> {
+fn write_desc<M: GuestMemoryBackend>(mem: &M, desc_index: u16, desc: VirtqDesc) -> Result<(), ()> {
     let mut raw = [0u8; 16];
     raw[..8].copy_from_slice(&desc.addr.to_le_bytes());
     raw[8..12].copy_from_slice(&desc.len.to_le_bytes());
@@ -1093,7 +1093,7 @@ fn write_desc(mem: &GuestMemoryMap, desc_index: u16, desc: VirtqDesc) -> Result<
     .map_err(|_| ())
 }
 
-fn write_u16(mem: &GuestMemoryMap, addr: u64, value: u16) -> Result<(), ()> {
+fn write_u16<M: GuestMemoryBackend>(mem: &M, addr: u64, value: u16) -> Result<(), ()> {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .map_err(|_| ())
 }
