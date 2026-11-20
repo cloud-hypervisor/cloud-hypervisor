@@ -1884,7 +1884,7 @@ fn update_cpuid_topology(
 #[cfg(test)]
 mod tests {
     use linux_loader::loader::bootparam::boot_e820_entry;
-    use vm_allocator::GuestMemoryMap;
+    use vm_allocator::GuestMemory;
 
     use super::*;
 
@@ -2035,9 +2035,11 @@ mod tests {
     #[test]
     fn test_system_configuration() {
         let no_vcpus = 4;
-        let gm = GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)])
+            .unwrap()
+            .memory();
         let config_err = configure_system(
-            &gm,
+            &*gm,
             GuestAddress(0),
             0,
             &None,
@@ -2056,10 +2058,10 @@ mod tests {
             .filter(|r| r.2 == RegionType::Ram && r.0 < layout::RAM_64BIT_START)
             .map(|r| (r.0, r.1))
             .collect();
-        let gm = GuestMemoryMap::from_ranges(&ram_regions).unwrap();
+        let gm = GuestMemory::from_ranges(&ram_regions).unwrap().memory();
 
         configure_system(
-            &gm,
+            &*gm,
             GuestAddress(0),
             0,
             &None,
@@ -2084,9 +2086,9 @@ mod tests {
                 }
             })
             .collect();
-        let gm = GuestMemoryMap::from_ranges(&ram_regions).unwrap();
+        let gm = GuestMemory::from_ranges(&ram_regions).unwrap().memory();
         configure_system(
-            &gm,
+            &*gm,
             GuestAddress(0),
             0,
             &None,
@@ -2099,7 +2101,7 @@ mod tests {
         .unwrap();
 
         configure_system(
-            &gm,
+            &*gm,
             GuestAddress(0),
             0,
             &None,
@@ -2114,7 +2116,7 @@ mod tests {
 
     #[test]
     fn test_generate_e820_memory_map() {
-        let gm = GuestMemoryMap::from_ranges(&[
+        let gm = GuestMemory::from_ranges(&[
             (GuestAddress(0), 2 << 20),
             (layout::RAM_64BIT_START, 2 << 20),
             (layout::RAM_64BIT_START.unchecked_add(4 << 20), 2 << 20),
@@ -2124,10 +2126,11 @@ mod tests {
                 2 << 20,
             ),
         ])
-        .unwrap();
+        .unwrap()
+        .memory();
 
         assert_eq!(
-            generate_e820_memory_map(&gm).unwrap(),
+            generate_e820_memory_map(&*gm).unwrap(),
             vec![
                 (0, layout::EBDA_START.0, E820_RAM),
                 (layout::HIGH_RAM_START.0, 1 << 20, E820_RAM),
