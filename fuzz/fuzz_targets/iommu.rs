@@ -369,7 +369,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     }
     let removed = iommu.remove_external_mapping(41);
     if let Some(ext_map) = removed {
-        iommu.add_external_mapping(41, ext_map);
+        let _ = iommu.add_external_mapping(41, ext_map);
     }
     let _ = iommu.remove_external_mapping(u32::MAX);
     iommu.reset();
@@ -1097,35 +1097,35 @@ fn write_u16<M: GuestMemoryBackend>(mem: &M, addr: u64, value: u16) -> Result<()
 }
 
 fn install_external_mappings(iommu: &mut virtio_devices::Iommu, plan: &FuzzPlan) {
-    iommu.add_external_mapping(1, Arc::new(FuzzExternalMapping::new(false, false)));
-    iommu.add_external_mapping(4, Arc::new(FuzzExternalMapping::new(false, false)));
-    iommu.add_external_mapping(20, Arc::new(FuzzExternalMapping::new(false, false)));
-    iommu.add_external_mapping(21, Arc::new(FuzzExternalMapping::new(false, false)));
-    iommu.add_external_mapping(30, Arc::new(FuzzExternalMapping::new(true, false)));
-    iommu.add_external_mapping(31, Arc::new(FuzzExternalMapping::new(false, true)));
-    iommu.add_external_mapping(40, Arc::new(FuzzExternalMapping::new(false, false)));
-    iommu.add_external_mapping(41, Arc::new(FuzzExternalMapping::new(true, false)));
-    iommu.add_external_mapping(
+    let _ = iommu.add_external_mapping(1, Arc::new(FuzzExternalMapping::new(false, false)));
+    let _ = iommu.add_external_mapping(4, Arc::new(FuzzExternalMapping::new(false, false)));
+    let _ = iommu.add_external_mapping(20, Arc::new(FuzzExternalMapping::new(false, false)));
+    let _ = iommu.add_external_mapping(21, Arc::new(FuzzExternalMapping::new(false, false)));
+    let _ = iommu.add_external_mapping(30, Arc::new(FuzzExternalMapping::new(true, false)));
+    let _ = iommu.add_external_mapping(31, Arc::new(FuzzExternalMapping::new(false, true)));
+    let _ = iommu.add_external_mapping(40, Arc::new(FuzzExternalMapping::new(false, false)));
+    let _ = iommu.add_external_mapping(41, Arc::new(FuzzExternalMapping::new(true, false)));
+    let _ = iommu.add_external_mapping(
         plan.ext_success_ep_a,
         Arc::new(FuzzExternalMapping::new(false, false)),
     );
-    iommu.add_external_mapping(
+    let _ = iommu.add_external_mapping(
         plan.ext_success_ep_b,
         Arc::new(FuzzExternalMapping::new(false, false)),
     );
-    iommu.add_external_mapping(
+    let _ = iommu.add_external_mapping(
         plan.rollback_success_ep,
         Arc::new(FuzzExternalMapping::new(false, false)),
     );
-    iommu.add_external_mapping(
+    let _ = iommu.add_external_mapping(
         plan.ext_fail_map_ep,
         Arc::new(FuzzExternalMapping::new(true, false)),
     );
-    iommu.add_external_mapping(
+    let _ = iommu.add_external_mapping(
         plan.ext_fail_unmap_ep,
         Arc::new(FuzzExternalMapping::new(false, true)),
     );
-    iommu.add_external_mapping(
+    let _ = iommu.add_external_mapping(
         plan.detach_ext_ep,
         Arc::new(FuzzExternalMapping::new(false, false)),
     );
