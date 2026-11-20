@@ -29,7 +29,6 @@ use linux_loader::loader::elf::start_info::{
 };
 use log::{debug, error, info};
 use thiserror::Error;
-use vm_allocator::GuestMemoryMap;
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend, GuestMemoryRegion,
 };
@@ -1357,8 +1356,8 @@ pub fn arch_memory_regions() -> Vec<(GuestAddress, usize, RegionType)> {
 /// * `cmdline_size` - Size of the kernel command line in bytes including the null terminator.
 /// * `num_cpus` - Number of virtual CPUs the guest will have.
 #[expect(clippy::too_many_arguments)]
-pub fn configure_system(
-    guest_mem: &GuestMemoryMap,
+pub fn configure_system<M: GuestMemoryBackend>(
+    guest_mem: &M,
     cmdline_addr: GuestAddress,
     cmdline_size: usize,
     initramfs: &Option<InitramfsConfig>,
@@ -1404,7 +1403,7 @@ type RamRange = (u64, u64);
 
 /// Returns usable physical memory ranges for the guest
 /// These should be used to create e820_RAM memory maps
-pub fn generate_ram_ranges(guest_mem: &GuestMemoryMap) -> super::Result<Vec<RamRange>> {
+pub fn generate_ram_ranges<M: GuestMemoryBackend>(guest_mem: &M) -> super::Result<Vec<RamRange>> {
     // Merge continuous memory regions into one region.
     // Note: memory regions from "GuestMemoryBackend" are sorted and non-zero sized.
     let ram_regions = {
@@ -1484,7 +1483,9 @@ pub fn generate_ram_ranges(guest_mem: &GuestMemoryMap) -> super::Result<Vec<RamR
 
 /// Generate the E820 entries shared by direct boot and fw_cfg.
 /// Each entry is (base, size, type).
-pub fn generate_e820_memory_map(guest_mem: &GuestMemoryMap) -> super::Result<Vec<(u64, u64, u32)>> {
+pub fn generate_e820_memory_map<M: GuestMemoryBackend>(
+    guest_mem: &M,
+) -> super::Result<Vec<(u64, u64, u32)>> {
     let mut entries = vec![(0, layout::EBDA_START.0, E820_RAM)];
     entries.extend(
         generate_ram_ranges(guest_mem)?
@@ -1503,8 +1504,8 @@ pub fn generate_e820_memory_map(guest_mem: &GuestMemoryMap) -> super::Result<Vec
     Ok(entries)
 }
 
-fn configure_pvh(
-    guest_mem: &GuestMemoryMap,
+fn configure_pvh<M: GuestMemoryBackend>(
+    guest_mem: &M,
     cmdline_addr: GuestAddress,
     initramfs: &Option<InitramfsConfig>,
     rsdp_addr: Option<GuestAddress>,
@@ -1589,8 +1590,8 @@ fn configure_pvh(
     Ok(())
 }
 
-fn configure_32bit_entry(
-    guest_mem: &GuestMemoryMap,
+fn configure_32bit_entry<M: GuestMemoryBackend>(
+    guest_mem: &M,
     cmdline_addr: GuestAddress,
     cmdline_size: usize,
     initramfs: &Option<InitramfsConfig>,
@@ -1666,8 +1667,8 @@ fn add_memmap_entry(memmap: &mut Vec<hvm_memmap_table_entry>, addr: u64, size: u
 }
 
 /// Returns the memory address where the initramfs could be loaded.
-pub fn initramfs_load_addr(
-    guest_mem: &GuestMemoryMap,
+pub fn initramfs_load_addr<M: GuestMemoryBackend>(
+    guest_mem: &M,
     initramfs_size: usize,
 ) -> super::Result<u64> {
     let first_region = guest_mem
@@ -1883,6 +1884,7 @@ fn update_cpuid_topology(
 #[cfg(test)]
 mod tests {
     use linux_loader::loader::bootparam::boot_e820_entry;
+    use vm_allocator::GuestMemoryMap;
 
     use super::*;
 
