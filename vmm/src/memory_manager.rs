@@ -2336,7 +2336,7 @@ impl MemoryManager {
                             )?;
 
                             guest_memory
-                                .add_region(Arc::clone(&region))
+                                .add_region(&region)
                                 .map_err(Error::GuestRegionCollection)?;
 
                             let hotplugged_size = zone.hotplugged_size.unwrap_or(0);
@@ -2876,7 +2876,7 @@ impl MemoryManager {
         region.register().map_err(Error::RegisterGuestRegion)?;
         let slot = region.slot().unwrap();
         self.guest_memory
-            .add_region(Arc::clone(&region))
+            .add_region(&region)
             .map_err(Error::GuestRegionCollection)?;
 
         self.guest_ram_mappings.push(GuestRamMapping {
