@@ -46,8 +46,6 @@ use zerocopy::IntoBytes;
 #[cfg(all(feature = "kvm", feature = "sev_snp"))]
 use zerocopy::{FromBytes, FromZeros};
 
-#[cfg(feature = "sev_snp")]
-use crate::GuestMemoryMap;
 use crate::cpu;
 use crate::cpu::CpuManager;
 use crate::igvm::loader::Loader;
@@ -177,8 +175,8 @@ fn igvm_memmap_from_ram_range(ram_range: (u64, u64)) -> IGVM_VHS_MEMORY_MAP_ENTR
 }
 
 #[cfg(feature = "sev_snp")]
-fn generate_memory_map(
-    guest_mem: &GuestMemoryMap,
+fn generate_memory_map<M: GuestMemoryBackend>(
+    guest_mem: &M,
 ) -> Result<Vec<IGVM_VHS_MEMORY_MAP_ENTRY>, Error> {
     let mut memory_map = Vec::new();
 
@@ -259,7 +257,7 @@ pub(crate) fn extract_sev_features(igvm_file: &IgvmFile) -> u64 {
 #[expect(clippy::needless_pass_by_value)]
 pub(crate) fn load_igvm(
     igvm_file: IgvmFile,
-    #[cfg(feature = "sev_snp")] boot_memory: &GuestMemoryMap,
+    #[cfg(feature = "sev_snp")] boot_memory: &impl GuestMemoryBackend,
     memory_manager: Arc<Mutex<MemoryManager>>,
     cpu_manager: Arc<Mutex<CpuManager>>,
     cmdline: &str,

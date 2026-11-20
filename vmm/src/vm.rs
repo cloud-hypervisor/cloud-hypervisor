@@ -1096,7 +1096,7 @@ impl Vm {
         Ok(())
     }
 
-    fn boot_guest_memory(&self) -> Result<vm_allocator::GuestMemoryMap> {
+    fn boot_guest_memory(&self) -> Result<impl GuestMemoryBackend + use<>> {
         let config = self.config.lock().unwrap();
         self.memory_manager
             .lock()
@@ -1594,7 +1594,7 @@ impl Vm {
     #[expect(clippy::needless_pass_by_value)]
     fn load_igvm(
         igvm_file: IgvmFile,
-        #[cfg(feature = "sev_snp")] boot_memory: &vm_allocator::GuestMemoryMap,
+        #[cfg(feature = "sev_snp")] boot_memory: &impl GuestMemoryBackend,
         memory_manager: Arc<Mutex<MemoryManager>>,
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
         #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))] measured_boot: Option<
