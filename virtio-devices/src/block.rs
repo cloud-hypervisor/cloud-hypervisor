@@ -1385,7 +1385,7 @@ mod tests {
     use hypervisor::Vm;
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::desc::split::Descriptor;
-    use vm_memory::GuestAddress;
+    use vm_memory::{GuestAddress, GuestMemoryBackend};
     use vm_virtio::AccessType;
     use vm_virtio::queue::testing::VirtQueue as GuestQ;
     use vmm_sys_util::eventfd::EFD_NONBLOCK;
@@ -1627,7 +1627,7 @@ mod tests {
         assert_eq!(status, [VIRTIO_BLK_S_IOERR as u8, 0xff, 0xff, 0xff]);
     }
 
-    fn used_len(vq: &GuestQ<'_, GuestMemoryMap>, mem: &GuestMemoryMap) -> u32 {
+    fn used_len<M: GuestMemoryBackend>(vq: &GuestQ<'_, M>, mem: &M) -> u32 {
         mem.read_obj(GuestAddress(vq.used.ring[0].location.0 + 4))
             .unwrap()
     }
