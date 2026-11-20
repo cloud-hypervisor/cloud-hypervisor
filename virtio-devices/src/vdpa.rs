@@ -30,8 +30,8 @@ use vmm_sys_util::ioctl_io_nr;
 use crate::device::ActivationContext;
 use crate::{
     ActivateError, ActivateResult, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK,
-    DEVICE_FEATURES_OK, GuestMemory, GuestMemoryMap, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon,
-    VirtioDevice, VirtioInterrupt, VirtioInterruptType, get_host_address_range,
+    DEVICE_FEATURES_OK, GuestMemory, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon, VirtioDevice,
+    VirtioInterrupt, VirtioInterruptType, get_host_address_range,
 };
 
 #[derive(Error, Debug)]
@@ -222,7 +222,6 @@ impl Vdpa {
 
     fn activate_vdpa(
         &mut self,
-        _mem: &GuestMemoryMap,
         virtio_interrupt: &dyn VirtioInterrupt,
         queues: &[(u16, Queue, EventFd)],
     ) -> Result<()> {
@@ -448,13 +447,12 @@ impl VirtioDevice for Vdpa {
 
     fn activate(&mut self, context: ActivationContext) -> ActivateResult {
         let ActivationContext {
-            mem,
             interrupt_cb: virtio_interrupt,
             queues,
             ..
         } = context;
         self.common.check_access_platform()?;
-        self.activate_vdpa(&mem.memory(), virtio_interrupt.as_ref(), &queues)
+        self.activate_vdpa(virtio_interrupt.as_ref(), &queues)
             .map_err(ActivateError::ActivateVdpa)?;
 
         self.common.interrupt_cb = Some(virtio_interrupt);
