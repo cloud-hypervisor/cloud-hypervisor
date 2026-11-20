@@ -2984,7 +2984,17 @@ impl MemoryManager {
             ));
         }
 
-        let start_addr = MemoryManager::start_addr(self.guest_memory.memory().last_addr(), true)?;
+        let end = if let Some(slot) = self.hotplug_slots[..self.next_hotplug_slot].last() {
+            GuestAddress(slot.base)
+                .checked_add(slot.length.checked_sub(1).ok_or(Error::InvalidSize)?)
+                .ok_or(Error::GuestAddressOverFlow)?
+        } else {
+            self.boot_regions
+                .last()
+                .ok_or(Error::InvalidMemoryParameters)?
+                .last_addr()
+        };
+        let start_addr = Self::start_addr(end, true)?;
         let start_addr = GuestAddress(base_clear_of_reserved(
             &self.arch_mem_regions,
             start_addr.0,
