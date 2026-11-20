@@ -1391,7 +1391,6 @@ mod tests {
     use vmm_sys_util::eventfd::EFD_NONBLOCK;
 
     use super::*;
-    use crate::GuestMemoryMap;
 
     struct Noop(EventFd);
     impl VirtioInterrupt for Noop {
@@ -1484,14 +1483,14 @@ mod tests {
         assert_eq!(&block.serial[..], serial.as_bytes());
     }
 
-    fn make_handler(queue: Queue, mem: &GuestMemoryMap, acked_features: u64) -> BlockEpollHandler {
+    fn make_handler(queue: Queue, mem: &GuestMemory, acked_features: u64) -> BlockEpollHandler {
         let evt = || EventFd::new(EFD_NONBLOCK).unwrap();
         make_handler_with_io(queue, mem, acked_features, Box::new(Noop(evt())))
     }
 
     fn make_handler_with_io(
         queue: Queue,
-        mem: &GuestMemoryMap,
+        mem: &GuestMemory,
         acked_features: u64,
         disk_image: Box<dyn AsyncIo>,
     ) -> BlockEpollHandler {
@@ -1499,7 +1498,7 @@ mod tests {
         BlockEpollHandler {
             queue_index: 0,
             queue,
-            mem: GuestMemory::new(mem.clone()),
+            mem: mem.clone(),
             disk_image,
             disk_nsectors: Arc::new(AtomicU64::new(0)),
             interrupt_cb: Arc::new(Noop(evt())),
@@ -1527,8 +1526,9 @@ mod tests {
     /// data descriptor and a 1 byte status descriptor. Returns the status
     /// byte and the 3 bytes after it, which are poisoned with 0xff before.
     fn process_one_request(request_type: u32, acked_features: u64) -> [u8; 4] {
-        let mem = GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
-        let vq = GuestQ::new(GuestAddress(0x1000), &mem, 4);
+        let guest_memory = GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let mem = guest_memory.memory();
+        let vq = GuestQ::new(GuestAddress(0x1000), &*mem, 4);
         mem.write_obj(request_type, GuestAddress(REQ_HDR_ADDR))
             .unwrap();
         mem.write_slice(&[0xff; 4], GuestAddress(REQ_STATUS_ADDR))
@@ -1541,7 +1541,7 @@ mod tests {
         vq.avail.ring[0].set(0);
         vq.avail.idx.set(1);
 
-        let mut handler = make_handler(vq.create_queue(), &mem, acked_features);
+        let mut handler = make_handler(vq.create_queue(), &guest_memory, acked_features);
         handler.process_queue_submit().unwrap();
 
         assert_eq!(vq.used.idx.get(), 1);
@@ -1574,8 +1574,9 @@ mod tests {
         // driver only enabled queue 1.
         let dir = TempDir::new_with_prefix("/dev/shm/ch-sparse-queue").unwrap();
         let mut block = make_block_with_serial(dir.as_path(), None, 2);
-        let mem = GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
-        let vq = GuestQ::new(GuestAddress(0x1000), &mem, 4);
+        let guest_memory = GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let mem = guest_memory.memory();
+        let vq = GuestQ::new(GuestAddress(0x1000), &*mem, 4);
         mem.write_obj(VIRTIO_BLK_T_GET_ID, GuestAddress(REQ_HDR_ADDR))
             .unwrap();
         let next = VRING_DESC_F_NEXT as u16;
@@ -1590,7 +1591,7 @@ mod tests {
 
         block
             .activate(ActivationContext {
-                mem: GuestMemory::new(mem.clone()),
+                mem: guest_memory,
                 interrupt_cb: Arc::new(QueueInterruptSender(Mutex::new(tx))),
                 queues: vec![(1, vq.create_queue(), queue_evt.try_clone().unwrap())],
                 device_status: Arc::new(AtomicU8::new(0)),
@@ -1606,13 +1607,14 @@ mod tests {
 
     #[test]
     fn parse_failure_reclaims_head() {
-        let mem = GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
-        let vq = GuestQ::new(GuestAddress(0x1000), &mem, 4);
+        let guest_memory = GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let mem = guest_memory.memory();
+        let vq = GuestQ::new(GuestAddress(0x1000), &*mem, 4);
         vq.dtable[0].set(0x2000, 16, 0, 0);
         vq.avail.ring[0].set(0);
         vq.avail.idx.set(1);
 
-        let mut handler = make_handler(vq.create_queue(), &mem, 0);
+        let mut handler = make_handler(vq.create_queue(), &guest_memory, 0);
 
         handler.process_queue_submit().unwrap();
 
@@ -1635,8 +1637,9 @@ mod tests {
     /// Processes the chain `descs`, which holds a read request that fails to
     /// parse, and returns the 4 bytes at `probe`, poisoned with 0xff before.
     fn process_rejected(descs: &[Descriptor], probe: u64) -> [u8; 4] {
-        let mem = GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
-        let vq = GuestQ::new(GuestAddress(0x1000), &mem, 4);
+        let guest_memory = GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let mem = guest_memory.memory();
+        let vq = GuestQ::new(GuestAddress(0x1000), &*mem, 4);
         mem.write_obj(VIRTIO_BLK_T_IN, GuestAddress(REQ_HDR_ADDR))
             .unwrap();
         mem.write_slice(&[0xff; 4], GuestAddress(probe)).unwrap();
@@ -1646,12 +1649,12 @@ mod tests {
         vq.avail.ring[0].set(0);
         vq.avail.idx.set(1);
 
-        let mut handler = make_handler(vq.create_queue(), &mem, 0);
+        let mut handler = make_handler(vq.create_queue(), &guest_memory, 0);
         handler.process_queue_submit().unwrap();
 
         // A rejected request is returned with used length 0.
         assert_eq!(vq.used.idx.get(), 1);
-        assert_eq!(used_len(&vq, &mem), 0);
+        assert_eq!(used_len(&vq, &*mem), 0);
         let mut bytes = [0u8; 4];
         mem.read_slice(&mut bytes, GuestAddress(probe)).unwrap();
         bytes
@@ -1742,8 +1745,9 @@ mod tests {
 
     #[test]
     fn writethrough_write_fails_when_fsync_fails() {
-        let mem = GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
-        let vq = GuestQ::new(GuestAddress(0x1000), &mem, 4);
+        let guest_memory = GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let mem = guest_memory.memory();
+        let vq = GuestQ::new(GuestAddress(0x1000), &*mem, 4);
         mem.write_obj(VIRTIO_BLK_T_OUT, GuestAddress(REQ_HDR_ADDR))
             .unwrap();
         let next = VRING_DESC_F_NEXT as u16;
@@ -1754,7 +1758,7 @@ mod tests {
         vq.avail.ring[0].set(0);
         vq.avail.idx.set(1);
 
-        let mut handler = make_handler(vq.create_queue(), &mem, 0);
+        let mut handler = make_handler(vq.create_queue(), &guest_memory, 0);
         handler.disk_nsectors.store(1, Ordering::SeqCst);
         handler.disk_image = Box::new(FailingFsync(
             EventFd::new(EFD_NONBLOCK).unwrap(),
@@ -1819,8 +1823,9 @@ mod tests {
     }
 
     fn completion_status(request_type: u32, result: i32) -> (u8, u32) {
-        let mem = GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
-        let vq = GuestQ::new(GuestAddress(0x1000), &mem, 4);
+        let guest_memory = GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let mem = guest_memory.memory();
+        let vq = GuestQ::new(GuestAddress(0x1000), &*mem, 4);
         mem.write_obj(request_type, GuestAddress(REQ_HDR_ADDR))
             .unwrap();
         mem.write_slice(&[0xff; 4], GuestAddress(REQ_STATUS_ADDR))
@@ -1840,7 +1845,7 @@ mod tests {
 
         let mut handler = make_handler_with_io(
             vq.create_queue(),
-            &mem,
+            &guest_memory,
             0,
             Box::new(OneShotAsyncIo::new(result)),
         );
@@ -1919,8 +1924,9 @@ mod tests {
 
     #[test]
     fn parse_failure_reports_ioerr_through_access_platform() {
-        let mem = GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
-        let vq = GuestQ::new(GuestAddress(0x1000), &mem, 4);
+        let guest_memory = GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let mem = guest_memory.memory();
+        let vq = GuestQ::new(GuestAddress(0x1000), &*mem, 4);
         mem.write_obj(VIRTIO_BLK_T_IN, GuestAddress(REQ_HDR_ADDR))
             .unwrap();
         mem.write_slice(&[0xff; 4], GuestAddress(REQ_STATUS_ADDR))
@@ -1933,12 +1939,12 @@ mod tests {
         vq.avail.ring[0].set(0);
         vq.avail.idx.set(1);
 
-        let mut handler = make_handler(vq.create_queue(), &mem, 0);
+        let mut handler = make_handler(vq.create_queue(), &guest_memory, 0);
         handler.access_platform = Some(Arc::new(Offset));
         handler.process_queue_submit().unwrap();
 
         assert_eq!(vq.used.idx.get(), 1);
-        assert_eq!(used_len(&vq, &mem), 0);
+        assert_eq!(used_len(&vq, &*mem), 0);
         assert_eq!(
             mem.read_obj::<u8>(GuestAddress(REQ_STATUS_ADDR)).unwrap(),
             VIRTIO_BLK_S_IOERR as u8
