@@ -10,8 +10,8 @@ use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
 use virtio_devices::{VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
-use vm_allocator::{GuestMemory, GuestMemoryMap};
-use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryBackend};
+use vm_allocator::GuestMemory;
+use vm_memory::{ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend};
 use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::{AccessPlatform, AccessType};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
@@ -124,10 +124,11 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
 
     // Setup the guest memory with the input bytes and dedicated queue region.
     let shared_memory = bytes[23] & 0x1 == 0;
-    let mem = match create_guest_memory(shared_memory) {
-        Some(mem) => mem,
+    let guest_memory = match create_guest_memory(shared_memory) {
+        Some(guest_memory) => guest_memory,
         None => return Corpus::Reject,
     };
+    let mem = guest_memory.memory();
     if mem.write_slice(mem_bytes, GuestAddress(0)).is_err() {
         return Corpus::Reject;
     }
@@ -145,10 +146,9 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
         ],
         QUEUE_REGION_BASE,
     );
-    if !populate_queue_memory(&mem, &queue_layouts, bytes) {
+    if !populate_queue_memory(&*mem, &queue_layouts, bytes) {
         return Corpus::Reject;
     }
-    let guest_memory = GuestMemory::new(mem);
 
     let inflate_q = queues.remove(0);
     let inflate_evt = EventFd::new(0).unwrap();
@@ -187,7 +187,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     balloon.reset();
 
     // Activate with two empty queues to exercise non-reporting paths.
-    if let Some(guest_memory) = create_guest_memory(true).map(GuestMemory::new) {
+    if let Some(guest_memory) = create_guest_memory(true) {
         let mut balloon_no_reporting = virtio_devices::Balloon::new(
             "fuzzer_balloon_no_reporting".to_owned(),
             BALLOON_SIZE,
@@ -234,7 +234,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     }
 
     // Activate with an empty reporting queue to exercise its empty path.
-    if let Some(guest_memory) = create_guest_memory(true).map(GuestMemory::new) {
+    if let Some(guest_memory) = create_guest_memory(true) {
         let mut balloon_reporting_empty = virtio_devices::Balloon::new(
             "fuzzer_balloon_reporting_empty".to_owned(),
             BALLOON_SIZE,
@@ -441,11 +441,12 @@ fn exercise_stats_queue(bytes: &[u8], queue_data: &[u8]) {
     let stats = layouts[2];
     let stats_addr = INFLATE_DATA_ADDR;
     let stats_data = [4_u64.to_le_bytes(), u64::from(bytes[0]).to_le_bytes()].concat();
-    if mem
+    let map = mem.memory();
+    if map
         .write_slice(&stats_data, GuestAddress(stats_addr))
         .is_err()
-        || !write_descriptor(&mem, stats.desc_table_addr, 0, stats_addr, 16, 0, 0)
-        || !write_avail_ring(&mem, stats.avail_ring_addr, &[0])
+        || !write_descriptor(&*map, stats.desc_table_addr, 0, stats_addr, 16, 0, 0)
+        || !write_avail_ring(&*map, stats.avail_ring_addr, &[0])
     {
         return;
     }
@@ -478,7 +479,7 @@ fn exercise_stats_queue(bytes: &[u8], queue_data: &[u8]) {
     stats_kick_evt.write(1).ok();
     balloon
         .activate(virtio_devices::ActivationContext {
-            mem: GuestMemory::new(mem),
+            mem,
             interrupt_cb: Arc::new(NoopVirtioInterrupt {}),
             queues: vec![
                 (0, inflate_q, inflate_evt),
@@ -497,7 +498,7 @@ fn bounded_pfn(v: u8) -> u32 {
     u32::from(v) & ((MEM_SIZE as u32 >> 12) - 1)
 }
 
-fn create_guest_memory(shared: bool) -> Option<GuestMemoryMap> {
+fn create_guest_memory(shared: bool) -> Option<GuestMemory> {
     let mem_region = vmm::memory_manager::MemoryManager::create_ram_region_raw(
         &None, 0, MEM_SIZE, false, false, shared, None, None, None, false,
     )
@@ -537,7 +538,7 @@ fn create_guest_memory(shared: bool) -> Option<GuestMemoryMap> {
         vm_memory::GuestRegionMmap::new(queue_region, GuestAddress(QUEUE_REGION_BASE))?.into(),
     );
 
-    GuestMemoryMap::from_arc_regions(vec![mem_region, reporting_tail_region, queue_region]).ok()
+    GuestMemory::from_arc_regions(vec![mem_region, reporting_tail_region, queue_region]).ok()
 }
 
 fn run_failing_interrupt_case(
@@ -547,10 +548,11 @@ fn run_failing_interrupt_case(
     kick_deflate: bool,
     kick_reporting: bool,
 ) {
-    let Some(mem) = create_guest_memory(bytes[23] & 0x1 == 0) else {
+    let Some(guest_memory) = create_guest_memory(bytes[23] & 0x1 == 0) else {
         return;
     };
 
+    let mem = guest_memory.memory();
     if mem
         .write_slice(&bytes[CONTROL_SIZE..], GuestAddress(0))
         .is_err()
@@ -570,11 +572,10 @@ fn run_failing_interrupt_case(
         ],
         QUEUE_REGION_BASE,
     );
-    if !populate_queue_memory(&mem, &queue_layouts, bytes) {
+    if !populate_queue_memory(&*mem, &queue_layouts, bytes) {
         return;
     }
 
-    let guest_memory = GuestMemory::new(mem);
     let inflate_q = queues.remove(0);
     let inflate_evt = EventFd::new(0).unwrap();
     let inflate_kick_evt = inflate_evt.try_clone().unwrap();
@@ -635,7 +636,7 @@ fn exercise_activation_edges(bytes: &[u8], queue_data: &[u8]) {
 }
 
 fn activate_with_too_few_queues(queue_data: &[u8]) {
-    let Some(guest_memory) = create_guest_memory(true).map(GuestMemory::new) else {
+    let Some(guest_memory) = create_guest_memory(true) else {
         return;
     };
     let (mut queues, _) = setup_virt_queues(
@@ -669,7 +670,7 @@ fn activate_with_too_few_queues(queue_data: &[u8]) {
 }
 
 fn activate_reporting_acked_without_reporting_queue(queue_data: &[u8]) {
-    let Some(guest_memory) = create_guest_memory(true).map(GuestMemory::new) else {
+    let Some(guest_memory) = create_guest_memory(true) else {
         return;
     };
     let (mut queues, _) = setup_virt_queues(
@@ -717,7 +718,7 @@ fn activate_reporting_acked_without_reporting_queue(queue_data: &[u8]) {
 }
 
 fn activate_reporting_available_unacked(queue_data: &[u8]) {
-    let Some(guest_memory) = create_guest_memory(true).map(GuestMemory::new) else {
+    let Some(guest_memory) = create_guest_memory(true) else {
         return;
     };
     let (mut queues, _) = setup_virt_queues(
