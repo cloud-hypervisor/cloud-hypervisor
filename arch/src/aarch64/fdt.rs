@@ -1090,7 +1090,8 @@ fn print_node(node: FdtNode<'_, '_>, n_spaces: usize) {
 mod tests {
     use std::collections::BTreeMap;
 
-    use vm_allocator::GuestMemoryMap;
+    use vm_allocator::GuestMemory;
+    use vm_memory::GuestAddressSpace;
 
     use super::super::layout;
     use super::*;
@@ -1099,11 +1100,13 @@ mod tests {
     #[test]
     fn test_write_fdt_to_memory_size() {
         let max = usize::try_from(layout::FDT_MAX_SIZE).unwrap();
-        let mem = GuestMemoryMap::from_ranges(&[(layout::RAM_START, 2 * max)]).unwrap();
+        let mem = GuestMemory::from_ranges(&[(layout::RAM_START, 2 * max)])
+            .unwrap()
+            .memory();
 
-        write_fdt_to_memory(&vec![0; max], &mem).unwrap();
+        write_fdt_to_memory(&vec![0; max], &*mem).unwrap();
         assert!(matches!(
-            write_fdt_to_memory(&vec![0; max + 1], &mem),
+            write_fdt_to_memory(&vec![0; max + 1], &*mem),
             Err(Error::FdtTooLarge(n, m)) if n == max + 1 && m == layout::FDT_MAX_SIZE
         ));
     }
