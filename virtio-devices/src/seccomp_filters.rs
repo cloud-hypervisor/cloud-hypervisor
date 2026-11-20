@@ -183,6 +183,7 @@ fn virtio_mem_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_ioctl, create_virtio_mem_ioctl_seccomp_rule()),
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_sendmsg, vec![]),
+        (libc::SYS_sendto, vec![]),
     ]
 }
 
