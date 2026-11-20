@@ -15,7 +15,7 @@ use seccompiler::SeccompAction;
 use virtio_devices::{VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
 use vm_allocator::{GuestMemory, GuestMemoryMap};
-use vm_memory::{Bytes, GuestAddress};
+use vm_memory::{Bytes, GuestAddress, GuestMemoryBackend};
 use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::{AccessPlatform, AccessType};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
@@ -317,8 +317,8 @@ fn setup_virt_queue(cursor: &mut FuzzCursor) -> Queue {
     q
 }
 
-fn populate_queue_memory(
-    mem: &GuestMemoryMap,
+fn populate_queue_memory<M: GuestMemoryBackend>(
+    mem: &M,
     q: &mut Queue,
     cursor: &mut FuzzCursor,
     mode: u8,
@@ -376,13 +376,13 @@ fn populate_queue_memory(
     Ok(())
 }
 
-fn write_u16(mem: &GuestMemoryMap, addr: u64, value: u16) -> Result<(), ()> {
+fn write_u16<M: GuestMemoryBackend>(mem: &M, addr: u64, value: u16) -> Result<(), ()> {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .map_err(|_| ())
 }
 
-fn write_desc(
-    mem: &GuestMemoryMap,
+fn write_desc<M: GuestMemoryBackend>(
+    mem: &M,
     index: u16,
     addr: u64,
     len: u32,
