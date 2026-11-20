@@ -38,8 +38,8 @@ use vmm_sys_util::timerfd::TimerFd;
 use super::{Error, PostcopyHandler, PostcopyRegion, Result, VhostUserState};
 use crate::vhost_user::Inflight;
 use crate::{
-    GuestMemoryMap, GuestRegion, MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_IN_ORDER,
-    VirtioInterrupt, VirtioInterruptType, get_host_address_range,
+    GuestRegion, MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_IN_ORDER, VirtioInterrupt,
+    VirtioInterruptType, get_host_address_range,
 };
 
 // Size of a dirty page for vhost-user.
@@ -79,7 +79,10 @@ pub struct VhostUserHandle {
 }
 
 impl VhostUserHandle {
-    pub fn update_mem_table(&mut self, mem: &GuestMemoryMap) -> Result<()> {
+    pub fn update_mem_table<M: GuestMemoryBackend<R = GuestRegion>>(
+        &mut self,
+        mem: &M,
+    ) -> Result<()> {
         let mut regions: Vec<VhostUserMemoryRegionInfo> = Vec::new();
         for region in mem.iter() {
             let (mmap_handle, mmap_offset) = match region.file_offset() {
@@ -238,9 +241,12 @@ impl VhostUserHandle {
     }
 
     #[expect(clippy::too_many_arguments)]
-    pub fn setup_vhost_user<S: VhostUserFrontendReqHandler>(
+    pub fn setup_vhost_user<
+        S: VhostUserFrontendReqHandler,
+        M: GuestMemoryBackend<R = GuestRegion>,
+    >(
         &mut self,
-        mem: &GuestMemoryMap,
+        mem: &M,
         queues: &[(u16, Queue, EventFd)],
         virtio_interrupt: &dyn VirtioInterrupt,
         acked_features: u64,
@@ -455,9 +461,12 @@ impl VhostUserHandle {
     }
 
     #[expect(clippy::too_many_arguments)]
-    pub fn reinitialize_vhost_user<S: VhostUserFrontendReqHandler>(
+    pub fn reinitialize_vhost_user<
+        S: VhostUserFrontendReqHandler,
+        M: GuestMemoryBackend<R = GuestRegion>,
+    >(
         &mut self,
-        mem: &GuestMemoryMap,
+        mem: &M,
         queues: &[(u16, Queue, EventFd)],
         virtio_interrupt: &dyn VirtioInterrupt,
         acked_features: u64,
@@ -768,9 +777,9 @@ impl VhostUserHandle {
     /// Resume the vhost-user backend from the device thread.
     /// Initialize the vrings from the bases captured earlier, or simply
     /// enable them if they haven't been stopped.
-    pub fn resume<S: VhostUserFrontendReqHandler>(
+    pub fn resume<S: VhostUserFrontendReqHandler, M: GuestMemoryBackend<R = GuestRegion>>(
         &mut self,
-        mem: &GuestMemoryMap,
+        mem: &M,
         queues: &[(u16, Queue, EventFd)],
         virtio_interrupt: &dyn VirtioInterrupt,
         acked_features: u64,
