@@ -9,6 +9,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
+use std::array;
 use std::sync::{Arc, Mutex};
 
 use acpi_tables::{Aml, aml};
@@ -44,6 +45,7 @@ pub(crate) struct PciSegment {
     pub(crate) pci_devices_up: u32,
     // Bitmap of PCI devices to hotunplug.
     pub(crate) pci_devices_down: u32,
+    pub(crate) slots: [PciDevSlot; 32],
     // List of allocated IRQs for each PCI slot.
     pub(crate) pci_irq_slots: [u8; 32],
 
@@ -121,6 +123,9 @@ impl PciSegment {
             end_of_mem32_area,
             start_of_mem64_area,
             end_of_mem64_area,
+            slots: array::from_fn(|device_id| PciDevSlot {
+                device_id: device_id as u8,
+            }),
             pci_irq_slots: *pci_irq_slots,
         };
 
@@ -297,6 +302,9 @@ impl PciSegment {
             end_of_mem32_area,
             start_of_mem64_area,
             end_of_mem64_area,
+            slots: array::from_fn(|device_id| PciDevSlot {
+                device_id: device_id as u8,
+            }),
             pci_irq_slots: *pci_irq_slots,
         };
 
@@ -313,8 +321,8 @@ impl PciSegment {
     }
 }
 
-struct PciDevSlot {
-    device_id: u8,
+pub(crate) struct PciDevSlot {
+    pub(crate) device_id: u8,
 }
 
 impl Aml for PciDevSlot {
@@ -554,13 +562,8 @@ impl Aml for PciSegment {
         };
         pci_dsdt_inner_data.push(&crs);
 
-        let mut pci_devices = Vec::new();
-        for device_id in 0..32 {
-            let pci_device = PciDevSlot { device_id };
-            pci_devices.push(pci_device);
-        }
-        for pci_device in pci_devices.iter() {
-            pci_dsdt_inner_data.push(pci_device);
+        for slot in &self.slots {
+            pci_dsdt_inner_data.push(slot);
         }
 
         let pci_device_methods = PciDevSlotMethods {};
