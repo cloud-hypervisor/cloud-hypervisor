@@ -9,13 +9,13 @@ use std::result;
 use crc_any::CRCu32;
 use thiserror::Error;
 use uuid::Uuid;
+use vm_allocator::GuestMemoryMap;
 use vm_memory::{
     ByteValued, Bytes, GuestAddress, GuestMemoryBackend, GuestMemoryRegion, GuestMemoryRegionBytes,
     MemoryRegionAddress,
 };
 
 use super::layout;
-use crate::GuestMemoryMap;
 
 /// Errors while loading UEFI or writing boot tables.
 #[derive(Debug, Error)]

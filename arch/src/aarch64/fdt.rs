@@ -21,10 +21,11 @@ use hypervisor::arch::aarch64::regs::{
 };
 use log::{debug, info};
 use thiserror::Error;
+use vm_allocator::GuestMemoryMap;
 use vm_fdt::{FdtWriter, FdtWriterResult};
 use vm_memory::{Address, Bytes, GuestMemoryBackend, GuestMemoryError, GuestMemoryRegion};
 
-use super::super::{DeviceType, GuestMemoryMap, InitramfsConfig};
+use super::super::{DeviceType, InitramfsConfig};
 use super::cache::{CacheTopologyInfo, read_cache_topology};
 use super::layout::{
     GIC_V2M_COMPATIBLE, GICV2M_SPI_BASE, GICV2M_SPI_NUM, IRQ_BASE, MEM_32BIT_DEVICES_SIZE,

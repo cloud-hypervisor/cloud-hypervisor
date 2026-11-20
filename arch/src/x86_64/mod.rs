@@ -29,6 +29,7 @@ use linux_loader::loader::elf::start_info::{
 };
 use log::{debug, error, info};
 use thiserror::Error;
+use vm_allocator::GuestMemoryMap;
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend, GuestMemoryRegion,
 };
@@ -36,7 +37,7 @@ use vm_memory::{
 use crate::smbios::SmbiosConfig;
 use crate::x86_64::cpu_profile::CpuProfile;
 use crate::x86_64::cpu_profile::cpuid_adjustments::MissingCpuidEntriesError;
-use crate::{GuestMemory, GuestMemoryMap, InitramfsConfig, RegionType, smbios};
+use crate::{GuestMemory, InitramfsConfig, RegionType, smbios};
 
 // While modern architectures support more than 255 CPUs via x2APIC,
 // legacy devices such as mptable support at most 254 CPUs.

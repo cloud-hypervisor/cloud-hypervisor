@@ -19,10 +19,11 @@ use std::sync::{Arc, Mutex};
 use hypervisor::arch::aarch64::gic::Vgic;
 use log::{Level, log_enabled};
 use thiserror::Error;
+use vm_allocator::GuestMemoryMap;
 use vm_memory::{Address, GuestAddress, GuestMemoryBackend};
 
 pub use self::fdt::DeviceInfoForFdt;
-use crate::{DeviceType, GuestMemory, GuestMemoryMap, NumaNodes, PciSpaceInfo, RegionType, smbios};
+use crate::{DeviceType, GuestMemory, NumaNodes, PciSpaceInfo, RegionType, smbios};
 
 pub const _NSIG: i32 = 65;
 

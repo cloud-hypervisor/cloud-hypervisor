@@ -10,10 +10,10 @@ use std::result;
 use libc::c_uchar;
 use log::{info, warn};
 use thiserror::Error;
+use vm_allocator::GuestMemoryMap;
 use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryBackend, GuestMemoryError};
 
 use super::MAX_SUPPORTED_CPUS_LEGACY;
-use crate::GuestMemoryMap;
 use crate::layout::{APIC_START, HIGH_RAM_START, IOAPIC_START};
 use crate::x86_64::{get_x2apic_id, mpspec};
 

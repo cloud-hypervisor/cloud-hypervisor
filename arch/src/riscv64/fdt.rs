@@ -16,10 +16,11 @@ use std::{cmp, result, str};
 use hypervisor::arch::riscv64::aia::Vaia;
 use log::debug;
 use thiserror::Error;
+use vm_allocator::GuestMemoryMap;
 use vm_fdt::{FdtWriter, FdtWriterResult};
 use vm_memory::{Address, Bytes, GuestMemoryBackend, GuestMemoryError, GuestMemoryRegion};
 
-use super::super::{DeviceType, GuestMemoryMap, InitramfsConfig};
+use super::super::{DeviceType, InitramfsConfig};
 use super::layout::{
     IRQ_BASE, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START, MEM_PCI_IO_SIZE, MEM_PCI_IO_START,
     PCI_HIGH_BASE, PCI_MMIO_CONFIG_SIZE_PER_SEGMENT,
