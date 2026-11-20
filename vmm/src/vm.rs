@@ -3385,7 +3385,7 @@ mod tests {
         use std::sync::atomic::AtomicU32;
 
         use hypervisor::VmExit;
-        use vm_allocator::{GuestMemoryMap, GuestRegion, MemorySlotAllocator};
+        use vm_allocator::{GuestMemory, GuestRegion, MemorySlotAllocator};
         // This example based on https://lwn.net/Articles/658511/
         let code = [
             0xba, 0xf8, 0x03, /* mov $0x3f8, %dx */
@@ -3420,7 +3420,7 @@ mod tests {
             hypervisor::MemoryVisibility::Shared,
         )
         .unwrap();
-        let mem = GuestMemoryMap::from_regions(vec![region]).unwrap();
+        let mem = GuestMemory::from_regions(vec![region]).unwrap().memory();
         mem.write_slice(&code, load_addr)
             .expect("Writing code to memory failed");
         for region in mem.iter() {
@@ -3461,7 +3461,7 @@ mod tests {
 mod tests {
     use arch::{DeviceType, MmioDeviceInfo};
     use devices::gic::Gic;
-    use vm_allocator::GuestMemoryMap;
+    use vm_allocator::GuestMemory;
 
     use super::*;
 
@@ -3473,7 +3473,9 @@ mod tests {
             arch::aarch64::layout::RAM_START,
             (arch::aarch64::layout::FDT_MAX_SIZE + 0x1000) as usize,
         )];
-        let mem = GuestMemoryMap::from_ranges(&regions).expect("Cannot initialize memory");
+        let mem = GuestMemory::from_ranges(&regions)
+            .expect("Cannot initialize memory")
+            .memory();
 
         let dev_info: HashMap<(DeviceType, String), MmioDeviceInfo> = [
             (
@@ -3511,7 +3513,7 @@ mod tests {
         let vgic_config = Gic::create_config(1, None).unwrap();
         let gic = vm.create_vgic(&vgic_config).expect("Cannot create gic");
         arch::aarch64::fdt::create_fdt(
-            &mem,
+            &*mem,
             "console=tty0",
             &[0],
             None,
