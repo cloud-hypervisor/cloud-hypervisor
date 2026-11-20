@@ -74,7 +74,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracer::trace_scoped;
 use vm_device::Bus;
-use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
+use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend};
 use vm_migration::protocol::{MemoryRangeTable, Request, Response};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, snapshot_from_id,
@@ -1148,7 +1148,7 @@ impl Vm {
     }
 
     #[cfg(feature = "fw_cfg")]
-    fn populate_fw_cfg_items<#[cfg(target_arch = "x86_64")] M: vm_memory::GuestMemoryBackend>(
+    fn populate_fw_cfg_items<#[cfg(target_arch = "x86_64")] M: GuestMemoryBackend>(
         fw_cfg_config: &FwCfgConfig,
         device_manager: &Arc<Mutex<DeviceManager>>,
         config: &Arc<Mutex<VmConfig>>,
@@ -1461,7 +1461,10 @@ impl Vm {
         Ok(vm)
     }
 
-    fn load_initramfs(&mut self, guest_mem: &GuestMemory) -> Result<arch::InitramfsConfig> {
+    fn load_initramfs<M: GuestMemoryBackend>(
+        &mut self,
+        guest_mem: &M,
+    ) -> Result<arch::InitramfsConfig> {
         let initramfs = self.initramfs.as_mut().unwrap();
         let size: usize = initramfs
             .seek(SeekFrom::End(0))
@@ -3354,7 +3357,6 @@ mod tests {
 
         use hypervisor::VmExit;
         use vm_allocator::{GuestRegion, MemorySlotAllocator};
-        use vm_memory::GuestMemoryBackend;
         // This example based on https://lwn.net/Articles/658511/
         let code = [
             0xba, 0xf8, 0x03, /* mov $0x3f8, %dx */
