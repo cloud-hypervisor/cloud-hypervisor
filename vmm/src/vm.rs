@@ -1536,9 +1536,7 @@ impl Vm {
         memory_manager
             .add_uefi_flash()
             .map_err(Error::MemoryManager)?;
-        let uefi_flash = memory_manager.uefi_flash();
-        let mem = uefi_flash.memory();
-        uefi::load_uefi(mem.deref(), layout::UEFI_START, &mut firmware).map_err(Error::UefiLoad)?;
+        uefi::load_uefi(memory_manager.uefi_flash(), &mut firmware).map_err(Error::UefiLoad)?;
         Ok(EntryPoint {
             entry_addr: layout::UEFI_START,
         })
