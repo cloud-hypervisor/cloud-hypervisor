@@ -712,7 +712,7 @@ components:
             description: The virtio device type, such as block or net
         additionalProperties:
           type: integer
-          format: int64
+          format: uint64
 
     BalloonStatsResponse:
       required:
