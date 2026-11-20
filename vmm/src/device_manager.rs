@@ -126,10 +126,10 @@ use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptRemapping, LegacyIrqGroupConfig, MsiIrqGroupConfig,
 };
 use vm_device::{Bus, BusDevice, BusDeviceSync, Resource};
+#[cfg(target_arch = "x86_64")]
+use vm_memory::GuestMemoryBackend;
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{Address, GuestAddress, GuestMemoryRegion, GuestUsize, MmapRegion, mmap};
-#[cfg(target_arch = "x86_64")]
-use vm_memory::{GuestAddressSpace, GuestMemoryBackend};
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotData, Snapshottable, Transportable,
@@ -2254,7 +2254,7 @@ impl DeviceManager {
         {
             // Add a CMOS emulated device
             let memory_manager = self.memory_manager.lock().unwrap();
-            let mem_size = memory_manager.guest_memory().memory().last_addr().0 + 1;
+            let mem_size = memory_manager.boot_guest_memory().last_addr().0 + 1;
             // CMOS holds RAM above 4 GiB as a single size, so end it at the
             // first reserved region there.
             let mem_size = memory_manager
