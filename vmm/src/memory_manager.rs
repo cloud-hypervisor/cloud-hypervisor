@@ -41,7 +41,7 @@ use vm_memory::guest_memory::FileOffset;
 use vm_memory::mmap::MmapRegionError;
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend, GuestMemoryError,
-    GuestMemoryRegion, GuestUsize, MmapRegion,
+    GuestMemoryRegion, GuestRegionCollection, GuestUsize, MmapRegion,
 };
 use vm_migration::protocol::{MemoryRange, MemoryRangeTable};
 use vm_migration::{
@@ -63,9 +63,7 @@ use crate::uffd::{
     self, FileUffdMemorySource, SocketUffdMemorySource, Uffd, UffdHole, UffdMemorySource, UffdRange,
 };
 use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
-use crate::{
-    GuestMemory, GuestMemoryMap, GuestRegion, MEMORY_MANAGER_SNAPSHOT_ID, prefault, userfaultfd,
-};
+use crate::{GuestMemory, GuestRegion, MEMORY_MANAGER_SNAPSHOT_ID, prefault, userfaultfd};
 
 struct UffdHandler {
     stop_event: EventFd,
@@ -2247,7 +2245,7 @@ impl MemoryManager {
                 dynamic,
             )?;
             let guest_memory =
-                GuestMemoryMap::from_arc_regions(regions).map_err(Error::GuestRegionCollection)?;
+                GuestMemory::from_arc_regions(regions).map_err(Error::GuestRegionCollection)?;
             (
                 GuestAddress(data.start_of_device_area),
                 data.boot_ram,
@@ -2281,11 +2279,11 @@ impl MemoryManager {
                 dynamic,
             )?;
 
-            let mut guest_memory = GuestMemoryMap::from_arc_regions(mem_regions)
-                .map_err(Error::GuestRegionCollection)?;
+            let guest_memory =
+                GuestMemory::from_arc_regions(mem_regions).map_err(Error::GuestRegionCollection)?;
 
             let mut start_of_device_area =
-                MemoryManager::start_addr(guest_memory.last_addr(), allow_mem_hotplug)?;
+                MemoryManager::start_addr(guest_memory.memory().last_addr(), allow_mem_hotplug)?;
 
             // Update list of memory zones for resize.
             for zone in zones.iter() {
@@ -2337,8 +2335,8 @@ impl MemoryManager {
                                 hypervisor::MemoryVisibility::Private,
                             )?;
 
-                            guest_memory = guest_memory
-                                .insert_region(Arc::clone(&region))
+                            guest_memory
+                                .add_region(Arc::clone(&region))
                                 .map_err(Error::GuestRegionCollection)?;
 
                             let hotplugged_size = zone.hotplugged_size.unwrap_or(0);
@@ -2382,8 +2380,6 @@ impl MemoryManager {
             &memory_zones,
             prefault,
         )?)?;
-
-        let guest_memory = GuestMemory::new(guest_memory);
 
         let allocator = Arc::new(Mutex::new(
             SystemAllocator::new(
@@ -2969,7 +2965,10 @@ impl MemoryManager {
         self.guest_memory.clone()
     }
 
-    pub fn boot_guest_memory(&self, config: &MemoryConfig) -> Result<GuestMemoryMap, Error> {
+    pub fn boot_guest_memory(
+        &self,
+        config: &MemoryConfig,
+    ) -> Result<GuestRegionCollection<GuestRegion>, Error> {
         let zone = |id: &str| {
             self.memory_zones
                 .get(id)
@@ -2996,7 +2995,7 @@ impl MemoryManager {
                 .ok_or(Error::MissingBootRegion(range.start.0, range.size))?;
             regions.push(Arc::clone(region));
         }
-        GuestMemoryMap::from_arc_regions(regions).map_err(Error::GuestRegionCollection)
+        GuestRegionCollection::from_arc_regions(regions).map_err(Error::GuestRegionCollection)
     }
 
     pub fn allocator(&self) -> Arc<Mutex<SystemAllocator>> {

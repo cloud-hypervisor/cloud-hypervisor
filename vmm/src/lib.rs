@@ -38,7 +38,7 @@ use serde::{Deserialize, Serialize};
 use signal_hook::iterator::{Handle, Signals};
 use thiserror::Error;
 use tracer::trace_scoped;
-use vm_allocator::{GuestMemory, GuestMemoryMap, GuestRegion};
+use vm_allocator::{GuestMemory, GuestRegion};
 use vm_memory::{Bytes, GuestAddress, GuestAddressSpace};
 use vm_migration::protocol::*;
 use vm_migration::{
