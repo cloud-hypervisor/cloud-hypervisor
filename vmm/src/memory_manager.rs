@@ -2805,18 +2805,6 @@ impl MemoryManager {
         }
     }
 
-    // Update the GuestMemory with the new range
-    fn add_region(&mut self, region: Arc<GuestRegion>) -> Result<(), Error> {
-        let guest_memory = self
-            .guest_memory
-            .memory()
-            .insert_region(region)
-            .map_err(Error::GuestRegionCollection)?;
-        self.guest_memory.replace(guest_memory);
-
-        Ok(())
-    }
-
     //
     // Calculate the start address of an area next to RAM.
     //
@@ -2891,7 +2879,9 @@ impl MemoryManager {
 
         region.register().map_err(Error::RegisterGuestRegion)?;
         let slot = region.slot().unwrap();
-        self.add_region(Arc::clone(&region))?;
+        self.guest_memory
+            .add_region(Arc::clone(&region))
+            .map_err(Error::GuestRegionCollection)?;
 
         self.guest_ram_mappings.push(GuestRamMapping {
             gpa: region.start_addr().raw_value(),
