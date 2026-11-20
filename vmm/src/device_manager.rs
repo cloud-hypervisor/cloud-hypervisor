@@ -500,10 +500,6 @@ pub enum DeviceManagerError {
     #[error("No disk path was specified when one was expected")]
     NoDiskPath,
 
-    /// Failed to update guest memory for virtio device.
-    #[error("Failed to update guest memory for virtio device")]
-    UpdateMemoryForVirtioDevice(#[source] virtio_devices::Error),
-
     /// Cannot create virtio-mem device
     #[error("Cannot create virtio-mem device")]
     CreateVirtioMem(#[source] io::Error),
@@ -5449,13 +5445,6 @@ impl DeviceManager {
 
     pub fn add_memory_region(&self, new_region: &Arc<GuestRegion>) -> DeviceManagerResult<()> {
         for handle in self.virtio_devices.iter() {
-            handle
-                .virtio_device
-                .lock()
-                .unwrap()
-                .add_memory_region(new_region)
-                .map_err(DeviceManagerError::UpdateMemoryForVirtioDevice)?;
-
             if let Some(dma_handler) = &handle.dma_handler
                 && !handle.pci_common.iommu.attached()
             {

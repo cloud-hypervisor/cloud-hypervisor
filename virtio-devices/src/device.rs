@@ -149,10 +149,6 @@ pub trait VirtioDevice: Send {
     /// after a shutdown() can lead to unpredictable results.
     fn shutdown(&mut self) {}
 
-    fn add_memory_region(&mut self, _region: &Arc<GuestRegion>) -> result::Result<(), Error> {
-        Ok(())
-    }
-
     /// Return the counters that this device exposes
     fn counters(&self) -> Option<HashMap<&'static str, Wrapping<u64>>> {
         None

@@ -115,10 +115,6 @@ pub enum Error {
     FailedSignalingUsedQueue(#[source] io::Error),
     #[error("I/O Error")]
     IoError(#[source] io::Error),
-    #[error("Failed to update memory vhost-user")]
-    VhostUserUpdateMemory(#[source] vhost_user::Error),
-    #[error("Failed to add memory region vhost-user")]
-    VhostUserAddMemoryRegion(#[source] vhost_user::Error),
     #[error("Failed to set shared memory region")]
     SetShmRegionsNotSupported,
     #[error("Failed to process net queue")]

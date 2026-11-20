@@ -1,6 +1,7 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -28,7 +29,8 @@ use virtio_queue::desc::RawDescriptor;
 use virtio_queue::{Queue, QueueT};
 use vm_memory::guest_memory::Error as MmapError;
 use vm_memory::{
-    Address, FileOffset, GuestAddress, GuestMemoryBackend, GuestMemoryRegion, VolatileMemory,
+    Address, FileOffset, GuestAddress, GuestAddressSpace, GuestMemoryBackend, GuestMemoryRegion,
+    VolatileMemory,
 };
 use vm_migration::protocol::MemoryRangeTable;
 use vmm_sys_util::epoll::{ControlOperation, Epoll, EpollEvent, EventSet};
@@ -38,8 +40,8 @@ use vmm_sys_util::timerfd::TimerFd;
 use super::{Error, PostcopyHandler, PostcopyRegion, Result, VhostUserState};
 use crate::vhost_user::Inflight;
 use crate::{
-    GuestRegion, MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_IN_ORDER, VirtioInterrupt,
-    VirtioInterruptType, get_host_address_range,
+    GuestMemory, GuestRegion, MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_IN_ORDER,
+    VirtioInterrupt, VirtioInterruptType, get_host_address_range,
 };
 
 // Size of a dirty page for vhost-user.
@@ -75,6 +77,7 @@ pub struct VhostUserHandle {
     vrings_info: Option<Vec<VringInfo>>,
     queue_indexes: Vec<u16>,
     vring_bases: Option<Vec<u64>>,
+    mapped_regions: Option<BTreeSet<u64>>,
     postcopy_ctx: Option<PostcopyContext>,
 }
 
@@ -83,27 +86,10 @@ impl VhostUserHandle {
         &mut self,
         mem: &M,
     ) -> Result<()> {
-        let mut regions: Vec<VhostUserMemoryRegionInfo> = Vec::new();
-        for region in mem.iter() {
-            let (mmap_handle, mmap_offset) = match region.file_offset() {
-                Some(_file_offset) => (_file_offset.file().as_raw_fd(), _file_offset.start()),
-                None => {
-                    return Err(Error::VhostUserMemoryRegion(
-                        MmapError::InvalidGuestAddress(region.start_addr()),
-                    ));
-                }
-            };
-
-            let vhost_user_net_reg = VhostUserMemoryRegionInfo {
-                guest_phys_addr: region.start_addr().raw_value(),
-                memory_size: region.len(),
-                userspace_addr: region.as_ptr() as u64,
-                mmap_offset,
-                mmap_handle,
-            };
-
-            regions.push(vhost_user_net_reg);
-        }
+        let regions = mem
+            .iter()
+            .map(Self::memory_region_info)
+            .collect::<Result<Vec<_>>>()?;
 
         if let Some(postcopy_ctx) = &self.postcopy_ctx {
             let uffd = postcopy_ctx
@@ -134,14 +120,12 @@ impl VhostUserHandle {
             self.vu
                 .postcopy_ack_mem_regions(FrontendReq::SET_MEM_TABLE)
                 .map_err(Error::VhostUserSetMemTable)?;
-
-            return Ok(());
+        } else {
+            self.vu
+                .set_mem_table(regions.as_slice())
+                .map_err(Error::VhostUserSetMemTable)?;
         }
-
-        self.vu
-            .set_mem_table(regions.as_slice())
-            .map_err(Error::VhostUserSetMemTable)?;
-
+        self.mapped_regions = Some(regions.iter().map(|r| r.guest_phys_addr).collect());
         Ok(())
     }
 
@@ -149,24 +133,60 @@ impl VhostUserHandle {
         self.postcopy_ctx.as_ref().map(|p| &p.handler)
     }
 
-    pub fn add_memory_region(&mut self, region: &Arc<GuestRegion>) -> Result<()> {
-        let (mmap_handle, mmap_offset) = match region.file_offset() {
-            Some(file_offset) => (file_offset.file().as_raw_fd(), file_offset.start()),
-            None => return Err(Error::MissingRegionFd),
-        };
-
-        let region = VhostUserMemoryRegionInfo {
+    fn memory_region_info(region: &GuestRegion) -> Result<VhostUserMemoryRegionInfo> {
+        let file = region.file_offset().ok_or_else(|| {
+            Error::VhostUserMemoryRegion(MmapError::InvalidGuestAddress(region.start_addr()))
+        })?;
+        Ok(VhostUserMemoryRegionInfo {
             guest_phys_addr: region.start_addr().raw_value(),
             memory_size: region.len(),
             userspace_addr: region.as_ptr() as u64,
-            mmap_offset,
-            mmap_handle,
+            mmap_offset: file.start(),
+            mmap_handle: file.file().as_raw_fd(),
+        })
+    }
+
+    pub(super) fn update_memory_region(
+        &mut self,
+        memory: &GuestMemory,
+        region: &GuestRegion,
+        added: bool,
+        features: u64,
+    ) -> Result<()> {
+        let gpa = region.start_addr().raw_value();
+        // Setup or reconnect can send a full table before a pending notification
+        // gets the handle lock. Skip updates already reflected in that table.
+        let Some(mapped_regions) = &mut self.mapped_regions else {
+            return Ok(());
         };
-
-        self.vu
-            .add_mem_region(&region)
-            .map_err(Error::VhostUserAddMemReg)?;
-
+        if mapped_regions.contains(&gpa) == added {
+            return Ok(());
+        }
+        if self.postcopy_ctx.is_some()
+            || features & VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits() == 0
+        {
+            self.update_mem_table(&*memory.memory())?;
+        } else {
+            let info = Self::memory_region_info(region)?;
+            if added {
+                self.vu
+                    .add_mem_region(&info)
+                    .map_err(Error::VhostUserAddMemReg)?;
+                mapped_regions.insert(gpa);
+            } else {
+                self.vu
+                    .remove_mem_region(&info)
+                    .map_err(Error::VhostUserRemoveMemReg)?;
+                mapped_regions.remove(&gpa);
+            }
+        }
+        // Without REPLY_ACK, wait for the backend to process the removal
+        // before the caller can reuse the address.
+        if !added && features & VhostUserProtocolFeatures::REPLY_ACK.bits() == 0 {
+            self.vu
+                .get_features()
+                .map_err(Error::VhostUserGetFeatures)?;
+        }
         Ok(())
     }
 
@@ -555,6 +575,7 @@ impl VhostUserHandle {
                 vrings_info: None,
                 queue_indexes: Vec::new(),
                 vring_bases: None,
+                mapped_regions: None,
                 postcopy_ctx: None,
             };
             vhost_user
@@ -612,6 +633,7 @@ impl VhostUserHandle {
                         vrings_info: None,
                         queue_indexes: Vec::new(),
                         vring_bases: None,
+                        mapped_regions: None,
                         postcopy_ctx: None,
                     })
                     .map_err(Error::VhostUserConnect);
@@ -1025,6 +1047,7 @@ mod tests {
             vrings_info: None,
             queue_indexes: Vec::new(),
             vring_bases: None,
+            mapped_regions: None,
             postcopy_ctx: None,
         }
     }
