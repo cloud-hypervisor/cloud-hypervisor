@@ -15,9 +15,10 @@ use thiserror::Error;
 use vm_memory::bitmap::{AtomicBitmap, BS, NewBitmap};
 use vm_memory::mmap::{FromRangesError, MmapRegionBuilder, MmapRegionError};
 use vm_memory::{
-    Address, FileOffset, GuestAddress, GuestMemoryAtomic, GuestMemoryBackend, GuestMemoryError,
-    GuestMemoryRegion, GuestMemoryRegionBytes, GuestRegionCollection, GuestRegionCollectionError,
-    GuestRegionMmap, GuestUsize, MemoryRegionAddress, MmapRegion, VolatileSlice,
+    Address, FileOffset, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend,
+    GuestMemoryError, GuestMemoryLoadGuard, GuestMemoryRegion, GuestMemoryRegionBytes,
+    GuestRegionCollection, GuestRegionCollectionError, GuestRegionMmap, GuestUsize,
+    MemoryRegionAddress, MmapRegion, VolatileSlice,
 };
 
 use crate::MemorySlotAllocator;
@@ -473,5 +474,27 @@ impl GuestMemoryBackend for GuestMemoryMap {
     }
 }
 
-/// Alias for mutable set of guest memory ranges
-pub type GuestMemory = GuestMemoryAtomic<GuestMemoryMap>;
+/// A wrapper for mutable set of guest memory ranges
+#[derive(Clone, Debug)]
+pub struct GuestMemory(GuestMemoryAtomic<GuestMemoryMap>);
+
+impl GuestMemory {
+    /// Creates an address space with the given initial map.
+    pub fn new(map: GuestMemoryMap) -> Self {
+        Self(GuestMemoryAtomic::new(map))
+    }
+
+    /// Atomically replaces the current memory ranges
+    pub fn replace(&self, map: GuestMemoryMap) {
+        self.0.lock().unwrap().replace(map);
+    }
+}
+
+impl GuestAddressSpace for GuestMemory {
+    type M = GuestMemoryMap;
+    type T = GuestMemoryLoadGuard<GuestMemoryMap>;
+
+    fn memory(&self) -> Self::T {
+        self.0.memory()
+    }
+}

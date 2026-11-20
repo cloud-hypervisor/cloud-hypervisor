@@ -2812,7 +2812,7 @@ impl MemoryManager {
             .memory()
             .insert_region(region)
             .map_err(Error::GuestRegionCollection)?;
-        self.guest_memory.lock().unwrap().replace(guest_memory);
+        self.guest_memory.replace(guest_memory);
 
         Ok(())
     }
