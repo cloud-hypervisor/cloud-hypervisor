@@ -1011,7 +1011,7 @@ mod tests {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    use vm_allocator::GuestMemoryMap;
+    use vm_allocator::GuestMemory;
     use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};
     use vmm_sys_util::eventfd::EventFd;
 
@@ -1076,8 +1076,7 @@ mod tests {
     }
 
     fn test_smmuv3() -> Smmuv3 {
-        let mem =
-            GuestMemory::new(GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x1_0000)]).unwrap());
+        let mem = GuestMemory::from_ranges(&[(GuestAddress(0), 0x1_0000)]).unwrap();
         let group = || Arc::new(NoopInterrupts) as Arc<dyn InterruptSourceGroup>;
 
         Smmuv3::new(
@@ -1180,8 +1179,7 @@ mod tests {
     }
 
     fn smmuv3_with_host_info(backend: &Arc<HostInfoBackend>) -> Smmuv3 {
-        let mem =
-            GuestMemory::new(GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x1_0000)]).unwrap());
+        let mem = GuestMemory::from_ranges(&[(GuestAddress(0), 0x1_0000)]).unwrap();
         let group = || Arc::new(NoopInterrupts) as Arc<dyn InterruptSourceGroup>;
 
         Smmuv3::new(
@@ -1204,8 +1202,7 @@ mod tests {
     }
 
     fn smmuv3_with_command(failing: &Arc<AtomicBool>, word0: u64) -> Smmuv3 {
-        let mem =
-            GuestMemory::new(GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x1_0000)]).unwrap());
+        let mem = GuestMemory::from_ranges(&[(GuestAddress(0), 0x1_0000)]).unwrap();
         mem.memory()
             .write_obj::<u64>(word0, GuestAddress(TEST_CMDQ_BASE))
             .unwrap();
