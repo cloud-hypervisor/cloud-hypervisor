@@ -68,13 +68,16 @@ impl CpuManager {
         let vcpus_pause_signalled = Arc::clone(&self.vcpus_pause_signalled);
         let vcpus_kick_signalled = Arc::clone(&self.vcpus_kick_signalled);
 
-        let mut vcpu_states = self.vcpu_states.lock().unwrap();
-
-        let vcpu_kill = Arc::clone(&vcpu_states[usize::try_from(vcpu_id).unwrap()].kill);
-        let vcpu_run_interrupted =
-            Arc::clone(&vcpu_states[usize::try_from(vcpu_id).unwrap()].vcpu_run_interrupted);
+        let (vcpu_kill, vcpu_run_interrupted, vcpu_paused) = {
+            let vcpu_states = self.vcpu_states.lock().unwrap();
+            let state = &vcpu_states[usize::try_from(vcpu_id).unwrap()];
+            (
+                Arc::clone(&state.kill),
+                Arc::clone(&state.vcpu_run_interrupted),
+                Arc::clone(&state.paused),
+            )
+        };
         let panic_vcpu_run_interrupted = Arc::clone(&vcpu_run_interrupted);
-        let vcpu_paused = Arc::clone(&vcpu_states[usize::try_from(vcpu_id).unwrap()].paused);
 
         // Prepare the CPU set the current vCPU is expected to run onto.
         let cpuset = self.affinity.get(&vcpu_id).map(|host_cpus| {
@@ -334,6 +337,7 @@ impl CpuManager {
 
         // On hot plug calls into this function entry_point is None. It is for
         // those hotplug CPU additions that we need to set the inserting flag.
+        let mut vcpu_states = self.vcpu_states.lock().unwrap();
         vcpu_states[usize::try_from(vcpu_id).unwrap()].handle = handle;
         vcpu_states[usize::try_from(vcpu_id).unwrap()].inserting = inserting;
 
