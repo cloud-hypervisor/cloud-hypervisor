@@ -2096,20 +2096,12 @@ impl Vm {
             // opposite order.
             let hotplug_method = self.config.lock().unwrap().memory.hotplug_method;
 
-            if let Some(new_region) = &new_region {
-                let device_manager = self.device_manager.lock().unwrap();
-                device_manager
-                    .add_memory_region(new_region)
+            if new_region.is_some() && hotplug_method == HotplugMethod::Acpi {
+                self.device_manager
+                    .lock()
+                    .unwrap()
+                    .notify_hotplug(AcpiNotificationFlags::MEMORY_DEVICES_CHANGED)
                     .map_err(Error::DeviceManager)?;
-
-                match hotplug_method {
-                    HotplugMethod::Acpi => {
-                        device_manager
-                            .notify_hotplug(AcpiNotificationFlags::MEMORY_DEVICES_CHANGED)
-                            .map_err(Error::DeviceManager)?;
-                    }
-                    HotplugMethod::VirtioMem => {}
-                }
             }
 
             let memory_config = &mut self.config.lock().unwrap().memory;
