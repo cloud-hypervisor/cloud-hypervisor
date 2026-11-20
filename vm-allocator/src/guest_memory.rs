@@ -15,9 +15,9 @@ use thiserror::Error;
 use vm_memory::bitmap::{AtomicBitmap, BS, NewBitmap};
 use vm_memory::mmap::{FromRangesError, MmapRegionBuilder, MmapRegionError};
 use vm_memory::{
-    Address, FileOffset, GuestAddress, GuestMemoryBackend, GuestMemoryError, GuestMemoryRegion,
-    GuestMemoryRegionBytes, GuestRegionCollection, GuestRegionCollectionError, GuestRegionMmap,
-    GuestUsize, MemoryRegionAddress, MmapRegion, VolatileSlice,
+    Address, FileOffset, GuestAddress, GuestMemoryAtomic, GuestMemoryBackend, GuestMemoryError,
+    GuestMemoryRegion, GuestMemoryRegionBytes, GuestRegionCollection, GuestRegionCollectionError,
+    GuestRegionMmap, GuestUsize, MemoryRegionAddress, MmapRegion, VolatileSlice,
 };
 
 use crate::MemorySlotAllocator;
@@ -472,3 +472,6 @@ impl GuestMemoryBackend for GuestMemoryMap {
         self.0.iter()
     }
 }
+
+/// Alias for mutable set of guest memory ranges
+pub type GuestMemory = GuestMemoryAtomic<GuestMemoryMap>;
