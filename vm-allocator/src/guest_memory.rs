@@ -497,6 +497,32 @@ impl GuestMemory {
             .replace(self.memory().insert_region(region)?);
         Ok(())
     }
+
+    /// Creates guest memory from non-overlapping regions sorted by guest address.
+    pub fn from_regions(regions: Vec<GuestRegion>) -> Result<Self, GuestRegionCollectionError> {
+        GuestMemoryMap::from_regions(regions).map(Self::new)
+    }
+
+    /// Creates guest memory from shared, non-overlapping regions sorted by guest address.
+    pub fn from_arc_regions(
+        regions: Vec<Arc<GuestRegion>>,
+    ) -> Result<Self, GuestRegionCollectionError> {
+        GuestMemoryMap::from_arc_regions(regions).map(Self::new)
+    }
+
+    /// Allocates anonymous regions from non-overlapping ranges sorted by guest address.
+    pub fn from_ranges(ranges: &[(GuestAddress, usize)]) -> Result<Self, FromRangesError> {
+        GuestMemoryMap::from_ranges(ranges).map(Self::new)
+    }
+
+    /// Allocates regions from sorted, non-overlapping ranges with optional backing files.
+    pub fn from_ranges_with_files<A, T>(ranges: T) -> Result<Self, FromRangesError>
+    where
+        A: Borrow<(GuestAddress, usize, Option<FileOffset>)>,
+        T: IntoIterator<Item = A>,
+    {
+        GuestMemoryMap::from_ranges_with_files(ranges).map(Self::new)
+    }
 }
 
 impl GuestAddressSpace for GuestMemory {
