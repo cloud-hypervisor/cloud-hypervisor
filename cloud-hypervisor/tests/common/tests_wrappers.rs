@@ -3719,10 +3719,20 @@ pub(crate) fn _test_macvtap(
 pub(crate) fn _test_vdpa_block(guest: &Guest) {
     let api_socket = temp_api_path(&guest.tmp_dir);
 
-    let mut child = GuestCommand::new(guest)
+    let mut command = GuestCommand::new(guest);
+    command
         .default_cpus()
-        .args(["--memory", "size=1G,hugepages=on"])
-        .default_kernel_cmdline_with_platform(Some("num_pci_segments=2,iommu_segments=1"))
+        .args(["--memory", "size=1G,hugepages=on"]);
+
+    let platform = Some("num_pci_segments=2,iommu_segments=1");
+    if guest.vm_type == GuestVmType::Confidential && !on_kvm_sev_snp() {
+        command.default_kernel_cmdline_with_platform(platform);
+    } else {
+        command
+            .default_kernel_cmdline_with_platform_and_extra(platform, Some("iommu.passthrough=1"));
+    }
+
+    let mut child = command
         .default_disks()
         .default_net()
         .args(["--vdpa", "path=/dev/vhost-vdpa-0,num_queues=1"])

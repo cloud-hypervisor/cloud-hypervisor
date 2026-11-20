@@ -2177,6 +2177,18 @@ impl<'a> GuestCommand<'a> {
     }
 
     pub fn default_kernel_cmdline_with_platform(&mut self, platform: Option<&str>) -> &mut Self {
+        self.default_kernel_cmdline_with_platform_and_extra(platform, None)
+    }
+
+    pub fn default_kernel_cmdline_with_platform_and_extra(
+        &mut self,
+        platform: Option<&str>,
+        cmdline_extra: Option<&str>,
+    ) -> &mut Self {
+        let cmdline = self.guest.kernel_cmdline.as_deref().map(|cmdline| {
+            cmdline_extra.map_or_else(|| cmdline.to_owned(), |extra| format!("{cmdline} {extra}"))
+        });
+
         if self.guest.vm_type == GuestVmType::Confidential {
             let console_str = if let Some(c) = &self.guest.console_type {
                 c.as_str()
@@ -2198,7 +2210,7 @@ impl<'a> GuestCommand<'a> {
                     "--kernel",
                     kernel.to_str().expect("kernel path is not valid UTF-8"),
                 ]);
-                if let Some(cmdline) = &self.guest.kernel_cmdline {
+                if let Some(cmdline) = &cmdline {
                     self.command.args(["--cmdline", cmdline]);
                 }
                 self.command.args(["--fw-cfg-config", "initramfs=off"]);
@@ -2218,7 +2230,7 @@ impl<'a> GuestCommand<'a> {
             ]);
         } else if let Some(kernel) = &self.guest.kernel_path {
             self.command.args(["--kernel", kernel.as_str()]);
-            if let Some(cmdline) = &self.guest.kernel_cmdline {
+            if let Some(cmdline) = &cmdline {
                 self.command.args(["--cmdline", cmdline]);
             }
             if let Some(platform_arg) = platform {
