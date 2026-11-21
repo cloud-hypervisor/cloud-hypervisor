@@ -699,8 +699,6 @@ impl BusDevice for MemoryManager {
                     data.copy_from_slice(&state.length.to_le_bytes()[4..]);
                 }
                 STATUS_OFFSET => {
-                    // The Linux kernel, quite reasonably, doesn't zero the memory it gives us.
-                    data.fill(0);
                     if state.active {
                         data[0] |= 1 << ENABLE_FLAG;
                     }
