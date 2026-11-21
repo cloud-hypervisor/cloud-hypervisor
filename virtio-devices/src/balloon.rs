@@ -57,6 +57,7 @@ const STATS_QUEUE_SIZE: u16 = 32;
 const MIN_NUM_QUEUES: u16 = 2;
 const INFLATE_QUEUE: u16 = 0;
 const DEFLATE_QUEUE: u16 = 1;
+const STATS_QUEUE: u16 = 2;
 
 // Inflate virtio queue event.
 const INFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
@@ -964,6 +965,12 @@ impl Balloon {
     }
 }
 
+fn take_queue(queues: &mut Vec<(u16, Queue, EventFd)>, index: u16) -> Option<(Queue, EventFd)> {
+    let position = queues.iter().position(|(i, _, _)| *i == index)?;
+    let (_, queue, queue_evt) = queues.remove(position);
+    Some((queue, queue_evt))
+}
+
 impl VirtioDevice for Balloon {
     fn device_type(&self) -> u32 {
         self.common.device_type
@@ -1036,46 +1043,54 @@ impl VirtioDevice for Balloon {
         let (kill_evt, pause_evt) = self.common.dup_eventfds()?;
 
         let mut virtqueues = Vec::new();
-        let (_, queue, queue_evt) = queues.remove(0);
+        let (queue, inflate_queue_evt) = take_queue(&mut queues, INFLATE_QUEUE).unwrap();
         virtqueues.push(queue);
-        let inflate_queue_evt = queue_evt;
-        let (_, queue, queue_evt) = queues.remove(0);
+        let (queue, deflate_queue_evt) = take_queue(&mut queues, DEFLATE_QUEUE).unwrap();
         virtqueues.push(queue);
-        let deflate_queue_evt = queue_evt;
 
-        let stats_handler =
-            if self.common.feature_acked(VIRTIO_BALLOON_F_STATS_VQ) && !queues.is_empty() {
-                let qi = virtqueues.len();
-                let (_, queue, queue_evt) = queues.remove(0);
-                virtqueues.push(queue);
+        let stats_acked = self.common.feature_acked(VIRTIO_BALLOON_F_STATS_VQ);
+        let stats_queue = if stats_acked {
+            take_queue(&mut queues, STATS_QUEUE)
+        } else {
+            None
+        };
+        let stats_handler = if let Some((queue, queue_evt)) = stats_queue {
+            let qi = virtqueues.len();
+            virtqueues.push(queue);
 
-                let _ = self.stats_request_evt.read();
-                let (request_sender, request_receiver) = mpsc::channel();
-                self.stats_request_sender = Some(request_sender);
-                let request_evt = self
-                    .stats_request_evt
-                    .try_clone()
-                    .map_err(crate::ActivateError::CloneEventFd)?;
+            let _ = self.stats_request_evt.read();
+            let (request_sender, request_receiver) = mpsc::channel();
+            self.stats_request_sender = Some(request_sender);
+            let request_evt = self
+                .stats_request_evt
+                .try_clone()
+                .map_err(crate::ActivateError::CloneEventFd)?;
 
-                Some(BalloonStatsHandler {
-                    queue_evt,
-                    queue_index: qi,
-                    request_evt,
-                    request_receiver,
-                    stats_cache: Arc::clone(&self.stats_cache),
-                    state: BalloonStatsState::WaitingForInitialDescriptor,
-                })
-            } else {
-                self.stats_request_sender = None;
-                None
-            };
+            Some(BalloonStatsHandler {
+                queue_evt,
+                queue_index: qi,
+                request_evt,
+                request_receiver,
+                stats_cache: Arc::clone(&self.stats_cache),
+                state: BalloonStatsState::WaitingForInitialDescriptor,
+            })
+        } else {
+            self.stats_request_sender = None;
+            None
+        };
 
+        // The stats queue is omitted from the queue numbering if not negotiated.
+        let reporting_queue = if self.common.feature_acked(VIRTIO_BALLOON_F_REPORTING) {
+            let index = STATS_QUEUE + u16::from(stats_acked);
+            take_queue(&mut queues, index).map(|queue| (index, queue))
+        } else {
+            None
+        };
         let (reporting_queue_evt, reporting_queue_index) =
-            if self.common.feature_acked(VIRTIO_BALLOON_F_REPORTING) && !queues.is_empty() {
+            if let Some((index, (queue, queue_evt))) = reporting_queue {
                 let qi = virtqueues.len();
-                let (_, queue, queue_evt) = queues.remove(0);
                 virtqueues.push(queue);
-                (Some(queue_evt), Some((qi, qi as u16)))
+                (Some(queue_evt), Some((qi, index)))
             } else {
                 (None, None)
             };
@@ -1152,6 +1167,10 @@ impl Migratable for Balloon {}
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicU8;
+    use std::time::Duration;
+
+    use virtio_bindings::virtio_ring::VRING_DESC_F_WRITE;
     use vm_virtio::queue::testing::VirtQueue;
 
     use super::*;
@@ -1404,6 +1423,97 @@ mod tests {
         let mut data = vec![0; page_size];
         memory.read_slice(&mut data, PAGES_ADDRESS).unwrap();
         assert!(data.iter().all(|byte| *byte == 0xa5));
+    }
+
+    struct QueueInterruptSender(Mutex<mpsc::Sender<u16>>);
+
+    impl VirtioInterrupt for QueueInterruptSender {
+        fn trigger(&self, int_type: VirtioInterruptType) -> io::Result<()> {
+            if let VirtioInterruptType::Queue(queue_index) = int_type {
+                self.0.lock().unwrap().send(queue_index).unwrap();
+            }
+            Ok(())
+        }
+
+        fn set_notifier(
+            &self,
+            _int_type: u32,
+            _notifier: Option<EventFd>,
+            _vm: &dyn hypervisor::Vm,
+        ) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn reporting_queue_uses_its_own_index() {
+        const PAGES_ADDRESS: GuestAddress = GuestAddress(0x10_0000);
+
+        // Negotiate statistics but only enable the inflate, deflate and
+        // reporting queues.
+        let page_size = get_page_size() as usize;
+        let mut balloon = Balloon::new(
+            "balloon0".to_string(),
+            0,
+            false,
+            true,
+            false,
+            SeccompAction::Allow,
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+            None,
+        )
+        .unwrap();
+        balloon.common.acked_features =
+            1u64 << VIRTIO_BALLOON_F_STATS_VQ | 1u64 << VIRTIO_BALLOON_F_REPORTING;
+        let memory = TestMemory::from_ranges(&[
+            (GuestAddress(0), PAGES_ADDRESS.0 as usize),
+            (PAGES_ADDRESS, page_size),
+        ])
+        .unwrap();
+        let inflate_queue = VirtQueue::new(GuestAddress(0x1_0000), &memory, 16);
+        let deflate_queue = VirtQueue::new(GuestAddress(0x2_0000), &memory, 16);
+        let reporting_queue = VirtQueue::new(GuestAddress(0x3_0000), &memory, 16);
+        reporting_queue.dtable[0].set(
+            PAGES_ADDRESS.0,
+            page_size as u32,
+            VRING_DESC_F_WRITE as u16,
+            0,
+        );
+        reporting_queue.avail.ring[0].set(0);
+        reporting_queue.avail.idx.set(1);
+        let reporting_queue_evt = EventFd::new(EFD_NONBLOCK).unwrap();
+        let (tx, rx) = mpsc::channel();
+
+        balloon
+            .activate(ActivationContext {
+                mem: GuestMemoryAtomic::new(memory.clone()),
+                interrupt_cb: Arc::new(QueueInterruptSender(Mutex::new(tx))),
+                queues: vec![
+                    (
+                        INFLATE_QUEUE,
+                        inflate_queue.create_queue(),
+                        EventFd::new(EFD_NONBLOCK).unwrap(),
+                    ),
+                    (
+                        DEFLATE_QUEUE,
+                        deflate_queue.create_queue(),
+                        EventFd::new(EFD_NONBLOCK).unwrap(),
+                    ),
+                    (
+                        3,
+                        reporting_queue.create_queue(),
+                        reporting_queue_evt.try_clone().unwrap(),
+                    ),
+                ],
+                device_status: Arc::new(AtomicU8::new(0)),
+            })
+            .unwrap();
+        reporting_queue_evt.write(1).unwrap();
+
+        let queue_index = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        balloon.reset();
+        assert_eq!(queue_index, 3);
+        assert_eq!(reporting_queue.used.idx.get(), 1);
     }
 
     #[test]
