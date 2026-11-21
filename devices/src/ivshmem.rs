@@ -284,7 +284,7 @@ impl PciDevice for IvshmemDevice {
         self.configuration.read_reg(reg_idx)
     }
 
-    fn read_bar(&mut self, base: u64, offset: u64, data: &mut [u8]) {
+    fn read_bar(&mut self, base: u64, offset: u64, _data: &mut [u8]) {
         debug!("read base {base:x} offset {offset}");
 
         let mut bar_idx = 0;
@@ -294,11 +294,8 @@ impl PciDevice for IvshmemDevice {
             }
         }
         match bar_idx {
-            // bar 0
-            0 => {
-                // ivshmem doesn't use an interrupt, we return zero now.
-                data.fill(0);
-            }
+            // BAR0 reads as zero for ivshmem-plain.
+            0 => {}
             // bar 2
             1 => debug!("Unexpected read ivshmem memory idx: {offset}"),
             _ => {
