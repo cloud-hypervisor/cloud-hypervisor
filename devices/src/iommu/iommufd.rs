@@ -3,35 +3,38 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::collections::BTreeMap;
+use std::fs::File;
 use std::io;
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 use iommufd_bindings::iommufd::{
-    iommu_hw_info, iommu_hw_info_arm_smmuv3, iommu_hwpt_arm_smmuv3,
+    iommu_hw_info, iommu_hw_info_arm_smmuv3, iommu_hw_info_tegra241_cmdqv, iommu_hwpt_arm_smmuv3,
     iommu_veventq_flag_IOMMU_VEVENTQ_FLAG_LOST_EVENTS, iommu_viommu_arm_smmuv3_invalidate,
     iommufd_hw_capabilities_IOMMU_HW_CAP_PCI_ATS_NOT_SUPPORTED,
     iommufd_hw_capabilities_IOMMU_HW_CAP_PCI_PASID_EXEC,
     iommufd_hw_capabilities_IOMMU_HW_CAP_PCI_PASID_PRIV,
 };
 use iommufd_ioctls::{
-    AttachHwpt, IommufdError, IommufdHwInfoData, IommufdHwptData, IommufdInvalidateData,
-    IommufdVDevice, IommufdVEvent, IommufdVEventData, IommufdVEventQ, IommufdVIommu,
-    IommufdViommuData,
+    AttachHwpt, IommuFd, IommufdError, IommufdHwInfoData, IommufdHwQueue, IommufdHwptData,
+    IommufdInvalidateData, IommufdVDevice, IommufdVEvent, IommufdVEventData, IommufdVEventQ,
+    IommufdVIommu, IommufdViommuData,
 };
 use log::{error, warn};
 use pci::{PasidCap, PciBdf};
 use thiserror::Error;
-use vm_allocator::GuestMemory;
-use vm_memory::GuestMemoryAtomic;
+use vm_allocator::{GuestMemory, GuestRegion};
+use vm_memory::{FileOffset, GuestMemoryAtomic};
 use vmm_sys_util::epoll::{ControlOperation, Epoll, EpollEvent, EventSet};
 use vmm_sys_util::eventfd::{EFD_NONBLOCK, EventFd};
 
 use crate::iommu::{
-    Error as IommuError, HwInfo, Invalidation, PhysicalIommu, Smmuv3AcpiInfo, TableEntry,
+    Error as IommuError, HwInfo, HwQueueHandle, Invalidation, PhysicalIommu, Smmuv3AcpiInfo,
+    TableEntry,
 };
 use crate::smmuv3::{Error as Smmuv3Error, EventRecord, IDR0_COHACC, Smmuv3, Smmuv3Interrupts};
+use crate::tegra241_cmdqv::{Tegra241Cmdqv, Tegra241CmdqvConfig, VCMDQ_PAGE0_SIZE};
 
 const VEVENTQ_DEPTH: u32 = 64;
 
@@ -58,6 +61,8 @@ fn nested_ste(words: &[u64; 8]) -> [u64; 2] {
 pub enum Error {
     #[error("Failed to query host IOMMU information")]
     QueryHwInfo(#[source] IommufdError),
+    #[error("The host reported unexpected hardware information")]
+    UnexpectedHwInfo,
     #[error("Failed to create vDevice")]
     CreateVdevice(#[source] IommufdError),
     #[error("Failed to attach device to the bypass HWPT")]
@@ -76,6 +81,12 @@ pub enum Error {
     SpawnFaultForwarder(#[source] io::Error),
     #[error("Failed to initialize the emulated SMMUv3 from host information")]
     DeviceInit(#[source] Smmuv3Error),
+    #[error("Unexpected VINTF page size {0:#x}")]
+    VintfPageSize(u64),
+    #[error("Failed to duplicate the iommufd")]
+    DupIommufd(#[source] io::Error),
+    #[error("Failed to allocate a hardware queue")]
+    AllocateHwQueue(#[source] IommufdError),
 }
 
 impl From<Error> for IommuError {
@@ -93,7 +104,7 @@ struct Endpoint {
 /// Iommufd backend of an emulated IOMMU.
 pub struct IommufdIommu {
     viommu: Arc<IommufdVIommu>,
-    hw_info_data: IommufdHwInfoData,
+    hw_info_data: iommu_hw_info_arm_smmuv3,
     ats_supported: bool,
     endpoints: Mutex<BTreeMap<u32, Endpoint>>,
 }
@@ -115,6 +126,12 @@ impl IommufdIommu {
     pub fn allocate_veventq(&self) -> Result<IommufdVEventQ, Error> {
         self.viommu
             .allocate_veventq(VEVENTQ_DEPTH)
+            .map_err(Error::AllocateVeventq)
+    }
+
+    pub fn allocate_cmdqv_veventq(&self) -> Result<IommufdVEventQ, Error> {
+        self.viommu
+            .allocate_cmdqv_veventq(VEVENTQ_DEPTH)
             .map_err(Error::AllocateVeventq)
     }
 
@@ -171,17 +188,15 @@ impl IommufdIommu {
     fn query_hw_info(
         viommu: &IommufdVIommu,
         dev_id: u32,
-    ) -> Result<(iommu_hw_info, IommufdHwInfoData), Error> {
-        // The buffer to fill depends on the IOMMU the host reports.
-        let mut hw_info_data = match viommu.data() {
-            IommufdViommuData::Smmuv3 | IommufdViommuData::Tegra241Cmdqv { .. } => {
-                IommufdHwInfoData::Smmuv3(iommu_hw_info_arm_smmuv3::default())
-            }
-        };
+    ) -> Result<(iommu_hw_info, iommu_hw_info_arm_smmuv3), Error> {
+        let mut hw_info_data = IommufdHwInfoData::Smmuv3(iommu_hw_info_arm_smmuv3::default());
         let hw_info = viommu
             .iommufd()
             .device_hw_info(dev_id, &mut hw_info_data)
             .map_err(Error::QueryHwInfo)?;
+        let IommufdHwInfoData::Smmuv3(hw_info_data) = hw_info_data else {
+            return Err(Error::UnexpectedHwInfo);
+        };
 
         Ok((hw_info, hw_info_data))
     }
@@ -202,13 +217,10 @@ impl IommufdIommu {
 
 impl PhysicalIommu for IommufdIommu {
     fn hw_info(&self) -> Result<HwInfo, IommuError> {
-        match self.hw_info_data {
-            #[cfg(target_arch = "aarch64")]
-            IommufdHwInfoData::Smmuv3(info) => Ok(HwInfo::Smmuv3 {
-                idr: info.idr,
-                ats_supported: self.ats_supported,
-            }),
-        }
+        Ok(HwInfo::Smmuv3 {
+            idr: self.hw_info_data.idr,
+            ats_supported: self.ats_supported,
+        })
     }
 
     fn install_table_entry(&self, device_id: u32, entry: TableEntry) -> Result<(), IommuError> {
@@ -256,6 +268,28 @@ impl PhysicalIommu for IommufdIommu {
 
         Ok(())
     }
+
+    fn allocate_hw_queue(
+        &self,
+        index: u32,
+        addr: u64,
+        size: u64,
+    ) -> Result<Box<dyn HwQueueHandle>, IommuError> {
+        let hw_queue = self
+            .viommu
+            .allocate_hw_queue(index, addr, size)
+            .map_err(Error::AllocateHwQueue)?;
+
+        Ok(Box::new(hw_queue))
+    }
+}
+
+impl HwQueueHandle for IommufdHwQueue {}
+
+#[cfg(target_arch = "aarch64")]
+pub struct HostCmdqv {
+    pub num_vcmdqs_log2: u8,
+    pub num_sids_log2: u8,
 }
 
 /// Emulated SMMUv3 backed by iommufd.
@@ -265,10 +299,45 @@ pub struct Smmuv3Iommufd {
     backend: Arc<IommufdIommu>,
     acpi_info: Smmuv3AcpiInfo,
     _fault_forwarder: FaultForwarder,
+
+    // cmdqv
+    vintf_page: Option<FileOffset>,
+    // VINTF page mappings, dropped before `cmdqv`, whose backend holds the
+    // vIOMMU they pin
+    vintf_regions: Vec<GuestRegion>,
+    cmdqv: Option<Arc<Mutex<Tegra241Cmdqv>>>,
 }
 
 #[cfg(target_arch = "aarch64")]
 impl Smmuv3Iommufd {
+    pub fn host_cmdqv(iommufd: &IommuFd, dev_id: u32) -> Option<HostCmdqv> {
+        let mut hw_info_data =
+            IommufdHwInfoData::Tegra241Cmdqv(iommu_hw_info_tegra241_cmdqv::default());
+        match iommufd.device_hw_info(dev_id, &mut hw_info_data) {
+            Ok(_) => {}
+            Err(IommufdError::IommuGetHwInfo(e)) if e.errno() == libc::EOPNOTSUPP => return None,
+            Err(e) => {
+                warn!("Failed to query the host Tegra241 CMDQV: {e}");
+                return None;
+            }
+        }
+
+        match hw_info_data {
+            IommufdHwInfoData::Tegra241Cmdqv(hw_info) if hw_info.version == 1 => Some(HostCmdqv {
+                num_vcmdqs_log2: hw_info.log2vcmdqs,
+                num_sids_log2: hw_info.log2vsids,
+            }),
+            IommufdHwInfoData::Tegra241Cmdqv(hw_info) => {
+                warn!("Unsupported Tegra241 CMDQV version {}", hw_info.version);
+                None
+            }
+            _ => {
+                warn!("The host reported unexpected Tegra241 CMDQV information");
+                None
+            }
+        }
+    }
+
     pub fn new(
         id: String,
         mem: GuestMemoryAtomic<GuestMemory>,
@@ -276,9 +345,18 @@ impl Smmuv3Iommufd {
         acpi_info: Smmuv3AcpiInfo,
         viommu: Arc<IommufdVIommu>,
         dev_id: u32,
+        cmdqv: Option<Tegra241CmdqvConfig>,
     ) -> Result<Self, Error> {
+        let vintf_page = match viommu.data() {
+            IommufdViommuData::Smmuv3 => None,
+            IommufdViommuData::Tegra241Cmdqv {
+                mmap_offset,
+                mmap_length,
+            } => Some(Self::vintf_page_file(&viommu, mmap_offset, mmap_length)?),
+        };
         let backend = Arc::new(IommufdIommu::new(viommu, dev_id)?);
-        let IommufdHwInfoData::Smmuv3(host_info) = backend.hw_info_data;
+        let cmdqv_id = format!("{id}_cmdqv");
+        let host_info = backend.hw_info_data;
         let acpi_info = Smmuv3AcpiInfo {
             coherent: host_info.idr[0] & IDR0_COHACC != 0,
             ats_supported: backend.ats_supported,
@@ -292,12 +370,36 @@ impl Smmuv3Iommufd {
             None,
         );
         device.initialize().map_err(Error::DeviceInit)?;
+        let cmdqv = cmdqv.map(|config| {
+            Arc::new(Mutex::new(Tegra241Cmdqv::new(
+                cmdqv_id,
+                config,
+                Arc::clone(&backend) as Arc<dyn PhysicalIommu>,
+            )))
+        });
+        // The guest sizes its VCMDQs from CMDQS, and the host takes none
+        // larger than its own CMDQS allows.
+        if cmdqv.is_some() {
+            device.set_max_cmdq_size(Smmuv3::max_cmdq_size(host_info.idr[1]));
+        }
         let device = Arc::new(Mutex::new(device));
-        let fault_forwarder =
-            FaultForwarder::new(backend.allocate_veventq()?, Arc::clone(&device))?;
+        let mut veventqs = vec![Veventq::Smmuv3(
+            backend.allocate_veventq()?,
+            Arc::clone(&device),
+        )];
+        if let Some(cmdqv) = &cmdqv {
+            veventqs.push(Veventq::Tegra241Cmdqv(
+                backend.allocate_cmdqv_veventq()?,
+                Arc::clone(cmdqv),
+            ));
+        }
+        let fault_forwarder = FaultForwarder::new(veventqs)?;
 
         Ok(Self {
+            vintf_page,
+            vintf_regions: Vec::new(),
             device,
+            cmdqv,
             backend,
             acpi_info,
             _fault_forwarder: fault_forwarder,
@@ -315,14 +417,52 @@ impl Smmuv3Iommufd {
         &self.device
     }
 
+    pub fn cmdqv(&self) -> Option<&Arc<Mutex<Tegra241Cmdqv>>> {
+        self.cmdqv.as_ref()
+    }
+
     pub fn backend(&self) -> &Arc<IommufdIommu> {
         &self.backend
+    }
+
+    /// The host VINTF page backing the guest's VCMDQ page0s, to be mmapped
+    /// with a length of `VCMDQ_PAGE0_SIZE`.
+    pub fn vintf_page(&self) -> Option<&FileOffset> {
+        self.vintf_page.as_ref()
+    }
+
+    fn vintf_page_file(viommu: &IommufdVIommu, offset: u64, len: u64) -> Result<FileOffset, Error> {
+        if len != VCMDQ_PAGE0_SIZE {
+            return Err(Error::VintfPageSize(len));
+        }
+        // SAFETY: the vIOMMU keeps the iommufd open.
+        let fd = unsafe { BorrowedFd::borrow_raw(viommu.iommufd().as_raw_fd()) };
+        let file = File::from(fd.try_clone_to_owned().map_err(Error::DupIommufd)?);
+
+        Ok(FileOffset::new(file, offset))
+    }
+
+    pub fn set_vintf_regions(&mut self, regions: Vec<GuestRegion>) {
+        self.vintf_regions = regions;
     }
 
     pub fn acpi_info(&self) -> Smmuv3AcpiInfo {
         Smmuv3AcpiInfo {
             attached_bdfs: self.backend.attached_bdfs(),
             ..self.acpi_info.clone()
+        }
+    }
+}
+
+enum Veventq {
+    Smmuv3(IommufdVEventQ, Arc<Mutex<Smmuv3>>),
+    Tegra241Cmdqv(IommufdVEventQ, Arc<Mutex<Tegra241Cmdqv>>),
+}
+
+impl Veventq {
+    fn as_raw_fd(&self) -> RawFd {
+        match self {
+            Veventq::Smmuv3(veventq, _) | Veventq::Tegra241Cmdqv(veventq, _) => veventq.as_raw_fd(),
         }
     }
 }
@@ -334,13 +474,13 @@ struct FaultForwarder {
 }
 
 impl FaultForwarder {
-    fn new(mut veventq: IommufdVEventQ, device: Arc<Mutex<Smmuv3>>) -> Result<Self, Error> {
+    fn new(mut veventqs: Vec<Veventq>) -> Result<Self, Error> {
         let kill = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateEventFd)?;
         let kill_reader = kill.try_clone().map_err(Error::CreateEventFd)?;
 
         let handle = thread::Builder::new()
             .name("smmuv3_veventq".to_string())
-            .spawn(move || Self::epoll_event_queue(&mut veventq, &device, &kill_reader))
+            .spawn(move || Self::epoll_event_queue(&mut veventqs, &kill_reader))
             .map_err(Error::SpawnFaultForwarder)?;
 
         Ok(FaultForwarder {
@@ -349,9 +489,9 @@ impl FaultForwarder {
         })
     }
 
-    fn epoll_event_queue(veventq: &mut IommufdVEventQ, device: &Mutex<Smmuv3>, kill: &EventFd) {
-        const VEVENTQ_TOKEN: u64 = 0;
-        const KILL_TOKEN: u64 = 1;
+    fn epoll_event_queue(veventqs: &mut [Veventq], kill: &EventFd) {
+        // vEVENTQ i has token i.
+        const KILL_TOKEN: u64 = u64::MAX;
 
         let epoll = match Epoll::new() {
             Ok(epoll) => epoll,
@@ -360,10 +500,12 @@ impl FaultForwarder {
                 return;
             }
         };
-        for (fd, token) in [
-            (veventq.as_raw_fd(), VEVENTQ_TOKEN),
-            (kill.as_raw_fd(), KILL_TOKEN),
-        ] {
+        let fds = veventqs
+            .iter()
+            .enumerate()
+            .map(|(token, veventq)| (veventq.as_raw_fd(), token as u64))
+            .chain([(kill.as_raw_fd(), KILL_TOKEN)]);
+        for (fd, token) in fds {
             if let Err(e) = epoll.ctl(
                 ControlOperation::Add,
                 fd,
@@ -374,7 +516,7 @@ impl FaultForwarder {
             }
         }
 
-        let mut events = [EpollEvent::default(); 2];
+        let mut events = vec![EpollEvent::default(); veventqs.len() + 1];
         loop {
             let count = match epoll.wait(-1, &mut events) {
                 Ok(count) => count,
@@ -386,9 +528,11 @@ impl FaultForwarder {
             };
 
             for event in events.iter().take(count) {
-                match event.data() {
-                    KILL_TOKEN => return,
-                    VEVENTQ_TOKEN => match veventq.read_events() {
+                if event.data() == KILL_TOKEN {
+                    return;
+                }
+                match &mut veventqs[event.data() as usize] {
+                    Veventq::Smmuv3(veventq, device) => match veventq.read_events() {
                         Ok(records) => {
                             let mut device = device.lock().unwrap();
                             for record in records {
@@ -398,7 +542,16 @@ impl FaultForwarder {
                         Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
                         Err(e) => warn!("SMMUv3 vEVENTQ read failed: {e}"),
                     },
-                    _ => unreachable!(),
+                    Veventq::Tegra241Cmdqv(veventq, cmdqv) => match veventq.read_events() {
+                        Ok(records) => {
+                            let mut cmdqv = cmdqv.lock().unwrap();
+                            for record in records {
+                                Self::forward_cmdqv_record(&mut cmdqv, record);
+                            }
+                        }
+                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+                        Err(e) => warn!("Tegra241 CMDQV vEVENTQ read failed: {e}"),
+                    },
                 }
             }
         }
@@ -430,6 +583,32 @@ impl FaultForwarder {
                     warn!("SMMUv3 vEVENTQ lost events at the tail");
                 }
                 device.set_event_overflow();
+            }
+        }
+    }
+
+    fn forward_cmdqv_record(cmdqv: &mut Tegra241Cmdqv, record: IommufdVEvent) {
+        if record.lost > 0 {
+            warn!(
+                "Tegra241 CMDQV vEVENTQ lost {} events before sequence {}",
+                record.lost, record.header.sequence
+            );
+        }
+
+        match record.data {
+            Some(IommufdVEventData::Tegra241Cmdqv(evt)) => {
+                cmdqv.report_vcmdq_errors(evt.lvcmdq_err_map.map(u64::from_le));
+            }
+            Some(IommufdVEventData::Smmuv3(_)) => {
+                warn!("Tegra241 CMDQV vEVENTQ yielded an unexpected SMMUv3 record");
+            }
+            // Header without a record.
+            None => {
+                if record.header.flags & iommu_veventq_flag_IOMMU_VEVENTQ_FLAG_LOST_EVENTS == 0 {
+                    warn!("Tegra241 CMDQV vEVENTQ yielded a header with no record");
+                } else {
+                    warn!("Tegra241 CMDQV vEVENTQ lost events at the tail");
+                }
             }
         }
     }

@@ -144,6 +144,10 @@ wait-timeout = "0.2.1"
 zbus = { version = "5.15.0", default-features = false }
 zerocopy = { version = "0.8.50", default-features = false }
 
+[patch.crates-io]
+iommufd-bindings = { git = "https://github.com/cloud-hypervisor/iommufd", rev = "0133fb738e34d1cefb43a988c71895a2654308bb" }
+iommufd-ioctls = { git = "https://github.com/cloud-hypervisor/iommufd", rev = "0133fb738e34d1cefb43a988c71895a2654308bb" }
+
 [workspace.lints.clippy]
 # Any clippy lint (group) in alphabetical order:
 # https://rust-lang.github.io/rust-clippy/master/index.html

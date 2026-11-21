@@ -466,14 +466,12 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 [[package]]
 name = "iommufd-bindings"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ccb1839dadf7e92244d8ae02a6b60f8d120c5674341dc18d401b715809641667"
+source = "git+https://github.com/cloud-hypervisor/iommufd?rev=0133fb738e34d1cefb43a988c71895a2654308bb#0133fb738e34d1cefb43a988c71895a2654308bb"
 
 [[package]]
 name = "iommufd-ioctls"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "848d491b399f8551129347bb949870eb3eee2b390e435dc29570a902e166f353"
+source = "git+https://github.com/cloud-hypervisor/iommufd?rev=0133fb738e34d1cefb43a988c71895a2654308bb#0133fb738e34d1cefb43a988c71895a2654308bb"
 dependencies = [
  "iommufd-bindings",
  "libc",
