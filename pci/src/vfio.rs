@@ -1973,6 +1973,23 @@ impl VfioCommon {
                 .contains(&offset)
     }
 
+    #[cfg(feature = "kvm")]
+    pub(crate) fn is_nvidia_bar0_command_reg_mirror(&self, base: u64, offset: u64) -> bool {
+        if self.vendor_id != VENDOR_NVIDIA {
+            return false;
+        }
+        let addr = base + offset;
+        let Some(region) = self.find_region(addr) else {
+            return false;
+        };
+        let region_offset = addr - region.start.raw_value();
+        if !self.is_nvidia_bar0_config_mirror(region.index, region_offset) {
+            return false;
+        }
+        let config_offset = region_offset - NVIDIA_BAR0_CONFIG_MIRROR_OFFSET;
+        (config_offset / PCI_CONFIG_REGISTER_SIZE as u64) as usize == COMMAND_REG
+    }
+
     pub(crate) fn read_bar(&mut self, base: u64, offset: u64, data: &mut [u8]) {
         let addr = base + offset;
         if let Some(region) = self.find_region(addr) {
@@ -2023,10 +2040,11 @@ impl VfioCommon {
                 }
             } else if self.is_nvidia_bar0_config_mirror(region.index, offset) {
                 // Route writes to the NVIDIA BAR0 config space mirror through
-                // write_config_register() so config patches, MSI/MSI-X updates,
-                // and shadow synchronization apply consistently, while ignoring
-                // writes to BAR registers to prevent guest BAR reprogramming via
-                // the mirror.
+                // write_non_bar_config_register() so config patches, MSI/MSI-X
+                // updates, and shadow synchronization apply consistently, while
+                // ignoring writes to BAR registers to prevent guest BAR
+                // reprogramming via the mirror and avoiding draining
+                // pending_bar_reprogram where write_bar() cannot return it.
                 let config_offset = offset - NVIDIA_BAR0_CONFIG_MIRROR_OFFSET;
                 let reg_idx = (config_offset / PCI_CONFIG_REGISTER_SIZE as u64) as usize;
                 let reg_off = config_offset % PCI_CONFIG_REGISTER_SIZE as u64;
@@ -2035,7 +2053,7 @@ impl VfioCommon {
                     && !(PCI_CONFIG_BAR0_INDEX..PCI_CONFIG_BAR0_INDEX + BAR_NUMS).contains(&reg_idx)
                     && reg_idx != PCI_ROM_EXP_BAR_INDEX
                 {
-                    let _ = self.write_config_register(reg_idx, reg_off, data);
+                    self.write_non_bar_config_register(reg_idx, reg_off, data);
                 }
             } else {
                 self.vfio_wrapper.region_write(region.index, offset, data);
@@ -2054,34 +2072,13 @@ impl VfioCommon {
         None
     }
 
-    pub(crate) fn write_config_register(
-        &mut self,
-        reg_idx: usize,
-        offset: u64,
-        data: &[u8],
-    ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>) {
-        // When the guest wants to write to a BAR, we trap it into
-        // our local configuration space. We're not reprogramming
-        // VFIO device.
-        if (PCI_CONFIG_BAR0_INDEX..PCI_CONFIG_BAR0_INDEX + BAR_NUMS).contains(&reg_idx)
-            || reg_idx == PCI_ROM_EXP_BAR_INDEX
-        {
-            // We keep our local cache updated with the BARs.
-            // We'll read it back from there when the guest is asking
-            // for BARs (see read_config_register()).
-            return (
-                self.configuration
-                    .write_config_register(reg_idx, offset, data),
-                None,
-            );
-        }
-
+    fn write_non_bar_config_register(&mut self, reg_idx: usize, offset: u64, data: &[u8]) -> bool {
         let device_writes = match self.patches.get_mut(&reg_idx) {
             Some(patch) => {
                 let device_writes = patch.write(offset, data);
 
                 if patch.mask == 0xffff_ffff {
-                    return (Vec::new(), None);
+                    return false;
                 }
 
                 device_writes
@@ -2144,6 +2141,35 @@ impl VfioCommon {
                 u32::from_le_bytes(data.try_into().expect("data should be 4 bytes")),
             ),
             _ => {}
+        }
+
+        true
+    }
+
+    pub(crate) fn write_config_register(
+        &mut self,
+        reg_idx: usize,
+        offset: u64,
+        data: &[u8],
+    ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>) {
+        // When the guest wants to write to a BAR, we trap it into
+        // our local configuration space. We're not reprogramming
+        // VFIO device.
+        if (PCI_CONFIG_BAR0_INDEX..PCI_CONFIG_BAR0_INDEX + BAR_NUMS).contains(&reg_idx)
+            || reg_idx == PCI_ROM_EXP_BAR_INDEX
+        {
+            // We keep our local cache updated with the BARs.
+            // We'll read it back from there when the guest is asking
+            // for BARs (see read_config_register()).
+            return (
+                self.configuration
+                    .write_config_register(reg_idx, offset, data),
+                None,
+            );
+        }
+
+        if !self.write_non_bar_config_register(reg_idx, offset, data) {
+            return (Vec::new(), None);
         }
 
         (self.configuration.drain_pending_bar_reprogram(), None)
@@ -3095,7 +3121,20 @@ impl PciDevice for VfioPciDevice {
     }
 
     fn write_bar(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
-        self.common.write_bar(base, offset, data)
+        #[cfg(feature = "kvm")]
+        let update_dma =
+            self.p2p_dma && self.common.is_nvidia_bar0_command_reg_mirror(base, offset);
+        #[cfg(feature = "kvm")]
+        let memory_space_enabled = update_dma && self.is_memory_space_enabled();
+
+        let ret = self.common.write_bar(base, offset, data);
+
+        #[cfg(feature = "kvm")]
+        if update_dma {
+            self.update_dma_buffers(memory_space_enabled);
+        }
+
+        ret
     }
 
     fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> Result<(), io::Error> {
@@ -3295,6 +3334,7 @@ mod tests {
 
     use super::*;
     use crate::PasidCap;
+    use crate::configuration::COMMAND_REG_MEMORY_SPACE_MASK;
 
     #[test]
     fn find_alignment_scales_with_length() {
@@ -4702,6 +4742,65 @@ mod tests {
 
         common.write_bar(bar0_gpa, 0x80000, &0x99aa_bbccu32.to_le_bytes());
         assert_eq!(mock.bar0_dword(0x80000), 0x99aa_bbcc);
+    }
+
+    #[test]
+    fn nvidia_bar0_config_mirror_command_reg_preserves_pending_bar_reprogram() {
+        let mock = MockNvidiaDevice::new();
+        let mut common = test_vfio_common(Arc::clone(&mock), None);
+        common.vendor_id = VENDOR_NVIDIA;
+
+        let bar0_gpa: u64 = 0xc000_0000;
+        let bar0_size: u64 = 0x10_0000;
+        let bar_cfg = PciBarConfiguration::default()
+            .set_index(VFIO_PCI_BAR0_REGION_INDEX as usize)
+            .set_address(bar0_gpa)
+            .set_size(bar0_size)
+            .set_region_type(PciBarRegionType::Memory32BitRegion)
+            .set_prefetchable(PciBarPrefetchable::NotPrefetchable);
+        common.configuration.add_pci_bar(&bar_cfg).unwrap();
+        common.bars.push(VfioBar {
+            start: GuestAddress(bar0_gpa),
+            length: bar0_size,
+            type_: PciBarRegionType::Memory32BitRegion,
+            index: VFIO_PCI_BAR0_REGION_INDEX,
+            bar_memory_regions: Vec::new(),
+        });
+
+        #[cfg(feature = "kvm")]
+        {
+            assert!(common.is_nvidia_bar0_command_reg_mirror(bar0_gpa, 0x88004));
+            assert!(common.is_nvidia_bar0_command_reg_mirror(bar0_gpa, 0x88006));
+            assert!(!common.is_nvidia_bar0_command_reg_mirror(bar0_gpa, 0x88000));
+            assert!(!common.is_nvidia_bar0_command_reg_mirror(bar0_gpa, 0x88008));
+            assert!(!common.is_nvidia_bar0_command_reg_mirror(bar0_gpa, 0x80004));
+        }
+
+        // Queue a pending BAR reprogramming while MSE is disabled.
+        let new_bar0_gpa: u32 = 0xd000_0000;
+        let (reprogram, _) =
+            common.write_config_register(PCI_CONFIG_BAR0_INDEX, 0, &new_bar0_gpa.to_le_bytes());
+        assert!(reprogram.is_empty());
+
+        // Enabling MSE via the BAR0 config space mirror updates COMMAND_REG in
+        // hardware and shadow without silently draining pending_bar_reprogram.
+        let cmd = COMMAND_REG_MEMORY_SPACE_MASK as u16;
+        common.write_bar(bar0_gpa, 0x88004, &cmd.to_le_bytes());
+        assert_eq!(mock.config_dword(0x04) & 0xffff, u32::from(cmd));
+        assert_eq!(
+            common.configuration.read_reg(COMMAND_REG) & 0xffff,
+            u32::from(cmd)
+        );
+
+        // A subsequent PCI config write still observes and drains the pending
+        // BAR reprogramming parameters.
+        let (reprogram, _) = common.write_config_register(COMMAND_REG, 0, &cmd.to_le_bytes());
+        assert_eq!(reprogram.len(), 1);
+        assert_eq!(reprogram[0].old_base, bar0_gpa);
+        assert_eq!(reprogram[0].new_base, u64::from(new_bar0_gpa));
+
+        let (reprogram, _) = common.write_config_register(COMMAND_REG, 0, &cmd.to_le_bytes());
+        assert!(reprogram.is_empty());
     }
 
     #[test]
