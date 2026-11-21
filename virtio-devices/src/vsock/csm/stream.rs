@@ -3,12 +3,15 @@
 //
 
 use std::io::{self, Read, Write};
-use std::os::fd::{AsRawFd, RawFd};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::unix::net::UnixStream;
+use std::path::Path;
 
 use vm_memory::{ReadVolatile, WriteVolatile};
 
 use super::super::SocketType;
 use super::super::packet::VsockPacket;
+use super::seqpacket::SeqPacketSocket;
 use super::transport::{PayloadRead, RxState, SendResult, Transport, TxState};
 use super::txbuf::TxBuf;
 use super::{Error, Result};
@@ -24,6 +27,39 @@ impl<S> From<S> for StreamTransport<S> {
             stream,
             tx_buf: TxBuf::new(),
         }
+    }
+}
+
+impl StreamTransport<UnixStream> {
+    /// Connects without blocking, so a listener with a full backlog fails the
+    /// connect with `WouldBlock` instead of stalling the caller.
+    pub(crate) fn connect(path: &Path) -> io::Result<Self> {
+        let (address, length) = SeqPacketSocket::path_to_sock_addr(path)?;
+        // SAFETY: socket takes only integer arguments and returns a new owned descriptor.
+        let fd = unsafe {
+            libc::socket(
+                libc::AF_UNIX,
+                libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC,
+                0,
+            )
+        };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: fd is a newly created socket whose ownership is transferred here.
+        let socket = unsafe { OwnedFd::from_raw_fd(fd) };
+        // SAFETY: address is initialized and length covers its family and terminated path.
+        if unsafe {
+            libc::connect(
+                socket.as_raw_fd(),
+                (&address as *const libc::sockaddr_un).cast(),
+                length,
+            )
+        } < 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(Self::from(UnixStream::from(socket)))
     }
 }
 
