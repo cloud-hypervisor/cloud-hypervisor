@@ -526,6 +526,7 @@ impl BalloonEpollHandler {
             self.queues[queue_index as usize]
                 .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
                 .map_err(Error::QueueAddUsed)?;
+            self.pbp = None;
             used_descs = true;
         }
 
@@ -1326,6 +1327,58 @@ mod tests {
             assert!(data[..balloon_size].iter().all(|byte| *byte == 0));
             assert!(data[balloon_size..].iter().all(|byte| *byte == 0xa5));
         }
+    }
+
+    #[test]
+    fn process_inflate_queue_does_not_merge_partial_pages_across_buffers() {
+        const QUEUE_ADDRESS: GuestAddress = GuestAddress(0x1_0000);
+        const PFNS_ADDRESS: GuestAddress = GuestAddress(0x2_0000);
+        const PAGES_ADDRESS: GuestAddress = GuestAddress(0x10_0000);
+
+        let page_size = get_page_size() as usize;
+        if page_size == VIRTIO_BALLOON_PAGE_SIZE {
+            return;
+        }
+
+        let pfns_per_page = page_size / VIRTIO_BALLOON_PAGE_SIZE;
+        let memory = TestMemory::from_ranges(&[
+            (GuestAddress(0), PAGES_ADDRESS.0 as usize),
+            (PAGES_ADDRESS, page_size),
+        ])
+        .unwrap();
+        memory
+            .write_slice(&vec![0xa5; page_size], PAGES_ADDRESS)
+            .unwrap();
+        for index in 0..pfns_per_page {
+            let pfn = (PAGES_ADDRESS.0 >> VIRTIO_BALLOON_PFN_SHIFT) as u32 + index as u32;
+            memory
+                .write_obj(
+                    pfn,
+                    PFNS_ADDRESS.unchecked_add((index * size_of::<u32>()) as u64),
+                )
+                .unwrap();
+        }
+
+        // Cover each half of the host page from a separate buffer.
+        let half_len = (pfns_per_page / 2 * size_of::<u32>()) as u32;
+        let guest_queue = VirtQueue::new(QUEUE_ADDRESS, &memory, 16);
+        guest_queue.dtable[0].set(PFNS_ADDRESS.0, half_len, 0, 0);
+        guest_queue.dtable[1].set(PFNS_ADDRESS.0 + u64::from(half_len), half_len, 0, 0);
+        guest_queue.avail.ring[0].set(0);
+        guest_queue.avail.ring[1].set(1);
+        guest_queue.avail.idx.set(2);
+        let mut handler = create_stats_handler(
+            &memory,
+            guest_queue.create_queue(),
+            BalloonStatsState::WaitingForInitialDescriptor,
+        );
+
+        handler.process_queue(INFLATE_QUEUE).unwrap();
+
+        assert_eq!(guest_queue.used.idx.get(), 2);
+        let mut data = vec![0; page_size];
+        memory.read_slice(&mut data, PAGES_ADDRESS).unwrap();
+        assert!(data.iter().all(|byte| *byte == 0xa5));
     }
 
     #[test]
