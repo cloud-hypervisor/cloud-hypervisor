@@ -270,16 +270,48 @@ impl PciBus {
         let mut device = d.pci.lock().unwrap();
 
         let (bar_reprogram, ret) = device.write_config_register(register, offset, data);
-        self.apply_bar_reprogramming(device.deref_mut(), &bar_reprogram);
+        self.apply_bar_reprogramming(device.deref_mut(), d.bus_device.as_ref(), &bar_reprogram);
 
         ret
     }
 
-    fn apply_bar_reprogramming(&self, device: &mut dyn PciDevice, bars: &[BarReprogrammingParams]) {
+    fn apply_bar_reprogramming(
+        &self,
+        device: &mut dyn PciDevice,
+        bus_device: Option<&Arc<dyn BusDeviceSync>>,
+        bars: &[BarReprogrammingParams],
+    ) {
         for bar in bars {
+            let bar_idx = bar
+                .bar_idx
+                .expect("bar_idx is set on detection and on restore");
+
+            // An unmapped BAR has nothing to move.
+            if !device.is_bar_mapped(bar_idx) {
+                let bus_device = bus_device.expect("a device with BARs has a bus device");
+                match self.device_reloc.map_bar(
+                    bar_idx,
+                    bar.new_base,
+                    bar.len,
+                    device,
+                    bus_device,
+                    bar.region_type,
+                ) {
+                    Ok(()) => device.set_bar_mapped(bar_idx, true),
+                    Err(e) => warn!(
+                        "Failed mapping BAR {} of device {}: {}: 0x{:x}(0x{:x}), left unmapped",
+                        bar_idx,
+                        device.bdf(),
+                        e,
+                        bar.new_base,
+                        bar.len
+                    ),
+                }
+                continue;
+            }
+
             if let Err(e) = self.device_reloc.move_bar(
-                bar.bar_idx
-                    .expect("bar_idx is set on detection and on restore"),
+                bar_idx,
                 bar.old_base,
                 bar.new_base,
                 bar.len,
