@@ -1051,6 +1051,10 @@ impl VirtioDevice for Net {
     fn access_platform(&self) -> Option<Arc<dyn AccessPlatform>> {
         self.common.access_platform()
     }
+
+    fn is_removable(&self) -> bool {
+        true
+    }
 }
 
 impl Pausable for Net {

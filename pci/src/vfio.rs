@@ -3119,6 +3119,10 @@ impl PciDevice for VfioPciDevice {
     fn bdf(&self) -> PciBdf {
         self.bdf
     }
+
+    fn is_removable(&self) -> bool {
+        true
+    }
 }
 
 impl Pausable for VfioPciDevice {

@@ -1627,6 +1627,22 @@ impl DeviceManager {
             }
         }
 
+        for segment in &mut self.pci_segments {
+            let pci_bus = segment.pci_bus.lock().unwrap();
+            for slot in &mut segment.slots {
+                slot.ejectable = pci_bus.is_device_removable(slot.device_id).unwrap_or(true);
+            }
+        }
+
+        if let Some((_, devices)) = &self.iommu_attached_devices {
+            for &bdf in devices {
+                if !self.is_iommu_device_removable(bdf) {
+                    self.pci_segments[bdf.segment() as usize].slots[bdf.device() as usize]
+                        .ejectable = false;
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -5584,12 +5600,7 @@ impl DeviceManager {
             .ok_or(DeviceManagerError::MissingDeviceNodePciBdf)?;
         let pci_segment_id = pci_device_bdf.segment();
 
-        if !self.is_iommu_segment(pci_segment_id)
-            && self
-                .iommu_attached_devices
-                .as_ref()
-                .is_some_and(|(_, devices)| devices.contains(&pci_device_bdf))
-        {
+        if !self.is_iommu_device_removable(pci_device_bdf) {
             return Err(DeviceManagerError::InvalidIommuRemove(pci_device_bdf));
         }
 
@@ -5598,22 +5609,14 @@ impl DeviceManager {
             .as_ref()
             .ok_or(DeviceManagerError::MissingPciDevice)?;
         if let PciDeviceHandle::Virtio(virtio_pci_device) = pci_device_handle {
-            let device_type = VirtioDeviceType::from(
-                virtio_pci_device
-                    .lock()
-                    .unwrap()
+            let virtio_pci_device = virtio_pci_device.lock().unwrap();
+            if !virtio_pci_device.is_removable() {
+                let device_type = virtio_pci_device
                     .virtio_device()
                     .lock()
                     .unwrap()
-                    .device_type(),
-            );
-            match device_type {
-                VirtioDeviceType::Net
-                | VirtioDeviceType::Block
-                | VirtioDeviceType::Pmem
-                | VirtioDeviceType::Fs
-                | VirtioDeviceType::Vsock => {}
-                _ => return Err(DeviceManagerError::RemovalNotAllowed(device_type)),
+                    .device_type();
+                return Err(DeviceManagerError::RemovalNotAllowed(device_type.into()));
             }
         }
 
@@ -5635,12 +5638,7 @@ impl DeviceManager {
         // Convert the device ID into the corresponding b/d/f.
         let pci_device_bdf = PciBdf::new(pci_segment_id, 0, device_id, 0);
 
-        if !self.is_iommu_segment(pci_segment_id)
-            && self
-                .iommu_attached_devices
-                .as_ref()
-                .is_some_and(|(_, devices)| devices.contains(&pci_device_bdf))
-        {
+        if !self.is_iommu_device_removable(pci_device_bdf) {
             return Err(DeviceManagerError::InvalidIommuRemove(pci_device_bdf));
         }
 
@@ -5706,6 +5704,10 @@ impl DeviceManager {
                     }
                     PciDeviceHandle::Virtio(virtio_pci_device) => {
                         let dev = virtio_pci_device.lock().unwrap();
+                        if !dev.is_removable() {
+                            let device_type = dev.virtio_device().lock().unwrap().device_type();
+                            return Err(DeviceManagerError::RemovalNotAllowed(device_type.into()));
+                        }
                         let config_bar_idx = VIRTIO_CONFIG_BAR_INDEX;
                         let bar_addr = pci_bar_resources.iter().find_map(|r| match r {
                             Resource::PciBar { index, base, .. } if *index == config_bar_idx => {
@@ -5928,6 +5930,14 @@ impl DeviceManager {
             1 << bdf.device();
 
         Ok(PciDeviceInfo { id, bdf })
+    }
+
+    fn is_iommu_device_removable(&self, pci_device_bdf: PciBdf) -> bool {
+        self.is_iommu_segment(pci_device_bdf.segment())
+            || !self
+                .iommu_attached_devices
+                .as_ref()
+                .is_some_and(|(_, devices)| devices.contains(&pci_device_bdf))
     }
 
     fn is_iommu_segment(&self, pci_segment_id: u16) -> bool {
@@ -6756,6 +6766,131 @@ impl Drop for DeviceManager {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    fn check_pci_slot_aml(mut config: serde_json::Value, fixed_slots: &[&[u8]]) {
+        use vmm_sys_util::eventfd::EFD_NONBLOCK;
+
+        use crate::pci_segment::PciDevSlot;
+        use crate::vm::Vm;
+
+        let firmware = tempfile::NamedTempFile::new().unwrap();
+        firmware.as_file().set_len(0x200000).unwrap();
+        config["payload"] = serde_json::json!({"firmware": firmware.path()});
+        let vm = Vm::new(
+            Arc::new(Mutex::new(serde_json::from_value(config).unwrap())),
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+            #[cfg(feature = "guest_debug")]
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+            &SeccompAction::Allow,
+            hypervisor::new().unwrap(),
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+            Some(ConsoleInfo {
+                console: ConsoleTransport::Null,
+                serial: ConsoleTransport::Null,
+                debug: ConsoleTransport::Off,
+            }),
+            None,
+            Arc::new(Mutex::new(None)),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let manager = vm.device_manager().lock().unwrap();
+        assert_eq!(manager.pci_segments.len(), fixed_slots.len());
+        for (segment, fixed_slots) in manager.pci_segments.iter().zip(fixed_slots) {
+            let mut bytes = Vec::new();
+            segment.to_aml_bytes(&mut bytes);
+            let mut expected = Vec::new();
+            for device_id in 0..32 {
+                PciDevSlot {
+                    device_id,
+                    ejectable: !fixed_slots.contains(&device_id),
+                }
+                .to_aml_bytes(&mut expected);
+            }
+            assert!(
+                bytes.windows(expected.len()).any(|w| w == expected),
+                "Unexpected PCI slot AML on segment {}",
+                segment.id,
+            );
+        }
+    }
+
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    #[test]
+    fn pci_slot_aml_device_removal_support() {
+        let disk = tempfile::NamedTempFile::new().unwrap();
+        disk.as_file().set_len(0x100000).unwrap();
+        check_pci_slot_aml(
+            serde_json::json!({
+                "memory": {"size": 0x8000000, "hotplug_size": 0x8000000, "hotplug_method": "VirtioMem"},
+                "platform": {"num_pci_segments": 3},
+                "console": {"mode": "Null", "pci_device_id": 1},
+                "rng": {"src": "/dev/urandom", "pci_segment": 1, "pci_device_id": 0},
+                "disks": [{"path": disk.path(), "image_type": "Raw", "pci_segment": 1, "pci_device_id": 5}],
+                "pvpanic": true,
+                "watchdog": true,
+                "rtc": {"pci_segment": 1, "pci_device_id": 7},
+                "balloon": {"size": 0, "pci_segment": 1, "pci_device_id": 8}
+            }),
+            // Segment 0: host bridge, console, virtio-mem, watchdog and pvpanic.
+            // Segment 1: RNG, RTC and balloon. The disk remains ejectable.
+            // Segment 2 has no host bridge and all slots are available.
+            &[&[0, 1, 2, 3, 4], &[0, 7, 8], &[]],
+        );
+    }
+
+    #[cfg(all(
+        feature = "kvm",
+        feature = "pvmemcontrol",
+        feature = "ivshmem",
+        target_arch = "x86_64"
+    ))]
+    #[test]
+    fn pci_slot_aml_pvmemcontrol_and_ivshmem() {
+        let memory = tempfile::NamedTempFile::new().unwrap();
+        memory.as_file().set_len(0x200000).unwrap();
+        check_pci_slot_aml(
+            serde_json::json!({
+                "memory": {"size": 0x8000000},
+                "platform": {"num_pci_segments": 2},
+                "console": {"mode": "Null", "pci_device_id": 1},
+                "rng": {"src": "/dev/urandom", "pci_segment": 1, "pci_device_id": 0},
+                "pvmemcontrol": {},
+                "ivshmem": {"path": memory.path(), "size": 0x200000, "pci_segment": 1, "pci_device_id": 7}
+            }),
+            &[&[0, 1, 2], &[0, 7]],
+        );
+    }
+
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    #[test]
+    fn pci_slot_aml_iommu_removal_restrictions() {
+        let disk = tempfile::NamedTempFile::new().unwrap();
+        disk.as_file().set_len(0x100000).unwrap();
+        check_pci_slot_aml(
+            serde_json::json!({
+                "memory": {"size": 0x8000000},
+                "platform": {"num_pci_segments": 3, "iommu_segments": [1]},
+                "console": {"mode": "Null", "pci_device_id": 1},
+                "rng": {"src": "/dev/urandom", "iommu": "Virtio", "pci_segment": 1, "pci_device_id": 0},
+                "disks": [
+                    {"path": disk.path(), "image_type": "Raw", "readonly": true, "iommu": "Virtio", "pci_device_id": 3},
+                    {"path": disk.path(), "image_type": "Raw", "readonly": true, "iommu": "Virtio", "pci_segment": 1, "pci_device_id": 5},
+                    {"path": disk.path(), "image_type": "Raw", "readonly": true, "pci_segment": 2, "pci_device_id": 0}
+                ]
+            }),
+            // The individually attached disk and the IOMMU itself are fixed.
+            // The disk on the IOMMU segment is removable, but its RNG is not.
+            // The disk on segment 2 is removable without an IOMMU.
+            &[&[0, 1, 2, 3], &[0], &[]],
+        );
+    }
+
     #[test]
     fn restore_preserves_pci_hotplug_flags() {
         let allocator = Arc::new(Mutex::new(

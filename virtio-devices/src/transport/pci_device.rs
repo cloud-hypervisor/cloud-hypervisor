@@ -1375,6 +1375,10 @@ impl PciDevice for VirtioPciDevice {
     fn bdf(&self) -> PciBdf {
         self.bdf
     }
+
+    fn is_removable(&self) -> bool {
+        self.device.lock().unwrap().is_removable()
+    }
 }
 
 impl BusDevice for VirtioPciDevice {

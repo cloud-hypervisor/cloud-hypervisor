@@ -480,6 +480,10 @@ impl VirtioDevice for Net {
     fn add_memory_region(&mut self, region: &Arc<GuestRegion>) -> result::Result<(), crate::Error> {
         self.vu_common.add_memory_region(region)
     }
+
+    fn is_removable(&self) -> bool {
+        true
+    }
 }
 
 impl Pausable for Net {
