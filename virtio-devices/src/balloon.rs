@@ -291,7 +291,8 @@ struct BalloonEpollHandler {
     deflate_queue_evt: EventFd,
     stats_handler: Option<BalloonStatsHandler>,
     reporting_queue_evt: Option<EventFd>,
-    reporting_queue_index: Option<usize>,
+    // Position in queues and the queue index used for interrupts
+    reporting_queue_index: Option<(usize, u16)>,
     kill_evt: EventFd,
     pause_evt: EventFd,
     pbp: Option<PartiallyBalloonedPage>,
@@ -634,7 +635,11 @@ impl BalloonEpollHandler {
         Ok(())
     }
 
-    fn process_reporting_queue(&mut self, queue_index: usize) -> result::Result<(), Error> {
+    fn process_reporting_queue(
+        &mut self,
+        queue_index: usize,
+        interrupt_index: u16,
+    ) -> result::Result<(), Error> {
         let page_size = get_page_size();
         let mut used_descs = false;
         while let Some(mut desc_chain) =
@@ -677,7 +682,7 @@ impl BalloonEpollHandler {
         }
 
         if used_descs {
-            self.signal(VirtioInterruptType::Queue(queue_index as u16))
+            self.signal(VirtioInterruptType::Queue(interrupt_index))
         } else {
             Ok(())
         }
@@ -785,12 +790,13 @@ impl EpollHelperHandler for BalloonEpollHandler {
                             "Failed to get reporting queue event: {e:?}"
                         ))
                     })?;
-                    let qi = self.reporting_queue_index.unwrap();
-                    self.process_reporting_queue(qi).map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to signal used reporting queue: {e:?}"
-                        ))
-                    })?;
+                    let (qi, interrupt_index) = self.reporting_queue_index.unwrap();
+                    self.process_reporting_queue(qi, interrupt_index)
+                        .map_err(|e| {
+                            EpollHelperError::HandleEvent(anyhow!(
+                                "Failed to signal used reporting queue: {e:?}"
+                            ))
+                        })?;
                 } else {
                     return Err(EpollHelperError::HandleEvent(anyhow!(
                         "Invalid reporting queue event as no eventfd registered"
@@ -1069,7 +1075,7 @@ impl VirtioDevice for Balloon {
                 let qi = virtqueues.len();
                 let (_, queue, queue_evt) = queues.remove(0);
                 virtqueues.push(queue);
-                (Some(queue_evt), Some(qi))
+                (Some(queue_evt), Some((qi, qi as u16)))
             } else {
                 (None, None)
             };
