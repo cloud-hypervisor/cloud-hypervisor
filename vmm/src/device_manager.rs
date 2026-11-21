@@ -1634,6 +1634,15 @@ impl DeviceManager {
             }
         }
 
+        if let Some((_, devices)) = &self.iommu_attached_devices {
+            for &bdf in devices {
+                if !self.is_iommu_device_removable(bdf) {
+                    self.pci_segments[bdf.segment() as usize].slots[bdf.device() as usize]
+                        .ejectable = false;
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -6859,6 +6868,30 @@ mod tests {
                 "ivshmem": {"path": memory.path(), "size": 0x200000, "pci_segment": 1, "pci_device_id": 7}
             }),
             &[&[0, 1, 2], &[0, 7]],
+        );
+    }
+
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    #[test]
+    fn pci_slot_aml_iommu_removal_restrictions() {
+        let disk = tempfile::NamedTempFile::new().unwrap();
+        disk.as_file().set_len(0x100000).unwrap();
+        check_pci_slot_aml(
+            serde_json::json!({
+                "memory": {"size": 0x8000000},
+                "platform": {"num_pci_segments": 3, "iommu_segments": [1]},
+                "console": {"mode": "Null", "pci_device_id": 1},
+                "rng": {"src": "/dev/urandom", "iommu": "Virtio", "pci_segment": 1, "pci_device_id": 0},
+                "disks": [
+                    {"path": disk.path(), "image_type": "Raw", "readonly": true, "iommu": "Virtio", "pci_device_id": 3},
+                    {"path": disk.path(), "image_type": "Raw", "readonly": true, "iommu": "Virtio", "pci_segment": 1, "pci_device_id": 5},
+                    {"path": disk.path(), "image_type": "Raw", "readonly": true, "pci_segment": 2, "pci_device_id": 0}
+                ]
+            }),
+            // The individually attached disk and the IOMMU itself are fixed.
+            // The disk on the IOMMU segment is removable, but its RNG is not.
+            // The disk on segment 2 is removable without an IOMMU.
+            &[&[0, 1, 2, 3], &[0], &[]],
         );
     }
 
