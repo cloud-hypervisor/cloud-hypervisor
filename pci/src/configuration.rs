@@ -562,6 +562,7 @@ pub struct PciConfiguration {
     msix_cap_reg_idx: Option<usize>,
     msix_config: Option<Arc<Mutex<MsixConfig>>>,
     pending_bar_reprogram: Vec<BarReprogrammingParams>,
+    bar_mapped: [bool; NUM_BAR_REGS + 1],
 }
 
 /// See pci_regs.h in kernel
@@ -741,6 +742,9 @@ impl PciConfiguration {
             msix_cap_reg_idx,
             msix_config,
             pending_bar_reprogram,
+
+            // BARs are mapped at creation, whatever the COMMAND register says.
+            bar_mapped: [true; NUM_BAR_REGS + 1],
         };
         config.fixup_pending_bar_reprogram()
     }
@@ -1151,6 +1155,14 @@ impl PciConfiguration {
         }
 
         Vec::new()
+    }
+
+    pub fn is_bar_mapped(&self, slot: usize) -> bool {
+        self.bar_mapped[slot]
+    }
+
+    pub fn set_bar_mapped(&mut self, slot: usize, mapped: bool) {
+        self.bar_mapped[slot] = mapped;
     }
 
     pub fn read_config_register(&self, reg_idx: usize) -> u32 {

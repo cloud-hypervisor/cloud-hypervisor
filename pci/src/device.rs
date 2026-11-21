@@ -99,6 +99,12 @@ pub trait PciDevice: Send {
     /// This rolls back the address update made by detect_bar_reprogramming()
     /// so that the config register stays consistent with the MMIO bus mapping.
     fn restore_bar_addr(&mut self, _params: &BarReprogrammingParams) {}
+    /// Whether BAR `bar_idx` is mapped.
+    fn is_bar_mapped(&self, _bar_idx: usize) -> bool {
+        true
+    }
+    /// Records whether BAR `bar_idx` is mapped.
+    fn set_bar_mapped(&mut self, _bar_idx: usize, _mapped: bool) {}
     /// Provides a mutable reference to the Any trait. This is useful to let
     /// the caller have access to the underlying type behind the trait.
     fn as_any_mut(&mut self) -> &mut dyn Any;

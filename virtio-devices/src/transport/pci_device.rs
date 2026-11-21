@@ -1233,6 +1233,14 @@ impl PciDevice for VirtioPciDevice {
         self.configuration.restore_bar_addr(params);
     }
 
+    fn is_bar_mapped(&self, bar_idx: usize) -> bool {
+        self.configuration.is_bar_mapped(bar_idx)
+    }
+
+    fn set_bar_mapped(&mut self, bar_idx: usize, mapped: bool) {
+        self.configuration.set_bar_mapped(bar_idx, mapped);
+    }
+
     fn read_bar(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
         match offset {
             o if o < COMMON_CONFIG_BAR_OFFSET + COMMON_CONFIG_SIZE => {

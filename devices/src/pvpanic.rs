@@ -243,6 +243,14 @@ impl PciDevice for PvPanicDevice {
         self.configuration.restore_bar_addr(params);
     }
 
+    fn is_bar_mapped(&self, bar_idx: usize) -> bool {
+        self.configuration.is_bar_mapped(bar_idx)
+    }
+
+    fn set_bar_mapped(&mut self, bar_idx: usize, mapped: bool) {
+        self.configuration.set_bar_mapped(bar_idx, mapped);
+    }
+
     fn read_bar(&mut self, _base: u64, _offset: u64, data: &mut [u8]) {
         if data.len() != 1 {
             debug!("Invalid sized read of pvpanic register: {}", data.len());
