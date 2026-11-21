@@ -11,7 +11,7 @@ use std::{io, result};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_allocator::{AddressAllocator, SystemAllocator};
-use vm_device::Resource;
+use vm_device::{BusDeviceSync, Resource};
 
 use crate::configuration::{self, PciBarRegionType};
 use crate::{PciBarConfiguration, PciBdf};
@@ -127,6 +127,28 @@ pub trait DeviceRelocation: Send + Sync {
         new_base: u64,
         len: u64,
         pci_dev: &mut dyn PciDevice,
+        region_type: PciBarRegionType,
+    ) -> result::Result<(), io::Error>;
+
+    /// Unmaps the BAR at `base`, which keeps its config space address.
+    fn unmap_bar(
+        &self,
+        bar_idx: usize,
+        base: u64,
+        len: u64,
+        pci_dev: &mut dyn PciDevice,
+        bus_device: &Arc<dyn BusDeviceSync>,
+        region_type: PciBarRegionType,
+    ) -> result::Result<(), io::Error>;
+
+    /// Maps an unmapped BAR at `base`.
+    fn map_bar(
+        &self,
+        bar_idx: usize,
+        base: u64,
+        len: u64,
+        pci_dev: &mut dyn PciDevice,
+        bus_device: &Arc<dyn BusDeviceSync>,
         region_type: PciBarRegionType,
     ) -> result::Result<(), io::Error>;
 }

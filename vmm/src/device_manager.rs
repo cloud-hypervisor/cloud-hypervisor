@@ -824,6 +824,118 @@ impl AddressManager {
 
         pci_dev.move_bar(bar_idx, new_base)
     }
+
+    fn set_ioeventfds(
+        &self,
+        pci_dev: &mut dyn PciDevice,
+        bar_idx: usize,
+        base: u64,
+        register: bool,
+    ) -> result::Result<(), io::Error> {
+        let Some(virtio_pci_dev) = pci_dev.as_any_mut().downcast_ref::<VirtioPciDevice>() else {
+            return Ok(());
+        };
+        if bar_idx != VIRTIO_CONFIG_BAR_INDEX {
+            return Ok(());
+        }
+
+        let (action, undo) = if register {
+            ("register", "unregister")
+        } else {
+            ("unregister", "register")
+        };
+
+        let ioeventfds: Vec<_> = virtio_pci_dev.ioeventfds(base).collect();
+        for (i, (event, addr)) in ioeventfds.iter().enumerate() {
+            let io_addr = IoEventAddress::Mmio(*addr);
+            let result = if register {
+                self.vm.register_ioevent(event, &io_addr, None)
+            } else {
+                self.vm.unregister_ioevent(event, &io_addr)
+            };
+            if let Err(e) = result {
+                for (event, addr) in &ioeventfds[..i] {
+                    let io_addr = IoEventAddress::Mmio(*addr);
+                    let result = if register {
+                        self.vm.unregister_ioevent(event, &io_addr)
+                    } else {
+                        self.vm.register_ioevent(event, &io_addr, None)
+                    };
+                    if let Err(e) = result {
+                        error!("Failed to {undo} ioevent at {addr:#x} again: {e:?}");
+                    }
+                }
+                return Err(io::Error::other(format!(
+                    "Failed to {action} ioevent: {e:?}"
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn allocate_range(
+        &self,
+        segment: usize,
+        base: u64,
+        len: u64,
+        region_type: PciBarRegionType,
+    ) -> result::Result<(), io::Error> {
+        match region_type {
+            PciBarRegionType::IoRegion => self
+                .allocator
+                .lock()
+                .unwrap()
+                .allocate_io_addresses(
+                    Some(GuestAddress(base)),
+                    len as GuestUsize,
+                    Some(len.max(4)),
+                )
+                .map(|_| ())
+                .ok_or_else(|| {
+                    io::Error::other(format!("Cannot allocate IO BAR address range at {base:#x}"))
+                }),
+            PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
+                let allocators = if region_type == PciBarRegionType::Memory32BitRegion {
+                    &self.pci_mmio32_allocators
+                } else {
+                    &self.pci_mmio64_allocators
+                };
+                allocators[segment]
+                    .lock()
+                    .unwrap()
+                    .allocate(Some(GuestAddress(base)), len as GuestUsize, Some(len))
+                    .map(|_| ())
+                    .ok_or_else(|| {
+                        io::Error::other(format!(
+                            "Cannot allocate MMIO BAR address range at {base:#x}"
+                        ))
+                    })
+            }
+        }
+    }
+
+    fn free_range(&self, segment: usize, base: u64, len: u64, region_type: PciBarRegionType) {
+        match region_type {
+            PciBarRegionType::IoRegion => {
+                self.allocator
+                    .lock()
+                    .unwrap()
+                    .free_io_addresses(GuestAddress(base), len as GuestUsize);
+            }
+            PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
+                let allocators = if region_type == PciBarRegionType::Memory32BitRegion {
+                    &self.pci_mmio32_allocators
+                } else {
+                    &self.pci_mmio64_allocators
+                };
+                allocators[segment]
+                    .lock()
+                    .unwrap()
+                    .free(GuestAddress(base), len as GuestUsize);
+            }
+        }
+    }
 }
 
 impl DeviceRelocation for AddressManager {
@@ -863,6 +975,77 @@ impl DeviceRelocation for AddressManager {
         self.update_device(pci_dev, bar_idx, old_base, new_base)?;
 
         self.update_device_tree(pci_dev, bar_idx, new_base)
+    }
+
+    fn unmap_bar(
+        &self,
+        bar_idx: usize,
+        base: u64,
+        len: u64,
+        pci_dev: &mut dyn PciDevice,
+        bus_device: &Arc<dyn BusDeviceSync>,
+        region_type: PciBarRegionType,
+    ) -> result::Result<(), io::Error> {
+        let segment = usize::from(pci_dev.bdf().segment());
+        let bus = match region_type {
+            PciBarRegionType::IoRegion => &self.io_bus,
+            PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
+                &self.mmio_bus
+            }
+        };
+
+        bus.remove_device_range(bus_device.as_ref(), base, len)
+            .map_err(io::Error::other)?;
+        if let Err(e) = self.set_ioeventfds(pci_dev, bar_idx, base, false) {
+            if let Err(e) = bus.insert(Arc::clone(bus_device), base, len) {
+                error!("Failed to put BAR {bar_idx} at {base:#x} on the bus again: {e}");
+            }
+            return Err(e);
+        }
+
+        self.free_range(segment, base, len, region_type);
+
+        Ok(())
+    }
+
+    fn map_bar(
+        &self,
+        bar_idx: usize,
+        base: u64,
+        len: u64,
+        pci_dev: &mut dyn PciDevice,
+        bus_device: &Arc<dyn BusDeviceSync>,
+        region_type: PciBarRegionType,
+    ) -> result::Result<(), io::Error> {
+        let segment = usize::from(pci_dev.bdf().segment());
+        let bus = match region_type {
+            PciBarRegionType::IoRegion => &self.io_bus,
+            PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
+                &self.mmio_bus
+            }
+        };
+        self.allocate_range(segment, base, len, region_type)?;
+        if let Err(e) = bus.insert(Arc::clone(bus_device), base, len) {
+            self.free_range(segment, base, len, region_type);
+            return Err(io::Error::other(e));
+        }
+
+        if let Err(e) = pci_dev
+            .move_bar(bar_idx, base)
+            .and_then(|()| self.set_ioeventfds(pci_dev, bar_idx, base, true))
+        {
+            if let Err(e) = bus.remove(base, len) {
+                error!("Failed to remove BAR {bar_idx} at {base:#x} from the bus: {e}");
+            }
+            self.free_range(segment, base, len, region_type);
+            return Err(e);
+        }
+
+        if let Err(e) = self.update_device_tree(pci_dev, bar_idx, base) {
+            warn!("BAR {bar_idx} mapped at {base:#x} without a device-tree update: {e}");
+        }
+
+        Ok(())
     }
 }
 
