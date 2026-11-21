@@ -28,3 +28,5 @@ mod guest_memory;
 pub use guest_memory::{
     Error as GuestRegionError, GuestMemory, GuestMemoryNotification, GuestRegion,
 };
+mod range_map;
+pub use range_map::{RangeMap, RangeMapError};
