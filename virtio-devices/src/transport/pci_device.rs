@@ -1167,6 +1167,9 @@ impl PciDevice for VirtioPciDevice {
                 })?;
 
                 for (idx, shm) in shm_list.region_list.iter().enumerate() {
+                    if shm.len == 0 {
+                        continue;
+                    }
                     let shm_cap = VirtioPciCap64::new(
                         PciCapabilityType::SharedMemory,
                         VIRTIO_SHM_BAR_INDEX as u8,
