@@ -251,10 +251,25 @@ fn virtio_vhost_fs_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
     ]
 }
 
+#[cfg(any(feature = "kvm", feature = "mshv"))]
+fn create_generic_vhost_user_ioctl_seccomp_rule() -> Vec<SeccompRule> {
+    or![
+        #[cfg(feature = "kvm")]
+        and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_USER_MEMORY_REGION2).unwrap()],
+        #[cfg(feature = "mshv")]
+        and![Cond::new(1, ArgLen::Dword, Eq, MSHV_SET_GUEST_MEMORY()).unwrap()],
+    ]
+}
+
 fn virtio_generic_vhost_user_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
     vec![
         (libc::SYS_clock_nanosleep, vec![]),
         (libc::SYS_connect, vec![]),
+        #[cfg(any(feature = "kvm", feature = "mshv"))]
+        (
+            libc::SYS_ioctl,
+            create_generic_vhost_user_ioctl_seccomp_rule(),
+        ),
         (libc::SYS_nanosleep, vec![]),
         (libc::SYS_pread64, vec![]),
         (libc::SYS_pwrite64, vec![]),
@@ -464,5 +479,13 @@ mod tests {
         for syscall in [libc::SYS_accept4, libc::SYS_setsockopt] {
             assert!(rules.iter().any(|(number, _)| *number == syscall));
         }
+    }
+
+    #[test]
+    fn test_generic_vhost_user_ioctl_rules() {
+        let rules = get_seccomp_rules(Thread::VirtioGenericVhostUser);
+        let has_ioctl = rules.iter().any(|(number, _)| *number == libc::SYS_ioctl);
+        assert_eq!(has_ioctl, cfg!(any(feature = "kvm", feature = "mshv")));
+        get_seccomp_filter(&SeccompAction::Trap, Thread::VirtioGenericVhostUser).unwrap();
     }
 }
