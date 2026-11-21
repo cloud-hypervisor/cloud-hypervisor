@@ -5704,6 +5704,10 @@ impl DeviceManager {
                     }
                     PciDeviceHandle::Virtio(virtio_pci_device) => {
                         let dev = virtio_pci_device.lock().unwrap();
+                        if !dev.is_removable() {
+                            let device_type = dev.virtio_device().lock().unwrap().device_type();
+                            return Err(DeviceManagerError::RemovalNotAllowed(device_type.into()));
+                        }
                         let config_bar_idx = VIRTIO_CONFIG_BAR_INDEX;
                         let bar_addr = pci_bar_resources.iter().find_map(|r| match r {
                             Resource::PciBar { index, base, .. } if *index == config_bar_idx => {
