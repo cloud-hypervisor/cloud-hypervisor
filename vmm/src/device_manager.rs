@@ -5609,22 +5609,14 @@ impl DeviceManager {
             .as_ref()
             .ok_or(DeviceManagerError::MissingPciDevice)?;
         if let PciDeviceHandle::Virtio(virtio_pci_device) = pci_device_handle {
-            let device_type = VirtioDeviceType::from(
-                virtio_pci_device
-                    .lock()
-                    .unwrap()
+            let virtio_pci_device = virtio_pci_device.lock().unwrap();
+            if !virtio_pci_device.is_removable() {
+                let device_type = virtio_pci_device
                     .virtio_device()
                     .lock()
                     .unwrap()
-                    .device_type(),
-            );
-            match device_type {
-                VirtioDeviceType::Net
-                | VirtioDeviceType::Block
-                | VirtioDeviceType::Pmem
-                | VirtioDeviceType::Fs
-                | VirtioDeviceType::Vsock => {}
-                _ => return Err(DeviceManagerError::RemovalNotAllowed(device_type)),
+                    .device_type();
+                return Err(DeviceManagerError::RemovalNotAllowed(device_type.into()));
             }
         }
 
