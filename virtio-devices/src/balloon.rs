@@ -57,6 +57,7 @@ const STATS_QUEUE_SIZE: u16 = 32;
 const MIN_NUM_QUEUES: u16 = 2;
 const INFLATE_QUEUE: u16 = 0;
 const DEFLATE_QUEUE: u16 = 1;
+const STATS_QUEUE: u16 = 2;
 
 // Inflate virtio queue event.
 const INFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
@@ -291,7 +292,8 @@ struct BalloonEpollHandler {
     deflate_queue_evt: EventFd,
     stats_handler: Option<BalloonStatsHandler>,
     reporting_queue_evt: Option<EventFd>,
-    reporting_queue_index: Option<usize>,
+    // Position in queues and the queue index used for interrupts
+    reporting_queue_index: Option<(usize, u16)>,
     kill_evt: EventFd,
     pause_evt: EventFd,
     pbp: Option<PartiallyBalloonedPage>,
@@ -526,6 +528,7 @@ impl BalloonEpollHandler {
             self.queues[queue_index as usize]
                 .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
                 .map_err(Error::QueueAddUsed)?;
+            self.pbp = None;
             used_descs = true;
         }
 
@@ -633,12 +636,16 @@ impl BalloonEpollHandler {
         Ok(())
     }
 
-    fn process_reporting_queue(&mut self, queue_index: usize) -> result::Result<(), Error> {
+    fn process_reporting_queue(
+        &mut self,
+        queue_index: usize,
+        interrupt_index: u16,
+    ) -> result::Result<(), Error> {
+        let page_size = get_page_size();
         let mut used_descs = false;
         while let Some(mut desc_chain) =
             self.queues[queue_index].pop_descriptor_chain(self.mem.memory())
         {
-            let mut descs_len = 0;
             let results: SmallVec<[_; 4]> = desc_chain
                 .checked_iter(self.access_platform.as_deref())
                 .collect();
@@ -647,7 +654,19 @@ impl BalloonEpollHandler {
                     Ok(d) => d,
                     Err(_) => break,
                 };
-                descs_len += desc.len();
+                if !desc.is_write_only() {
+                    warn!("Skipping device-readable descriptor on reporting queue");
+                    continue;
+                }
+                if !desc.addr().raw_value().is_multiple_of(page_size)
+                    || !u64::from(desc.len()).is_multiple_of(page_size)
+                {
+                    warn!(
+                        "Skipping unaligned reported range at {:#x}",
+                        desc.addr().raw_value()
+                    );
+                    continue;
+                }
                 if let Err(e) = Self::release_memory_range(
                     desc_chain.memory(),
                     desc.addr(),
@@ -658,13 +677,13 @@ impl BalloonEpollHandler {
             }
 
             self.queues[queue_index]
-                .add_used(desc_chain.memory(), desc_chain.head_index(), descs_len)
+                .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
                 .map_err(Error::QueueAddUsed)?;
             used_descs = true;
         }
 
         if used_descs {
-            self.signal(VirtioInterruptType::Queue(queue_index as u16))
+            self.signal(VirtioInterruptType::Queue(interrupt_index))
         } else {
             Ok(())
         }
@@ -772,12 +791,13 @@ impl EpollHelperHandler for BalloonEpollHandler {
                             "Failed to get reporting queue event: {e:?}"
                         ))
                     })?;
-                    let qi = self.reporting_queue_index.unwrap();
-                    self.process_reporting_queue(qi).map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to signal used reporting queue: {e:?}"
-                        ))
-                    })?;
+                    let (qi, interrupt_index) = self.reporting_queue_index.unwrap();
+                    self.process_reporting_queue(qi, interrupt_index)
+                        .map_err(|e| {
+                            EpollHelperError::HandleEvent(anyhow!(
+                                "Failed to signal used reporting queue: {e:?}"
+                            ))
+                        })?;
                 } else {
                     return Err(EpollHelperError::HandleEvent(anyhow!(
                         "Invalid reporting queue event as no eventfd registered"
@@ -945,6 +965,12 @@ impl Balloon {
     }
 }
 
+fn take_queue(queues: &mut Vec<(u16, Queue, EventFd)>, index: u16) -> Option<(Queue, EventFd)> {
+    let position = queues.iter().position(|(i, _, _)| *i == index)?;
+    let (_, queue, queue_evt) = queues.remove(position);
+    Some((queue, queue_evt))
+}
+
 impl VirtioDevice for Balloon {
     fn device_type(&self) -> u32 {
         self.common.device_type
@@ -1005,51 +1031,66 @@ impl VirtioDevice for Balloon {
             mut queues,
             device_status,
         } = context;
+        if [INFLATE_QUEUE, DEFLATE_QUEUE]
+            .iter()
+            .any(|index| !queues.iter().any(|(i, _, _)| i == index))
+        {
+            error!("Inflate and deflate queues must be enabled");
+            return Err(crate::ActivateError::BadActivate);
+        }
         self.common.activate(&queues, Arc::clone(&interrupt_cb))?;
         *self.stats_cache.lock().unwrap() = None;
         let (kill_evt, pause_evt) = self.common.dup_eventfds()?;
 
         let mut virtqueues = Vec::new();
-        let (_, queue, queue_evt) = queues.remove(0);
+        let (queue, inflate_queue_evt) = take_queue(&mut queues, INFLATE_QUEUE).unwrap();
         virtqueues.push(queue);
-        let inflate_queue_evt = queue_evt;
-        let (_, queue, queue_evt) = queues.remove(0);
+        let (queue, deflate_queue_evt) = take_queue(&mut queues, DEFLATE_QUEUE).unwrap();
         virtqueues.push(queue);
-        let deflate_queue_evt = queue_evt;
 
-        let stats_handler =
-            if self.common.feature_acked(VIRTIO_BALLOON_F_STATS_VQ) && !queues.is_empty() {
-                let qi = virtqueues.len();
-                let (_, queue, queue_evt) = queues.remove(0);
-                virtqueues.push(queue);
+        let stats_acked = self.common.feature_acked(VIRTIO_BALLOON_F_STATS_VQ);
+        let stats_queue = if stats_acked {
+            take_queue(&mut queues, STATS_QUEUE)
+        } else {
+            None
+        };
+        let stats_handler = if let Some((queue, queue_evt)) = stats_queue {
+            let qi = virtqueues.len();
+            virtqueues.push(queue);
 
-                let _ = self.stats_request_evt.read();
-                let (request_sender, request_receiver) = mpsc::channel();
-                self.stats_request_sender = Some(request_sender);
-                let request_evt = self
-                    .stats_request_evt
-                    .try_clone()
-                    .map_err(crate::ActivateError::CloneEventFd)?;
+            let _ = self.stats_request_evt.read();
+            let (request_sender, request_receiver) = mpsc::channel();
+            self.stats_request_sender = Some(request_sender);
+            let request_evt = self
+                .stats_request_evt
+                .try_clone()
+                .map_err(crate::ActivateError::CloneEventFd)?;
 
-                Some(BalloonStatsHandler {
-                    queue_evt,
-                    queue_index: qi,
-                    request_evt,
-                    request_receiver,
-                    stats_cache: Arc::clone(&self.stats_cache),
-                    state: BalloonStatsState::WaitingForInitialDescriptor,
-                })
-            } else {
-                self.stats_request_sender = None;
-                None
-            };
+            Some(BalloonStatsHandler {
+                queue_evt,
+                queue_index: qi,
+                request_evt,
+                request_receiver,
+                stats_cache: Arc::clone(&self.stats_cache),
+                state: BalloonStatsState::WaitingForInitialDescriptor,
+            })
+        } else {
+            self.stats_request_sender = None;
+            None
+        };
 
+        // The stats queue is omitted from the queue numbering if not negotiated.
+        let reporting_queue = if self.common.feature_acked(VIRTIO_BALLOON_F_REPORTING) {
+            let index = STATS_QUEUE + u16::from(stats_acked);
+            take_queue(&mut queues, index).map(|queue| (index, queue))
+        } else {
+            None
+        };
         let (reporting_queue_evt, reporting_queue_index) =
-            if self.common.feature_acked(VIRTIO_BALLOON_F_REPORTING) && !queues.is_empty() {
+            if let Some((index, (queue, queue_evt))) = reporting_queue {
                 let qi = virtqueues.len();
-                let (_, queue, queue_evt) = queues.remove(0);
                 virtqueues.push(queue);
-                (Some(queue_evt), Some(qi))
+                (Some(queue_evt), Some((qi, index)))
             } else {
                 (None, None)
             };
@@ -1126,6 +1167,10 @@ impl Migratable for Balloon {}
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicU8;
+    use std::time::Duration;
+
+    use virtio_bindings::virtio_ring::VRING_DESC_F_WRITE;
     use vm_virtio::queue::testing::VirtQueue;
 
     use super::*;
@@ -1326,6 +1371,149 @@ mod tests {
             assert!(data[..balloon_size].iter().all(|byte| *byte == 0));
             assert!(data[balloon_size..].iter().all(|byte| *byte == 0xa5));
         }
+    }
+
+    #[test]
+    fn process_inflate_queue_does_not_merge_partial_pages_across_buffers() {
+        const QUEUE_ADDRESS: GuestAddress = GuestAddress(0x1_0000);
+        const PFNS_ADDRESS: GuestAddress = GuestAddress(0x2_0000);
+        const PAGES_ADDRESS: GuestAddress = GuestAddress(0x10_0000);
+
+        let page_size = get_page_size() as usize;
+        if page_size == VIRTIO_BALLOON_PAGE_SIZE {
+            return;
+        }
+
+        let pfns_per_page = page_size / VIRTIO_BALLOON_PAGE_SIZE;
+        let memory = TestMemory::from_ranges(&[
+            (GuestAddress(0), PAGES_ADDRESS.0 as usize),
+            (PAGES_ADDRESS, page_size),
+        ])
+        .unwrap();
+        memory
+            .write_slice(&vec![0xa5; page_size], PAGES_ADDRESS)
+            .unwrap();
+        for index in 0..pfns_per_page {
+            let pfn = (PAGES_ADDRESS.0 >> VIRTIO_BALLOON_PFN_SHIFT) as u32 + index as u32;
+            memory
+                .write_obj(
+                    pfn,
+                    PFNS_ADDRESS.unchecked_add((index * size_of::<u32>()) as u64),
+                )
+                .unwrap();
+        }
+
+        // Cover each half of the host page from a separate buffer.
+        let half_len = (pfns_per_page / 2 * size_of::<u32>()) as u32;
+        let guest_queue = VirtQueue::new(QUEUE_ADDRESS, &memory, 16);
+        guest_queue.dtable[0].set(PFNS_ADDRESS.0, half_len, 0, 0);
+        guest_queue.dtable[1].set(PFNS_ADDRESS.0 + u64::from(half_len), half_len, 0, 0);
+        guest_queue.avail.ring[0].set(0);
+        guest_queue.avail.ring[1].set(1);
+        guest_queue.avail.idx.set(2);
+        let mut handler = create_stats_handler(
+            &memory,
+            guest_queue.create_queue(),
+            BalloonStatsState::WaitingForInitialDescriptor,
+        );
+
+        handler.process_queue(INFLATE_QUEUE).unwrap();
+
+        assert_eq!(guest_queue.used.idx.get(), 2);
+        let mut data = vec![0; page_size];
+        memory.read_slice(&mut data, PAGES_ADDRESS).unwrap();
+        assert!(data.iter().all(|byte| *byte == 0xa5));
+    }
+
+    struct QueueInterruptSender(Mutex<mpsc::Sender<u16>>);
+
+    impl VirtioInterrupt for QueueInterruptSender {
+        fn trigger(&self, int_type: VirtioInterruptType) -> io::Result<()> {
+            if let VirtioInterruptType::Queue(queue_index) = int_type {
+                self.0.lock().unwrap().send(queue_index).unwrap();
+            }
+            Ok(())
+        }
+
+        fn set_notifier(
+            &self,
+            _int_type: u32,
+            _notifier: Option<EventFd>,
+            _vm: &dyn hypervisor::Vm,
+        ) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn reporting_queue_uses_its_own_index() {
+        const PAGES_ADDRESS: GuestAddress = GuestAddress(0x10_0000);
+
+        // Negotiate statistics but only enable the inflate, deflate and
+        // reporting queues.
+        let page_size = get_page_size() as usize;
+        let mut balloon = Balloon::new(
+            "balloon0".to_string(),
+            0,
+            false,
+            true,
+            false,
+            SeccompAction::Allow,
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+            None,
+        )
+        .unwrap();
+        balloon.common.acked_features =
+            1u64 << VIRTIO_BALLOON_F_STATS_VQ | 1u64 << VIRTIO_BALLOON_F_REPORTING;
+        let memory = TestMemory::from_ranges(&[
+            (GuestAddress(0), PAGES_ADDRESS.0 as usize),
+            (PAGES_ADDRESS, page_size),
+        ])
+        .unwrap();
+        let inflate_queue = VirtQueue::new(GuestAddress(0x1_0000), &memory, 16);
+        let deflate_queue = VirtQueue::new(GuestAddress(0x2_0000), &memory, 16);
+        let reporting_queue = VirtQueue::new(GuestAddress(0x3_0000), &memory, 16);
+        reporting_queue.dtable[0].set(
+            PAGES_ADDRESS.0,
+            page_size as u32,
+            VRING_DESC_F_WRITE as u16,
+            0,
+        );
+        reporting_queue.avail.ring[0].set(0);
+        reporting_queue.avail.idx.set(1);
+        let reporting_queue_evt = EventFd::new(EFD_NONBLOCK).unwrap();
+        let (tx, rx) = mpsc::channel();
+
+        balloon
+            .activate(ActivationContext {
+                mem: GuestMemoryAtomic::new(memory.clone()),
+                interrupt_cb: Arc::new(QueueInterruptSender(Mutex::new(tx))),
+                queues: vec![
+                    (
+                        INFLATE_QUEUE,
+                        inflate_queue.create_queue(),
+                        EventFd::new(EFD_NONBLOCK).unwrap(),
+                    ),
+                    (
+                        DEFLATE_QUEUE,
+                        deflate_queue.create_queue(),
+                        EventFd::new(EFD_NONBLOCK).unwrap(),
+                    ),
+                    (
+                        3,
+                        reporting_queue.create_queue(),
+                        reporting_queue_evt.try_clone().unwrap(),
+                    ),
+                ],
+                device_status: Arc::new(AtomicU8::new(0)),
+            })
+            .unwrap();
+        reporting_queue_evt.write(1).unwrap();
+
+        let queue_index = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        balloon.reset();
+        assert_eq!(queue_index, 3);
+        assert_eq!(reporting_queue.used.idx.get(), 1);
     }
 
     #[test]
