@@ -192,9 +192,15 @@ impl PciDevice for PvPanicDevice {
             }
         }
 
-        let bar_addr = mmio32_allocator
-            .allocate(bar_addr, region_size, Some(PVPANIC_DEVICE_MMIO_ALIGNMENT))
-            .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
+        let bar_addr = if let Some(addr) = bar_addr
+            && !self.configuration.is_bar_mapped(bar_id as usize)
+        {
+            addr
+        } else {
+            mmio32_allocator
+                .allocate(bar_addr, region_size, Some(PVPANIC_DEVICE_MMIO_ALIGNMENT))
+                .ok_or(PciDeviceError::IoAllocationFailed(region_size))?
+        };
 
         let bar = PciBarConfiguration::default()
             .set_index(bar_id as usize)

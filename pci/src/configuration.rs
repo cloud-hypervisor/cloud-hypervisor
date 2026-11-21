@@ -545,6 +545,9 @@ pub struct PciConfigurationState {
     // Preserve deferred BAR moves across snapshot and restore.
     #[serde(default)]
     pending_bar_reprogram: Vec<BarReprogrammingParams>,
+    // Absent from an older snapshot, whose BARs are all mapped.
+    #[serde(default)]
+    bar_mapped: Option<[bool; NUM_BAR_REGS + 1]>,
 }
 
 /// Contains the configuration space of a PCI node.
@@ -666,6 +669,11 @@ impl PciConfiguration {
         msix_config: Option<Arc<Mutex<MsixConfig>>>,
         state: Option<PciConfigurationState>,
     ) -> Self {
+        let bar_mapped = state
+            .as_ref()
+            .and_then(|state| state.bar_mapped)
+            // BARs are mapped at creation, whatever the COMMAND register says.
+            .unwrap_or([true; NUM_BAR_REGS + 1]);
         let (
             registers,
             writable_bits,
@@ -743,9 +751,7 @@ impl PciConfiguration {
             msix_cap_reg_idx,
             msix_config,
             pending_bar_reprogram,
-
-            // BARs are mapped at creation, whatever the COMMAND register says.
-            bar_mapped: [true; NUM_BAR_REGS + 1],
+            bar_mapped,
         };
         config.fixup_pending_bar_reprogram()
     }
@@ -825,6 +831,7 @@ impl PciConfiguration {
             last_capability: self.last_capability,
             msix_cap_reg_idx: self.msix_cap_reg_idx,
             pending_bar_reprogram: self.pending_bar_reprogram.clone(),
+            bar_mapped: Some(self.bar_mapped),
         }
     }
 

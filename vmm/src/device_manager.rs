@@ -4995,7 +4995,14 @@ impl DeviceManager {
     ) -> DeviceManagerResult<()> {
         self.bus_devices.push(Arc::clone(&bus_device));
 
-        self.register_bar_mapping(Arc::clone(&bus_device), &bars)?;
+        let mapped: Vec<PciBarConfiguration> = {
+            let device = pci_device.lock().unwrap();
+            bars.iter()
+                .filter(|bar| device.is_bar_mapped(bar.idx()))
+                .copied()
+                .collect()
+        };
+        self.register_bar_mapping(Arc::clone(&bus_device), &mapped)?;
 
         self.pci_segments[segment_id as usize]
             .pci_bus
@@ -5343,12 +5350,17 @@ impl DeviceManager {
             .find(|bar| bar.idx() == VIRTIO_CONFIG_BAR_INDEX)
             .unwrap()
             .addr();
-        for (event, addr) in virtio_pci_device.lock().unwrap().ioeventfds(bar_addr) {
-            let io_addr = IoEventAddress::Mmio(addr);
-            self.address_manager
-                .vm
-                .register_ioevent(event, &io_addr, None)
-                .map_err(DeviceManagerError::RegisterIoevent)?;
+        {
+            let device = virtio_pci_device.lock().unwrap();
+            if device.is_bar_mapped(VIRTIO_CONFIG_BAR_INDEX) {
+                for (event, addr) in device.ioeventfds(bar_addr) {
+                    let io_addr = IoEventAddress::Mmio(addr);
+                    self.address_manager
+                        .vm
+                        .register_ioevent(event, &io_addr, None)
+                        .map_err(DeviceManagerError::RegisterIoevent)?;
+                }
+            }
         }
 
         // Update the device tree with correct resource information.
@@ -7269,5 +7281,149 @@ mod tests {
             create_mmio_allocators(0x100000, 0x3fffff, 1024, &[1; 1024], 4 << 10),
             Err(DeviceManagerError::PciSegmentMmioAperture(0))
         ));
+    }
+
+    /// An address manager over a single PCI segment with `mmio32` as its
+    /// 32-bit MMIO allocator.
+    fn bar_test_address_manager(mmio32: &Arc<Mutex<AddressAllocator>>) -> AddressManager {
+        AddressManager {
+            allocator: Arc::new(Mutex::new(
+                SystemAllocator::new(
+                    GuestAddress(0),
+                    0x10000,
+                    GuestAddress(0x2000_0000),
+                    0x1000_0000,
+                    #[cfg(target_arch = "x86_64")]
+                    &[vm_allocator::GsiApic::new(5, 19)],
+                    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+                    arch::IRQ_BASE,
+                )
+                .unwrap(),
+            )),
+            io_bus: Arc::new(Bus::new()),
+            mmio_bus: Arc::new(Bus::new()),
+            vm: hypervisor::new()
+                .unwrap()
+                .create_vm(hypervisor::HypervisorVmConfig::default())
+                .unwrap(),
+            device_tree: Arc::new(Mutex::new(DeviceTree::new())),
+            pci_mmio32_allocators: Box::new([Arc::clone(mmio32)]),
+            pci_mmio64_allocators: Box::new([]),
+        }
+    }
+
+    const PVPANIC_ID: &str = "pvpanic0";
+    const PVPANIC_SLOT: u8 = 1;
+    const COMMAND_REG: u64 = 1;
+    const MEMORY_SPACE_ENABLE: u16 = 0x2;
+
+    /// Puts `device` on a PCI bus backed by `address_manager`, with BAR 0
+    /// at `base` in its device tree node.
+    fn pvpanic_on_bus(
+        address_manager: &Arc<AddressManager>,
+        device: &Arc<Mutex<devices::PvPanicDevice>>,
+        base: u64,
+        size: u64,
+    ) -> pci::PciConfigMmio {
+        let mut node = DeviceNode::new(PVPANIC_ID.to_owned(), None);
+        node.resources.push(Resource::PciBar {
+            index: 0,
+            base,
+            size,
+            type_: vm_device::PciBarType::Mmio32,
+            prefetchable: false,
+        });
+        address_manager
+            .device_tree
+            .lock()
+            .unwrap()
+            .insert(PVPANIC_ID.to_owned(), node);
+        let mut pci_bus = pci::PciBus::new(None, Arc::clone(address_manager) as _);
+        pci_bus
+            .add_device(
+                PVPANIC_SLOT,
+                Arc::clone(device) as Arc<Mutex<dyn PciDevice>>,
+                Arc::clone(device) as Arc<dyn BusDeviceSync>,
+            )
+            .unwrap();
+        pci::PciConfigMmio::new(Arc::new(Mutex::new(pci_bus)))
+    }
+
+    fn write_command(config_mmio: &mut pci::PciConfigMmio, command: u16) {
+        BusDevice::write(
+            config_mmio,
+            0,
+            (u64::from(PVPANIC_SLOT) << 15) | (COMMAND_REG << 2),
+            &command.to_le_bytes(),
+        );
+    }
+
+    /// A BAR unmapped at snapshot time restores unmapped: its saved range is
+    /// neither allocated nor mapped until the guest enables the memory space.
+    #[test]
+    fn restored_unmapped_bar_stays_unmapped_until_its_space_is_enabled() {
+        let bdf = PciBdf::new(0, 0, PVPANIC_SLOT, 0);
+        let mmio32 = Arc::new(Mutex::new(
+            AddressAllocator::new(GuestAddress(0xc000_0000), 0x1000_0000).unwrap(),
+        ));
+        let mut mmio64 = AddressAllocator::new(GuestAddress(1 << 32), 0x1000_0000).unwrap();
+        let address_manager = Arc::new(bar_test_address_manager(&mmio32));
+
+        let mut device = devices::PvPanicDevice::new(PVPANIC_ID.to_owned(), bdf, None).unwrap();
+        let bars = device
+            .allocate_bars(
+                &mut address_manager.allocator.lock().unwrap(),
+                &mut mmio32.lock().unwrap(),
+                &mut mmio64,
+                None,
+            )
+            .unwrap();
+        let (base, size) = (bars[0].addr(), bars[0].size());
+        device.set_bar_mapped(0, false);
+        let snapshot = device.snapshot().unwrap();
+        mmio32.lock().unwrap().free(GuestAddress(base), size);
+
+        let device = Arc::new(Mutex::new(
+            devices::PvPanicDevice::new(PVPANIC_ID.to_owned(), bdf, Some(&snapshot)).unwrap(),
+        ));
+        let bars = device
+            .lock()
+            .unwrap()
+            .allocate_bars(
+                &mut address_manager.allocator.lock().unwrap(),
+                &mut mmio32.lock().unwrap(),
+                &mut mmio64,
+                Some(vec![Resource::PciBar {
+                    index: 0,
+                    base,
+                    size,
+                    type_: vm_device::PciBarType::Mmio32,
+                    prefetchable: false,
+                }]),
+            )
+            .unwrap();
+        assert_eq!(bars[0].addr(), base);
+        assert!(!device.lock().unwrap().is_bar_mapped(0));
+        let mut config_mmio = pvpanic_on_bus(&address_manager, &device, base, size);
+        {
+            let mut allocator = mmio32.lock().unwrap();
+            assert!(
+                allocator
+                    .allocate(Some(GuestAddress(base)), size, Some(size))
+                    .is_some()
+            );
+            allocator.free(GuestAddress(base), size);
+        }
+
+        write_command(&mut config_mmio, MEMORY_SPACE_ENABLE);
+        assert!(device.lock().unwrap().is_bar_mapped(0));
+        address_manager.mmio_bus.read(base, &mut [0u8; 1]).unwrap();
+        assert!(
+            mmio32
+                .lock()
+                .unwrap()
+                .allocate(Some(GuestAddress(base)), size, Some(size))
+                .is_none()
+        );
     }
 }

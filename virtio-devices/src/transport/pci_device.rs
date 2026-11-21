@@ -1104,27 +1104,32 @@ impl PciDevice for VirtioPciDevice {
 
         // Allocate the virtio-pci capability BAR.
         // See http://docs.oasis-open.org/virtio/virtio/v1.0/cs04/virtio-v1.0-cs04.html#x1-740004
-        let (virtio_pci_bar_addr, region_type) = if use_64bit_bar {
-            let region_type = PciBarRegionType::Memory64BitRegion;
+        let region_type = if use_64bit_bar {
+            PciBarRegionType::Memory64BitRegion
+        } else {
+            PciBarRegionType::Memory32BitRegion
+        };
+        let virtio_pci_bar_addr = if let Some(addr) = settings_bar_addr
+            && !self.configuration.is_bar_mapped(VIRTIO_CONFIG_BAR_INDEX)
+        {
+            addr
+        } else if use_64bit_bar {
             let alignment = if restoring {
                 None
             } else {
                 Some(VIRTIO_PCI_BAR_ALIGN)
             };
-            let addr = mmio64_allocator
+            mmio64_allocator
                 .allocate(settings_bar_addr, CAPABILITY_BAR_SIZE, alignment)
-                .ok_or(PciDeviceError::IoAllocationFailed(CAPABILITY_BAR_SIZE))?;
-            (addr, region_type)
+                .ok_or(PciDeviceError::IoAllocationFailed(CAPABILITY_BAR_SIZE))?
         } else {
-            let region_type = PciBarRegionType::Memory32BitRegion;
-            let addr = mmio32_allocator
+            mmio32_allocator
                 .allocate(
                     settings_bar_addr,
                     CAPABILITY_BAR_SIZE,
                     Some(CAPABILITY_BAR_SIZE),
                 )
-                .ok_or(PciDeviceError::IoAllocationFailed(CAPABILITY_BAR_SIZE))?;
-            (addr, region_type)
+                .ok_or(PciDeviceError::IoAllocationFailed(CAPABILITY_BAR_SIZE))?
         };
 
         let bar = PciBarConfiguration::default()
