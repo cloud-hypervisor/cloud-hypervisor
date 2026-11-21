@@ -647,6 +647,10 @@ impl BalloonEpollHandler {
                     Ok(d) => d,
                     Err(_) => break,
                 };
+                if !desc.is_write_only() {
+                    warn!("Skipping device-readable descriptor on reporting queue");
+                    continue;
+                }
                 if let Err(e) = Self::release_memory_range(
                     desc_chain.memory(),
                     desc.addr(),
