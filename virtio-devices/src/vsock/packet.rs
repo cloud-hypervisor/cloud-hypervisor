@@ -21,8 +21,8 @@ use std::ops::Deref;
 
 use virtio_queue::DescriptorChain;
 use vm_memory::{
-    Address, Bytes, GuestAddress, GuestMemoryBackend, ReadVolatile, VolatileMemoryError,
-    WriteVolatile,
+    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend, ReadVolatile,
+    VolatileMemoryError, WriteVolatile,
 };
 use vm_virtio::AccessPlatform;
 use vm_virtio::checked_descriptor::DescriptorChainExt;
@@ -124,7 +124,8 @@ enum PacketBuffer {
 impl PacketBuffer {
     fn guest(mem: GuestMemory, addr: GuestAddress, len: usize) -> Result<Self> {
         // Validate the range before storing it.
-        mem.get_slice(addr, len)
+        mem.memory()
+            .get_slice(addr, len)
             .map_err(|_| VsockError::GuestMemory)?;
 
         Ok(Self::Guest { mem, addr, len })
@@ -161,6 +162,7 @@ impl PacketBuffer {
 
         match self {
             Self::Guest { mem, addr, .. } => {
+                let mem = mem.memory();
                 let addr = Self::guest_addr(*addr, offset)?;
                 let slice = mem
                     .get_slice(addr, dst.len())
@@ -185,6 +187,7 @@ impl PacketBuffer {
 
         match self {
             Self::Guest { mem, addr, .. } => {
+                let mem = mem.memory();
                 let addr = Self::guest_addr(*addr, offset)?;
                 let slice = mem
                     .get_slice(addr, src.len())
@@ -208,6 +211,7 @@ impl PacketBuffer {
 
         match self {
             Self::Guest { mem, addr, .. } => {
+                let mem = mem.memory();
                 let mut slice = mem.get_slice(*addr, len).map_err(|_| {
                     io::Error::new(ErrorKind::InvalidInput, "invalid guest memory range")
                 })?;
@@ -228,6 +232,7 @@ impl PacketBuffer {
 
         match self {
             Self::Guest { mem, addr, .. } => {
+                let mem = mem.memory();
                 let addr = Self::guest_addr(*addr, offset).map_err(|e| vsock_error_to_io(&e))?;
                 let slice = mem.get_slice(addr, len).map_err(|_| {
                     io::Error::new(ErrorKind::InvalidInput, "invalid guest memory range")
@@ -269,10 +274,12 @@ impl VsockPacket {
     /// creating the wrapper.
     pub fn from_tx_virtq_head<M>(
         desc_chain: &mut DescriptorChain<M>,
+        mem: &GuestMemory,
         access_platform: Option<&dyn AccessPlatform>,
     ) -> Result<Self>
     where
-        M: Clone + Deref<Target = GuestMemory>,
+        M: Deref,
+        M::Target: GuestMemoryBackend,
     {
         let head = desc_chain
             .next_checked(access_platform)
@@ -334,11 +341,7 @@ impl VsockPacket {
                 .addr()
                 .checked_add(VSOCK_PKT_HDR_SIZE as u64)
                 .ok_or(VsockError::GuestMemory)?;
-            pkt.buf = Some(PacketBuffer::guest(
-                desc_chain.memory().clone(),
-                buf_addr,
-                total_len,
-            )?);
+            pkt.buf = Some(PacketBuffer::guest(mem.clone(), buf_addr, total_len)?);
 
             return Ok(pkt);
         }
@@ -398,7 +401,7 @@ impl VsockPacket {
                 return Err(VsockError::BufDescTooSmall);
             }
             pkt.buf = Some(PacketBuffer::guest(
-                desc_chain.memory().clone(),
+                mem.clone(),
                 buf_desc.addr(),
                 total_len,
             )?);
@@ -413,10 +416,12 @@ impl VsockPacket {
     /// descriptor. Bounds and pointer checks are performed when creating the wrapper.
     pub fn from_rx_virtq_head<M>(
         desc_chain: &mut DescriptorChain<M>,
+        mem: &GuestMemory,
         access_platform: Option<&dyn AccessPlatform>,
     ) -> Result<Self>
     where
-        M: Clone + Deref<Target = GuestMemory>,
+        M: Deref,
+        M::Target: GuestMemoryBackend,
     {
         let head = desc_chain
             .next_checked(access_platform)
@@ -480,11 +485,7 @@ impl VsockPacket {
         };
 
         let buf = if let Some(addr) = buf_addr {
-            Some(PacketBuffer::guest(
-                desc_chain.memory().clone(),
-                addr,
-                buf_size,
-            )?)
+            Some(PacketBuffer::guest(mem.clone(), addr, buf_size)?)
         } else {
             None
         };
@@ -690,7 +691,6 @@ mod tests {
 
     use super::super::tests::TestContext;
     use super::*;
-    use crate::GuestMemory;
     use crate::vsock::defs::MAX_PKT_BUF_SIZE;
 
     macro_rules! create_context {
@@ -698,7 +698,7 @@ mod tests {
             let $test_ctx = TestContext::new();
             let mut $handler_ctx = $test_ctx.create_epoll_handler_context();
             // For TX packets, hdr.len should be set to a valid value.
-            set_pkt_len(1024, &$handler_ctx.guest_txvq.dtable[0], &$test_ctx.mem);
+            set_pkt_len(1024, &$handler_ctx.guest_txvq.dtable[0], &*$test_ctx.map);
         };
     }
 
@@ -712,10 +712,11 @@ mod tests {
         ($test_ctx:expr, $handler_ctx:expr, $err:pat, $ctor:ident, $vq:expr) => {
             match VsockPacket::$ctor(
                 &mut $handler_ctx.handler.queues[$vq]
-                    .iter(&$test_ctx.mem)
+                    .iter(&*$test_ctx.map)
                     .unwrap()
                     .next()
                     .unwrap(),
+                &$handler_ctx.handler.mem,
                 None,
             ) {
                 Err($err) => (),
@@ -725,7 +726,7 @@ mod tests {
         };
     }
 
-    fn set_pkt_len(len: u32, guest_desc: &GuestQDesc<'_, GuestMemory>, mem: &GuestMemory) {
+    fn set_pkt_len<M: GuestMemoryBackend>(len: u32, guest_desc: &GuestQDesc<'_, M>, mem: &M) {
         let hdr_gpa = guest_desc.addr.get();
         mem.write_slice(
             &len.to_le_bytes(),
@@ -742,10 +743,11 @@ mod tests {
 
             let pkt = VsockPacket::from_tx_virtq_head(
                 &mut handler_ctx.handler.queues[1]
-                    .iter(&test_ctx.mem)
+                    .iter(&*test_ctx.map)
                     .unwrap()
                     .next()
                     .unwrap(),
+                &handler_ctx.handler.mem,
                 None,
             )
             .unwrap();
@@ -774,13 +776,14 @@ mod tests {
         // Test case: zero-length TX packet.
         {
             create_context!(test_ctx, handler_ctx);
-            set_pkt_len(0, &handler_ctx.guest_txvq.dtable[0], &test_ctx.mem);
+            set_pkt_len(0, &handler_ctx.guest_txvq.dtable[0], &*test_ctx.map);
             let pkt = VsockPacket::from_tx_virtq_head(
                 &mut handler_ctx.handler.queues[1]
-                    .iter(&test_ctx.mem)
+                    .iter(&*test_ctx.map)
                     .unwrap()
                     .next()
                     .unwrap(),
+                &handler_ctx.handler.mem,
                 None,
             )
             .unwrap();
@@ -794,7 +797,7 @@ mod tests {
             set_pkt_len(
                 MAX_PKT_BUF_SIZE as u32 + 1,
                 &handler_ctx.guest_txvq.dtable[0],
-                &test_ctx.mem,
+                &*test_ctx.map,
             );
             expect_asm_error!(tx, test_ctx, handler_ctx, VsockError::InvalidPktLen(_));
         }
@@ -812,7 +815,7 @@ mod tests {
         // packet header `len` field.
         {
             create_context!(test_ctx, handler_ctx);
-            set_pkt_len(8 * 1024, &handler_ctx.guest_txvq.dtable[0], &test_ctx.mem);
+            set_pkt_len(8 * 1024, &handler_ctx.guest_txvq.dtable[0], &*test_ctx.map);
             handler_ctx.guest_txvq.dtable[1].len.set(4 * 1024);
             expect_asm_error!(tx, test_ctx, handler_ctx, VsockError::BufDescTooSmall);
         }
@@ -822,7 +825,7 @@ mod tests {
     fn test_tx_packet_assembly_multi_desc() {
         const QSIZE: u16 = 4;
         let test_ctx = TestContext::new();
-        let guest_txvq = GuestQ::new(GuestAddress(0x0060_0000), &test_ctx.mem, QSIZE);
+        let guest_txvq = GuestQ::new(GuestAddress(0x0060_0000), &*test_ctx.map, QSIZE);
         let mut queue = guest_txvq.create_queue();
 
         guest_txvq.dtable[0].set(
@@ -841,18 +844,19 @@ mod tests {
         guest_txvq.avail.ring[0].set(0);
         guest_txvq.avail.idx.set(1);
 
-        set_pkt_len(8 * 1024, &guest_txvq.dtable[0], &test_ctx.mem);
+        set_pkt_len(8 * 1024, &guest_txvq.dtable[0], &*test_ctx.map);
         test_ctx
-            .mem
+            .map
             .write_slice(&[0xaa_u8; 4 * 1024], GuestAddress(0x0061_1000))
             .unwrap();
         test_ctx
-            .mem
+            .map
             .write_slice(&[0xbb_u8; 4 * 1024], GuestAddress(0x0061_2000))
             .unwrap();
 
         let pkt = VsockPacket::from_tx_virtq_head(
-            &mut queue.iter(&test_ctx.mem).unwrap().next().unwrap(),
+            &mut queue.iter(&*test_ctx.map).unwrap().next().unwrap(),
+            &test_ctx.mem,
             None,
         )
         .unwrap();
@@ -861,11 +865,11 @@ mod tests {
         assert_eq!(pkt.buf_capacity().unwrap(), 8 * 1024);
 
         test_ctx
-            .mem
+            .map
             .write_slice(&[0xff_u8; 4 * 1024], GuestAddress(0x0061_1000))
             .unwrap();
         test_ctx
-            .mem
+            .map
             .write_slice(&[0xff_u8; 4 * 1024], GuestAddress(0x0061_2000))
             .unwrap();
 
@@ -882,10 +886,11 @@ mod tests {
             create_context!(test_ctx, handler_ctx);
             let pkt = VsockPacket::from_rx_virtq_head(
                 &mut handler_ctx.handler.queues[0]
-                    .iter(&test_ctx.mem)
+                    .iter(&*test_ctx.map)
                     .unwrap()
                     .next()
                     .unwrap(),
+                &handler_ctx.handler.mem,
                 None,
             )
             .unwrap();
@@ -929,10 +934,11 @@ mod tests {
         create_context!(test_ctx, handler_ctx);
         let mut pkt = VsockPacket::from_rx_virtq_head(
             &mut handler_ctx.handler.queues[0]
-                .iter(&test_ctx.mem)
+                .iter(&*test_ctx.map)
                 .unwrap()
                 .next()
                 .unwrap(),
+            &handler_ctx.handler.mem,
             None,
         )
         .unwrap();
@@ -1023,10 +1029,11 @@ mod tests {
         create_context!(test_ctx, handler_ctx);
         let mut pkt = VsockPacket::from_rx_virtq_head(
             &mut handler_ctx.handler.queues[0]
-                .iter(&test_ctx.mem)
+                .iter(&*test_ctx.map)
                 .unwrap()
                 .next()
                 .unwrap(),
+            &handler_ctx.handler.mem,
             None,
         )
         .unwrap();
@@ -1050,27 +1057,28 @@ mod tests {
     #[test]
     fn test_tx_packet_data_uses_guest_memory() {
         create_context!(test_ctx, handler_ctx);
-        set_pkt_len(8, &handler_ctx.guest_txvq.dtable[0], &test_ctx.mem);
+        set_pkt_len(8, &handler_ctx.guest_txvq.dtable[0], &*test_ctx.map);
 
         let data_gpa = handler_ctx.guest_txvq.dtable[1].addr.get();
         let original = [0x11_u8, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
         test_ctx
-            .mem
+            .map
             .write_slice(&original, GuestAddress(data_gpa))
             .unwrap();
 
         let pkt = VsockPacket::from_tx_virtq_head(
             &mut handler_ctx.handler.queues[1]
-                .iter(&test_ctx.mem)
+                .iter(&*test_ctx.map)
                 .unwrap()
                 .next()
                 .unwrap(),
+            &handler_ctx.handler.mem,
             None,
         )
         .unwrap();
 
         test_ctx
-            .mem
+            .map
             .write_slice(&[0xff_u8; 8], GuestAddress(data_gpa))
             .unwrap();
 
@@ -1084,10 +1092,11 @@ mod tests {
         create_context!(test_ctx, handler_ctx);
         let mut pkt = VsockPacket::from_rx_virtq_head(
             &mut handler_ctx.handler.queues[0]
-                .iter(&test_ctx.mem)
+                .iter(&*test_ctx.map)
                 .unwrap()
                 .next()
                 .unwrap(),
+            &handler_ctx.handler.mem,
             None,
         )
         .unwrap();
@@ -1095,7 +1104,7 @@ mod tests {
         let data_gpa = handler_ctx.guest_rxvq.dtable[1].addr.get();
         let mut before = [0u8; 6];
         test_ctx
-            .mem
+            .map
             .read_slice(&mut before, GuestAddress(data_gpa))
             .unwrap();
         assert_eq!(&before, &[0u8; 6]);
@@ -1107,7 +1116,7 @@ mod tests {
 
         let mut after = [0u8; 6];
         test_ctx
-            .mem
+            .map
             .read_slice(&mut after, GuestAddress(data_gpa))
             .unwrap();
         assert_eq!(&after, &payload);
@@ -1118,16 +1127,17 @@ mod tests {
         create_context!(test_ctx, handler_ctx);
         let mut pkt = VsockPacket::from_rx_virtq_head(
             &mut handler_ctx.handler.queues[0]
-                .iter(&test_ctx.mem)
+                .iter(&*test_ctx.map)
                 .unwrap()
                 .next()
                 .unwrap(),
+            &handler_ctx.handler.mem,
             None,
         )
         .unwrap();
 
         assert_eq!(pkt.len(), 0);
-        pkt.commit_hdr(&test_ctx.mem).unwrap();
+        pkt.commit_hdr(&*test_ctx.map).unwrap();
     }
 
     #[test]
@@ -1135,10 +1145,11 @@ mod tests {
         create_context!(test_ctx, handler_ctx);
         let mut pkt = VsockPacket::from_rx_virtq_head(
             &mut handler_ctx.handler.queues[0]
-                .iter(&test_ctx.mem)
+                .iter(&*test_ctx.map)
                 .unwrap()
                 .next()
                 .unwrap(),
+            &handler_ctx.handler.mem,
             None,
         )
         .unwrap();
@@ -1146,7 +1157,7 @@ mod tests {
         let cap = pkt.buf_capacity().unwrap() as u32;
         pkt.set_len(cap + 1);
 
-        match pkt.commit_hdr(&test_ctx.mem) {
+        match pkt.commit_hdr(&*test_ctx.map) {
             Err(VsockError::InvalidPktLen(n)) => assert_eq!(n, cap + 1),
             other => panic!("expected InvalidPktLen, got {other:?}"),
         }

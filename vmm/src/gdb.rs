@@ -32,7 +32,7 @@ use gdbstub_arch::x86::X86_64_SSE as GdbArch;
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
 use log::{error, info};
 use thiserror::Error;
-use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryError};
+use vm_memory::{GuestAddress, GuestMemoryError};
 use vmm_sys_util::eventfd;
 
 use crate::{GuestMemory, cpu, vm};
@@ -72,14 +72,14 @@ pub(crate) trait Debuggable: vm_migration::Pausable {
     fn write_regs(&self, cpu_id: usize, regs: &CoreRegs) -> result::Result<(), DebuggableError>;
     fn read_mem(
         &self,
-        guest_memory: &GuestMemoryAtomic<GuestMemory>,
+        guest_memory: &GuestMemory,
         cpu_id: usize,
         vaddr: GuestAddress,
         len: usize,
     ) -> result::Result<Vec<u8>, DebuggableError>;
     fn write_mem(
         &self,
-        guest_memory: &GuestMemoryAtomic<GuestMemory>,
+        guest_memory: &GuestMemory,
         cpu_id: usize,
         vaddr: &GuestAddress,
         data: &[u8],

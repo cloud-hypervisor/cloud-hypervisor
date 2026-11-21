@@ -16,10 +16,10 @@ use log::error;
 use thiserror::Error;
 use vm_memory::{Address, Bytes, GuestMemoryBackend, GuestMemoryError};
 
+use crate::EntryPoint;
 use crate::layout::{
     BOOT_GDT_START, BOOT_IDT_START, BOOT_STACK_POINTER, PVH_INFO_START, ZERO_PAGE_START,
 };
-use crate::{EntryPoint, GuestMemory};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -132,8 +132,8 @@ pub fn setup_regs(vcpu: &dyn hypervisor::Vcpu, entry_point: EntryPoint) -> Resul
 ///
 /// * `mem` - The memory that will be passed to the guest.
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
-pub fn setup_sregs(
-    mem: &GuestMemory,
+pub fn setup_sregs<M: GuestMemoryBackend>(
+    mem: &M,
     vcpu: &dyn hypervisor::Vcpu,
     enable_x2_apic_mode: bool,
 ) -> Result<()> {
@@ -144,7 +144,7 @@ pub fn setup_sregs(
 
 const BOOT_GDT_MAX: usize = 4;
 
-fn write_gdt_table(table: &[u64], guest_mem: &GuestMemory) -> Result<()> {
+fn write_gdt_table<M: GuestMemoryBackend>(table: &[u64], guest_mem: &M) -> Result<()> {
     let boot_gdt_addr = BOOT_GDT_START;
     for (index, entry) in table.iter().enumerate() {
         let addr = guest_mem
@@ -155,15 +155,15 @@ fn write_gdt_table(table: &[u64], guest_mem: &GuestMemory) -> Result<()> {
     Ok(())
 }
 
-fn write_idt_value(val: u64, guest_mem: &GuestMemory) -> Result<()> {
+fn write_idt_value<M: GuestMemoryBackend>(val: u64, guest_mem: &M) -> Result<()> {
     let boot_idt_addr = BOOT_IDT_START;
     guest_mem
         .write_obj(val, boot_idt_addr)
         .map_err(Error::WriteIdt)
 }
 
-pub fn configure_segments_and_sregs(
-    mem: &GuestMemory,
+pub fn configure_segments_and_sregs<M: GuestMemoryBackend>(
+    mem: &M,
     sregs: &mut SpecialRegisters,
     enable_x2_apic_mode: bool,
 ) -> Result<()> {
@@ -211,7 +211,8 @@ pub fn configure_segments_and_sregs(
 
 #[cfg(test)]
 mod tests {
-    use vm_memory::GuestAddress;
+    use vm_allocator::GuestMemory;
+    use vm_memory::{GuestAddress, GuestAddressSpace};
 
     use super::*;
 
@@ -219,29 +220,29 @@ mod tests {
         GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap()
     }
 
-    fn read_u64(gm: &GuestMemory, offset: GuestAddress) -> u64 {
+    fn read_u64<M: GuestMemoryBackend>(gm: &M, offset: GuestAddress) -> u64 {
         gm.read_obj(offset).unwrap()
     }
 
     #[test]
     fn segments_and_sregs() {
         let mut sregs: SpecialRegisters = Default::default();
-        let gm = create_guest_mem();
-        configure_segments_and_sregs(&gm, &mut sregs, false).unwrap();
-        assert_eq!(0x0, read_u64(&gm, BOOT_GDT_START));
+        let gm = create_guest_mem().memory();
+        configure_segments_and_sregs(&*gm, &mut sregs, false).unwrap();
+        assert_eq!(0x0, read_u64(&*gm, BOOT_GDT_START));
         assert_eq!(
             0xcf9b000000ffff,
-            read_u64(&gm, BOOT_GDT_START.unchecked_add(8))
+            read_u64(&*gm, BOOT_GDT_START.unchecked_add(8))
         );
         assert_eq!(
             0xcf93000000ffff,
-            read_u64(&gm, BOOT_GDT_START.unchecked_add(16))
+            read_u64(&*gm, BOOT_GDT_START.unchecked_add(16))
         );
         assert_eq!(
             0x8b0000000067,
-            read_u64(&gm, BOOT_GDT_START.unchecked_add(24))
+            read_u64(&*gm, BOOT_GDT_START.unchecked_add(24))
         );
-        assert_eq!(0x0, read_u64(&gm, BOOT_IDT_START));
+        assert_eq!(0x0, read_u64(&*gm, BOOT_IDT_START));
 
         assert_eq!(0, sregs.cs.base);
         assert_eq!(0xffffffff, sregs.ds.limit);

@@ -18,7 +18,7 @@ use virtio_devices::{Pmem, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
 use vm_allocator::{GuestMemory, GuestRegion};
 use vm_memory::guest_memory::FileOffset;
-use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, MmapRegion};
+use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend, MmapRegion};
 use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::{AccessPlatform, AccessType};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
@@ -89,18 +89,17 @@ fn run_pmem_case(
 
     exercise_device_api(&mut pmem, cursor, enable_access_platform);
 
-    let mem = match GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
-        Ok(mem) => mem,
+    let guest_memory = match GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
+        Ok(guest_memory) => guest_memory,
         Err(_) => return false,
     };
 
     let chain_cases = build_chain_cases(cursor);
-    if !populate_queue(&mem, &chain_cases) {
+    if !populate_queue(&*guest_memory.memory(), &chain_cases) {
         return false;
     }
 
     let queue = setup_virt_queue(cursor.next_bool(), bad_used_ring);
-    let guest_memory = GuestMemoryAtomic::new(mem);
     let evt = match EventFd::new(0) {
         Ok(evt) => evt,
         Err(_) => return false,
@@ -194,7 +193,7 @@ fn run_bad_activate_case(cursor: &mut FuzzCursor<'_>) -> bool {
     };
 
     pmem.activate(virtio_devices::ActivationContext {
-        mem: GuestMemoryAtomic::new(mem),
+        mem,
         interrupt_cb: Arc::new(HarnessInterrupt {
             fail_interrupt: false,
         }),
@@ -328,7 +327,7 @@ fn build_chain_cases(cursor: &mut FuzzCursor<'_>) -> Vec<ChainCase> {
     ]
 }
 
-fn populate_queue(mem: &GuestMemory, chain_cases: &[ChainCase]) -> bool {
+fn populate_queue<M: GuestMemoryBackend>(mem: &M, chain_cases: &[ChainCase]) -> bool {
     if chain_cases.is_empty() || chain_cases.len() > (QUEUE_SIZE as usize / 2) {
         return false;
     }
@@ -395,7 +394,14 @@ fn populate_queue(mem: &GuestMemory, chain_cases: &[ChainCase]) -> bool {
     write_u16(mem, AVAIL_RING_ADDR + 2, chain_cases.len() as u16)
 }
 
-fn write_desc(mem: &GuestMemory, idx: u16, addr: u64, len: u32, flags: u16, next: u16) -> bool {
+fn write_desc<M: GuestMemoryBackend>(
+    mem: &M,
+    idx: u16,
+    addr: u64,
+    len: u32,
+    flags: u16,
+    next: u16,
+) -> bool {
     let desc_addr = DESC_TABLE_ADDR + u64::from(idx) * 16;
     write_u64(mem, desc_addr, addr)
         && write_u32(mem, desc_addr + 8, len)
@@ -403,17 +409,17 @@ fn write_desc(mem: &GuestMemory, idx: u16, addr: u64, len: u32, flags: u16, next
         && write_u16(mem, desc_addr + 14, next)
 }
 
-fn write_u16(mem: &GuestMemory, addr: u64, value: u16) -> bool {
+fn write_u16<M: GuestMemoryBackend>(mem: &M, addr: u64, value: u16) -> bool {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .is_ok()
 }
 
-fn write_u32(mem: &GuestMemory, addr: u64, value: u32) -> bool {
+fn write_u32<M: GuestMemoryBackend>(mem: &M, addr: u64, value: u32) -> bool {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .is_ok()
 }
 
-fn write_u64(mem: &GuestMemory, addr: u64, value: u64) -> bool {
+fn write_u64<M: GuestMemoryBackend>(mem: &M, addr: u64, value: u64) -> bool {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .is_ok()
 }

@@ -19,7 +19,6 @@ use log::{error, info, warn};
 use seccompiler::SeccompAction;
 use virtio_bindings::virtio_config::VIRTIO_F_ACCESS_PLATFORM;
 use virtio_queue::Queue;
-use vm_memory::GuestMemoryAtomic;
 use vm_migration::{MigratableError, Pausable};
 use vm_virtio::{AccessPlatform, AccessType, VirtioDeviceType};
 use vmm_sys_util::eventfd::EventFd;
@@ -63,7 +62,7 @@ pub struct VirtioSharedMemoryList {
 }
 
 pub struct ActivationContext {
-    pub mem: GuestMemoryAtomic<GuestMemory>,
+    pub mem: GuestMemory,
     pub interrupt_cb: Arc<dyn VirtioInterrupt>,
     pub queues: Vec<(u16, Queue, EventFd)>,
     pub device_status: Arc<AtomicU8>,
@@ -149,10 +148,6 @@ pub trait VirtioDevice: Send {
     /// every device as part of shutting down the VM. Acting on the device
     /// after a shutdown() can lead to unpredictable results.
     fn shutdown(&mut self) {}
-
-    fn add_memory_region(&mut self, _region: &Arc<GuestRegion>) -> result::Result<(), Error> {
-        Ok(())
-    }
 
     /// Return the counters that this device exposes
     fn counters(&self) -> Option<HashMap<&'static str, Wrapping<u64>>> {

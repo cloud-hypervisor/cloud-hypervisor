@@ -15,6 +15,7 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::{Arc, Mutex, Weak};
 use std::{io, result};
@@ -28,8 +29,8 @@ use thiserror::Error;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
 use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-    GuestMemoryBackend, GuestMemoryError, GuestMemoryLoadGuard, GuestMemoryRegion,
+    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend,
+    GuestMemoryError, GuestMemoryRegion,
 };
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -272,9 +273,11 @@ struct Request {
 }
 
 impl Request {
-    fn parse(
-        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemory>>,
-    ) -> result::Result<Request, Error> {
+    fn parse<M>(desc_chain: &mut DescriptorChain<M>) -> result::Result<Request, Error>
+    where
+        M: Deref,
+        M::Target: GuestMemoryBackend,
+    {
         let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
         // The descriptor contains the request type which MUST be readable.
         if desc.is_write_only() {
@@ -322,7 +325,12 @@ impl Request {
         })
     }
 
-    fn send_response(&self, mem: &GuestMemory, resp_type: u16, state: u16) -> Result<u32, Error> {
+    fn send_response<M: GuestMemoryBackend>(
+        &self,
+        mem: &M,
+        resp_type: u16,
+        state: u16,
+    ) -> Result<u32, Error> {
         let resp = VirtioMemResp {
             resp_type,
             state,
@@ -394,7 +402,7 @@ impl BlocksState {
 }
 
 struct MemEpollHandler {
-    mem: GuestMemoryAtomic<GuestMemory>,
+    mem: GuestMemory,
     region: Arc<GuestRegion>,
     host_fd: Option<RawFd>,
     blocks_state: Arc<Mutex<BlocksState>>,

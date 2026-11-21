@@ -21,8 +21,8 @@ use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::vhost_user::{PostcopyHandler, VhostUserCommon, VhostUserState};
 use crate::{
-    ActivateResult, GuestRegion, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon, VirtioDevice,
-    VirtioInterrupt, VirtioInterruptType, VirtioSharedMemoryList,
+    ActivateResult, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon, VirtioDevice, VirtioInterrupt,
+    VirtioInterruptType, VirtioSharedMemoryList,
 };
 
 pub type State = VhostUserState<()>;
@@ -367,10 +367,6 @@ impl VirtioDevice for GenericVhostUser {
         } else {
             Err(crate::Error::SetShmRegionsNotSupported)
         }
-    }
-
-    fn add_memory_region(&mut self, region: &Arc<GuestRegion>) -> result::Result<(), crate::Error> {
-        self.vu_common.add_memory_region(region)
     }
 }
 

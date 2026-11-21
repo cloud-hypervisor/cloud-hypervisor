@@ -23,7 +23,7 @@ use seccompiler::SeccompAction;
 use virtio_devices::{Block, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
 use vm_allocator::GuestMemory;
-use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
+use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
 // Guest memory size. Kept small: everything the device touches lives in the
@@ -221,9 +221,8 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     // Setup the guest memory and lay out a virtio queue the device can
     // actually consume: a descriptor table, an available ring referring to
     // it, and request headers/payloads/status bytes in the data region.
-    let mem = GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap();
-    build_queue_content(&mem, &input);
-    let guest_memory = GuestMemoryAtomic::new(mem);
+    let guest_memory = GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap();
+    build_queue_content(&*guest_memory.memory(), &input);
 
     let q = setup_virt_queue(&input);
 
@@ -276,7 +275,14 @@ impl VirtioInterrupt for NoopVirtioInterrupt {
 }
 
 /// Write a single descriptor into the descriptor table.
-fn write_descriptor(mem: &GuestMemory, index: u16, addr: u64, len: u32, flags: u16, next: u16) {
+fn write_descriptor<M: GuestMemoryBackend>(
+    mem: &M,
+    index: u16,
+    addr: u64,
+    len: u32,
+    flags: u16,
+    next: u16,
+) {
     let desc_addr = GuestAddress(DESC_TABLE_ADDR + 16 * u64::from(index));
     let _ = mem.write_obj(addr.to_le(), desc_addr);
     let _ = mem.write_obj(len.to_le(), GuestAddress(desc_addr.0 + 8));
@@ -293,7 +299,7 @@ fn data_is_write_only(request_type: u32) -> bool {
 /// Build the descriptor table, the available ring and the request contents
 /// from the fuzz input. Returns the number of chains published in the
 /// available ring.
-fn build_queue_content(mem: &GuestMemory, input: &FuzzInput) {
+fn build_queue_content<M: GuestMemoryBackend>(mem: &M, input: &FuzzInput) {
     // Fill the data region with the leftover fuzz bytes, repeated so that
     // request payloads (e.g. DISCARD segments) are never all zeroes.
     if !input.payload.is_empty() {

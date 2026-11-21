@@ -7,6 +7,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::fs::File;
+use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 use std::{io, result};
@@ -20,8 +21,8 @@ use thiserror::Error;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
 use vm_allocator::GuestRegion;
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-    GuestMemoryError, GuestMemoryLoadGuard,
+    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend,
+    GuestMemoryError,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
@@ -106,10 +107,14 @@ struct Request {
 }
 
 impl Request {
-    fn parse(
-        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemory>>,
+    fn parse<M>(
+        desc_chain: &mut DescriptorChain<M>,
         access_platform: Option<&dyn AccessPlatform>,
-    ) -> result::Result<Request, Error> {
+    ) -> result::Result<Request, Error>
+    where
+        M: Deref,
+        M::Target: GuestMemoryBackend,
+    {
         let desc = desc_chain
             .next_checked(access_platform)
             .map_err(|addr| Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(addr)))?
@@ -155,7 +160,7 @@ impl Request {
 }
 
 struct PmemEpollHandler {
-    mem: GuestMemoryAtomic<GuestMemory>,
+    mem: GuestMemory,
     queue: Queue,
     disk: File,
     interrupt_cb: Arc<dyn VirtioInterrupt>,

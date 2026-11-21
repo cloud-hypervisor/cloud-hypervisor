@@ -74,7 +74,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracer::trace_scoped;
 use vm_device::Bus;
-use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
+use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend};
 use vm_migration::protocol::{MemoryRangeTable, Request, Response};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, snapshot_from_id,
@@ -381,7 +381,7 @@ impl VmState {
 }
 
 struct VmOpsHandler {
-    memory: GuestMemoryAtomic<GuestMemory>,
+    memory: GuestMemory,
     #[cfg(target_arch = "x86_64")]
     io_bus: Arc<Bus>,
     mmio_bus: Arc<Bus>,
@@ -1096,6 +1096,15 @@ impl Vm {
         Ok(())
     }
 
+    fn boot_guest_memory(&self) -> Result<impl GuestMemoryBackend + use<>> {
+        let config = self.config.lock().unwrap();
+        self.memory_manager
+            .lock()
+            .unwrap()
+            .boot_guest_memory(&config.memory)
+            .map_err(Error::MemoryManager)
+    }
+
     #[cfg(feature = "fw_cfg")]
     fn populate_fw_cfg(&self) -> Result<()> {
         let fw_cfg_enabled = self
@@ -1134,13 +1143,16 @@ impl Vm {
         };
 
         #[cfg(target_arch = "x86_64")]
-        let boot_memory = self.memory_manager.lock().unwrap().boot_guest_memory();
+        let boot_memory = fw_cfg_config
+            .e820
+            .then(|| self.boot_guest_memory())
+            .transpose()?;
         Self::populate_fw_cfg_items(
             &fw_cfg_config,
             &self.device_manager,
             &self.config,
             #[cfg(target_arch = "x86_64")]
-            &boot_memory,
+            boot_memory.as_ref(),
             #[cfg(target_arch = "x86_64")]
             kvm_sev_snp_enabled,
         )?;
@@ -1160,11 +1172,11 @@ impl Vm {
     }
 
     #[cfg(feature = "fw_cfg")]
-    fn populate_fw_cfg_items(
+    fn populate_fw_cfg_items<#[cfg(target_arch = "x86_64")] M: GuestMemoryBackend>(
         fw_cfg_config: &FwCfgConfig,
         device_manager: &Arc<Mutex<DeviceManager>>,
         config: &Arc<Mutex<VmConfig>>,
-        #[cfg(target_arch = "x86_64")] boot_memory: &GuestMemory,
+        #[cfg(target_arch = "x86_64")] boot_memory: Option<&M>,
         #[cfg(target_arch = "x86_64")] kvm_sev_snp_enabled: bool,
     ) -> Result<()> {
         let mut kernel_option: Option<File> = None;
@@ -1240,7 +1252,7 @@ impl Vm {
 
         let mut fw_cfg = fw_cfg.lock().unwrap();
         #[cfg(target_arch = "x86_64")]
-        if fw_cfg_config.e820 {
+        if let Some(boot_memory) = boot_memory {
             fw_cfg
                 .add_e820(boot_memory, kvm_sev_snp_enabled)
                 .map_err(Error::ErrorPopulatingFwCfg)?;
@@ -1473,7 +1485,10 @@ impl Vm {
         Ok(vm)
     }
 
-    fn load_initramfs(&mut self, guest_mem: &GuestMemory) -> Result<arch::InitramfsConfig> {
+    fn load_initramfs<M: GuestMemoryBackend>(
+        &mut self,
+        guest_mem: &M,
+    ) -> Result<arch::InitramfsConfig> {
         let initramfs = self.initramfs.as_mut().unwrap();
         let size: usize = initramfs
             .seek(SeekFrom::End(0))
@@ -1524,9 +1539,7 @@ impl Vm {
         memory_manager
             .add_uefi_flash()
             .map_err(Error::MemoryManager)?;
-        let uefi_flash = memory_manager.uefi_flash();
-        let mem = uefi_flash.memory();
-        uefi::load_uefi(mem.deref(), layout::UEFI_START, &mut firmware).map_err(Error::UefiLoad)?;
+        uefi::load_uefi(memory_manager.uefi_flash(), &mut firmware).map_err(Error::UefiLoad)?;
         Ok(EntryPoint {
             entry_addr: layout::UEFI_START,
         })
@@ -1581,6 +1594,7 @@ impl Vm {
     #[expect(clippy::needless_pass_by_value)]
     fn load_igvm(
         igvm_file: IgvmFile,
+        #[cfg(feature = "sev_snp")] boot_memory: &impl GuestMemoryBackend,
         memory_manager: Arc<Mutex<MemoryManager>>,
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
         #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))] measured_boot: Option<
@@ -1599,6 +1613,8 @@ impl Vm {
 
         let res = igvm_loader::load_igvm(
             igvm_file,
+            #[cfg(feature = "sev_snp")]
+            boot_memory,
             memory_manager,
             Arc::clone(&cpu_manager),
             "",
@@ -1679,6 +1695,7 @@ impl Vm {
     #[cfg(target_arch = "x86_64")]
     fn load_payload(
         payload: &PayloadConfig,
+        #[cfg(feature = "sev_snp")] memory_config: &crate::vm_config::MemoryConfig,
         memory_manager: Arc<Mutex<MemoryManager>>,
         #[cfg(feature = "igvm")] cpu_manager: Arc<Mutex<cpu::CpuManager>>,
         #[cfg(feature = "igvm")] igvm_file: Option<IgvmFile>,
@@ -1728,8 +1745,16 @@ impl Vm {
                 } else {
                     None
                 };
+                #[cfg(feature = "sev_snp")]
+                let boot_memory = memory_manager
+                    .lock()
+                    .unwrap()
+                    .boot_guest_memory(memory_config)
+                    .map_err(Error::MemoryManager)?;
                 return Self::load_igvm(
                     igvm_file,
+                    #[cfg(feature = "sev_snp")]
+                    &boot_memory,
                     memory_manager,
                     cpu_manager,
                     #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
@@ -1782,14 +1807,15 @@ impl Vm {
         #[cfg(feature = "igvm")] cpu_manager: &Arc<Mutex<cpu::CpuManager>>,
         #[cfg(feature = "igvm")] igvm_file: Option<IgvmFile>,
     ) -> Result<Option<thread::JoinHandle<Result<EntryPoint>>>> {
+        let config = config.lock().unwrap();
         config
-            .lock()
-            .unwrap()
             .payload
             .as_ref()
             .map(|payload| {
                 let memory_manager = Arc::clone(memory_manager);
                 let payload = payload.clone();
+                #[cfg(feature = "sev_snp")]
+                let memory_config = config.memory.clone();
                 #[cfg(feature = "igvm")]
                 let cpu_manager = Arc::clone(cpu_manager);
 
@@ -1798,6 +1824,8 @@ impl Vm {
                     .spawn(move || {
                         Self::load_payload(
                             &payload,
+                            #[cfg(feature = "sev_snp")]
+                            &memory_config,
                             memory_manager,
                             #[cfg(feature = "igvm")]
                             cpu_manager,
@@ -1818,7 +1846,7 @@ impl Vm {
     ) -> Result<()> {
         trace_scoped!("configure_system");
         info!("Configuring system");
-        let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
+        let mem = self.boot_guest_memory()?;
 
         let initramfs_config = match self.initramfs {
             Some(_) => Some(self.load_initramfs(&mem)?),
@@ -1866,7 +1894,7 @@ impl Vm {
             let cpu_manager = self.cpu_manager.lock().unwrap();
             (cpu_manager.get_mpidrs(), cpu_manager.get_vcpu_topology())
         };
-        let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
+        let mem = self.boot_guest_memory()?;
         let mut pci_space_info: Vec<PciSpaceInfo> = Vec::new();
         let initramfs_config = match self.initramfs {
             Some(_) => Some(self.load_initramfs(&mem)?),
@@ -1971,7 +1999,7 @@ impl Vm {
             &self.device_manager,
         )?;
         let num_vcpu = self.cpu_manager.lock().unwrap().vcpus().len();
-        let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
+        let mem = self.boot_guest_memory()?;
         let mut pci_space_info: Vec<PciSpaceInfo> = Vec::new();
         let initramfs_config = match self.initramfs {
             Some(_) => Some(self.load_initramfs(&mem)?),
@@ -2107,20 +2135,12 @@ impl Vm {
             // opposite order.
             let hotplug_method = self.config.lock().unwrap().memory.hotplug_method;
 
-            if let Some(new_region) = &new_region {
-                let device_manager = self.device_manager.lock().unwrap();
-                device_manager
-                    .add_memory_region(new_region)
+            if new_region.is_some() && hotplug_method == HotplugMethod::Acpi {
+                self.device_manager
+                    .lock()
+                    .unwrap()
+                    .notify_hotplug(AcpiNotificationFlags::MEMORY_DEVICES_CHANGED)
                     .map_err(Error::DeviceManager)?;
-
-                match hotplug_method {
-                    HotplugMethod::Acpi => {
-                        device_manager
-                            .notify_hotplug(AcpiNotificationFlags::MEMORY_DEVICES_CHANGED)
-                            .map_err(Error::DeviceManager)?;
-                    }
-                    HotplugMethod::VirtioMem => {}
-                }
             }
 
             let memory_config = &mut self.config.lock().unwrap().memory;
@@ -2454,7 +2474,7 @@ impl Vm {
         let mem = self.memory_manager.lock().unwrap().guest_memory().memory();
         let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
         let rsdp_addr = acpi::create_acpi_tables(
-            &mem,
+            mem.deref(),
             &self.device_manager.lock().unwrap(),
             &self.cpu_manager.lock().unwrap(),
             &self.memory_manager.lock().unwrap(),
@@ -2695,7 +2715,7 @@ impl Vm {
         self.memory_manager.lock().unwrap().memory_range_table(mode)
     }
 
-    pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemory> {
+    pub fn guest_memory(&self) -> GuestMemory {
         self.memory_manager.lock().unwrap().guest_memory()
     }
 
@@ -3195,7 +3215,7 @@ impl Debuggable for Vm {
 
     fn read_mem(
         &self,
-        guest_memory: &GuestMemoryAtomic<GuestMemory>,
+        guest_memory: &GuestMemory,
         cpu_id: usize,
         vaddr: GuestAddress,
         len: usize,
@@ -3208,7 +3228,7 @@ impl Debuggable for Vm {
 
     fn write_mem(
         &self,
-        guest_memory: &GuestMemoryAtomic<GuestMemory>,
+        guest_memory: &GuestMemory,
         cpu_id: usize,
         vaddr: &GuestAddress,
         data: &[u8],
@@ -3357,8 +3377,7 @@ mod tests {
         use std::sync::atomic::AtomicU32;
 
         use hypervisor::VmExit;
-        use vm_allocator::{GuestRegion, MemorySlotAllocator};
-        use vm_memory::GuestMemoryBackend;
+        use vm_allocator::{GuestMemory, GuestRegion, MemorySlotAllocator};
         // This example based on https://lwn.net/Articles/658511/
         let code = [
             0xba, 0xf8, 0x03, /* mov $0x3f8, %dx */
@@ -3393,7 +3412,7 @@ mod tests {
             hypervisor::MemoryVisibility::Shared,
         )
         .unwrap();
-        let mem = GuestMemory::from_regions(vec![region]).unwrap();
+        let mem = GuestMemory::from_regions(vec![region]).unwrap().memory();
         mem.write_slice(&code, load_addr)
             .expect("Writing code to memory failed");
         for region in mem.iter() {
@@ -3434,6 +3453,7 @@ mod tests {
 mod tests {
     use arch::{DeviceType, MmioDeviceInfo};
     use devices::gic::Gic;
+    use vm_allocator::GuestMemory;
 
     use super::*;
 
@@ -3445,7 +3465,9 @@ mod tests {
             arch::aarch64::layout::RAM_START,
             (arch::aarch64::layout::FDT_MAX_SIZE + 0x1000) as usize,
         )];
-        let mem = GuestMemory::from_ranges(&regions).expect("Cannot initialize memory");
+        let mem = GuestMemory::from_ranges(&regions)
+            .expect("Cannot initialize memory")
+            .memory();
 
         let dev_info: HashMap<(DeviceType, String), MmioDeviceInfo> = [
             (
@@ -3483,7 +3505,7 @@ mod tests {
         let vgic_config = Gic::create_config(1, None).unwrap();
         let gic = vm.create_vgic(&vgic_config).expect("Cannot create gic");
         arch::aarch64::fdt::create_fdt(
-            &mem,
+            &*mem,
             "console=tty0",
             &[0],
             None,

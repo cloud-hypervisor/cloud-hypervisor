@@ -20,8 +20,8 @@ use vm_allocator::page_size::get_page_size;
 use vm_allocator::{AddressAllocator, GuestMemory, SystemAllocator};
 use vm_device::{BusDeviceSync, Resource};
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-    GuestMemoryBackend, GuestMemoryError, GuestMemoryRegion, Le32, Le64, VolatileMemory,
+    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend,
+    GuestMemoryError, GuestMemoryRegion, Le32, Le64, VolatileMemory,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 
@@ -351,7 +351,7 @@ impl PvmemcontrolDevice {
 
 impl PvmemcontrolDevice {
     fn register_percpu_buf(
-        guest_memory: &GuestMemoryAtomic<GuestMemory>,
+        guest_memory: &GuestMemory,
         mut state: PercpuInitState,
         PvmemcontrolTransportRegister { buf_phys_addr }: PvmemcontrolTransportRegister,
     ) -> Self {
@@ -410,11 +410,7 @@ impl PvmemcontrolDevice {
         )
     }
 
-    fn run_command(
-        &mut self,
-        guest_memory: &GuestMemoryAtomic<GuestMemory>,
-        command: PvmemcontrolTransportCommand,
-    ) {
+    fn run_command(&mut self, guest_memory: &GuestMemory, command: PvmemcontrolTransportCommand) {
         let state = mem::replace(&mut self.state, PvmemcontrolState::Broken);
 
         *self = match command {
@@ -482,7 +478,7 @@ impl PvmemcontrolDevice {
 }
 
 pub struct PvmemcontrolBusDevice {
-    mem: GuestMemoryAtomic<GuestMemory>,
+    mem: GuestMemory,
     dev: RwLock<PvmemcontrolDevice>,
 }
 
@@ -800,7 +796,7 @@ impl PvmemcontrolDevice {
     pub fn make_device(
         id: String,
         bdf: PciBdf,
-        mem: GuestMemoryAtomic<GuestMemory>,
+        mem: GuestMemory,
     ) -> (PvmemcontrolPciDevice, PvmemcontrolBusDevice) {
         let dev = RwLock::new(PvmemcontrolDevice::error());
         let configuration = PciConfiguration::new(
@@ -978,6 +974,7 @@ impl BusDeviceSync for PvmemcontrolBusDevice {
 mod tests {
     use std::os::unix::fs::FileExt;
 
+    use vm_allocator::GuestMemory;
     use vm_memory::FileOffset;
     use vmm_sys_util::tempfile::TempFile;
 
@@ -1024,7 +1021,7 @@ mod tests {
         )])
         .unwrap();
         let dev = PvmemcontrolBusDevice {
-            mem: GuestMemoryAtomic::new(mem),
+            mem,
             dev: RwLock::new(PvmemcontrolDevice::error()),
         };
 

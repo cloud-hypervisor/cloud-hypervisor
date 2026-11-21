@@ -30,8 +30,7 @@ use linux_loader::loader::elf::start_info::{
 use log::{debug, error, info};
 use thiserror::Error;
 use vm_memory::{
-    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend,
-    GuestMemoryRegion,
+    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend, GuestMemoryRegion,
 };
 
 use crate::smbios::SmbiosConfig;
@@ -1204,7 +1203,7 @@ fn required_common_cpuid_updates(
 pub fn configure_vcpu(
     vcpu: &dyn hypervisor::Vcpu,
     id: u32,
-    boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemory>)>,
+    boot_setup: Option<(EntryPoint, &GuestMemory)>,
     cpuid: Vec<CpuIdEntry>,
     kvm_hyperv: bool,
     cpu_vendor: CpuVendor,
@@ -1291,7 +1290,7 @@ pub fn configure_vcpu(
             // there are 256 vCPUs in a flat hierarchy (i.e. max x2apic ID is 255),
             // so we need to enable x2apic in this case as well.
             let enable_x2_apic_mode = get_max_x2apic_id(topology) > MAX_SUPPORTED_CPUS_LEGACY;
-            regs::setup_sregs(&guest_memory.memory(), vcpu, enable_x2_apic_mode)
+            regs::setup_sregs(&*guest_memory.memory(), vcpu, enable_x2_apic_mode)
                 .map_err(Error::SregsConfiguration)?;
         }
         regs::setup_fpu(vcpu).map_err(Error::FpuConfiguration)?;
@@ -1357,8 +1356,8 @@ pub fn arch_memory_regions() -> Vec<(GuestAddress, usize, RegionType)> {
 /// * `cmdline_size` - Size of the kernel command line in bytes including the null terminator.
 /// * `num_cpus` - Number of virtual CPUs the guest will have.
 #[expect(clippy::too_many_arguments)]
-pub fn configure_system(
-    guest_mem: &GuestMemory,
+pub fn configure_system<M: GuestMemoryBackend>(
+    guest_mem: &M,
     cmdline_addr: GuestAddress,
     cmdline_size: usize,
     initramfs: &Option<InitramfsConfig>,
@@ -1404,7 +1403,7 @@ type RamRange = (u64, u64);
 
 /// Returns usable physical memory ranges for the guest
 /// These should be used to create e820_RAM memory maps
-pub fn generate_ram_ranges(guest_mem: &GuestMemory) -> super::Result<Vec<RamRange>> {
+pub fn generate_ram_ranges<M: GuestMemoryBackend>(guest_mem: &M) -> super::Result<Vec<RamRange>> {
     // Merge continuous memory regions into one region.
     // Note: memory regions from "GuestMemoryBackend" are sorted and non-zero sized.
     let ram_regions = {
@@ -1484,7 +1483,9 @@ pub fn generate_ram_ranges(guest_mem: &GuestMemory) -> super::Result<Vec<RamRang
 
 /// Generate the E820 entries shared by direct boot and fw_cfg.
 /// Each entry is (base, size, type).
-pub fn generate_e820_memory_map(guest_mem: &GuestMemory) -> super::Result<Vec<(u64, u64, u32)>> {
+pub fn generate_e820_memory_map<M: GuestMemoryBackend>(
+    guest_mem: &M,
+) -> super::Result<Vec<(u64, u64, u32)>> {
     let mut entries = vec![(0, layout::EBDA_START.0, E820_RAM)];
     entries.extend(
         generate_ram_ranges(guest_mem)?
@@ -1503,8 +1504,8 @@ pub fn generate_e820_memory_map(guest_mem: &GuestMemory) -> super::Result<Vec<(u
     Ok(entries)
 }
 
-fn configure_pvh(
-    guest_mem: &GuestMemory,
+fn configure_pvh<M: GuestMemoryBackend>(
+    guest_mem: &M,
     cmdline_addr: GuestAddress,
     initramfs: &Option<InitramfsConfig>,
     rsdp_addr: Option<GuestAddress>,
@@ -1589,8 +1590,8 @@ fn configure_pvh(
     Ok(())
 }
 
-fn configure_32bit_entry(
-    guest_mem: &GuestMemory,
+fn configure_32bit_entry<M: GuestMemoryBackend>(
+    guest_mem: &M,
     cmdline_addr: GuestAddress,
     cmdline_size: usize,
     initramfs: &Option<InitramfsConfig>,
@@ -1666,7 +1667,10 @@ fn add_memmap_entry(memmap: &mut Vec<hvm_memmap_table_entry>, addr: u64, size: u
 }
 
 /// Returns the memory address where the initramfs could be loaded.
-pub fn initramfs_load_addr(guest_mem: &GuestMemory, initramfs_size: usize) -> super::Result<u64> {
+pub fn initramfs_load_addr<M: GuestMemoryBackend>(
+    guest_mem: &M,
+    initramfs_size: usize,
+) -> super::Result<u64> {
     let first_region = guest_mem
         .find_region(GuestAddress::new(0))
         .ok_or(super::Error::InitramfsAddress)?;
@@ -1880,6 +1884,7 @@ fn update_cpuid_topology(
 #[cfg(test)]
 mod tests {
     use linux_loader::loader::bootparam::boot_e820_entry;
+    use vm_allocator::GuestMemory;
 
     use super::*;
 
@@ -2030,9 +2035,11 @@ mod tests {
     #[test]
     fn test_system_configuration() {
         let no_vcpus = 4;
-        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)])
+            .unwrap()
+            .memory();
         let config_err = configure_system(
-            &gm,
+            &*gm,
             GuestAddress(0),
             0,
             &None,
@@ -2051,10 +2058,10 @@ mod tests {
             .filter(|r| r.2 == RegionType::Ram && r.0 < layout::RAM_64BIT_START)
             .map(|r| (r.0, r.1))
             .collect();
-        let gm = GuestMemory::from_ranges(&ram_regions).unwrap();
+        let gm = GuestMemory::from_ranges(&ram_regions).unwrap().memory();
 
         configure_system(
-            &gm,
+            &*gm,
             GuestAddress(0),
             0,
             &None,
@@ -2079,9 +2086,9 @@ mod tests {
                 }
             })
             .collect();
-        let gm = GuestMemory::from_ranges(&ram_regions).unwrap();
+        let gm = GuestMemory::from_ranges(&ram_regions).unwrap().memory();
         configure_system(
-            &gm,
+            &*gm,
             GuestAddress(0),
             0,
             &None,
@@ -2094,7 +2101,7 @@ mod tests {
         .unwrap();
 
         configure_system(
-            &gm,
+            &*gm,
             GuestAddress(0),
             0,
             &None,
@@ -2119,10 +2126,11 @@ mod tests {
                 2 << 20,
             ),
         ])
-        .unwrap();
+        .unwrap()
+        .memory();
 
         assert_eq!(
-            generate_e820_memory_map(&gm).unwrap(),
+            generate_e820_memory_map(&*gm).unwrap(),
             vec![
                 (0, layout::EBDA_START.0, E820_RAM),
                 (layout::HIGH_RAM_START.0, 1 << 20, E820_RAM),

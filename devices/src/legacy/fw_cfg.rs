@@ -33,8 +33,8 @@ use serde::{Deserialize, Serialize};
 use vm_allocator::GuestMemory;
 use vm_device::BusDevice;
 #[cfg(target_arch = "x86_64")]
-use vm_memory::ByteValued;
-use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
+use vm_memory::{ByteValued, GuestMemoryBackend};
+use vm_memory::{Bytes, GuestAddress, GuestAddressSpace};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::sock_ctrl_msg::IntoIovec;
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes};
@@ -163,7 +163,7 @@ pub struct FwCfg {
     dma_address: u64,
     items: Vec<FwCfgItem>,                           // 0x20 and above
     known_items: [FwCfgContent; FW_CFG_KNOWN_ITEMS], // 0x0 to 0x19
-    memory: GuestMemoryAtomic<GuestMemory>,
+    memory: GuestMemory,
 }
 
 #[repr(C)]
@@ -390,7 +390,7 @@ fn create_acpi_loader(acpi_table: AcpiTable) -> [FwCfgItem; 3] {
 }
 
 impl FwCfg {
-    pub fn new(memory: GuestMemoryAtomic<GuestMemory>, state: Option<FwCfgState>) -> FwCfg {
+    pub fn new(memory: GuestMemory, state: Option<FwCfgState>) -> FwCfg {
         let state = state.unwrap_or_default();
         const DEFAULT_ITEM: FwCfgContent = FwCfgContent::Slice(&[]);
         let mut known_items = [DEFAULT_ITEM; FW_CFG_KNOWN_ITEMS];
@@ -439,7 +439,11 @@ impl FwCfg {
     }
 
     #[cfg(target_arch = "x86_64")]
-    pub fn add_e820(&mut self, boot_memory: &GuestMemory, kvm_sev_snp_enabled: bool) -> Result<()> {
+    pub fn add_e820<M: GuestMemoryBackend>(
+        &mut self,
+        boot_memory: &M,
+        kvm_sev_snp_enabled: bool,
+    ) -> Result<()> {
         let mut entries = generate_e820_memory_map(boot_memory).map_err(Error::other)?;
         if kvm_sev_snp_enabled {
             entries.push((STAGE0_START_ADDRESS.0, STAGE0_SIZE as u64, E820_RESERVED));
@@ -838,6 +842,7 @@ mod tests {
     use std::ffi::CString;
     use std::io::Write;
 
+    use vm_memory::GuestMemoryBackend;
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
@@ -853,8 +858,7 @@ mod tests {
 
     #[test]
     fn restore_continues_selected_file_and_partial_dma_address() {
-        let memory =
-            GuestMemoryAtomic::new(GuestMemory::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap());
+        let memory = GuestMemory::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
         let file = TempFile::new().unwrap();
         file.as_file().write_all(b"abcdef").unwrap();
         let mut fw_cfg = FwCfg::new(memory.clone(), None);
@@ -894,8 +898,8 @@ mod tests {
     fn test_stage0_reserved_only_for_sev_snp() {
         for sev_snp in [false, true] {
             let gm = GuestMemory::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap();
-            let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(gm.clone()), None);
-            fw_cfg.add_e820(&gm, sev_snp).unwrap();
+            let mut fw_cfg = FwCfg::new(gm.clone(), None);
+            fw_cfg.add_e820(&*gm.memory(), sev_snp).unwrap();
 
             let FwCfgContent::Bytes(bytes) = &fw_cfg.items[0].content else {
                 panic!("Expected an E820 file");
@@ -921,13 +925,13 @@ mod tests {
             (GuestAddress(1 << 32), 2 << 20),
         ])
         .unwrap();
-        let boot_entries = arch::x86_64::generate_e820_memory_map(&gm).unwrap();
+        let boot_entries = arch::x86_64::generate_e820_memory_map(&*gm.memory()).unwrap();
 
         for sev_snp in [false, true] {
-            let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(gm.clone()), None);
+            let mut fw_cfg = FwCfg::new(gm.clone(), None);
             // Noncontiguous boot RAM must be represented without inferring
             // its layout from the configured total memory size.
-            fw_cfg.add_e820(&gm, sev_snp).unwrap();
+            fw_cfg.add_e820(&*gm.memory(), sev_snp).unwrap();
 
             let FwCfgContent::Bytes(bytes) = &fw_cfg
                 .items
@@ -962,9 +966,7 @@ mod tests {
 
     #[test]
     fn test_signature() {
-        let gm = GuestMemoryAtomic::new(
-            GuestMemory::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap(),
-        );
+        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap();
 
         let mut fw_cfg = FwCfg::new(gm, None);
 
@@ -984,9 +986,7 @@ mod tests {
 
     #[test]
     fn test_kernel_cmdline() {
-        let gm = GuestMemoryAtomic::new(
-            GuestMemory::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap(),
-        );
+        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap();
 
         let mut fw_cfg = FwCfg::new(gm, None);
 
@@ -1011,9 +1011,7 @@ mod tests {
     #[test]
     #[cfg(target_arch = "aarch64")]
     fn test_kernel_data() {
-        let gm = GuestMemoryAtomic::new(
-            GuestMemory::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap(),
-        );
+        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap();
         let mut fw_cfg = FwCfg::new(gm, None);
         let kernel = b"test kernel image";
         let temp = TempFile::new().unwrap();
@@ -1034,9 +1032,7 @@ mod tests {
 
     #[test]
     fn test_initram_fs() {
-        let gm = GuestMemoryAtomic::new(
-            GuestMemory::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap(),
-        );
+        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap();
 
         let mut fw_cfg = FwCfg::new(gm, None);
 
@@ -1064,9 +1060,7 @@ mod tests {
 
     #[test]
     fn test_string_item() {
-        let gm = GuestMemoryAtomic::new(
-            GuestMemory::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap(),
-        );
+        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap();
 
         let mut fw_cfg = FwCfg::new(gm, None);
 
@@ -1098,7 +1092,7 @@ mod tests {
 
         let mem_size = 0x1000;
         let load_addr = GuestAddress(0x1000);
-        let mem: GuestMemory = GuestMemory::from_ranges(&[(load_addr, mem_size)]).unwrap();
+        let mem = GuestMemory::from_ranges(&[(load_addr, mem_size)]).unwrap();
 
         // Note: In firmware we would just allocate FwCfgDmaAccess struct
         // and use address of struct (&) as dma address
@@ -1125,8 +1119,8 @@ mod tests {
         let dma_lo: [u8; 4] = address_bytes[4..8].try_into().unwrap();
 
         // writing the FwCfgDmaAccess to mem (this would just be self.dma_access.as_ref() in guest)
-        let _ = mem.write(access.as_mut_bytes(), access_address);
-        let mem_m = GuestMemoryAtomic::new(mem.clone());
+        let _ = mem.memory().write(access.as_mut_bytes(), access_address);
+        let mem_m = mem.clone();
         let mut fw_cfg = FwCfg::new(mem_m, None);
         let cfg_item = FwCfgItem {
             name: "code".to_string(),
@@ -1136,7 +1130,7 @@ mod tests {
 
         let mut data = [0u8; 12];
 
-        let _ = mem.read(&mut data, GuestAddress(code_address));
+        let _ = mem.memory().read(&mut data, GuestAddress(code_address));
         assert_ne!(data, code);
 
         #[cfg(target_arch = "aarch64")]
@@ -1150,7 +1144,7 @@ mod tests {
             fw_cfg.write(0, FW_CFG_DMA_HI_OFFSET, &dma_hi);
             fw_cfg.write(0, FW_CFG_DMA_LO_OFFSET, &dma_lo);
         }
-        let _ = mem.read(&mut data, GuestAddress(code_address));
+        let _ = mem.memory().read(&mut data, GuestAddress(code_address));
         assert_eq!(data, code);
     }
 
@@ -1167,7 +1161,12 @@ mod tests {
     const DMA_DESCRIPTOR: GuestAddress = GuestAddress(0x1000);
     const DMA_BUFFER: GuestAddress = GuestAddress(0x1800);
 
-    fn run_dma(fw_cfg: &mut FwCfg, mem: &GuestMemory, control: AccessControl, len: u32) -> u32 {
+    fn run_dma<M: GuestMemoryBackend>(
+        fw_cfg: &mut FwCfg,
+        mem: &M,
+        control: AccessControl,
+        len: u32,
+    ) -> u32 {
         let mut access = FwCfgDmaAccess {
             control_be: control.0.to_be(),
             length_be: len.to_be(),
@@ -1187,7 +1186,7 @@ mod tests {
         u32::from_be_bytes(status)
     }
 
-    fn dma_buffer(mem: &GuestMemory, len: usize) -> Vec<u8> {
+    fn dma_buffer<M: GuestMemoryBackend>(mem: &M, len: usize) -> Vec<u8> {
         let mut data = vec![0u8; len];
         mem.read(&mut data, DMA_BUFFER).unwrap();
         data
@@ -1195,8 +1194,9 @@ mod tests {
 
     #[test]
     fn test_dma_select_and_skip() {
-        let mem: GuestMemory = GuestMemory::from_ranges(&[(DMA_DESCRIPTOR, 0x1000)]).unwrap();
-        let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(mem.clone()), None);
+        let mem = GuestMemory::from_ranges(&[(DMA_DESCRIPTOR, 0x1000)]).unwrap();
+        let mut fw_cfg = FwCfg::new(mem.clone(), None);
+        let mem = mem.memory();
         let item_a = FW_CFG_FILE_FIRST;
         let item_b = FW_CFG_FILE_FIRST + 1;
         for (name, data) in [
@@ -1223,35 +1223,36 @@ mod tests {
         fw_cfg.write(0, FW_CFG_SELECTOR_OFFSET, &item_a.to_le_bytes());
 
         assert_eq!(
-            run_dma(&mut fw_cfg, &mem, select(item_b).with_read(true), 4),
+            run_dma(&mut fw_cfg, &*mem, select(item_b).with_read(true), 4),
             0
         );
-        assert_eq!(dma_buffer(&mem, 4), [11, 12, 13, 14]);
+        assert_eq!(dma_buffer(&*mem, 4), [11, 12, 13, 14]);
 
-        assert_eq!(run_dma(&mut fw_cfg, &mem, skip, 2), 0);
-        assert_eq!(run_dma(&mut fw_cfg, &mem, read, 2), 0);
-        assert_eq!(dma_buffer(&mem, 2), [17, 18]);
+        assert_eq!(run_dma(&mut fw_cfg, &*mem, skip, 2), 0);
+        assert_eq!(run_dma(&mut fw_cfg, &*mem, read, 2), 0);
+        assert_eq!(dma_buffer(&*mem, 2), [17, 18]);
 
         assert_eq!(
-            run_dma(&mut fw_cfg, &mem, select(item_b).with_read(true), 2),
+            run_dma(&mut fw_cfg, &*mem, select(item_b).with_read(true), 2),
             0
         );
-        assert_eq!(dma_buffer(&mem, 2), [11, 12]);
+        assert_eq!(dma_buffer(&*mem, 2), [11, 12]);
 
-        assert_eq!(run_dma(&mut fw_cfg, &mem, skip, u32::MAX), 0);
+        assert_eq!(run_dma(&mut fw_cfg, &*mem, skip, u32::MAX), 0);
         assert_eq!(fw_cfg.data_offset, 8);
 
-        assert_eq!(run_dma(&mut fw_cfg, &mem, select(item_a), 0), 0);
-        assert_eq!(run_dma(&mut fw_cfg, &mem, read, 3), 0);
-        assert_eq!(dma_buffer(&mem, 3), [1, 2, 3]);
+        assert_eq!(run_dma(&mut fw_cfg, &*mem, select(item_a), 0), 0);
+        assert_eq!(run_dma(&mut fw_cfg, &*mem, read, 3), 0);
+        assert_eq!(dma_buffer(&*mem, 3), [1, 2, 3]);
 
-        assert_eq!(run_dma(&mut fw_cfg, &mem, write, 1), error);
+        assert_eq!(run_dma(&mut fw_cfg, &*mem, write, 1), error);
     }
 
     #[test]
     fn test_dma_truncated_file() {
-        let mem: GuestMemory = GuestMemory::from_ranges(&[(DMA_DESCRIPTOR, 0x1000)]).unwrap();
-        let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(mem.clone()), None);
+        let mem = GuestMemory::from_ranges(&[(DMA_DESCRIPTOR, 0x1000)]).unwrap();
+        let mut fw_cfg = FwCfg::new(mem.clone(), None);
+        let mem = mem.memory();
         let temp = TempFile::new().unwrap();
         let file = temp.as_file();
         file.set_len(16).unwrap();
@@ -1270,15 +1271,16 @@ mod tests {
         let skip = select.with_skip(true);
         let read = select.with_read(true);
         let error = AccessControl::new().with_error(true).0;
-        assert_eq!(run_dma(&mut fw_cfg, &mem, skip, 4), 0);
+        assert_eq!(run_dma(&mut fw_cfg, &*mem, skip, 4), 0);
         assert_eq!(fw_cfg.data_offset, 0);
-        assert_eq!(run_dma(&mut fw_cfg, &mem, read, 4), error);
+        assert_eq!(run_dma(&mut fw_cfg, &*mem, read, 4), error);
     }
 
     #[test]
     fn test_dma_skip_after_truncation_keeps_offset() {
-        let mem: GuestMemory = GuestMemory::from_ranges(&[(DMA_DESCRIPTOR, 0x1000)]).unwrap();
-        let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(mem.clone()), None);
+        let mem = GuestMemory::from_ranges(&[(DMA_DESCRIPTOR, 0x1000)]).unwrap();
+        let mut fw_cfg = FwCfg::new(mem.clone(), None);
+        let mem = mem.memory();
         let temp = TempFile::new().unwrap();
         let file = temp.as_file();
         file.set_len(8).unwrap();
@@ -1293,11 +1295,11 @@ mod tests {
         let select = AccessControl::new()
             .with_select(true)
             .with_selector(FW_CFG_FILE_FIRST);
-        assert_eq!(run_dma(&mut fw_cfg, &mem, select.with_read(true), 6), 0);
+        assert_eq!(run_dma(&mut fw_cfg, &*mem, select.with_read(true), 6), 0);
         file.set_len(4).unwrap();
         let skip = AccessControl::new().with_skip(true);
-        assert_eq!(run_dma(&mut fw_cfg, &mem, skip, 0), 0);
-        assert_eq!(run_dma(&mut fw_cfg, &mem, skip, 2), 0);
+        assert_eq!(run_dma(&mut fw_cfg, &*mem, skip, 0), 0);
+        assert_eq!(run_dma(&mut fw_cfg, &*mem, skip, 2), 0);
         assert_eq!(fw_cfg.data_offset, 6);
     }
 }

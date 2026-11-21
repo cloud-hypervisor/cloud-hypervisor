@@ -15,7 +15,7 @@ use virtio_devices::watchdog::WatchdogState;
 use virtio_devices::{VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
 use vm_allocator::GuestMemory;
-use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
+use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend};
 use vm_migration::{Pausable, Snapshottable};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
@@ -337,11 +337,10 @@ fn run_watchdog_case(bytes: &[u8], mode: usize) -> Result<(), ()> {
         drop(writer);
     }
 
-    let mem = GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).map_err(|_| ())?;
-    seed_memory(&mem, &mut cursor)?;
+    let guest_memory = GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).map_err(|_| ())?;
+    seed_memory(&*guest_memory.memory(), &mut cursor)?;
     let queue = setup_virt_queue(&mut cursor, config.invalid_used_ring)?;
-    populate_queue_memory(&mem, config.desc_mode, &mut cursor)?;
-    let guest_memory = GuestMemoryAtomic::new(mem);
+    populate_queue_memory(&*guest_memory.memory(), config.desc_mode, &mut cursor)?;
 
     let (evt, queue_evt) = make_queue_event(config.queue_event_mode, config.pre_kicks)?;
 
@@ -459,7 +458,7 @@ fn timer_pipe() -> Result<(std::fs::File, std::fs::File), ()> {
     }))
 }
 
-fn seed_memory(mem: &GuestMemory, cursor: &mut FuzzCursor) -> Result<(), ()> {
+fn seed_memory<M: GuestMemoryBackend>(mem: &M, cursor: &mut FuzzCursor) -> Result<(), ()> {
     let mut seed = [0u8; 512];
     cursor.fill_slice(&mut seed);
     mem.write_slice(&seed, GuestAddress(DATA_ADDR))
@@ -494,8 +493,8 @@ fn setup_virt_queue(_cursor: &mut FuzzCursor, invalid_used_ring: bool) -> Result
     Ok(q)
 }
 
-fn populate_queue_memory(
-    mem: &GuestMemory,
+fn populate_queue_memory<M: GuestMemoryBackend>(
+    mem: &M,
     desc_mode: DescriptorMode,
     cursor: &mut FuzzCursor,
 ) -> Result<(), ()> {
@@ -529,13 +528,13 @@ fn populate_queue_memory(
     Ok(())
 }
 
-fn write_u16(mem: &GuestMemory, addr: u64, value: u16) -> Result<(), ()> {
+fn write_u16<M: GuestMemoryBackend>(mem: &M, addr: u64, value: u16) -> Result<(), ()> {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .map_err(|_| ())
 }
 
-fn write_desc(
-    mem: &GuestMemory,
+fn write_desc<M: GuestMemoryBackend>(
+    mem: &M,
     index: u16,
     addr: u64,
     len: u32,

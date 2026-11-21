@@ -26,7 +26,7 @@ use super::{DEFAULT_VIRTIO_FEATURES, Error, Result};
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::vhost_user::{PostcopyHandler, VhostUserCommon, VhostUserState};
-use crate::{GuestRegion, VIRTIO_F_ACCESS_PLATFORM, VirtioInterrupt, VirtioInterruptType};
+use crate::{VIRTIO_F_ACCESS_PLATFORM, VirtioInterrupt, VirtioInterruptType};
 
 const DEFAULT_QUEUE_NUMBER: u16 = 1;
 
@@ -372,10 +372,6 @@ impl VirtioDevice for Blk {
 
     fn shutdown(&mut self) {
         self.vu_common.shutdown();
-    }
-
-    fn add_memory_region(&mut self, region: &Arc<GuestRegion>) -> result::Result<(), crate::Error> {
-        self.vu_common.add_memory_region(region)
     }
 }
 

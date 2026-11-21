@@ -7,7 +7,7 @@ use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, OwnedFd};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
-use std::{io, result};
+use std::{io, mem, process, result};
 
 use anyhow::anyhow;
 use event_monitor::event;
@@ -21,9 +21,10 @@ use vhost::vhost_user::message::{
 };
 use vhost::vhost_user::{Error as VhostUserError, FrontendReqHandler, VhostUserFrontendReqHandler};
 use virtio_queue::{Error as QueueError, Queue};
+use vm_allocator::GuestMemoryNotification;
 use vm_memory::guest_memory::Error as MmapError;
 use vm_memory::mmap::MmapRegionError;
-use vm_memory::{Address, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend};
+use vm_memory::{Address, GuestAddressSpace, GuestMemoryBackend};
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{MigratableError, Pausable, Snapshot};
 use vmm_sys_util::eventfd::EventFd;
@@ -122,8 +123,6 @@ pub enum Error {
     PostcopyMemTableBasesMissing,
     #[error("Failed to register the backend's userfaultfd")]
     PostcopyRegister(#[source] io::Error),
-    #[error("Adding memory regions during postcopy is not supported")]
-    PostcopyAddMemRegion,
     #[error("Reconnecting during postcopy is not supported")]
     PostcopyReconnect,
     #[error("Set mem table failed")]
@@ -148,6 +147,8 @@ pub enum Error {
     VhostUserSetBackendRequestFd(#[source] vhost::Error),
     #[error("Add memory region failed")]
     VhostUserAddMemReg(#[source] VhostError),
+    #[error("Remove memory region failed")]
+    VhostUserRemoveMemReg(#[source] VhostError),
     #[error("Failed getting the configuration")]
     VhostUserGetConfig(#[source] VhostError),
     #[error("Failed setting the configuration")]
@@ -160,8 +161,6 @@ pub enum Error {
     VhostUserSetLogBase(#[source] VhostError),
     #[error("Invalid used address")]
     UsedAddress(#[source] HostAddressRangeError),
-    #[error("Missing file descriptor for the region")]
-    MissingRegionFd,
     #[error("Failed getting the available index")]
     GetAvailableIndex(#[source] QueueError),
     #[error("Failed getting the used index")]
@@ -262,6 +261,7 @@ impl Error {
             | Error::VhostUserSetVringEnable(e)
             | Error::VhostUserSetBackendRequestFd(e)
             | Error::VhostUserAddMemReg(e)
+            | Error::VhostUserRemoveMemReg(e)
             | Error::VhostUserGetConfig(e)
             | Error::VhostUserSetConfig(e)
             | Error::VhostUserGetInflight(e)
@@ -296,7 +296,7 @@ pub struct Inflight {
 
 pub struct VhostUserEpollHandler<S: VhostUserFrontendReqHandler> {
     pub vu: Arc<Mutex<VhostUserHandle>>,
-    pub mem: GuestMemoryAtomic<GuestMemory>,
+    pub mem: GuestMemory,
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
     pub queues: Vec<(u16, Queue, EventFd)>,
@@ -375,13 +375,16 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
 
         let num_queues = u16::try_from(self.queues.len())
             .map_err(|_| EpollHelperError::IoError(io::Error::other(Error::BadQueueNum)))?;
-        let mut vhost_user = match VhostUserHandle::connect_vhost_user(
+        match VhostUserHandle::connect_vhost_user(
             self.server,
             &self.socket_path,
             num_queues,
             true,
             &self.kill_evt,
             |vhost_user| {
+                // Hold the handle lock from sampling memory until the new backend
+                // takes over, so concurrent notifications reach the right connection.
+                let mut current = self.vu.lock().unwrap();
                 vhost_user.reinitialize_vhost_user(
                     self.mem.memory().deref(),
                     &queues,
@@ -390,10 +393,13 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
                     self.acked_protocol_features,
                     &self.backend_req_handler,
                     self.inflight.as_mut(),
-                )
+                )?;
+                mem::swap(&mut *current, vhost_user);
+                self.disconnected.store(false, Ordering::Relaxed);
+                Ok(())
             },
         ) {
-            Ok(vu) => vu,
+            Ok(_) => {}
             // Kill event fired during the reconnect retry loop; abandon the
             // reconnect attempt. The EpollHelper observes the same kill
             // event and will tear down on its next iteration.
@@ -404,17 +410,13 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
                     self.socket_path
                 ))));
             }
-        };
+        }
 
         helper.add_event_custom(
-            vhost_user.socket_handle().as_raw_fd(),
+            self.vu.lock().unwrap().socket_handle().as_raw_fd(),
             HUP_CONNECTION_EVENT,
             epoll::Events::EPOLLHUP,
         )?;
-
-        // Update vhost-user reference
-        let mut vu = self.vu.lock().unwrap();
-        *vu = vhost_user;
 
         Ok(())
     }
@@ -460,7 +462,7 @@ impl<S: VhostUserFrontendReqHandler> EpollHelperHandler for VhostUserEpollHandle
                     .lock()
                     .unwrap()
                     .resume(
-                        &self.mem.memory(),
+                        self.mem.memory().deref(),
                         &self.queues,
                         self.virtio_interrupt.as_ref(),
                         self.acked_features,
@@ -520,10 +522,52 @@ impl<C> VhostUserState<C> {
     }
 }
 
+struct VhostUserMemoryNotifier {
+    vu: Arc<Mutex<VhostUserHandle>>,
+    memory: GuestMemory,
+    features: u64,
+    disconnected: Arc<AtomicBool>,
+    socket_path: String,
+}
+
+impl VhostUserMemoryNotifier {
+    fn update(&self, region: &GuestRegion, added: bool) {
+        let mut vu = self.vu.lock().unwrap();
+        if self.disconnected.load(Ordering::Relaxed) {
+            return;
+        }
+        if let Err(e) = vu.update_memory_region(&self.memory, region, added, self.features) {
+            if e.is_transport_lost() {
+                warn!(
+                    "Lost vhost-user backend {} during memory update: {e:?}",
+                    self.socket_path
+                );
+                self.disconnected.store(true, Ordering::Relaxed);
+            } else {
+                error!(
+                    "Failed updating vhost-user memory for {}: {e:?}",
+                    self.socket_path
+                );
+                process::exit(1);
+            }
+        }
+    }
+}
+
+impl GuestMemoryNotification for VhostUserMemoryNotifier {
+    fn region_added(&self, region: &Arc<GuestRegion>) {
+        self.update(region, true);
+    }
+
+    fn region_removed(&self, region: &Arc<GuestRegion>) {
+        self.update(region, false);
+    }
+}
+
 pub struct VhostUserCommon {
     pub virtio_common: VirtioCommon,
     pub vu: Option<Arc<Mutex<VhostUserHandle>>>,
-    pub guest_memory: Option<GuestMemoryAtomic<GuestMemory>>,
+    pub guest_memory: Option<GuestMemory>,
     pub acked_protocol_features: u64,
     pub socket_path: String,
     pub vu_num_queues: u16,
@@ -532,6 +576,7 @@ pub struct VhostUserCommon {
     pub vring_bases: Option<Vec<u64>>,
     /// Indicates that the backend is no longer reachable. Shared with EPollHandler.
     pub disconnected: Arc<AtomicBool>,
+    memory_notifier: Option<Arc<VhostUserMemoryNotifier>>,
     saved_dirty_log: Option<MemoryRangeTable>,
     dirty_logging: bool,
     resume_evt: Option<EventFd>,
@@ -550,6 +595,7 @@ impl VhostUserCommon {
             server: false,
             vring_bases: None,
             disconnected: Arc::new(AtomicBool::new(false)),
+            memory_notifier: None,
             saved_dirty_log: None,
             dirty_logging: false,
             resume_evt: None,
@@ -559,7 +605,7 @@ impl VhostUserCommon {
     #[expect(clippy::too_many_arguments)]
     pub fn activate<T: VhostUserFrontendReqHandler>(
         &mut self,
-        mem: GuestMemoryAtomic<GuestMemory>,
+        mem: GuestMemory,
         queues: &[(u16, Queue, EventFd)],
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         acked_features: u64,
@@ -589,6 +635,18 @@ impl VhostUserCommon {
             error!("Missing vhost-user handle for socket {}", self.socket_path);
             return Err(ActivateError::BadActivate);
         };
+        if self.memory_notifier.is_none() {
+            let notifier = Arc::new(VhostUserMemoryNotifier {
+                vu: Arc::clone(vu),
+                memory: mem.clone(),
+                features: self.acked_protocol_features,
+                disconnected: Arc::clone(&self.disconnected),
+                socket_path: self.socket_path.clone(),
+            });
+            let weak = Arc::downgrade(&notifier);
+            mem.add_notifier(weak);
+            self.memory_notifier = Some(notifier);
+        }
         let queues = queues
             .iter()
             .map(|(i, q, e)| (*i, vm_virtio::clone_queue(q), e.try_clone().unwrap()))
@@ -597,7 +655,7 @@ impl VhostUserCommon {
         vu.lock()
             .unwrap()
             .setup_vhost_user(
-                &mem.memory(),
+                mem.memory().deref(),
                 &queues,
                 interrupt_cb.as_ref(),
                 acked_features,
@@ -698,15 +756,6 @@ impl VhostUserCommon {
         event!("virtio-device", "reset", "id", id);
     }
 
-    fn memory_update_error(&self, source: Error) -> crate::Error {
-        if self.acked_protocol_features & VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits() != 0
-        {
-            crate::Error::VhostUserAddMemoryRegion(source)
-        } else {
-            crate::Error::VhostUserUpdateMemory(source)
-        }
-    }
-
     pub fn shutdown(&mut self) {
         // Join the workers so they drop their Arc<VhostUserHandle> and the
         // socket closes, letting the migration destination reconnect.
@@ -718,59 +767,8 @@ impl VhostUserCommon {
         }
 
         // Drop the vhost-user handle
+        self.memory_notifier = None;
         self.vu = None;
-    }
-
-    fn add_memory_region_internal(&self, region: &Arc<GuestRegion>) -> Result<()> {
-        if let Some(vu) = &self.vu {
-            // Only the regions registered when postcopy started are served.
-            if vu.lock().unwrap().postcopy_handler().is_some() {
-                return Err(Error::PostcopyAddMemRegion);
-            }
-            if self.acked_protocol_features & VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits()
-                != 0
-            {
-                return vu.lock().unwrap().add_memory_region(region);
-            } else if let Some(guest_memory) = &self.guest_memory {
-                return vu
-                    .lock()
-                    .unwrap()
-                    .update_mem_table(guest_memory.memory().deref());
-            }
-        }
-
-        Ok(())
-    }
-
-    pub fn add_memory_region(
-        &mut self,
-        region: &Arc<GuestRegion>,
-    ) -> result::Result<(), crate::Error> {
-        if self.disconnected.load(Ordering::Relaxed) {
-            warn!(
-                "Skipping add memory region on disconnected dev with socket: {}",
-                self.socket_path
-            );
-            return Ok(());
-        }
-
-        if let Err(e) = self.add_memory_region_internal(region) {
-            if e.is_transport_lost() {
-                warn!(
-                    "Failed updating memory on vhost-user backend for socket {}: {e:?}; \
-                     marking device as disconnected",
-                    self.socket_path
-                );
-                self.disconnected.store(true, Ordering::Relaxed);
-            } else {
-                warn!(
-                    "Failed updating memory on vhost-user backend for socket {}: {e:?}",
-                    self.socket_path
-                );
-            }
-            return Err(self.memory_update_error(e));
-        }
-        Ok(())
     }
 
     pub fn pause(&mut self) -> result::Result<(), MigratableError> {
@@ -954,6 +952,7 @@ impl VhostUserCommon {
 
         // Drop the vhost-user handler to avoid further calls to fail because
         // the connection with the backend has been closed.
+        self.memory_notifier = None;
         self.vu = None;
 
         Ok(())
@@ -973,7 +972,7 @@ mod tests {
 
     use super::*;
     use crate::vsock::tests::NoopVirtioInterrupt;
-    use crate::{MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VirtioDevice};
+    use crate::{GuestMemory, MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VirtioDevice};
 
     fn read_request(stream: &mut UnixStream, expected_request: FrontendReq) -> Vec<u8> {
         let mut header = [0u8; 12];
@@ -1175,8 +1174,8 @@ mod tests {
         .unwrap();
         struct BackendReqHandler;
         impl VhostUserFrontendReqHandler for BackendReqHandler {}
-        vu.setup_vhost_user::<BackendReqHandler>(
-            &mem,
+        vu.setup_vhost_user::<BackendReqHandler, _>(
+            &*mem.memory(),
             &[],
             &NoopVirtioInterrupt {},
             (1u64 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_F_ACCESS_PLATFORM),
@@ -1275,12 +1274,13 @@ mod tests {
     #[test]
     fn add_memory_region_skips_disconnected_device() {
         let (vu, _backend) = connect_handle(VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits());
-        let mut common = VhostUserCommon {
-            vu: Some(Arc::new(Mutex::new(vu))),
-            acked_protocol_features: VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits(),
-            ..VhostUserCommon::new(VirtioCommon::new(false).unwrap())
+        let notifier = VhostUserMemoryNotifier {
+            vu: Arc::new(Mutex::new(vu)),
+            features: VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits(),
+            memory: GuestMemory::from_ranges(&[(GuestAddress(0), 4096)]).unwrap(),
+            socket_path: String::new(),
+            disconnected: Arc::new(AtomicBool::new(true)),
         };
-        common.disconnected.store(true, Ordering::Relaxed);
 
         // Sending this region would fail, as it has no backing file.
         let region = MmapRegion::new(0x1000).unwrap();
@@ -1289,6 +1289,7 @@ mod tests {
                 .unwrap()
                 .into(),
         );
-        common.add_memory_region(&region).unwrap();
+        notifier.region_added(&region);
+        notifier.region_removed(&region);
     }
 }

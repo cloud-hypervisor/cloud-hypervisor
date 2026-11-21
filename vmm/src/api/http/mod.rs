@@ -40,6 +40,7 @@ use crate::device_manager::DeviceManagerError;
 use crate::external_fds::{ScmRightsError, UpdateFdsError};
 use crate::landlock::Landlock;
 use crate::locked_unix_listener::{LockedUnixListener, LockedUnixListenerError};
+use crate::memory_manager::Error as MemoryManagerError;
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::util::{error_chain_messages, flatten_error_chain_to_string};
 use crate::vm::Error as VmError;
@@ -129,6 +130,7 @@ fn api_error_status_code(error: &ApiError) -> StatusCode {
         Some(
             VmError::VmMigrating
             | VmError::VmRestoring
+            | VmError::MemoryManager(MemoryManagerError::HotplugDuringRestore)
             | VmError::DeviceManager(DeviceManagerError::IdentifierNotUnique(_)),
         ) => StatusCode::Conflict,
         Some(VmError::ConfigValidation(e)) => match e {

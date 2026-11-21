@@ -18,7 +18,7 @@ use virtio_devices::{
 };
 use virtio_queue::{Queue, QueueT};
 use vm_allocator::GuestMemory;
-use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
+use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend};
 use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::{AccessPlatform, AccessType};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
@@ -146,23 +146,23 @@ fn queue_base(queue_index: usize) -> u64 {
     BASE_VIRT_QUEUE_ADDR + (QUEUE_BYTES_SIZE * queue_index) as u64
 }
 
-fn write_le16(mem: &GuestMemory, addr: u64, value: u16) -> bool {
+fn write_le16<M: GuestMemoryBackend>(mem: &M, addr: u64, value: u16) -> bool {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .is_ok()
 }
 
-fn write_le32(mem: &GuestMemory, addr: u64, value: u32) -> bool {
+fn write_le32<M: GuestMemoryBackend>(mem: &M, addr: u64, value: u32) -> bool {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .is_ok()
 }
 
-fn write_le64(mem: &GuestMemory, addr: u64, value: u64) -> bool {
+fn write_le64<M: GuestMemoryBackend>(mem: &M, addr: u64, value: u64) -> bool {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .is_ok()
 }
 
-fn write_desc(
-    mem: &GuestMemory,
+fn write_desc<M: GuestMemoryBackend>(
+    mem: &M,
     table_addr: u64,
     idx: u16,
     addr: u64,
@@ -177,7 +177,7 @@ fn write_desc(
         && write_le16(mem, desc_addr + 14, next)
 }
 
-fn write_avail(mem: &GuestMemory, avail_addr: u64, ring: &[u16]) -> bool {
+fn write_avail<M: GuestMemoryBackend>(mem: &M, avail_addr: u64, ring: &[u16]) -> bool {
     if !write_le16(mem, avail_addr, 0) {
         return false;
     }
@@ -192,11 +192,11 @@ fn write_avail(mem: &GuestMemory, avail_addr: u64, ring: &[u16]) -> bool {
     true
 }
 
-fn write_tx_hdr_len(mem: &GuestMemory, hdr_addr: u64, len: u32) -> bool {
+fn write_tx_hdr_len<M: GuestMemoryBackend>(mem: &M, hdr_addr: u64, len: u32) -> bool {
     write_le32(mem, hdr_addr + VSOCK_HDR_LEN_OFF, len)
 }
 
-fn program_queue_memory(mem: &GuestMemory, bytes: &[u8], edge: bool) -> bool {
+fn program_queue_memory<M: GuestMemoryBackend>(mem: &M, bytes: &[u8], edge: bool) -> bool {
     let rx_base = queue_base(0);
     let tx_base = queue_base(1);
     let evt_base = queue_base(2);
@@ -379,17 +379,18 @@ fn run_worker_scenario(
         let _ = backend.evfd.write(1);
     }
 
-    let mem = match GuestMemory::from_ranges(&[
+    let guest_memory = match GuestMemory::from_ranges(&[
         (GuestAddress(0), MEM_SIZE),
         (
             GuestAddress(BASE_VIRT_QUEUE_ADDR),
             QUEUE_BYTES_SIZE * NUM_QUEUES as usize,
         ),
     ]) {
-        Ok(mem) => mem,
+        Ok(guest_memory) => guest_memory,
         Err(_) => return false,
     };
 
+    let mem = guest_memory.memory();
     if mem
         .write_slice(queue_bytes_all, GuestAddress(BASE_VIRT_QUEUE_ADDR))
         .is_err()
@@ -399,11 +400,10 @@ fn run_worker_scenario(
     if mem.write_slice(mem_bytes, GuestAddress(0)).is_err() {
         return false;
     }
-    if !program_queue_memory(&mem, bytes, edge) {
+    if !program_queue_memory(&*mem, bytes, edge) {
         return false;
     }
 
-    let guest_memory = GuestMemoryAtomic::new(mem);
     let mut queues_with_evts = Vec::with_capacity(NUM_QUEUES as usize);
     for i in 0..NUM_QUEUES {
         let q = match build_queue(
@@ -519,11 +519,11 @@ fn configure_handler_context(
         3 => {
             let len = VSOCK_PKT_HDR_SIZE + 64;
             ctx.guest_txvq.dtable[0].set(0x0050_0000, len, 0, 0);
-            let _ = write_tx_hdr_len(&test_ctx.mem, 0x0050_0000, len - VSOCK_PKT_HDR_SIZE);
+            let _ = write_tx_hdr_len(&*test_ctx.map, 0x0050_0000, len - VSOCK_PKT_HDR_SIZE);
         }
         4 => {
             ctx.guest_txvq.dtable[1].set(0x0050_1000, 16, 0, 0);
-            let _ = write_tx_hdr_len(&test_ctx.mem, 0x0050_0000, 4096);
+            let _ = write_tx_hdr_len(&*test_ctx.map, 0x0050_0000, 4096);
         }
         5 => ctx.guest_rxvq.dtable[0].len.set(0),
         6 => ctx.guest_rxvq.dtable[0].set(0x0040_0000, VSOCK_PKT_HDR_SIZE, 0, 0),
@@ -535,11 +535,11 @@ fn configure_handler_context(
         ),
         8 => {
             let rx_hdr_addr = ctx.guest_rxvq.dtable[0].addr.get();
-            let _ = write_tx_hdr_len(&test_ctx.mem, rx_hdr_addr, 70_000);
+            let _ = write_tx_hdr_len(&*test_ctx.map, rx_hdr_addr, 70_000);
         }
         _ => {
             let tx_hdr_addr = ctx.guest_txvq.dtable[0].addr.get();
-            let _ = write_tx_hdr_len(&test_ctx.mem, tx_hdr_addr, 70_000);
+            let _ = write_tx_hdr_len(&*test_ctx.map, tx_hdr_addr, 70_000);
         }
     }
 }
@@ -630,11 +630,10 @@ fn exercise_device_paths(bytes: &[u8]) {
     let _ = device.snapshot();
     let _ = device.id();
 
-    let mem = match GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
-        Ok(mem) => mem,
+    let memory = match GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
+        Ok(memory) => memory,
         Err(_) => return,
     };
-    let memory = GuestMemoryAtomic::new(mem);
     let _ = device.activate(ActivationContext {
         mem: memory.clone(),
         interrupt_cb: Arc::new(HarnessInterrupt {

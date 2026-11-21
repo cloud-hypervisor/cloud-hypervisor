@@ -32,7 +32,7 @@ use virtio_bindings::virtio_config::*;
 use virtio_bindings::virtio_net::*;
 use virtio_bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use virtio_queue::{Queue, QueueT};
-use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic};
+use vm_memory::{ByteValued, GuestAddressSpace};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
@@ -60,7 +60,7 @@ const RETRY_ANNOUNCEMENTS_EVENT: u16 = START_ANNOUNCEMENTS_EVENT + 1;
 pub const MIN_MTU: u16 = 1280;
 
 pub struct NetCtrlEpollHandler {
-    pub mem: GuestMemoryAtomic<GuestMemory>,
+    pub mem: GuestMemory,
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
     pub ctrl_q: CtrlQueue,
@@ -227,7 +227,7 @@ pub type Result<T> = result::Result<T, Error>;
 
 struct NetEpollHandler {
     net: NetQueuePair,
-    mem: GuestMemoryAtomic<GuestMemory>,
+    mem: GuestMemory,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     kill_evt: EventFd,
     pause_evt: EventFd,

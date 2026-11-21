@@ -31,7 +31,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
 #[cfg(not(target_arch = "riscv64"))]
 use std::time::Instant;
-use std::{iter, path, result, sync};
+use std::{iter, path, process, result, sync};
 
 use acpi_tables::sdt::GenericAddress;
 use acpi_tables::{Aml, aml};
@@ -120,16 +120,19 @@ use virtio_devices::{
     balloon, mem, net, transport, vdpa, vhost_user, vsock,
 };
 use vm_allocator::page_size::get_page_size;
-use vm_allocator::{AddressAllocator, GuestRegionError, InterruptAllocError, SystemAllocator};
+use vm_allocator::{
+    AddressAllocator, GuestMemoryNotification, GuestRegionError, InterruptAllocError,
+    SystemAllocator,
+};
 use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptRemapping, LegacyIrqGroupConfig, MsiIrqGroupConfig,
 };
 use vm_device::{Bus, BusDevice, BusDeviceSync, Resource};
+#[cfg(target_arch = "x86_64")]
+use vm_memory::GuestMemoryBackend;
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{Address, GuestAddress, GuestMemoryRegion, GuestUsize, MmapRegion, mmap};
-#[cfg(target_arch = "x86_64")]
-use vm_memory::{GuestAddressSpace, GuestMemoryBackend};
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotData, Snapshottable, Transportable,
@@ -497,17 +500,9 @@ pub enum DeviceManagerError {
     #[error("No disk path was specified when one was expected")]
     NoDiskPath,
 
-    /// Failed to update guest memory for virtio device.
-    #[error("Failed to update guest memory for virtio device")]
-    UpdateMemoryForVirtioDevice(#[source] virtio_devices::Error),
-
     /// Cannot create virtio-mem device
     #[error("Cannot create virtio-mem device")]
     CreateVirtioMem(#[source] io::Error),
-
-    /// Failed to update guest memory for VFIO PCI device.
-    #[error("Failed to update guest memory for VFIO PCI device")]
-    UpdateMemoryForVfioPciDevice(#[source] ExternalDmaMappingError),
 
     /// Trying to use a directory for pmem but no size specified
     #[error("Trying to use a directory for pmem but no size specified")]
@@ -599,10 +594,6 @@ pub enum DeviceManagerError {
     /// Failed to DMA map VFIO user device.
     #[error("Failed to DMA map VFIO user device")]
     VfioUserDmaMap(#[source] ExternalDmaMappingError),
-
-    /// Failed to update memory mappings for VFIO user device
-    #[error("Failed to update memory mappings for VFIO user device")]
-    UpdateMemoryForVfioUserPciDevice(#[source] ExternalDmaMappingError),
 
     /// vfio-user cannot be hot-added while SEV-SNP shared-page tracking is active
     #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
@@ -895,6 +886,26 @@ impl Clone for PtyPair {
 pub struct VfioContext {
     ops: Arc<dyn VfioOps>,
     dma_mapping: Arc<dyn ExternalDmaMapping>,
+}
+
+impl GuestMemoryNotification for VfioContext {
+    fn region_added(&self, region: &Arc<GuestRegion>) {
+        let gpa = region.start_addr().raw_value();
+        if let Err(e) = self.dma_mapping.map(gpa, gpa, region.len()) {
+            error!("VFIO: {}", flatten_error_chain_to_string(&e));
+            process::exit(1);
+        }
+    }
+
+    fn region_removed(&self, region: &Arc<GuestRegion>) {
+        if let Err(e) = self
+            .dma_mapping
+            .unmap(region.start_addr().raw_value(), region.len())
+        {
+            error!("VFIO: {}", flatten_error_chain_to_string(&e));
+            process::exit(1);
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -2237,8 +2248,12 @@ impl DeviceManager {
             .map_err(DeviceManagerError::BusError)?;
         {
             // Add a CMOS emulated device
+            let config = self.config.lock().unwrap();
             let memory_manager = self.memory_manager.lock().unwrap();
-            let mem_size = memory_manager.guest_memory().memory().last_addr().0 + 1;
+            let boot_memory = memory_manager
+                .boot_guest_memory(&config.memory)
+                .map_err(DeviceManagerError::MemoryManager)?;
+            let mem_size = boot_memory.last_addr().0 + 1;
             // CMOS holds RAM above 4 GiB as a single size, so end it at the
             // first reserved region there.
             let mem_size = memory_manager
@@ -4054,11 +4069,12 @@ impl DeviceManager {
             .to_str()
             .ok_or(DeviceManagerError::CreateVdpaConvertPath)?;
 
+        let memory = self.memory_manager.lock().unwrap().guest_memory();
         let vdpa_device = Arc::new(Mutex::new(
             virtio_devices::Vdpa::new(
                 id.clone(),
                 device_path,
-                self.memory_manager.lock().unwrap().guest_memory(),
+                memory.clone(),
                 vdpa_cfg.num_queues,
                 state_from_id(snapshot, id.as_str())
                     .map_err(DeviceManagerError::RestoreGetState)?,
@@ -4069,8 +4085,23 @@ impl DeviceManager {
         // Create the DMA handler that is required by the vDPA device
         let vdpa_mapping = Arc::new(VdpaDmaMapping::new(
             Arc::clone(&vdpa_device),
-            Arc::new(self.memory_manager.lock().unwrap().guest_memory()),
+            Arc::new(memory.clone()),
         ));
+
+        if !vdpa_cfg.pci_common.iommu.attached() {
+            // Virtio-mem maps individual blocks through its DMA handler.
+            let mm = self.memory_manager.lock().unwrap();
+            for zone in mm.memory_zones().values() {
+                for region in zone.regions() {
+                    let gpa = region.start_addr().raw_value();
+                    vdpa_mapping
+                        .map(gpa, gpa, region.len())
+                        .map_err(DeviceManagerError::VirtioDmaMap)?;
+                }
+            }
+            let notifier = Arc::downgrade(&vdpa_mapping);
+            memory.add_notifier(notifier);
+        }
 
         self.device_tree
             .lock()
@@ -4605,7 +4636,8 @@ impl DeviceManager {
                 // Statically map all guest RAM into the IOMMU. Do not register
                 // virtio-mem regions, as they are handled directly by the
                 // virtio-mem device itself.
-                for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
+                let mm = self.memory_manager.lock().unwrap();
+                for zone in mm.memory_zones().values() {
                     for region in zone.regions() {
                         let gpa = region.start_addr().raw_value();
                         vfio_mapping
@@ -4613,6 +4645,8 @@ impl DeviceManager {
                             .map_err(|e| DeviceManagerError::VfioDmaMap(e, gpa, region.len()))?;
                     }
                 }
+                let notifier = Arc::downgrade(&vfio_context);
+                mm.guest_memory().add_notifier(notifier);
             }
 
             for virtio_mem_device in self.virtio_mem_devices.iter() {
@@ -4918,9 +4952,10 @@ impl DeviceManager {
         )
         .map_err(DeviceManagerError::VfioUserCreate)?;
 
-        let memory = self.memory_manager.lock().unwrap().guest_memory();
-        let vfio_user_mapping: Arc<dyn ExternalDmaMapping> =
-            Arc::new(VfioUserDmaMapping::new(client, Arc::new(memory)));
+        let memory = Arc::new(memory_manager.lock().unwrap().guest_memory());
+        let mapping = Arc::new(VfioUserDmaMapping::new(client, Arc::clone(&memory)));
+        let notifier = Arc::downgrade(&mapping);
+        let vfio_user_mapping: Arc<dyn ExternalDmaMapping> = mapping;
         for virtio_mem_device in self.virtio_mem_devices.iter() {
             virtio_mem_device
                 .lock()
@@ -4932,15 +4967,19 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
         }
 
-        for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
-            for region in zone.regions() {
-                if region.file_offset().is_some() {
-                    let gpa = region.start_addr().raw_value();
-                    vfio_user_mapping
-                        .map(gpa, gpa, region.len())
-                        .map_err(DeviceManagerError::VfioUserDmaMap)?;
+        {
+            let mm = memory_manager.lock().unwrap();
+            for zone in mm.memory_zones().values() {
+                for region in zone.regions() {
+                    if region.file_offset().is_some() {
+                        let gpa = region.start_addr().raw_value();
+                        vfio_user_mapping
+                            .map(gpa, gpa, region.len())
+                            .map_err(DeviceManagerError::VfioUserDmaMap)?;
+                    }
                 }
             }
+            memory.add_notifier(notifier);
         }
 
         let vfio_user_pci_device = Arc::new(Mutex::new(vfio_user_pci_device));
@@ -5094,18 +5133,6 @@ impl DeviceManager {
                             dma_handler,
                         )
                         .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
-                }
-
-                // Do not register virtio-mem regions, as they are handled directly by
-                // virtio-mem devices.
-                for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
-                    for region in zone.regions() {
-                        let gpa = region.start_addr().0;
-                        let size = region.len();
-                        dma_handler
-                            .map(gpa, gpa, size)
-                            .map_err(DeviceManagerError::VirtioDmaMap)?;
-                    }
                 }
             }
         }
@@ -5418,55 +5445,6 @@ impl DeviceManager {
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     pub fn cmdline_additions(&self) -> &[String] {
         self.cmdline_additions.as_slice()
-    }
-
-    pub fn add_memory_region(&self, new_region: &Arc<GuestRegion>) -> DeviceManagerResult<()> {
-        for handle in self.virtio_devices.iter() {
-            handle
-                .virtio_device
-                .lock()
-                .unwrap()
-                .add_memory_region(new_region)
-                .map_err(DeviceManagerError::UpdateMemoryForVirtioDevice)?;
-
-            if let Some(dma_handler) = &handle.dma_handler
-                && !handle.pci_common.iommu.attached()
-            {
-                let gpa = new_region.start_addr().0;
-                let size = new_region.len();
-                dma_handler
-                    .map(gpa, gpa, size)
-                    .map_err(DeviceManagerError::VirtioDmaMap)?;
-            }
-        }
-
-        // Take care of updating the memory for VFIO PCI devices.
-        if let Some(vfio_context) = self.vfio_context.upgrade() {
-            let gpa = new_region.start_addr().raw_value();
-            vfio_context
-                .dma_mapping
-                .map(gpa, gpa, new_region.len())
-                .map_err(DeviceManagerError::UpdateMemoryForVfioPciDevice)?;
-        }
-
-        // Take care of updating the memory for vfio-user devices.
-        if new_region.file_offset().is_some() {
-            let device_tree = self.device_tree.lock().unwrap();
-            for pci_device_node in device_tree.pci_devices() {
-                if let PciDeviceHandle::VfioUser { dma_mapping, .. } = pci_device_node
-                    .pci_device_handle
-                    .as_ref()
-                    .ok_or(DeviceManagerError::MissingPciDevice)?
-                {
-                    let gpa = new_region.start_addr().raw_value();
-                    dma_mapping
-                        .map(gpa, gpa, new_region.len())
-                        .map_err(DeviceManagerError::UpdateMemoryForVfioUserPciDevice)?;
-                }
-            }
-        }
-
-        Ok(())
     }
 
     pub fn activate_virtio_devices(&self) -> DeviceManagerResult<()> {
@@ -5893,9 +5871,6 @@ impl DeviceManager {
         &mut self,
         handle: MetaVirtioDevice,
     ) -> DeviceManagerResult<PciDeviceInfo> {
-        // Add the virtio device to the device manager list. This is important
-        // as the list is used to notify virtio devices about memory updates
-        // for instance.
         self.virtio_devices.push(handle.clone());
 
         let mapping: Option<Arc<IommuMapping>> = if handle.pci_common.iommu.attached() {

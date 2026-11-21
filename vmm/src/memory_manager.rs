@@ -40,8 +40,8 @@ use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::mmap::MmapRegionError;
 use vm_memory::{
-    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend,
-    GuestMemoryError, GuestMemoryRegion, GuestUsize, MmapRegion,
+    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend, GuestMemoryError,
+    GuestMemoryRegion, GuestRegionCollection, GuestUsize, MmapRegion,
 };
 use vm_migration::protocol::{MemoryRange, MemoryRangeTable};
 use vm_migration::{
@@ -356,8 +356,7 @@ struct CowSource {
 }
 
 pub struct MemoryManager {
-    boot_guest_memory: GuestMemory,
-    guest_memory: GuestMemoryAtomic<GuestMemory>,
+    guest_memory: GuestMemory,
     next_memory_slot: Arc<AtomicU32>,
     memory_slot_allocator: Arc<MemorySlotAllocator>,
     start_of_device_area: GuestAddress,
@@ -396,7 +395,7 @@ pub struct MemoryManager {
 
     pub acpi_address: Option<GuestAddress>,
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
-    uefi_flash: Option<GuestMemoryAtomic<GuestMemory>>,
+    uefi_flash: Option<GuestRegion>,
 }
 
 #[derive(Error, Debug)]
@@ -417,6 +416,9 @@ pub enum Error {
     #[error("Guest region collection error")]
     GuestRegionCollection(#[source] vm_memory::GuestRegionCollectionError),
 
+    #[error("Boot RAM mapping missing at {0:#x} (size {1:#x})")]
+    MissingBootRegion(u64, u64),
+
     /// Failed to allocate a memory range.
     #[error("Failed to allocate a memory range")]
     MemoryRangeAllocation,
@@ -424,6 +426,9 @@ pub enum Error {
     /// Error from region creation
     #[error("Error from region creation")]
     GuestMemoryRegion(#[source] MmapRegionError),
+
+    #[error("Cannot hotplug RAM during on-demand restore")]
+    HotplugDuringRestore,
 
     /// No ACPI slot available
     #[error("No ACPI slot available")]
@@ -764,162 +769,127 @@ pub enum MemoryRangePolicy {
     Sparse,
 }
 
+struct ZoneRange {
+    zone_index: usize,
+    file_offset: u64,
+    start: GuestAddress,
+    size: u64,
+}
+
 impl MemoryManager {
-    /// Creates all memory regions based on the available RAM ranges defined
-    /// by `ram_regions`, and based on the description of the memory zones.
-    /// In practice, this function can perform multiple memory mappings of the
-    /// same backing file if there's a hole in the address space between two
-    /// RAM ranges.
-    ///
-    /// One example might be ram_regions containing 2 regions (0-3G and 4G-6G)
-    /// and zones containing two zones (size 1G and size 4G).
-    ///
-    /// This function will create 3 resulting memory regions:
-    /// - First one mapping entirely the first memory zone on 0-1G range
-    /// - Second one mapping partially the second memory zone on 1G-3G range
-    /// - Third one mapping partially the second memory zone on 4G-6G range
-    ///
-    /// Also, all memory regions are page-size aligned (e.g. their sizes must
-    /// be multiple of page-size), which may leave an additional hole in the
-    /// address space when hugepage is used.
+    /// Split zones (size, alignment) across the architecture's RAM windows.
+    /// A zone spanning a hole continues at the same file offset in the next
+    /// window. Leave any tail smaller than the zone alignment unmapped.
+    fn zone_ranges(
+        arch_regions: &[ArchMemRegion],
+        zones: impl IntoIterator<Item = (u64, u64)>,
+    ) -> Result<Vec<ZoneRange>, Error> {
+        let mut zones = zones.into_iter().enumerate();
+        let mut zone = zones.next().ok_or(Error::MissingMemoryZones)?;
+        let mut zone_offset = 0;
+        let mut ranges = Vec::new();
+        for window in arch_regions.iter().filter(|r| r.r_type == RegionType::Ram) {
+            let mut offset = 0;
+            loop {
+                let (zone_index, (zone_size, align)) = zone;
+                let available = align_down(window.size as u64 - offset, align);
+                if available == 0 {
+                    break;
+                }
+                let size = available.min(zone_size - zone_offset);
+                let start = GuestAddress(window.base)
+                    .checked_add(offset)
+                    .ok_or(Error::GuestAddressOverFlow)?;
+                ranges.push(ZoneRange {
+                    zone_index,
+                    file_offset: zone_offset,
+                    start,
+                    size,
+                });
+                zone_offset += size;
+                offset += size;
+                if zone_offset == zone_size {
+                    let Some(next) = zones.next() else {
+                        return Ok(ranges);
+                    };
+                    zone = next;
+                    zone_offset = 0;
+                }
+                if size == available {
+                    break;
+                }
+            }
+        }
+        Ok(ranges)
+    }
+
     fn create_memory_regions_from_zones(
-        ram_regions: &[(GuestAddress, usize)],
+        arch_regions: &[ArchMemRegion],
         zones: &[MemoryZoneConfig],
         thp: bool,
         vm: &Arc<dyn hypervisor::Vm>,
         slot_allocator: &Arc<MemorySlotAllocator>,
         log_dirty: bool,
     ) -> Result<(Vec<Arc<GuestRegion>>, MemoryZones), Error> {
-        let mut zone_iter = zones.iter();
         let mut mem_regions = Vec::new();
-        let mut zone = zone_iter.next().ok_or(Error::MissingMemoryZones)?;
-        let mut zone_align_size = memory_zone_get_align_size(zone)?;
-        let mut zone_offset = 0u64;
         let mut memory_zones = HashMap::new();
-
-        if !is_aligned(zone.size, zone_align_size) {
-            return Err(Error::MisalignedMemorySize);
+        for zone in zones {
+            let align = memory_zone_get_align_size(zone)?;
+            if !is_aligned(zone.size, align) {
+                return Err(Error::MisalignedMemorySize);
+            }
+            if memory_zones
+                .insert(
+                    zone.id.clone(),
+                    MemoryZone::new(zone.shared, zone.hugepages, align, zone.mergeable),
+                )
+                .is_some()
+            {
+                error!("Memory zone identifier '{}' found more than once", zone.id);
+                return Err(Error::DuplicateZoneId);
+            }
         }
 
-        // Add zone id to the list of memory zones.
-        memory_zones.insert(
-            zone.id.clone(),
-            MemoryZone::new(zone.shared, zone.hugepages, zone_align_size, zone.mergeable),
-        );
+        let sizes = zones
+            .iter()
+            .map(|z| (z.size, memory_zones[&z.id].backing_page_size));
+        for range in Self::zone_ranges(arch_regions, sizes)? {
+            let zone = &zones[range.zone_index];
+            let region_start = range.start;
+            let region_size = range.size;
+            let file_offset = range.file_offset;
+            info!(
+                "create ram region for zone {}, region_start: {:#x}, region_size: {:#x}",
+                zone.id,
+                region_start.raw_value(),
+                region_size
+            );
+            let region = MemoryManager::create_ram_region(
+                &zone.file,
+                file_offset,
+                region_start,
+                region_size as usize,
+                zone.reserve.unwrap_or(zone.hugepages),
+                zone.shared,
+                zone.hugepages,
+                zone.hugepage_size,
+                zone.host_numa_node,
+                None,
+                thp,
+                Arc::clone(vm),
+                Arc::clone(slot_allocator),
+                zone.mergeable,
+                log_dirty,
+                hypervisor::MemoryVisibility::Private,
+            )?;
 
-        for ram_region in ram_regions.iter() {
-            let mut ram_region_offset = 0;
-            let mut exit = false;
-
-            loop {
-                let mut ram_region_consumed = false;
-                let mut pull_next_zone = false;
-
-                let ram_region_available_size =
-                    align_down(ram_region.1 as u64 - ram_region_offset, zone_align_size);
-                if ram_region_available_size == 0 {
-                    break;
-                }
-                let zone_sub_size = zone.size - zone_offset;
-
-                let file_offset = zone_offset;
-                let region_start = ram_region
-                    .0
-                    .checked_add(ram_region_offset)
-                    .ok_or(Error::GuestAddressOverFlow)?;
-                let region_size = if zone_sub_size <= ram_region_available_size {
-                    if zone_sub_size == ram_region_available_size {
-                        ram_region_consumed = true;
-                    }
-
-                    ram_region_offset += zone_sub_size;
-                    pull_next_zone = true;
-
-                    zone_sub_size
-                } else {
-                    zone_offset += ram_region_available_size;
-                    ram_region_consumed = true;
-
-                    ram_region_available_size
-                };
-
-                info!(
-                    "create ram region for zone {}, region_start: {:#x}, region_size: {:#x}",
-                    zone.id,
-                    region_start.raw_value(),
-                    region_size
-                );
-                let region = MemoryManager::create_ram_region(
-                    &zone.file,
-                    file_offset,
-                    region_start,
-                    region_size as usize,
-                    zone.reserve.unwrap_or(zone.hugepages),
-                    zone.shared,
-                    zone.hugepages,
-                    zone.hugepage_size,
-                    zone.host_numa_node,
-                    None,
-                    thp,
-                    Arc::clone(vm),
-                    Arc::clone(slot_allocator),
-                    zone.mergeable,
-                    log_dirty,
-                    hypervisor::MemoryVisibility::Private,
-                )?;
-
-                // Add region to the list of regions associated with the
-                // current memory zone.
-                if let Some(memory_zone) = memory_zones.get_mut(&zone.id) {
-                    memory_zone.regions.push(Arc::clone(&region));
-                }
-
-                mem_regions.push(region);
-
-                if pull_next_zone {
-                    // Get the next zone and reset the offset.
-                    zone_offset = 0;
-                    if let Some(z) = zone_iter.next() {
-                        zone = z;
-                    } else {
-                        exit = true;
-                        break;
-                    }
-                    zone_align_size = memory_zone_get_align_size(zone)?;
-                    if !is_aligned(zone.size, zone_align_size) {
-                        return Err(Error::MisalignedMemorySize);
-                    }
-
-                    // Check if zone id already exist. In case it does, throw
-                    // an error as we need unique identifiers. Otherwise, add
-                    // the new zone id to the list of memory zones.
-                    if memory_zones.contains_key(&zone.id) {
-                        error!(
-                            "Memory zone identifier '{}' found more than once. \
-                            It must be unique",
-                            zone.id,
-                        );
-                        return Err(Error::DuplicateZoneId);
-                    }
-                    memory_zones.insert(
-                        zone.id.clone(),
-                        MemoryZone::new(
-                            zone.shared,
-                            zone.hugepages,
-                            zone_align_size,
-                            zone.mergeable,
-                        ),
-                    );
-                }
-
-                if ram_region_consumed {
-                    break;
-                }
+            // Add region to the list of regions associated with the
+            // current memory zone.
+            if let Some(memory_zone) = memory_zones.get_mut(&zone.id) {
+                memory_zone.regions.push(Arc::clone(&region));
             }
 
-            if exit {
-                break;
-            }
+            mem_regions.push(region);
         }
 
         Ok((mem_regions, memory_zones))
@@ -1138,7 +1108,7 @@ impl MemoryManager {
         saved_regions: &MemoryRangeTable,
     ) -> Result<(), Error> {
         let guest_memory = self.guest_memory.memory();
-        if !is_restore_cow_compatible(&guest_memory, saved_regions) {
+        if !is_restore_cow_compatible(&*guest_memory, saved_regions) {
             info!("Restore (mode=copyonwrite): guest RAM unsuitable, falling back to copy");
             return self.fill_saved_regions(file_path, saved_regions);
         }
@@ -1155,7 +1125,7 @@ impl MemoryManager {
                 "snapshot memory file is shorter than the saved ranges",
             )));
         }
-        do_mmap_cow_saved_regions(&guest_memory, &memory_file, saved_regions, self.thp)?;
+        do_mmap_cow_saved_regions(&*guest_memory, &memory_file, saved_regions, self.thp)?;
         // Landlock applies after the restore, so the pagemap is opened here.
         self.cow_source = match PageMap::open() {
             Ok(pagemap) => Some(CowSource {
@@ -2215,10 +2185,7 @@ impl MemoryManager {
         )
         .map_err(Error::CreateUefiFlash)?;
         uefi_region.register().map_err(Error::CreateUefiFlash)?;
-        let uefi_flash =
-            GuestMemoryAtomic::new(GuestMemory::from_regions(vec![uefi_region]).unwrap());
-
-        self.uefi_flash = Some(uefi_flash);
+        self.uefi_flash = Some(uefi_region);
 
         Ok(())
     }
@@ -2267,7 +2234,6 @@ impl MemoryManager {
             arch_mem_regions,
             memory_zones,
             guest_memory,
-            boot_guest_memory,
             hotplug_slots,
             selected_slot,
             next_hotplug_slot,
@@ -2283,7 +2249,6 @@ impl MemoryManager {
             )?;
             let guest_memory =
                 GuestMemory::from_arc_regions(regions).map_err(Error::GuestRegionCollection)?;
-            let boot_guest_memory = guest_memory.clone();
             (
                 GuestAddress(data.start_of_device_area),
                 data.boot_ram,
@@ -2291,7 +2256,6 @@ impl MemoryManager {
                 data.arch_mem_regions.clone(),
                 memory_zones,
                 guest_memory,
-                boot_guest_memory,
                 data.hotplug_slots.clone(),
                 data.selected_slot,
                 data.next_hotplug_slot,
@@ -2299,12 +2263,6 @@ impl MemoryManager {
         } else {
             // Init guest memory
             let arch_mem_regions = arch::arch_memory_regions();
-
-            let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
-                .iter()
-                .filter(|r| r.2 == RegionType::Ram)
-                .map(|r| (r.0, r.1))
-                .collect();
 
             let arch_mem_regions: Vec<ArchMemRegion> = arch_mem_regions
                 .iter()
@@ -2316,7 +2274,7 @@ impl MemoryManager {
                 .collect();
 
             let (mem_regions, mut memory_zones) = Self::create_memory_regions_from_zones(
-                &ram_regions,
+                &arch_mem_regions,
                 &zones,
                 config.thp,
                 &vm,
@@ -2324,13 +2282,11 @@ impl MemoryManager {
                 dynamic,
             )?;
 
-            let mut guest_memory =
+            let guest_memory =
                 GuestMemory::from_arc_regions(mem_regions).map_err(Error::GuestRegionCollection)?;
 
-            let boot_guest_memory = guest_memory.clone();
-
             let mut start_of_device_area =
-                MemoryManager::start_addr(guest_memory.last_addr(), allow_mem_hotplug)?;
+                MemoryManager::start_addr(guest_memory.memory().last_addr(), allow_mem_hotplug)?;
 
             // Update list of memory zones for resize.
             for zone in zones.iter() {
@@ -2382,8 +2338,8 @@ impl MemoryManager {
                                 hypervisor::MemoryVisibility::Private,
                             )?;
 
-                            guest_memory = guest_memory
-                                .insert_region(Arc::clone(&region))
+                            guest_memory
+                                .add_region(&region)
                                 .map_err(Error::GuestRegionCollection)?;
 
                             let hotplugged_size = zone.hotplugged_size.unwrap_or(0);
@@ -2416,7 +2372,6 @@ impl MemoryManager {
                 arch_mem_regions,
                 memory_zones,
                 guest_memory,
-                boot_guest_memory,
                 hotplug_slots,
                 0,
                 0,
@@ -2428,8 +2383,6 @@ impl MemoryManager {
             &memory_zones,
             prefault,
         )?)?;
-
-        let guest_memory = GuestMemoryAtomic::new(guest_memory);
 
         let allocator = Arc::new(Mutex::new(
             SystemAllocator::new(
@@ -2469,7 +2422,6 @@ impl MemoryManager {
 
         #[allow(unused_mut)]
         let mut memory_manager = MemoryManager {
-            boot_guest_memory,
             guest_memory,
             next_memory_slot,
             memory_slot_allocator,
@@ -2852,18 +2804,6 @@ impl MemoryManager {
         }
     }
 
-    // Update the GuestMemory with the new range
-    fn add_region(&mut self, region: Arc<GuestRegion>) -> Result<(), Error> {
-        let guest_memory = self
-            .guest_memory
-            .memory()
-            .insert_region(region)
-            .map_err(Error::GuestRegionCollection)?;
-        self.guest_memory.lock().unwrap().replace(guest_memory);
-
-        Ok(())
-    }
-
     //
     // Calculate the start address of an area next to RAM.
     //
@@ -2938,7 +2878,9 @@ impl MemoryManager {
 
         region.register().map_err(Error::RegisterGuestRegion)?;
         let slot = region.slot().unwrap();
-        self.add_region(Arc::clone(&region))?;
+        self.guest_memory
+            .add_region(&region)
+            .map_err(Error::GuestRegionCollection)?;
 
         self.guest_ram_mappings.push(GuestRamMapping {
             gpa: region.start_addr().raw_value(),
@@ -2954,6 +2896,9 @@ impl MemoryManager {
 
     fn hotplug_ram_region(&mut self, size: usize) -> Result<Arc<GuestRegion>, Error> {
         info!("Hotplugging new RAM: {size}");
+        if self.restoring() {
+            return Err(Error::HotplugDuringRestore);
+        }
 
         // Check that there is a free slot
         if self.next_hotplug_slot >= HOTPLUG_COUNT {
@@ -2979,7 +2924,25 @@ impl MemoryManager {
             ));
         }
 
-        let start_addr = MemoryManager::start_addr(self.guest_memory.memory().last_addr(), true)?;
+        let (base, length) = if let Some(slot) = self.hotplug_slots[..self.next_hotplug_slot].last()
+        {
+            (GuestAddress(slot.base), slot.length)
+        } else {
+            let zone = self
+                .memory_zones
+                .get(DEFAULT_MEMORY_ZONE)
+                .ok_or(Error::MissingZoneIdentifier)?;
+            let ranges = Self::zone_ranges(
+                &self.arch_mem_regions,
+                [(self.boot_ram, zone.backing_page_size)],
+            )?;
+            let range = ranges.last().ok_or(Error::InvalidMemoryParameters)?;
+            (range.start, range.size)
+        };
+        let end = base
+            .checked_add(length.checked_sub(1).ok_or(Error::InvalidSize)?)
+            .ok_or(Error::GuestAddressOverFlow)?;
+        let start_addr = Self::start_addr(end, true)?;
         let start_addr = GuestAddress(base_clear_of_reserved(
             &self.arch_mem_regions,
             start_addr.0,
@@ -3022,12 +2985,41 @@ impl MemoryManager {
         Ok(region)
     }
 
-    pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemory> {
+    pub fn guest_memory(&self) -> GuestMemory {
         self.guest_memory.clone()
     }
 
-    pub fn boot_guest_memory(&self) -> GuestMemory {
-        self.boot_guest_memory.clone()
+    pub fn boot_guest_memory(
+        &self,
+        config: &MemoryConfig,
+    ) -> Result<GuestRegionCollection<GuestRegion>, Error> {
+        let zone = |id: &str| {
+            self.memory_zones
+                .get(id)
+                .ok_or(Error::MissingZoneIdentifier)
+        };
+        let zones = if let Some(configs) = &config.zones {
+            configs
+                .iter()
+                .map(|z| Ok((zone(&z.id)?, z.size)))
+                .collect::<Result<Vec<_>, Error>>()?
+        } else {
+            vec![(zone(DEFAULT_MEMORY_ZONE)?, self.boot_ram)]
+        };
+        let sizes = zones
+            .iter()
+            .map(|(zone, size)| (*size, zone.backing_page_size));
+        let mut regions = Vec::new();
+        for range in Self::zone_ranges(&self.arch_mem_regions, sizes)? {
+            let region = zones[range.zone_index]
+                .0
+                .regions
+                .iter()
+                .find(|r| r.start_addr() == range.start && r.len() == range.size)
+                .ok_or(Error::MissingBootRegion(range.start.0, range.size))?;
+            regions.push(Arc::clone(region));
+        }
+        GuestRegionCollection::from_arc_regions(regions).map_err(Error::GuestRegionCollection)
     }
 
     pub fn allocator(&self) -> Arc<Mutex<SystemAllocator>> {
@@ -3295,8 +3287,8 @@ impl MemoryManager {
     }
 
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
-    pub fn uefi_flash(&self) -> GuestMemoryAtomic<GuestMemory> {
-        self.uefi_flash.as_ref().unwrap().clone()
+    pub fn uefi_flash(&self) -> &GuestRegion {
+        self.uefi_flash.as_ref().unwrap()
     }
 
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -3821,7 +3813,7 @@ impl Transportable for MemoryManager {
             && source.ranges == self.snapshot_memory_ranges
         {
             match clone_file_range(&source.file, &memory_file, total_len) {
-                Ok(()) => return write_private_pages(&guest_memory, source, &mut memory_file),
+                Ok(()) => return write_private_pages(&*guest_memory, source, &mut memory_file),
                 Err(e) => {
                     warn!("Snapshot: restore source not cloned, writing all guest memory: {e}");
                 }
@@ -3867,7 +3859,7 @@ impl Transportable for MemoryManager {
                 // Dense fallback: anonymous mmap or hugetlbfs (no
                 // SEEK_HOLE).
                 write_guest_range(
-                    &guest_memory,
+                    &*guest_memory,
                     &mut memory_file,
                     file_cursor,
                     range.gpa,
@@ -3957,8 +3949,8 @@ impl Migratable for MemoryManager {
 }
 
 // Streams guest memory `[gpa, gpa + length)` into `file` at `file_offset`.
-fn write_guest_range(
-    guest_memory: &GuestMemory,
+fn write_guest_range<M: GuestMemoryBackend>(
+    guest_memory: &M,
     file: &mut File,
     file_offset: u64,
     gpa: u64,
@@ -3982,8 +3974,8 @@ fn write_guest_range(
 
 // Writes the guest pages that no longer read from the restore source over
 // the clone of that source in `file`.
-fn write_private_pages(
-    guest_memory: &GuestMemory,
+fn write_private_pages<M: GuestMemoryBackend>(
+    guest_memory: &M,
     source: &CowSource,
     file: &mut File,
 ) -> result::Result<(), MigratableError> {
@@ -4016,7 +4008,10 @@ fn write_private_pages(
 // single plain private-anonymous guest region — the MAP_FIXED overlay
 // preconditions. File-backed regions are rejected: their stale mapping
 // metadata would misdirect a later snapshot or fd consumer.
-fn is_restore_cow_compatible(guest_memory: &GuestMemory, saved_regions: &MemoryRangeTable) -> bool {
+fn is_restore_cow_compatible<M: GuestMemoryBackend>(
+    guest_memory: &M,
+    saved_regions: &MemoryRangeTable,
+) -> bool {
     let page_size = get_page_size();
     let mut file_offset: u64 = 0;
     for range in saved_regions.ranges() {
@@ -4048,8 +4043,8 @@ fn is_restore_cow_compatible(guest_memory: &GuestMemory, saved_regions: &MemoryR
 // Maps each saved range over its guest RAM window, re-applying the owning
 // region's reserve policy and the THP policy. Ranges must have passed
 // `is_restore_cow_compatible`.
-fn do_mmap_cow_saved_regions(
-    guest_memory: &GuestMemory,
+fn do_mmap_cow_saved_regions<M: GuestMemoryBackend<R = GuestRegion>>(
+    guest_memory: &M,
     memory_file: &File,
     saved_regions: &MemoryRangeTable,
     thp: bool,
@@ -4328,7 +4323,9 @@ mod tests {
     #[test]
     fn cow_restore_maps_data_and_reads_holes_as_zero() {
         let page = get_page_size();
-        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), (2 * page) as usize)]).unwrap();
+        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), (2 * page) as usize)])
+            .unwrap()
+            .memory();
 
         let mut file = tempfile::tempfile().unwrap();
         file.write_all(&vec![0xabu8; page as usize]).unwrap();
@@ -4341,8 +4338,8 @@ mod tests {
             length: 2 * page,
         });
 
-        assert!(is_restore_cow_compatible(&gm, &table));
-        do_mmap_cow_saved_regions(&gm, &file, &table, false).unwrap();
+        assert!(is_restore_cow_compatible(&*gm, &table));
+        do_mmap_cow_saved_regions(&*gm, &file, &table, false).unwrap();
 
         assert_eq!(gm.read_obj::<u8>(GuestAddress(0)).unwrap(), 0xab);
         assert_eq!(gm.read_obj::<u8>(GuestAddress(page - 1)).unwrap(), 0xab);
@@ -4360,7 +4357,9 @@ mod tests {
     #[test]
     fn cow_snapshot_writes_private_pages_over_the_source() {
         let page = get_page_size();
-        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), (16 * page) as usize)]).unwrap();
+        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), (16 * page) as usize)])
+            .unwrap()
+            .memory();
         let mut file = tempfile::tempfile().unwrap();
         for i in 0..16u8 {
             file.write_all(&vec![i + 1; page as usize]).unwrap();
@@ -4370,7 +4369,7 @@ mod tests {
             gpa: 0,
             length: 16 * page,
         });
-        do_mmap_cow_saved_regions(&gm, &file, &ranges, false).unwrap();
+        do_mmap_cow_saved_regions(&*gm, &file, &ranges, false).unwrap();
         let source = CowSource {
             file,
             ranges,
@@ -4384,7 +4383,7 @@ mod tests {
         let mut content = vec![0u8; (16 * page) as usize];
         source.file.read_exact_at(&mut content, 0).unwrap();
         snapshot.write_all(&content).unwrap();
-        write_private_pages(&gm, &source, &mut snapshot).unwrap();
+        write_private_pages(&*gm, &source, &mut snapshot).unwrap();
 
         let mut got = vec![0u8; (16 * page) as usize];
         snapshot.read_exact_at(&mut got, 0).unwrap();
@@ -4398,21 +4397,23 @@ mod tests {
     #[test]
     fn cow_restore_rejects_unaligned_or_out_of_region_ranges() {
         let page = get_page_size();
-        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), page as usize)]).unwrap();
+        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), page as usize)])
+            .unwrap()
+            .memory();
 
         let mut unaligned = MemoryRangeTable::default();
         unaligned.push(MemoryRange {
             gpa: 1,
             length: page,
         });
-        assert!(!is_restore_cow_compatible(&gm, &unaligned));
+        assert!(!is_restore_cow_compatible(&*gm, &unaligned));
 
         let mut spanning = MemoryRangeTable::default();
         spanning.push(MemoryRange {
             gpa: 0,
             length: 2 * page,
         });
-        assert!(!is_restore_cow_compatible(&gm, &spanning));
+        assert!(!is_restore_cow_compatible(&*gm, &spanning));
     }
 
     #[test]
@@ -4432,14 +4433,15 @@ mod tests {
                 .unwrap()
                 .into(),
         ])
-        .unwrap();
+        .unwrap()
+        .memory();
 
         let mut table = MemoryRangeTable::default();
         table.push(MemoryRange {
             gpa: 0,
             length: page,
         });
-        assert!(!is_restore_cow_compatible(&gm, &table));
+        assert!(!is_restore_cow_compatible(&*gm, &table));
     }
 
     #[test]
@@ -4461,14 +4463,15 @@ mod tests {
                     .unwrap()
                     .into(),
             ])
-            .unwrap();
+            .unwrap()
+            .memory();
 
             let mut table = MemoryRangeTable::default();
             table.push(MemoryRange {
                 gpa: 0,
                 length: page,
             });
-            do_mmap_cow_saved_regions(&gm, &file, &table, true).unwrap();
+            do_mmap_cow_saved_regions(&*gm, &file, &table, true).unwrap();
             assert_eq!(gm.read_obj::<u8>(GuestAddress(0)).unwrap(), 0xcd);
         }
     }

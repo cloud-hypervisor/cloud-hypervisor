@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
-use std::{io, result};
+use std::{io, process, result};
 
 use anyhow::anyhow;
 use event_monitor::event;
@@ -19,8 +19,9 @@ use vhost::vhost_kern::vhost_binding::{VHOST, VHOST_BACKEND_F_SUSPEND};
 use vhost::{VhostBackend, VringConfigData};
 use virtio_queue::desc::RawDescriptor;
 use virtio_queue::{Queue, QueueT};
+use vm_allocator::{GuestMemoryNotification, GuestRegion};
 use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
-use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend};
+use vm_memory::{Address, GuestAddress, GuestAddressSpace, GuestMemoryBackend, GuestMemoryRegion};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
@@ -115,7 +116,7 @@ pub struct VdpaState {
 pub struct Vdpa {
     common: VirtioCommon,
     id: String,
-    vhost: Option<VhostKernVdpa<GuestMemoryAtomic<GuestMemory>>>,
+    vhost: Option<VhostKernVdpa<GuestMemory>>,
     iova_range: VhostVdpaIovaRange,
     enabled_queues: BTreeMap<u16, bool>,
     backend_features: u64,
@@ -126,7 +127,7 @@ impl Vdpa {
     pub fn new(
         id: String,
         device_path: &str,
-        mem: GuestMemoryAtomic<GuestMemory>,
+        mem: GuestMemory,
         num_queues: u16,
         state: Option<VdpaState>,
     ) -> Result<Self> {
@@ -222,7 +223,6 @@ impl Vdpa {
 
     fn activate_vdpa(
         &mut self,
-        _mem: &GuestMemory,
         virtio_interrupt: &dyn VirtioInterrupt,
         queues: &[(u16, Queue, EventFd)],
     ) -> Result<()> {
@@ -448,13 +448,12 @@ impl VirtioDevice for Vdpa {
 
     fn activate(&mut self, context: ActivationContext) -> ActivateResult {
         let ActivationContext {
-            mem,
             interrupt_cb: virtio_interrupt,
             queues,
             ..
         } = context;
         self.common.check_access_platform()?;
-        self.activate_vdpa(&mem.memory(), virtio_interrupt.as_ref(), &queues)
+        self.activate_vdpa(virtio_interrupt.as_ref(), &queues)
             .map_err(ActivateError::ActivateVdpa)?;
 
         self.common.interrupt_cb = Some(virtio_interrupt);
@@ -652,6 +651,26 @@ where
     }
 }
 
+impl<M: GuestAddressSpace + Send + Sync> GuestMemoryNotification for VdpaDmaMapping<M>
+where
+    M::M: GuestMemoryBackend,
+{
+    fn region_added(&self, region: &Arc<GuestRegion>) {
+        let gpa = region.start_addr().raw_value();
+        if let Err(e) = self.map(gpa, gpa, region.len()) {
+            error!("vDPA: {e:?}");
+            process::exit(1);
+        }
+    }
+
+    fn region_removed(&self, region: &Arc<GuestRegion>) {
+        if let Err(e) = self.unmap(region.start_addr().raw_value(), region.len()) {
+            error!("vDPA: {e:?}");
+            process::exit(1);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::AtomicU8;
@@ -693,9 +712,7 @@ mod tests {
             migrating: false,
         };
         let context = ActivationContext {
-            mem: GuestMemoryAtomic::new(
-                GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
-            ),
+            mem: GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
             interrupt_cb: Arc::new(NoopInterrupt),
             queues: vec![],
             device_status: Arc::new(AtomicU8::new(0)),
@@ -725,9 +742,7 @@ mod tests {
             migrating: false,
         };
         let context = ActivationContext {
-            mem: GuestMemoryAtomic::new(
-                GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
-            ),
+            mem: GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
             interrupt_cb: Arc::new(NoopInterrupt),
             queues: vec![],
             device_status: Arc::new(AtomicU8::new(0)),
