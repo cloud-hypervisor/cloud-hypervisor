@@ -1249,6 +1249,10 @@ impl PciDevice for VirtioPciDevice {
         self.configuration.set_bar_mapped(bar_idx, mapped);
     }
 
+    fn undecoded_bar(&self, bar_idx: usize) -> Option<BarReprogrammingParams> {
+        self.configuration.undecoded_bar(bar_idx)
+    }
+
     fn read_bar(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
         match offset {
             o if o < COMMON_CONFIG_BAR_OFFSET + COMMON_CONFIG_SIZE => {

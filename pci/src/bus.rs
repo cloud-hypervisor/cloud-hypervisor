@@ -7,17 +7,20 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::ops::DerefMut;
-use std::result;
 use std::sync::{Arc, Barrier, Mutex};
+use std::{array, result};
 
-use log::warn;
+use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_device::{BusDevice, BusDeviceSync};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 
 use crate::PciBdf;
-use crate::configuration::{PciBridgeSubclass, PciClassCode, PciConfiguration, PciHeaderType};
+use crate::configuration::{
+    COMMAND_REG, NUM_BAR_REGS, PciBridgeSubclass, PciClassCode, PciConfiguration, PciHeaderType,
+    ROM_BAR_IDX,
+};
 use crate::device::{BarReprogrammingParams, DeviceRelocation, PciDevice};
 
 /// Denotes the PCI device ID of a bus' root bridge device.
@@ -268,9 +271,54 @@ impl PciBus {
     ) -> Option<Arc<Barrier>> {
         let d = self.devices.get(&device_id)?;
         let mut device = d.pci.lock().unwrap();
+        // Only the BARs this write stops decoding are unmapped. A BAR mapped at
+        // creation with its space off stays mapped.
+        let undecoded: [bool; NUM_BAR_REGS + 1] =
+            array::from_fn(|slot| register == COMMAND_REG && device.undecoded_bar(slot).is_some());
 
         let (bar_reprogram, ret) = device.write_config_register(register, offset, data);
         self.apply_bar_reprogramming(device.deref_mut(), d.bus_device.as_ref(), &bar_reprogram);
+
+        let Some(bus_device) = &d.bus_device else {
+            return ret;
+        };
+        if register != COMMAND_REG {
+            return ret;
+        }
+        for slot in (0..NUM_BAR_REGS).chain([ROM_BAR_IDX]) {
+            if undecoded[slot] {
+                continue;
+            }
+            let Some(p) = device.undecoded_bar(slot) else {
+                continue;
+            };
+            if let Err(e) = self.device_reloc.unmap_bar(
+                slot,
+                p.old_base,
+                p.len,
+                device.deref_mut(),
+                bus_device,
+                p.region_type,
+            ) {
+                warn!(
+                    "Failed unmapping BAR {} of device {}: {}: 0x{:x}(0x{:x})",
+                    slot,
+                    device.bdf(),
+                    e,
+                    p.old_base,
+                    p.len
+                );
+                continue;
+            }
+            device.set_bar_mapped(slot, false);
+            debug!(
+                "Unmapped BAR {} of device {} at 0x{:x}(0x{:x})",
+                slot,
+                device.bdf(),
+                p.old_base,
+                p.len
+            );
+        }
 
         ret
     }

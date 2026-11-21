@@ -26,14 +26,14 @@ const STATUS_REG: usize = 1;
 const STATUS_REG_CAPABILITIES_USED_MASK: u32 = 0x0010_0000;
 const BAR0_REG: usize = 4;
 const ROM_BAR_REG: usize = 12;
-const ROM_BAR_IDX: usize = 6;
+pub(crate) const ROM_BAR_IDX: usize = 6;
 const BAR_SIZE_PROBE_ALL_ONES: u32 = 0xffff_ffff;
 const BAR_IO_ADDR_MASK: u32 = 0xffff_fffc;
 const BAR_MEM_ADDR_MASK: u32 = 0xffff_fff0;
 const ROM_BAR_ADDR_MASK: u32 = 0xffff_f800;
 const MSI_CAPABILITY_REGISTER_MASK: u32 = 0x0071_0000;
 const MSIX_CAPABILITY_REGISTER_MASK: u32 = 0xc000_0000;
-const NUM_BAR_REGS: usize = 6;
+pub(crate) const NUM_BAR_REGS: usize = 6;
 const CAPABILITY_LIST_HEAD_OFFSET: usize = 0x34;
 const FIRST_CAPABILITY_OFFSET: usize = 0x40;
 const CAPABILITY_MAX_OFFSET: usize = 192;
@@ -1236,6 +1236,15 @@ impl PciConfiguration {
             new_base: base,
             len,
             region_type,
+        })
+    }
+
+    /// The placement of BAR `slot` if it is mapped while its address space
+    /// is not decoded.
+    pub fn undecoded_bar(&self, slot: usize) -> Option<BarReprogrammingParams> {
+        self.bar_params(slot).filter(|p| {
+            self.bar_mapped[slot]
+                && self.read_config_register(COMMAND_REG) & Self::decode_mask(p.region_type) == 0
         })
     }
 

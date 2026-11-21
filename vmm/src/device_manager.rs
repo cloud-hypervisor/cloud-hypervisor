@@ -7426,4 +7426,61 @@ mod tests {
                 .is_none()
         );
     }
+
+    /// Disabling the memory space unmaps the BAR and frees its range, and
+    /// enabling it maps the BAR at its register again.
+    #[test]
+    fn disabling_the_memory_space_unmaps_the_bar() {
+        let bdf = PciBdf::new(0, 0, PVPANIC_SLOT, 0);
+        let mmio32 = Arc::new(Mutex::new(
+            AddressAllocator::new(GuestAddress(0xc000_0000), 0x1000_0000).unwrap(),
+        ));
+        let mut mmio64 = AddressAllocator::new(GuestAddress(1 << 32), 0x1000_0000).unwrap();
+        let address_manager = Arc::new(bar_test_address_manager(&mmio32));
+        let device = Arc::new(Mutex::new(
+            devices::PvPanicDevice::new(PVPANIC_ID.to_owned(), bdf, None).unwrap(),
+        ));
+        let bars = device
+            .lock()
+            .unwrap()
+            .allocate_bars(
+                &mut address_manager.allocator.lock().unwrap(),
+                &mut mmio32.lock().unwrap(),
+                &mut mmio64,
+                None,
+            )
+            .unwrap();
+        let (base, size) = (bars[0].addr(), bars[0].size());
+        address_manager
+            .mmio_bus
+            .insert(Arc::clone(&device) as Arc<dyn BusDeviceSync>, base, size)
+            .unwrap();
+        let mut config_mmio = pvpanic_on_bus(&address_manager, &device, base, size);
+        let mut data = [0u8; 1];
+
+        write_command(&mut config_mmio, MEMORY_SPACE_ENABLE);
+        address_manager.mmio_bus.read(base, &mut data).unwrap();
+
+        write_command(&mut config_mmio, 0);
+        assert!(address_manager.mmio_bus.read(base, &mut data).is_err());
+        {
+            let mut allocator = mmio32.lock().unwrap();
+            assert!(
+                allocator
+                    .allocate(Some(GuestAddress(base)), size, Some(size))
+                    .is_some()
+            );
+            allocator.free(GuestAddress(base), size);
+        }
+
+        write_command(&mut config_mmio, MEMORY_SPACE_ENABLE);
+        address_manager.mmio_bus.read(base, &mut data).unwrap();
+        assert!(
+            mmio32
+                .lock()
+                .unwrap()
+                .allocate(Some(GuestAddress(base)), size, Some(size))
+                .is_none()
+        );
+    }
 }

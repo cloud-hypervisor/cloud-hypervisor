@@ -105,6 +105,11 @@ pub trait PciDevice: Send {
     }
     /// Records whether BAR `bar_idx` is mapped.
     fn set_bar_mapped(&mut self, _bar_idx: usize, _mapped: bool) {}
+    /// The placement of BAR `bar_idx` if it is mapped while its address
+    /// space is not decoded.
+    fn undecoded_bar(&self, _bar_idx: usize) -> Option<BarReprogrammingParams> {
+        None
+    }
     /// Provides a mutable reference to the Any trait. This is useful to let
     /// the caller have access to the underlying type behind the trait.
     fn as_any_mut(&mut self) -> &mut dyn Any;

@@ -260,6 +260,10 @@ impl PciDevice for PvPanicDevice {
         self.configuration.set_bar_mapped(bar_idx, mapped);
     }
 
+    fn undecoded_bar(&self, bar_idx: usize) -> Option<BarReprogrammingParams> {
+        self.configuration.undecoded_bar(bar_idx)
+    }
+
     fn read_bar(&mut self, _base: u64, _offset: u64, data: &mut [u8]) {
         if data.len() != 1 {
             debug!("Invalid sized read of pvpanic register: {}", data.len());
