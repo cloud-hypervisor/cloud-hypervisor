@@ -112,7 +112,8 @@ use vfio_ioctls::VfioIommufd;
 use vfio_ioctls::{VfioContainer, VfioDevice, VfioDeviceFd, VfioOps};
 use virtio_devices::block::Error as VirtioBlockError;
 use virtio_devices::transport::{
-    VIRTIO_CONFIG_BAR_INDEX, VirtioPciDevice, VirtioPciDeviceActivator, VirtioTransport,
+    VIRTIO_CONFIG_BAR_INDEX, VIRTIO_SHM_BAR_INDEX, VirtioPciDevice, VirtioPciDeviceActivator,
+    VirtioTransport,
 };
 use virtio_devices::vhost_user::{PostcopyHandler, VhostUserConfig};
 use virtio_devices::{
@@ -120,7 +121,9 @@ use virtio_devices::{
     balloon, mem, net, transport, vdpa, vhost_user, vsock,
 };
 use vm_allocator::page_size::get_page_size;
-use vm_allocator::{AddressAllocator, GuestRegionError, InterruptAllocError, SystemAllocator};
+use vm_allocator::{
+    AddressAllocator, AllocateDirection, GuestRegionError, InterruptAllocError, SystemAllocator,
+};
 use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptRemapping, LegacyIrqGroupConfig, MsiIrqGroupConfig,
@@ -713,12 +716,16 @@ impl AddressManager {
     // Update the device_tree resources associated with the device
     fn update_device_tree(
         &self,
-        pci_dev: &dyn PciDevice,
+        pci_dev: &mut dyn PciDevice,
         bar_idx: usize,
+        old_base: u64,
         new_base: u64,
     ) -> result::Result<(), io::Error> {
         if let Some(id) = pci_dev.id() {
-            if let Some(node) = self.device_tree.lock().unwrap().get_mut(&id) {
+            let is_virtio_shm_bar =
+                bar_idx == VIRTIO_SHM_BAR_INDEX && pci_dev.as_any_mut().is::<VirtioPciDevice>();
+            let mut device_tree = self.device_tree.lock().unwrap();
+            let children = if let Some(node) = device_tree.get_mut(&id) {
                 let mut resource_updated = false;
                 for resource in node.resources.iter_mut() {
                     if let Resource::PciBar { index, base, .. } = resource
@@ -735,10 +742,26 @@ impl AddressManager {
                         "Couldn't find a resource for BAR {bar_idx} of device {id}"
                     )));
                 }
+
+                is_virtio_shm_bar.then(|| node.children.clone())
             } else {
                 return Err(io::Error::other(format!(
                     "Couldn't find device {id} from device tree"
                 )));
+            };
+
+            if let Some(children) = children {
+                for child_id in children {
+                    if let Some(child_node) = device_tree.get_mut(&child_id) {
+                        for resource in child_node.resources.iter_mut() {
+                            if let Resource::MmioAddressRange { base, .. } = resource
+                                && *base == old_base
+                            {
+                                *base = new_base;
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -862,7 +885,7 @@ impl DeviceRelocation for AddressManager {
 
         self.update_device(pci_dev, bar_idx, old_base, new_base)?;
 
-        self.update_device_tree(pci_dev, bar_idx, new_base)
+        self.update_device_tree(pci_dev, bar_idx, old_base, new_base)
     }
 }
 
@@ -3638,6 +3661,7 @@ impl DeviceManager {
             return Err(DeviceManagerError::PmemSizeNotAligned);
         }
 
+        let bar_size = size.next_power_of_two();
         let (region_base, region_size) = if let Some((base, size)) = region_range {
             // The memory needs to be 2MiB aligned in order to support
             // hugepages.
@@ -3647,7 +3671,7 @@ impl DeviceManager {
                 .unwrap()
                 .allocate(
                     Some(GuestAddress(base)),
-                    size as GuestUsize,
+                    bar_size as GuestUsize,
                     Some(0x0020_0000),
                 )
                 .ok_or(DeviceManagerError::PmemRangeAllocation)?;
@@ -3655,12 +3679,17 @@ impl DeviceManager {
             (base, size)
         } else {
             // The memory needs to be 2MiB aligned in order to support
-            // hugepages.
+            // hugepages, and aligned to its power-of-two BAR size.
             let base = self.pci_segments[pmem_cfg.pci_common.pci_segment as usize]
                 .mem64_allocator
                 .lock()
                 .unwrap()
-                .allocate(None, size as GuestUsize, Some(0x0020_0000))
+                .allocate_direction(
+                    None,
+                    bar_size as GuestUsize,
+                    Some(bar_size),
+                    AllocateDirection::BottomUp,
+                )
                 .ok_or(DeviceManagerError::PmemRangeAllocation)?;
 
             (base.raw_value(), size)

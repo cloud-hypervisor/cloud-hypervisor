@@ -8,7 +8,7 @@
 
 use std::fs::File;
 use std::os::unix::io::AsRawFd;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::{io, result};
 
 use anyhow::anyhow;
@@ -21,7 +21,7 @@ use virtio_queue::{DescriptorChain, Queue, QueueT};
 use vm_allocator::GuestRegion;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-    GuestMemoryError, GuestMemoryLoadGuard,
+    GuestMemoryError, GuestMemoryLoadGuard, GuestMemoryRegion,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
@@ -31,7 +31,7 @@ use vmm_sys_util::eventfd::EventFd;
 use super::{
     ActivateError, ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError,
     EpollHelperHandler, Error as DeviceError, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_VERSION_1,
-    VirtioCommon, VirtioDevice, VirtioDeviceType,
+    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioSharedMemoryList,
 };
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
@@ -265,7 +265,7 @@ pub struct Pmem {
     id: String,
     disk: Option<File>,
     config: VirtioPmemConfig,
-    _mapping: GuestRegion,
+    mapping: Arc<Mutex<GuestRegion>>,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
 }
@@ -323,17 +323,30 @@ impl Pmem {
             id,
             disk: Some(disk),
             config,
-            _mapping: mapping,
+            mapping: Arc::new(Mutex::new(mapping)),
             seccomp_action,
             exit_evt,
         })
+    }
+
+    fn current_config(&self) -> VirtioPmemConfig {
+        VirtioPmemConfig {
+            start: self
+                .mapping
+                .lock()
+                .unwrap()
+                .start_addr()
+                .raw_value()
+                .to_le(),
+            size: self.config.size,
+        }
     }
 
     fn state(&self) -> PmemState {
         PmemState {
             avail_features: self.common.avail_features,
             acked_features: self.common.acked_features,
-            config: self.config,
+            config: self.current_config(),
         }
     }
 
@@ -361,7 +374,8 @@ impl VirtioDevice for Pmem {
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
-        self.read_config_from_slice(self.config.as_slice(), offset, data);
+        let config = self.current_config();
+        self.read_config_from_slice(config.as_slice(), offset, data);
     }
 
     fn activate(&mut self, context: ActivationContext) -> ActivateResult {
@@ -413,6 +427,13 @@ impl VirtioDevice for Pmem {
         event!("virtio-device", "reset", "id", &self.id);
     }
 
+    fn get_shm_regions(&self) -> Option<VirtioSharedMemoryList> {
+        Some(VirtioSharedMemoryList {
+            mapping: Arc::clone(&self.mapping),
+            region_list: Vec::new(),
+        })
+    }
+
     fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
         self.common.set_access_platform(access_platform);
     }
@@ -444,3 +465,59 @@ impl Snapshottable for Pmem {
 
 impl Transportable for Pmem {}
 impl Migratable for Pmem {}
+
+#[cfg(test)]
+mod tests {
+    use vm_memory::{GuestRegionMmap, MmapRegion};
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::*;
+
+    #[test]
+    fn test_pmem_shm_regions() {
+        let temp_file = TempFile::new().unwrap();
+        let size = 16 << 20;
+        temp_file.as_file().set_len(size as u64).unwrap();
+        let disk = temp_file.into_file();
+
+        let mmap_region = MmapRegion::new(size).unwrap();
+        let initial_addr = GuestAddress(0x1_0000_0000);
+        let mapping: GuestRegion = GuestRegionMmap::new(mmap_region, initial_addr)
+            .unwrap()
+            .into();
+
+        let pmem = Pmem::new(
+            "pmem0".to_string(),
+            disk,
+            initial_addr,
+            mapping,
+            false,
+            SeccompAction::Trap,
+            EventFd::new(libc::EFD_NONBLOCK).unwrap(),
+            None,
+        )
+        .unwrap();
+
+        let shm = pmem.get_shm_regions().expect("pmem should expose BAR 2");
+        {
+            let region = shm.mapping.lock().unwrap();
+            assert_eq!(region.start_addr(), initial_addr);
+            assert_eq!(region.size(), size);
+        }
+        assert!(shm.region_list.is_empty());
+
+        let moved_addr = GuestAddress(0x1_0800_0000);
+        shm.mapping
+            .lock()
+            .unwrap()
+            .move_guest_address(moved_addr)
+            .unwrap();
+
+        let mut cfg_bytes = [0u8; 16];
+        pmem.read_config(0, &mut cfg_bytes);
+        let start = u64::from_le_bytes(cfg_bytes[0..8].try_into().unwrap());
+        let len = u64::from_le_bytes(cfg_bytes[8..16].try_into().unwrap());
+        assert_eq!(start, moved_addr.raw_value());
+        assert_eq!(len, size as u64);
+    }
+}
