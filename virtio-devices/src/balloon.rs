@@ -1018,6 +1018,13 @@ impl VirtioDevice for Balloon {
             mut queues,
             device_status,
         } = context;
+        if [INFLATE_QUEUE, DEFLATE_QUEUE]
+            .iter()
+            .any(|index| !queues.iter().any(|(i, _, _)| i == index))
+        {
+            error!("Inflate and deflate queues must be enabled");
+            return Err(crate::ActivateError::BadActivate);
+        }
         self.common.activate(&queues, Arc::clone(&interrupt_cb))?;
         *self.stats_cache.lock().unwrap() = None;
         let (kill_evt, pause_evt) = self.common.dup_eventfds()?;
