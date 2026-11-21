@@ -67,7 +67,9 @@ impl SeqPacketSocket {
         Ok(())
     }
 
-    fn path_to_sock_addr(path: &Path) -> io::Result<(libc::sockaddr_un, libc::socklen_t)> {
+    pub(super) fn path_to_sock_addr(
+        path: &Path,
+    ) -> io::Result<(libc::sockaddr_un, libc::socklen_t)> {
         if path.as_os_str().is_empty() {
             return Err(io::ErrorKind::InvalidInput.into());
         }
