@@ -6673,9 +6673,6 @@ impl BusDevice for DeviceManager {
                     warn!("Unexpected B0EJ read width: {}", data.len());
                     return;
                 }
-                // Always return an empty bitmap since the eject is always
-                // taken care of right away during a write access.
-                data.fill(0);
             }
             PSEG_FIELD_OFFSET => {
                 if data.len() != PSEG_FIELD_SIZE {
