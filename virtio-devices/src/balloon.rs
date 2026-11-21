@@ -635,6 +635,7 @@ impl BalloonEpollHandler {
     }
 
     fn process_reporting_queue(&mut self, queue_index: usize) -> result::Result<(), Error> {
+        let page_size = get_page_size();
         let mut used_descs = false;
         while let Some(mut desc_chain) =
             self.queues[queue_index].pop_descriptor_chain(self.mem.memory())
@@ -649,6 +650,15 @@ impl BalloonEpollHandler {
                 };
                 if !desc.is_write_only() {
                     warn!("Skipping device-readable descriptor on reporting queue");
+                    continue;
+                }
+                if !desc.addr().raw_value().is_multiple_of(page_size)
+                    || !u64::from(desc.len()).is_multiple_of(page_size)
+                {
+                    warn!(
+                        "Skipping unaligned reported range at {:#x}",
+                        desc.addr().raw_value()
+                    );
                     continue;
                 }
                 if let Err(e) = Self::release_memory_range(
