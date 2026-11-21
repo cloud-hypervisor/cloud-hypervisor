@@ -639,7 +639,6 @@ impl BalloonEpollHandler {
         while let Some(mut desc_chain) =
             self.queues[queue_index].pop_descriptor_chain(self.mem.memory())
         {
-            let mut descs_len = 0;
             let results: SmallVec<[_; 4]> = desc_chain
                 .checked_iter(self.access_platform.as_deref())
                 .collect();
@@ -648,7 +647,6 @@ impl BalloonEpollHandler {
                     Ok(d) => d,
                     Err(_) => break,
                 };
-                descs_len += desc.len();
                 if let Err(e) = Self::release_memory_range(
                     desc_chain.memory(),
                     desc.addr(),
@@ -659,7 +657,7 @@ impl BalloonEpollHandler {
             }
 
             self.queues[queue_index]
-                .add_used(desc_chain.memory(), desc_chain.head_index(), descs_len)
+                .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
                 .map_err(Error::QueueAddUsed)?;
             used_descs = true;
         }
