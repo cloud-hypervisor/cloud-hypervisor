@@ -1195,6 +1195,9 @@ impl PciDevice for VirtioPciDevice {
         mmio64_allocator: &mut AddressAllocator,
     ) -> result::Result<(), PciDeviceError> {
         for bar in self.bar_regions.drain(..) {
+            if !self.configuration.is_bar_mapped(bar.idx()) {
+                continue;
+            }
             match bar.region_type() {
                 PciBarRegionType::Memory32BitRegion => {
                     mmio32_allocator.free(GuestAddress(bar.addr()), bar.size());

@@ -5898,7 +5898,9 @@ impl DeviceManager {
                             }
                             _ => None,
                         });
-                        if let Some(bar_addr) = bar_addr {
+                        if let Some(bar_addr) = bar_addr
+                            && dev.is_bar_mapped(config_bar_idx)
+                        {
                             for (event, addr) in dev.ioeventfds(bar_addr) {
                                 let io_addr = IoEventAddress::Mmio(addr);
                                 self.address_manager

@@ -223,6 +223,9 @@ impl PciDevice for PvPanicDevice {
         _mmio64_allocator: &mut AddressAllocator,
     ) -> result::Result<(), PciDeviceError> {
         for bar in self.bar_regions.drain(..) {
+            if !self.configuration.is_bar_mapped(bar.idx()) {
+                continue;
+            }
             mmio32_allocator.free(GuestAddress(bar.addr()), bar.size());
         }
 
