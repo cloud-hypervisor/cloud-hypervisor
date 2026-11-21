@@ -677,8 +677,6 @@ impl FwCfg {
     }
 
     fn read_content(content: &FwCfgContent, offset: u32, data: &mut [u8]) -> Result<()> {
-        // Zero fill rather than the usual 0xff fill for QEMU compatibility
-        data.fill(0);
         let start = offset as usize;
         let end = start + data.len();
         match content {
