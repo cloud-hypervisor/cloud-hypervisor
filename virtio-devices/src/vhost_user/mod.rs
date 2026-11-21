@@ -992,7 +992,7 @@ impl VhostUserCommon {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use std::io::{Read, Write};
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::thread;
@@ -1006,7 +1006,7 @@ mod tests {
     use crate::vsock::tests::NoopVirtioInterrupt;
     use crate::{GuestMemory, MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VirtioDevice};
 
-    fn read_request(stream: &mut UnixStream, expected_request: FrontendReq) -> Vec<u8> {
+    pub(super) fn read_request(stream: &mut UnixStream, expected_request: FrontendReq) -> Vec<u8> {
         let mut header = [0u8; 12];
         stream.read_exact(&mut header).unwrap();
         assert_eq!(
@@ -1019,7 +1019,7 @@ mod tests {
         payload
     }
 
-    fn write_reply(stream: &mut UnixStream, request: FrontendReq, value: u64) {
+    pub(super) fn write_reply(stream: &mut UnixStream, request: FrontendReq, value: u64) {
         let mut reply = Vec::with_capacity(20);
         reply.extend_from_slice(&u32::from(request).to_ne_bytes());
         reply.extend_from_slice(&(VhostUserHeaderFlag::REPLY.bits() | 1).to_ne_bytes());
