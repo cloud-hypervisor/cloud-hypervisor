@@ -5591,12 +5591,7 @@ impl DeviceManager {
             .ok_or(DeviceManagerError::MissingDeviceNodePciBdf)?;
         let pci_segment_id = pci_device_bdf.segment();
 
-        if !self.is_iommu_segment(pci_segment_id)
-            && self
-                .iommu_attached_devices
-                .as_ref()
-                .is_some_and(|(_, devices)| devices.contains(&pci_device_bdf))
-        {
+        if !self.is_iommu_device_removable(pci_device_bdf) {
             return Err(DeviceManagerError::InvalidIommuRemove(pci_device_bdf));
         }
 
@@ -5642,12 +5637,7 @@ impl DeviceManager {
         // Convert the device ID into the corresponding b/d/f.
         let pci_device_bdf = PciBdf::new(pci_segment_id, 0, device_id, 0);
 
-        if !self.is_iommu_segment(pci_segment_id)
-            && self
-                .iommu_attached_devices
-                .as_ref()
-                .is_some_and(|(_, devices)| devices.contains(&pci_device_bdf))
-        {
+        if !self.is_iommu_device_removable(pci_device_bdf) {
             return Err(DeviceManagerError::InvalidIommuRemove(pci_device_bdf));
         }
 
@@ -5935,6 +5925,14 @@ impl DeviceManager {
             1 << bdf.device();
 
         Ok(PciDeviceInfo { id, bdf })
+    }
+
+    fn is_iommu_device_removable(&self, pci_device_bdf: PciBdf) -> bool {
+        self.is_iommu_segment(pci_device_bdf.segment())
+            || !self
+                .iommu_attached_devices
+                .as_ref()
+                .is_some_and(|(_, devices)| devices.contains(&pci_device_bdf))
     }
 
     fn is_iommu_segment(&self, pci_segment_id: u16) -> bool {
