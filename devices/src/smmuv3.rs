@@ -968,10 +968,7 @@ impl BusDevice for Smmuv3 {
         match self.read_reg(offset, data.len()) {
             Ok(val) if data.len() == 8 => write_le_u64(data, val),
             Ok(val) => write_le_u32(data, val as u32),
-            Err(e) => {
-                debug!("SMMUv3 read at {offset:#x}: {e}");
-                data.fill(0);
-            }
+            Err(e) => debug!("SMMUv3 read at {offset:#x}: {e}"),
         }
     }
 
