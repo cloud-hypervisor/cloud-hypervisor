@@ -1127,12 +1127,11 @@ mod tests {
                     );
                 });
 
-                let mut device = GenericVhostUser::new(
+                let (mut device, shmem_sizes) = GenericVhostUser::new(
                     "test".to_string(),
                     socket_path.to_str().unwrap(),
                     vec![256],
                     vm_virtio::VirtioDeviceType::Fs as u32,
-                    None,
                     SeccompAction::Allow,
                     EventFd::new(libc::EFD_NONBLOCK).unwrap(),
                     enabled,
@@ -1140,6 +1139,7 @@ mod tests {
                     None,
                 )
                 .unwrap();
+                assert!(shmem_sizes.is_empty());
                 assert_eq!(device.features() & access_platform != 0, enabled);
                 device.ack_features(access_platform);
                 let state: VhostUserState<()> = device.snapshot().unwrap().to_state().unwrap();
