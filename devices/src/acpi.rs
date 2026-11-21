@@ -68,9 +68,7 @@ impl BusDevice for AcpiShutdownDevice {
     fn read(&mut self, _base: u64, _offset: u64, data: &mut [u8]) {
         if data.len() != 1 {
             debug!("Invalid sized read of ACPI shutdown device: {}", data.len());
-            return;
         }
-        data.fill(0);
     }
 
     fn write(&mut self, _base: u64, _offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
