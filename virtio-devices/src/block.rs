@@ -351,6 +351,7 @@ impl BlockEpollHandler {
                 self.disk_image.as_mut(),
                 &self.serial,
                 desc_chain.head_index() as u64,
+                has_feature(self.acked_features, VIRTIO_BLK_F_DISCARD.into()),
             );
 
             if let Ok(ExecuteAsync {
@@ -1771,6 +1772,14 @@ mod tests {
         assert_eq!(vq.used.idx.get(), 1);
         let status: u8 = mem.read_obj(GuestAddress(REQ_STATUS_ADDR)).unwrap();
         assert_eq!(status, VIRTIO_BLK_S_IOERR as u8);
+    }
+
+    // DISCARD is not offered with sparse=off, so a DISCARD request must not
+    // reach the backend.
+    #[test]
+    fn discard_without_negotiated_feature_is_unsupported() {
+        let status = process_one_request(VIRTIO_BLK_T_DISCARD, 0);
+        assert_eq!(status[0], VIRTIO_BLK_S_UNSUPP as u8);
     }
 
     #[test]
