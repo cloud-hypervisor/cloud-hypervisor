@@ -227,6 +227,22 @@ impl PciBus {
         }
     }
 
+    fn write_config_register(
+        &self,
+        device_id: u8,
+        register: usize,
+        offset: u64,
+        data: &[u8],
+    ) -> Option<Arc<Barrier>> {
+        let d = self.devices.get(&device_id)?;
+        let mut device = d.lock().unwrap();
+
+        let (bar_reprogram, ret) = device.write_config_register(register, offset, data);
+        self.apply_bar_reprogramming(device.deref_mut(), &bar_reprogram);
+
+        ret
+    }
+
     fn apply_bar_reprogramming(&self, device: &mut dyn PciDevice, bars: &[BarReprogrammingParams]) {
         for bar in bars {
             if let Err(e) = self.device_reloc.move_bar(
@@ -318,20 +334,12 @@ impl PciConfigIo {
             return None;
         }
 
-        let pci_bus = self.pci_bus.as_ref().lock().unwrap();
-        if let Some(d) = pci_bus.devices.get(&(device as u8)) {
-            let mut device = d.lock().unwrap();
-
-            // Update the register value
-            let (bar_reprogram, ret) = device.write_config_register(register, offset, data);
-
-            // Move the device's BAR if needed
-            pci_bus.apply_bar_reprogramming(device.deref_mut(), &bar_reprogram);
-
-            ret
-        } else {
-            None
-        }
+        self.pci_bus.as_ref().lock().unwrap().write_config_register(
+            device as u8,
+            register,
+            offset,
+            data,
+        )
     }
 
     fn set_config_address(&mut self, offset: u64, data: &[u8]) {
@@ -454,20 +462,10 @@ impl PciConfigMmio {
             return None;
         }
 
-        let pci_bus = self.pci_bus.lock().unwrap();
-        if let Some(d) = pci_bus.devices.get(&(device as u8)) {
-            let mut device = d.lock().unwrap();
-
-            // Update the register value
-            let (bar_reprogram, ret) = device.write_config_register(register, offset, data);
-
-            // Move the device's BAR if needed
-            pci_bus.apply_bar_reprogramming(device.deref_mut(), &bar_reprogram);
-
-            ret
-        } else {
-            None
-        }
+        self.pci_bus
+            .lock()
+            .unwrap()
+            .write_config_register(device as u8, register, offset, data)
     }
 }
 
