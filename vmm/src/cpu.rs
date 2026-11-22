@@ -1329,6 +1329,18 @@ impl CpuManager {
             thread::Builder::new()
                 .name(format!("vcpu{vcpu_id}"))
                 .spawn(move || {
+                    // Since Linux 6.14 (and 6.12.14, 6.13.3), the first KVM_RUN on x86 creates
+                    // kvm-nx-lpage-recovery, even with immediate_exit set, and it inherits the
+                    // caller's cgroup and affinity. Do it first, so the thread keeps those of the
+                    // VMM, not the vCPU.
+                    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+                    if matches!(hypervisor_type, HypervisorType::Kvm)
+                        && let Err(e) = vcpu.lock().unwrap().run_immediate_exit()
+                    {
+                        error!("Unexpected VM exit on initial \"immediate_exit\" run: {e:?}");
+                        return;
+                    }
+
                     // Schedule the thread to run on the expected CPU set
                     if let Some(cpuset) = cpuset.as_ref() {
                         let cpuset: *const libc::cpu_set_t = cpuset;
