@@ -320,8 +320,9 @@ following parameters. Unless marked otherwise, they apply to
   has the form `zone_id@host_numa_node`.
 - `external_fds <list of target@[fd,...]>` (`receive-migration`): \
   Replacement file descriptors opened on the destination. Use `net(<id>)`
-  for network FDs, `vfio(<id>)` for VFIO cdev FDs, and `iommu` for the
-  iommufd FD. For migratable VFIO devices, see [Destination File Descriptors](vfio.md#destination-file-descriptors).
+  for network FDs, `vfio(<id>)` for VFIO cdev FDs, `iommu` for the
+  iommufd FD, and `cpus_cgroup` for the vCPU cgroup FD. For migratable
+  VFIO devices, see [Destination File Descriptors](vfio.md#destination-file-descriptors).
 - `background_fetch_pages <on|off>` (`receive-migration`): \
   For postcopy migration and on-demand restore, keep fetching the remaining
   guest pages in the background after the VM resumed. With `off`, only the

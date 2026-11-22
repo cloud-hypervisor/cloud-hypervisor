@@ -391,7 +391,7 @@ pub enum VmReceiveMigrationConfigError {
 impl VmReceiveMigrationData {
     pub const SYNTAX: &'static str = "VM receive migration parameters \
         \"<receiver_url>\" or \"receiver_url=<url>[,tls_dir=<path>]\
-        [,external_fds=[net(<id>)@[<fd>,...],vfio(<id>)@[<fd>],iommu@[<fd>]]]\
+        [,external_fds=[net(<id>)@[<fd>,...],vfio(<id>)@[<fd>],iommu@[<fd>],cpus_cgroup@[<fd>]]]\
         [,zone_updates=[<id@host_numa_node>]][,background_fetch_pages=on|off]\
         [,serial_file=<path>|serial_socket=<path>|serial_tcp=<ip>:<port>]\
         [,console_file=<path>|console_socket=<path>|console_tcp=<ip>:<port>]\"\
