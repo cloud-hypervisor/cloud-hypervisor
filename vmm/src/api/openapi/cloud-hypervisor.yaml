@@ -1859,30 +1859,41 @@ components:
 
     ExternalFdTarget:
       oneOf:
-        - type: object
-          required:
-            - Net
-          properties:
-            Net:
-              type: object
-              required:
-                - id
-              properties:
-                id:
-                  type: string
-        - type: object
-          required:
-            - Vfio
-          properties:
-            Vfio:
-              type: object
-              required:
-                - id
-              properties:
-                id:
-                  type: string
-        - type: string
-          enum: [Iommu]
+        - $ref: "#/components/schemas/ExternalFdDeviceTarget"
+        - $ref: "#/components/schemas/ExternalFdVmTarget"
+
+    ExternalFdDeviceTarget:
+      oneOf:
+        - $ref: "#/components/schemas/ExternalFdNetTarget"
+        - $ref: "#/components/schemas/ExternalFdVfioTarget"
+
+    ExternalFdNetTarget:
+      type: object
+      required:
+        - Net
+      properties:
+        Net:
+          $ref: "#/components/schemas/ExternalFdDeviceId"
+
+    ExternalFdVfioTarget:
+      type: object
+      required:
+        - Vfio
+      properties:
+        Vfio:
+          $ref: "#/components/schemas/ExternalFdDeviceId"
+
+    ExternalFdDeviceId:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+
+    ExternalFdVmTarget:
+      type: string
+      enum: [Iommu]
 
     RestoredNetConfig:
       type: object
