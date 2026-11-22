@@ -3636,6 +3636,7 @@ pub(crate) mod tests {
                 nested: true,
                 core_scheduling: CoreScheduling::default(),
                 cgroup: None,
+                cgroup_fd: Default::default(),
                 profile: CpuProfileConfig::default(),
                 #[cfg(target_arch = "x86_64")]
                 cpuid_overrides: Vec::new(),
