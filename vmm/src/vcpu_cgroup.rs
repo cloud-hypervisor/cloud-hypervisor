@@ -19,6 +19,12 @@ pub(crate) fn open_cgroup_threads(cpus: &CpusConfig) -> io::Result<Option<File>>
             return OpenOptions::new().write(true).open(path).map(Some);
         }
         file
+    } else if let Some(fd) = cpus.cgroup_fd.as_ref() {
+        let file = File::from(fd.try_clone()?);
+        if !file.metadata()?.is_dir() {
+            return Ok(Some(file));
+        }
+        file
     } else {
         return Ok(None);
     };
@@ -60,9 +66,19 @@ pub(crate) fn join_cgroup(mut cgroup_threads: &File) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::os::fd::IntoRawFd;
     use std::os::unix::fs::symlink;
 
     use super::*;
+    use crate::config::take_inherited_fd;
+
+    fn cpus_with_fd(file: File) -> CpusConfig {
+        CpusConfig {
+            // SAFETY: into_raw_fd transferred exclusive ownership of the descriptor.
+            cgroup_fd: unsafe { take_inherited_fd(file.into_raw_fd()) }.unwrap(),
+            ..Default::default()
+        }
+    }
 
     #[test]
     fn test_open_path() {
@@ -92,6 +108,18 @@ mod tests {
             ..Default::default()
         };
         let file = open_cgroup_threads(&by_path).unwrap().unwrap();
+        join_cgroup(&file).unwrap();
+        assert_eq!(read_back(), "0");
+
+        let by_dir_fd = cpus_with_fd(File::open(cgroup.path()).unwrap());
+        fs::write(&threads, "").unwrap();
+        let file = open_cgroup_threads(&by_dir_fd).unwrap().unwrap();
+        join_cgroup(&file).unwrap();
+        assert_eq!(read_back(), "0");
+
+        let by_file_fd = cpus_with_fd(OpenOptions::new().write(true).open(&threads).unwrap());
+        fs::write(&threads, "").unwrap();
+        let file = open_cgroup_threads(&by_file_fd).unwrap().unwrap();
         join_cgroup(&file).unwrap();
         assert_eq!(read_back(), "0");
 

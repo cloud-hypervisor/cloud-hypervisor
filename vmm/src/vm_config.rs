@@ -100,6 +100,9 @@ pub struct CpusConfig {
     pub core_scheduling: CoreScheduling,
     #[serde(default)]
     pub cgroup: Option<PathBuf>,
+    // Deserialized FDs are discarded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cgroup_fd: ExternalFd,
     // Defaults to "Host" if no profile is given.
     #[serde(default)]
     pub profile: CpuProfileConfig,
@@ -129,6 +132,7 @@ impl Default for CpusConfig {
             nested: false,
             core_scheduling: CoreScheduling::default(),
             cgroup: None,
+            cgroup_fd: ExternalFd::default(),
             profile: CpuProfileConfig::default(),
             #[cfg(target_arch = "x86_64")]
             cpuid_overrides: Vec::new(),

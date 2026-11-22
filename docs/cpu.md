@@ -247,7 +247,7 @@ In this example, both vCPUs will share the same core scheduling cookie,
 allowing them to be co-scheduled on SMT siblings while preventing host
 threads from sharing those siblings.
 
-### `cgroup`
+### `cgroup` and `cgroup_fd`
 
 Cgroup of the vCPU threads (cgroup v2 only).
 
@@ -263,10 +263,23 @@ Threads of removed vCPUs leave the cgroup when they exit.
   `cgroup.threads` file. Cloud Hypervisor opens `cgroup.threads` each time it
   boots, reboots, restores or receives the VM, and keeps it open for CPU
   hotplug.
+- `cgroup_fd=<fd>` is an inherited FD of either the cgroup directory, in
+  which case Cloud Hypervisor opens `cgroup.threads` beneath it, or of a
+  `cgroup.threads` file opened for writing, for when Cloud Hypervisor cannot
+  open the cgroup files itself.
 
 Cloud Hypervisor writes to a given file as is, without checking what it is.
 To move only the vCPU threads, it has to be a `cgroup.threads` file: the
 same write to `cgroup.procs` would move the whole process.
+
+The forms differ in whose permissions the kernel checks when a vCPU thread
+moves itself. For an opened `cgroup.threads` file, Linux 5.16 and newer check
+the permissions of whoever opened it, so a privileged manager can open the
+file for an unprivileged Cloud Hypervisor. For a path or a directory FD,
+Cloud Hypervisor opens `cgroup.threads` itself, so its own permissions apply.
+
+The two options are mutually exclusive. Like `iommufd_fd`, `cgroup_fd` can
+only be given on the command line: `vm.create` over the HTTP API takes no FDs.
 
 The cgroup must be in the same threaded domain as Cloud Hypervisor, usually
 as a threaded cgroup below Cloud Hypervisor's own cgroup or next to it, and
