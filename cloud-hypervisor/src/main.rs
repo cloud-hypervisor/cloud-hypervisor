@@ -1422,6 +1422,7 @@ mod tests {
                 features: CpuFeatures::default(),
                 nested: false,
                 core_scheduling: CoreScheduling::Vm,
+                cgroup: None,
                 profile: Default::default(),
                 #[cfg(target_arch = "x86_64")]
                 cpuid_overrides: Vec::new(),

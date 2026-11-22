@@ -12,6 +12,7 @@
 //
 
 use std::collections::BTreeMap;
+use std::fs::File;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use std::io::Write;
 use std::mem::zeroed;
@@ -102,7 +103,7 @@ use crate::seccomp_filters::{Thread, get_seccomp_filter};
 #[cfg(target_arch = "x86_64")]
 use crate::vm::physical_bits;
 use crate::vm_config::{CoreScheduling, CpusConfig};
-use crate::{CPU_MANAGER_SNAPSHOT_ID, GuestMemory};
+use crate::{CPU_MANAGER_SNAPSHOT_ID, GuestMemory, vcpu_cgroup};
 
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 /// Extract the specified bits of a 64-bit integer.
@@ -239,6 +240,9 @@ pub enum Error {
 
     #[error("Cannot clone EventFd")]
     EventFdClone(#[source] io::Error),
+
+    #[error("Error opening the vCPU cgroup")]
+    OpenCgroup(#[source] io::Error),
 
     #[cfg(feature = "kvm")]
     #[error("Unexpected exit of vCPU {0} on an immediate_exit run: {1:?}")]
@@ -822,6 +826,7 @@ pub struct CpuManager {
     core_scheduling_group_leader: Arc<AtomicI32>,
     #[cfg(feature = "igvm")]
     igvm_enabled: bool,
+    cgroup_threads: Option<Arc<File>>,
 }
 
 /// State of the core scheduling group leader election for VM-wide cookie
@@ -1041,6 +1046,10 @@ impl CpuManager {
         )
         .map_err(Error::MsrConfigurationUpdate)?;
 
+        let cgroup_threads = vcpu_cgroup::open_cgroup_threads(config)
+            .map_err(Error::OpenCgroup)?
+            .map(Arc::new);
+
         Ok(Arc::new(Mutex::new(CpuManager {
             config: config.clone(),
             interrupt_controller: None,
@@ -1074,6 +1083,7 @@ impl CpuManager {
             )),
             #[cfg(feature = "igvm")]
             igvm_enabled,
+            cgroup_threads,
         })))
     }
 
@@ -1319,6 +1329,7 @@ impl CpuManager {
 
         let core_scheduling = self.config.core_scheduling;
         let core_scheduling_group_leader = Arc::clone(&self.core_scheduling_group_leader);
+        let cgroup_threads = self.cgroup_threads.clone();
 
         #[cfg(target_arch = "x86_64")]
         let interrupt_controller_clone = self.interrupt_controller.as_ref().cloned();
@@ -1338,6 +1349,15 @@ impl CpuManager {
                         && let Err(e) = vcpu.lock().unwrap().run_immediate_exit()
                     {
                         error!("Unexpected VM exit on initial \"immediate_exit\" run: {e:?}");
+                        return;
+                    }
+
+                    // Join the vCPU cgroup before applying the affinity, since entering a
+                    // cpuset cgroup resets or narrows it, depending on the kernel version.
+                    if let Some(cgroup_threads) = cgroup_threads.as_deref()
+                        && let Err(e) = vcpu_cgroup::join_cgroup(cgroup_threads)
+                    {
+                        error!("Failed moving the vCPU {vcpu_id} into its cgroup: {e}");
                         return;
                     }
 

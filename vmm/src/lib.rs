@@ -110,6 +110,7 @@ pub mod sparse;
 mod sync_utils;
 mod uffd;
 mod userfaultfd;
+mod vcpu_cgroup;
 pub mod vm;
 pub mod vm_config;
 
@@ -3634,6 +3635,7 @@ pub(crate) mod tests {
                 features: CpuFeatures::default(),
                 nested: true,
                 core_scheduling: CoreScheduling::default(),
+                cgroup: None,
                 profile: CpuProfileConfig::default(),
                 #[cfg(target_arch = "x86_64")]
                 cpuid_overrides: Vec::new(),

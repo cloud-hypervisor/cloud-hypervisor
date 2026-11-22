@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use std::fs::File;
 use std::io::Error as IoError;
 use std::path::Path;
 use std::str::FromStr;
@@ -9,7 +10,7 @@ use std::str::FromStr;
 #[cfg(test)]
 use landlock::make_bitflags;
 use landlock::{
-    ABI, Access, AccessFs, BitFlags, Compatible, Ruleset, RulesetAttr, RulesetCreated,
+    ABI, Access, AccessFs, BitFlags, Compatible, PathBeneath, Ruleset, RulesetAttr, RulesetCreated,
     RulesetCreatedAttr, RulesetError, path_beneath_rules,
 };
 use thiserror::Error;
@@ -110,6 +111,15 @@ impl Landlock {
         access: &str,
     ) -> Result<(), LandlockError> {
         self.add_rule(path, access.parse::<LandlockAccess>()?.access)?;
+        Ok(())
+    }
+
+    pub(crate) fn add_file_rule(&mut self, file: File, access: &str) -> Result<(), LandlockError> {
+        let access = access.parse::<LandlockAccess>()?.access & AccessFs::from_file(ABI);
+        self.ruleset
+            .as_mut()
+            .add_rule(PathBeneath::new(file, access))
+            .map_err(LandlockError::ManageRuleset)?;
         Ok(())
     }
 

@@ -805,6 +805,7 @@ impl CpusConfig {
         affinity=<list_of_vcpus_with_their_associated_cpuset>,\
         features=<list_of_features_to_enable>,\
         nested=on|off,core_scheduling=vm|vcpu|off,\
+        cgroup=<path>,\
         profile=host|path:<file>,\
         x-cpuid-overrides=[[<leaf>,<subleaf>,<eax>,<ebx>,<ecx>,<edx>],...]\"";
 
@@ -820,6 +821,7 @@ impl CpusConfig {
             .add("features")
             .add("nested")
             .add("core_scheduling")
+            .add("cgroup")
             .add("profile");
         #[cfg(target_arch = "x86_64")]
         parser.add("x-cpuid-overrides");
@@ -911,6 +913,8 @@ impl CpusConfig {
             .map_err(Error::ParseCpus)?
             .unwrap_or(CoreScheduling::Vm);
 
+        let cgroup = parser.get("cgroup").map(PathBuf::from);
+
         Ok(CpusConfig {
             boot_vcpus,
             max_vcpus,
@@ -923,6 +927,7 @@ impl CpusConfig {
             features,
             nested,
             core_scheduling,
+            cgroup,
             profile,
             #[cfg(target_arch = "x86_64")]
             cpuid_overrides,
@@ -4753,6 +4758,16 @@ pub(crate) mod tests {
         );
         // Invalid value should error
         CpusConfig::parse("boot=1,core_scheduling=invalid").unwrap_err();
+
+        assert_eq!(
+            CpusConfig::parse("boot=1,cgroup=/sys/fs/cgroup/vm/vcpus")?,
+            CpusConfig {
+                boot_vcpus: 1,
+                max_vcpus: 1,
+                cgroup: Some(PathBuf::from("/sys/fs/cgroup/vm/vcpus")),
+                ..Default::default()
+            }
+        );
 
         Ok(())
     }
