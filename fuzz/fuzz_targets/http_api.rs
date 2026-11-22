@@ -148,6 +148,7 @@ impl RequestHandler for StubApiRequestHandler {
                     cpuid_overrides: Vec::new(),
                     nested: true,
                     core_scheduling: CoreScheduling::default(),
+                    cgroup: None,
                 },
                 memory: MemoryConfig {
                     size: 536_870_912,

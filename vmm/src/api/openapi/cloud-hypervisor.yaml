@@ -1011,6 +1011,13 @@ components:
           $ref: "#/components/schemas/CpuFeatures"
         core_scheduling:
           $ref: "#/components/schemas/CoreSchedulingMode"
+        cgroup:
+          type: string
+          description: >
+            Path of a cgroup v2 directory or of its cgroup.threads file. Each
+            vCPU thread moves itself into this cgroup through its
+            cgroup.threads file before running guest code. Restore and
+            receive-migration reuse the path.
         profile:
           $ref: "#/components/schemas/CpuProfileConfig"
         x-cpuid-overrides:

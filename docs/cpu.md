@@ -247,6 +247,57 @@ In this example, both vCPUs will share the same core scheduling cookie,
 allowing them to be co-scheduled on SMT siblings while preventing host
 threads from sharing those siblings.
 
+### `cgroup`
+
+Cgroup of the vCPU threads (cgroup v2 only).
+
+Each vCPU thread moves itself into the given cgroup by writing to the
+cgroup's `cgroup.threads` file. It does so before applying its `affinity`
+and before running any guest code. This covers every vCPU thread,
+whether created at boot, reboot, CPU hotplug, restore or migration. The other
+threads of Cloud Hypervisor stay in their cgroup, so the vCPUs can get, for
+example, a different `cpu.max` or `cpuset.cpus` than the rest of the VMM.
+Threads of removed vCPUs leave the cgroup when they exit.
+
+- `cgroup=<path>` is the path of the cgroup directory or of its
+  `cgroup.threads` file. Cloud Hypervisor opens `cgroup.threads` each time it
+  boots, reboots, restores or receives the VM, and keeps it open for CPU
+  hotplug.
+
+Cloud Hypervisor writes to a given file as is, without checking what it is.
+To move only the vCPU threads, it has to be a `cgroup.threads` file: the
+same write to `cgroup.procs` would move the whole process.
+
+The cgroup must be in the same threaded domain as Cloud Hypervisor, usually
+as a threaded cgroup below Cloud Hypervisor's own cgroup or next to it, and
+Cloud Hypervisor must be allowed to migrate its threads into it. Otherwise
+the kernel rejects the write and the vCPU fails to start.
+
+If the cpuset controller is enabled for the cgroup, a vCPU runs only on CPUs
+that are in both its `affinity` and `cpuset.cpus.effective`. If no CPU is in
+both, the vCPU fails to start.
+
+A snapshot and a live migration carry the cgroup path like disk images and
+every other path, so restoring or receiving the VM uses the same path, and
+the cgroup must exist there.
+
+_Example_
+
+```shell
+mkdir -p /sys/fs/cgroup/vm/{vmm,vcpus}
+echo threaded > /sys/fs/cgroup/vm/vmm/cgroup.type
+echo threaded > /sys/fs/cgroup/vm/vcpus/cgroup.type
+echo +cpu > /sys/fs/cgroup/vm/cgroup.subtree_control
+echo "50000 100000" > /sys/fs/cgroup/vm/vmm/cpu.max
+echo $$ > /sys/fs/cgroup/vm/vmm/cgroup.procs
+
+cloud-hypervisor ... --cpus boot=2,cgroup=/sys/fs/cgroup/vm/vcpus
+```
+
+In this example, the vCPU threads run in `/sys/fs/cgroup/vm/vcpus` without a
+CPU limit, while all other threads of Cloud Hypervisor are limited to half a
+host CPU.
+
 ### `profile`
 
 CPU profiles are experimental. They are under active development and no
