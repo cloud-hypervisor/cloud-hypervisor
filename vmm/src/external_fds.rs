@@ -17,7 +17,7 @@ use thiserror::Error;
 use crate::api::VmReceiveMigrationData;
 use crate::config;
 use crate::config::{RestoreConfig, RestoredNetConfig, RestoredVfioConfig};
-use crate::vm_config::{DeviceConfig, ExternalFd, NetConfig, PlatformConfig, VmConfig};
+use crate::vm_config::{CpusConfig, DeviceConfig, ExternalFd, NetConfig, PlatformConfig, VmConfig};
 
 /// A resource that can be backed by one or more file descriptors.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
@@ -25,6 +25,7 @@ pub enum Target {
     Net { id: String },
     Vfio { id: String },
     Iommu,
+    CpusCgroup,
 }
 
 /// Errors parsing [`Target`].
@@ -57,16 +58,24 @@ impl FromStr for Target {
             }
         }
 
+        fn without_id(
+            input: &str,
+            contains_parenthesis: bool,
+            target: Target,
+            original: &str,
+        ) -> Result<Target, <Target as FromStr>::Err> {
+            if input.is_empty() && !contains_parenthesis {
+                Ok(target)
+            } else {
+                Err(ParseTargetError::InvalidValue(original.to_owned()))
+            }
+        }
+
         match target {
             "net" => parse_id(rest, |id| Target::Net { id }, s),
             "vfio" => parse_id(rest, |id| Target::Vfio { id }, s),
-            "iommu" => {
-                if rest.is_empty() && !contains_parenthesis {
-                    Ok(Target::Iommu)
-                } else {
-                    Err(ParseTargetError::InvalidValue(s.to_owned()))
-                }
-            }
+            "iommu" => without_id(rest, contains_parenthesis, Target::Iommu, s),
+            "cpus_cgroup" => without_id(rest, contains_parenthesis, Target::CpusCgroup, s),
             _ => Err(ParseTargetError::InvalidValue(s.to_owned())),
         }
     }
@@ -450,6 +459,9 @@ pub enum UpdateFdsError {
     /// `iommufd_fd` was provided without also enabling the iommufd backend.
     #[error("IOMMU file descriptor was provided without enabling the iommufd backend")]
     IommufdFdRequiresIommufdBackend,
+    /// A cgroup file descriptor was provided for vCPUs that have a cgroup path.
+    #[error("Cgroup file descriptor cannot be combined with a cgroup path")]
+    CgroupFdWithPath,
 }
 
 impl VmConfig {
@@ -467,6 +479,8 @@ impl VmConfig {
         let vfio_fd = to_validate
             .iter()
             .any(|target| matches!(target, Target::Vfio { .. }));
+
+        self.cpus.validate_fds(external_fds, &mut to_validate)?;
 
         self.net.iter().try_for_each(|net_configs| {
             net_configs
@@ -508,6 +522,8 @@ impl VmConfig {
         // Validate before updating to avoid TOCTOU issues.
         self.validate_fds(&external_fds)?;
 
+        self.cpus.update_fds(&mut external_fds)?;
+
         self.net.iter_mut().try_for_each(|net_configs| {
             net_configs
                 .iter_mut()
@@ -539,6 +555,46 @@ pub(crate) trait UpdateFdsComponent {
 
     /// Updates all file descriptors of this component.
     fn update_fds(&mut self, external_fds: &mut ExternalFds) -> Result<(), UpdateFdsError>;
+}
+
+impl UpdateFdsComponent for CpusConfig {
+    fn validate_fds(
+        &self,
+        external_fds: &ExternalFds,
+        to_validate: &mut BTreeSet<Target>,
+    ) -> Result<(), UpdateFdsError> {
+        let target = Target::CpusCgroup;
+        let Some(received_fds) = external_fds.entry(&target) else {
+            return Ok(());
+        };
+
+        if self.cgroup.is_some() {
+            return Err(UpdateFdsError::CgroupFdWithPath);
+        }
+
+        if received_fds.fds().len() != 1 {
+            return Err(UpdateFdsError::FdAmountMismatch {
+                target,
+                expected: 1,
+                actual: received_fds.fds().len(),
+            });
+        }
+
+        to_validate.remove(&target);
+
+        Ok(())
+    }
+
+    fn update_fds(&mut self, external_fds: &mut ExternalFds) -> Result<(), UpdateFdsError> {
+        if let Some(mut received_fds) = external_fds.take_entry(&Target::CpusCgroup) {
+            self.cgroup_fd = received_fds
+                .take_fds()
+                .pop()
+                .expect("Should be checked during validation");
+        }
+
+        Ok(())
+    }
 }
 
 impl UpdateFdsComponent for NetConfig {
@@ -712,8 +768,8 @@ impl UpdateFdsComponent for PlatformConfig {
 #[cfg(test)]
 pub(crate) mod tests {
     use std::os::fd::{AsRawFd, IntoRawFd};
-    use std::slice;
     use std::str::FromStr;
+    use std::{mem, slice};
 
     use option_parser::{OptionParser, TupleList};
     use serde::{Deserialize, Serialize};
@@ -765,6 +821,7 @@ pub(crate) mod tests {
             ("net(foo)", net_target("foo")),
             ("vfio(foo)", vfio_target("foo")),
             ("iommu", Target::Iommu),
+            ("cpus_cgroup", Target::CpusCgroup),
         ] {
             assert_eq!(Target::from_str(input), Ok(expected), "{input}");
         }
@@ -784,6 +841,8 @@ pub(crate) mod tests {
             "vfio",
             "iommu(foo)",
             "iommu(",
+            "cpus_cgroup(foo)",
+            "cpus_cgroup(",
             "foo",
         ] {
             assert_eq!(
@@ -1726,6 +1785,82 @@ pub(crate) mod tests {
                 Err(UpdateFdsError::SuperfluousFds(vec![net_target("net1")]))
             );
         }
+    }
+
+    #[test]
+    fn update_fds_vm_config_cgroup() {
+        let fd: ExternalFd = test_fd().into();
+
+        let mut vm_config = create_dummy_vm_config();
+        let external_fds = vec![(Target::CpusCgroup, vec![fd.clone()])].into();
+        vm_config.update_fds(external_fds).unwrap();
+        assert_eq!(vm_config.cpus.cgroup_fd, fd);
+
+        let mut vm_config = create_dummy_vm_config();
+        vm_config.cpus.cgroup = Some("/sys/fs/cgroup/vm/vcpus".into());
+        let vm_config_expected = vm_config.clone();
+        let external_fds = vec![(Target::CpusCgroup, vec![fd.clone()])].into();
+        assert_eq!(
+            vm_config.update_fds(external_fds),
+            Err(UpdateFdsError::CgroupFdWithPath)
+        );
+        assert_eq!(vm_config, vm_config_expected);
+
+        let mut vm_config = create_dummy_vm_config();
+        let external_fds = vec![(Target::CpusCgroup, vec![fd.clone(), fd.clone()])].into();
+        assert_eq!(
+            vm_config.update_fds(external_fds),
+            Err(UpdateFdsError::FdAmountMismatch {
+                target: Target::CpusCgroup,
+                expected: 1,
+                actual: 2,
+            })
+        );
+
+        let raw_fd = test_fd().into_raw_fd();
+        // SAFETY: into_raw_fd transferred exclusive ownership of the descriptor.
+        let mut restore = unsafe {
+            RestoreConfig::parse(&format!(
+                "source_url=file:///tmp/snapshot,external_fds=[cpus_cgroup@[{raw_fd}]]"
+            ))
+        }
+        .unwrap();
+        let mut snapshot = create_dummy_vm_config();
+        snapshot.cpus.cgroup_fd = fd.clone();
+        let mut vm_config: VmConfig =
+            serde_json::from_value(serde_json::to_value(snapshot).unwrap()).unwrap();
+        vm_config
+            .update_fds(mem::take(&mut restore.external_fds))
+            .unwrap();
+        assert_eq!(
+            vm_config.cpus.cgroup_fd.as_ref().unwrap().as_raw_fd(),
+            raw_fd
+        );
+
+        let raw_fd = test_fd().into_raw_fd();
+        // SAFETY: into_raw_fd transferred exclusive ownership of the descriptor.
+        let mut receive = unsafe {
+            VmReceiveMigrationData::parse(&format!(
+                "receiver_url=unix:/tmp/migration,external_fds=[cpus_cgroup@[{raw_fd}]]"
+            ))
+        }
+        .unwrap();
+        let mut vm_config = create_dummy_vm_config();
+        vm_config
+            .update_fds(mem::take(&mut receive.external_fds))
+            .unwrap();
+        assert_eq!(
+            vm_config.cpus.cgroup_fd.as_ref().unwrap().as_raw_fd(),
+            raw_fd
+        );
+
+        let serialized =
+            serde_json::to_string(&ExternalFds::from(vec![(Target::CpusCgroup, vec![fd])]))
+                .unwrap();
+        assert_eq!(
+            serialized,
+            r#"{"external_fds":[{"target":"CpusCgroup","expected_fds":1}]}"#
+        );
     }
 
     #[test]

@@ -1889,7 +1889,7 @@ components:
                 id:
                   type: string
         - type: string
-          enum: [Iommu]
+          enum: [Iommu, CpusCgroup]
 
     RestoredNetConfig:
       type: object

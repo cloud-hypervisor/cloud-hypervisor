@@ -3163,7 +3163,8 @@ impl RestoreConfig {
     pub const SYNTAX: &'static str = "Restore from a VM snapshot.\
         \nRestore parameters \"source_url=<source_url>,prefault=on|off,\
         memory_restore_mode=copy|ondemand|ondemand_no_background_fetch_pages|copyonwrite,\
-        external_fds=[net(<id>)@[<fd>,...],vfio(<id>)@[<fd>],iommu@[<fd>]],resume=true|false,\
+        external_fds=[net(<id>)@[<fd>,...],vfio(<id>)@[<fd>],iommu@[<fd>],cpus_cgroup@[<fd>]],\
+        resume=true|false,\
         zone_updates=<list_of_updates>,\
         serial_file=<path>|serial_socket=<path>|serial_tcp=<ip>:<port>,\
         console_file=<path>|console_socket=<path>|console_tcp=<ip>:<port>\"\n\
@@ -3176,8 +3177,8 @@ impl RestoreConfig {
         same without prefaulting pages in the background, and `memory_restore_mode=copyonwrite` \
         maps the snapshot file copy-on-write (plain private RAM only; falls back to copy otherwise)\
         \n`external_fds` provides replacement file descriptors. `net(<id>)` entries replace \
-        the FDs of network devices, `vfio(<id>)` entries replace VFIO cdev FDs, and `iommu` \
-        provides the iommufd FD. \
+        the FDs of network devices, `vfio(<id>)` entries replace VFIO cdev FDs, `iommu` \
+        provides the iommufd FD, and `cpus_cgroup` provides the vCPU cgroup FD. \
         Do not combine `external_fds` with legacy FD fields.\
         \n`net_fds=<list_of_net_ids_with_their_associated_fds>`, \
         `vfio_fds=<list_of_vfio_ids_with_their_associated_fd>` and \
