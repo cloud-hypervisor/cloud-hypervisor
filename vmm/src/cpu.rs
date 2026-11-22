@@ -239,6 +239,10 @@ pub enum Error {
 
     #[error("Cannot clone EventFd")]
     EventFdClone(#[source] io::Error),
+
+    #[cfg(feature = "kvm")]
+    #[error("Unexpected exit of vCPU {0} on an immediate_exit run: {1:?}")]
+    ImmediateExitRun(u32, VmExit),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -665,6 +669,17 @@ impl Vcpu {
     /// anything useful.
     pub fn run(&mut self) -> result::Result<VmExit, HypervisorCpuError> {
         self.vcpu.run()
+    }
+
+    #[cfg(feature = "kvm")]
+    fn run_immediate_exit(&mut self) -> Result<()> {
+        self.vcpu.set_immediate_exit(true);
+        let exit = self.run();
+        self.vcpu.set_immediate_exit(false);
+        match exit.map_err(Error::VcpuRun)? {
+            VmExit::Ignore => Ok(()),
+            exit => Err(Error::ImmediateExitRun(self.id, exit)),
+        }
     }
 
     #[cfg(target_arch = "riscv64")]
@@ -1447,14 +1462,11 @@ impl CpuManager {
                                 // to be executed.
 
                                 #[cfg(feature = "kvm")]
-                                if matches!(hypervisor_type, HypervisorType::Kvm) {
-                                    let mut lock = vcpu.lock().unwrap();
-                                    lock.vcpu.set_immediate_exit(true);
-                                    if !matches!(lock.run(), Ok(VmExit::Ignore)) {
-                                        error!("Unexpected VM exit on \"immediate_exit\" run");
-                                        break;
-                                    }
-                                    lock.vcpu.set_immediate_exit(false);
+                                if matches!(hypervisor_type, HypervisorType::Kvm)
+                                    && let Err(e) = vcpu.lock().unwrap().run_immediate_exit()
+                                {
+                                    error!("Unexpected VM exit on \"immediate_exit\" run: {e:?}");
+                                    break;
                                 }
 
                                 vcpu_run_interrupted.store(true, Ordering::SeqCst);
