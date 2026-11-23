@@ -10,8 +10,7 @@ use std::result;
 
 use thiserror::Error;
 use uuid::Uuid;
-use vm_allocator::GuestMemory;
-use vm_memory::{Address, ByteValued, Bytes, GuestAddress};
+use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryBackend};
 
 use crate::layout::{SMBIOS_MAX_SIZE, SMBIOS_START};
 
@@ -199,8 +198,8 @@ unsafe impl ByteValued for SmbiosChassis {}
 // SAFETY: data structure only contain a series of integers
 unsafe impl ByteValued for SmbiosEndOfTable {}
 
-fn write_and_incr<T: ByteValued>(
-    mem: &GuestMemory,
+fn write_and_incr<T: ByteValued, M: GuestMemoryBackend>(
+    mem: &M,
     val: T,
     mut curptr: GuestAddress,
 ) -> Result<GuestAddress> {
@@ -211,7 +210,11 @@ fn write_and_incr<T: ByteValued>(
     Ok(curptr)
 }
 
-fn write_string(mem: &GuestMemory, val: &str, mut curptr: GuestAddress) -> Result<GuestAddress> {
+fn write_string<M: GuestMemoryBackend>(
+    mem: &M,
+    val: &str,
+    mut curptr: GuestAddress,
+) -> Result<GuestAddress> {
     for c in val.as_bytes().iter() {
         curptr = write_and_incr(mem, *c, curptr)?;
     }
@@ -219,7 +222,11 @@ fn write_string(mem: &GuestMemory, val: &str, mut curptr: GuestAddress) -> Resul
     Ok(curptr)
 }
 
-fn write_opt_string(mem: &GuestMemory, s: Option<&str>, cur: GuestAddress) -> Result<GuestAddress> {
+fn write_opt_string<M: GuestMemoryBackend>(
+    mem: &M,
+    s: Option<&str>,
+    cur: GuestAddress,
+) -> Result<GuestAddress> {
     if let Some(v) = s {
         write_string(mem, v, cur)
     } else {
@@ -227,8 +234,8 @@ fn write_opt_string(mem: &GuestMemory, s: Option<&str>, cur: GuestAddress) -> Re
     }
 }
 
-fn write_string_terminator(
-    mem: &GuestMemory,
+fn write_string_terminator<M: GuestMemoryBackend>(
+    mem: &M,
     cur: GuestAddress,
     has_strings: bool,
 ) -> Result<GuestAddress> {
@@ -263,8 +270,8 @@ fn alloc_index(next: &mut u8, present: bool) -> Result<u8> {
     Ok(idx)
 }
 
-fn write_type1_system(
-    mem: &GuestMemory,
+fn write_type1_system<M: GuestMemoryBackend>(
+    mem: &M,
     curptr: &mut GuestAddress,
     handle: &mut u16,
     system: Option<&SmbiosSystem>,
@@ -322,8 +329,8 @@ fn write_type1_system(
     Ok(())
 }
 
-fn write_type3_chassis(
-    mem: &GuestMemory,
+fn write_type3_chassis<M: GuestMemoryBackend>(
+    mem: &M,
     curptr: &mut GuestAddress,
     handle: &mut u16,
     chassis: &SmbiosChassisConfig,
@@ -358,7 +365,10 @@ fn write_type3_chassis(
     Ok(())
 }
 
-pub(crate) fn setup_smbios(mem: &GuestMemory, smbios: Option<&SmbiosConfig>) -> Result<u64> {
+pub(crate) fn setup_smbios<M: GuestMemoryBackend>(
+    mem: &M,
+    smbios: Option<&SmbiosConfig>,
+) -> Result<u64> {
     let system = smbios.and_then(|cfg| cfg.system.as_ref());
     let chassis = smbios.and_then(|cfg| cfg.chassis.as_ref());
     let oem_strings: &[String] = smbios.map_or(&[], |cfg| &cfg.oem_strings);
@@ -455,10 +465,15 @@ pub(crate) fn setup_smbios(mem: &GuestMemory, smbios: Option<&SmbiosConfig>) -> 
 
 #[cfg(test)]
 mod tests {
+    use vm_allocator::GuestMemory;
+
     use super::*;
 
     /// Collects all strings after a SMBIOS structure, stopping at the double-NUL terminator and returns next addr.
-    fn read_string_set(mem: &GuestMemory, addr: GuestAddress) -> (Vec<String>, GuestAddress) {
+    fn read_string_set<M: GuestMemoryBackend>(
+        mem: &M,
+        addr: GuestAddress,
+    ) -> (Vec<String>, GuestAddress) {
         let mut cur = addr;
         let read_byte = |addr: GuestAddress| -> u8 { mem.read_obj(addr).unwrap() };
 
