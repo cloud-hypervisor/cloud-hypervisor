@@ -317,6 +317,8 @@ impl FromStr for MigrationMode {
 pub struct VmReceiveMigrationData {
     /// URL for the reception of migration state
     pub receiver_url: String,
+    #[serde(default)]
+    pub clock_restore_mode: hypervisor::SnapshotClockMode,
     /// Directory containing the TLS server certificate (`server-cert.pem`),
     /// the TLS server key (`server-key.pem`), and the server's TLS root CA
     /// certificate (`ca-cert.pem`).
@@ -393,6 +395,7 @@ impl VmReceiveMigrationData {
         \"<receiver_url>\" or \"receiver_url=<url>[,tls_dir=<path>]\
         [,external_fds=[net(<id>)@[<fd>,...],vfio(<id>)@[<fd>],iommu@[<fd>]]]\
         [,zone_updates=[<id@host_numa_node>]][,background_fetch_pages=on|off]\
+        [,clock_restore_mode=advance|preserve]\
         [,serial_file=<path>|serial_socket=<path>|serial_tcp=<ip>:<port>]\
         [,console_file=<path>|console_socket=<path>|console_tcp=<ip>:<port>]\"\
         \n`vfio_fds=<list_of_vfio_ids_with_their_associated_fd>` and \
@@ -407,6 +410,7 @@ impl VmReceiveMigrationData {
         let mut parser = OptionParser::new();
         parser
             .add("background_fetch_pages")
+            .add("clock_restore_mode")
             .add("external_fds")
             .add("iommufd_fd")
             .add("receiver_url")
@@ -492,6 +496,10 @@ impl VmReceiveMigrationData {
 
         let data = Self {
             receiver_url,
+            clock_restore_mode: parser
+                .convert("clock_restore_mode")
+                .map_err(VmReceiveMigrationConfigError::ParseError)?
+                .unwrap_or_default(),
             tls_dir,
             vfio_fds,
             iommufd_fd,
@@ -2323,6 +2331,7 @@ mod tests {
             data,
             VmReceiveMigrationData {
                 receiver_url: "tcp:192.168.1.1:8080".to_string(),
+                clock_restore_mode: hypervisor::SnapshotClockMode::Advance,
                 tls_dir: None,
                 vfio_fds: None,
                 iommufd_fd: Default::default(),
@@ -2357,7 +2366,7 @@ mod tests {
         // SAFETY: This test input contains no inherited descriptors.
         let data = unsafe {
             VmReceiveMigrationData::parse(&format!(
-                "receiver_url=tcp:192.168.1.1:8080,tls_dir={},serial_tcp=1.2.3.4:6789,console_file=/tmp/c",
+                "receiver_url=tcp:192.168.1.1:8080,tls_dir={},clock_restore_mode=preserve,serial_tcp=1.2.3.4:6789,console_file=/tmp/c",
                 tls_dir_path.display()
             ))
         }
@@ -2366,6 +2375,7 @@ mod tests {
             data,
             VmReceiveMigrationData {
                 receiver_url: "tcp:192.168.1.1:8080".to_string(),
+                clock_restore_mode: hypervisor::SnapshotClockMode::Preserve,
                 tls_dir: Some(tls_dir_path),
                 vfio_fds: None,
                 iommufd_fd: Default::default(),

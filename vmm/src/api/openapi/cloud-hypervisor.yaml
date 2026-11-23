@@ -2006,6 +2006,8 @@ components:
       properties:
         receiver_url:
           type: string
+        clock_restore_mode:
+          $ref: "#/components/schemas/SnapshotClockMode"
         vfio_fds:
           type: array
           deprecated: true
