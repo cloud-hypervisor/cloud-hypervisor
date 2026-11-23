@@ -128,8 +128,12 @@ pub fn arch_memory_regions() -> Vec<(GuestAddress, usize, RegionType)> {
 
 /// Configures the system and should be called once per vm before starting vcpu threads.
 #[expect(clippy::too_many_arguments)]
-pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
-    guest_mem: &GuestMemory,
+pub fn configure_system<
+    T: DeviceInfoForFdt + Clone + Debug,
+    S: BuildHasher,
+    M: GuestMemoryBackend,
+>(
+    guest_mem: &M,
     cmdline: &str,
     vcpu_mpidr: &[u64],
     vcpu_topology: Option<(u16, u16, u16, u16)>,
@@ -177,7 +181,10 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
 }
 
 /// Returns the memory address where the initramfs could be loaded.
-pub fn initramfs_load_addr(guest_mem: &GuestMemory, initramfs_size: usize) -> super::Result<u64> {
+pub fn initramfs_load_addr<M: GuestMemoryBackend>(
+    guest_mem: &M,
+    initramfs_size: usize,
+) -> super::Result<u64> {
     let round_to_pagesize = |size| (size + (super::PAGE_SIZE - 1)) & !(super::PAGE_SIZE - 1);
     match guest_mem
         .last_addr()
