@@ -11,7 +11,7 @@ use seccompiler::SeccompAction;
 use virtio_devices::{VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
 use vm_allocator::GuestMemory;
-use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryAtomic};
+use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryBackend};
 use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::{AccessPlatform, AccessType};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
@@ -774,7 +774,11 @@ fn activate_reporting_available_unacked(queue_data: &[u8]) {
     balloon.reset();
 }
 
-fn populate_queue_memory(mem: &GuestMemory, queue_layouts: &[QueueLayout], bytes: &[u8]) -> bool {
+fn populate_queue_memory<M: GuestMemoryBackend>(
+    mem: &M,
+    queue_layouts: &[QueueLayout],
+    bytes: &[u8],
+) -> bool {
     if queue_layouts.len() != QUEUE_NUM as usize {
         return false;
     }
@@ -925,7 +929,7 @@ fn populate_queue_memory(mem: &GuestMemory, queue_layouts: &[QueueLayout], bytes
     ) && write_avail_ring(mem, reporting.avail_ring_addr, &[0, 1, 2, 3])
 }
 
-fn write_avail_ring(mem: &GuestMemory, avail_ring_addr: u64, heads: &[u16]) -> bool {
+fn write_avail_ring<M: GuestMemoryBackend>(mem: &M, avail_ring_addr: u64, heads: &[u16]) -> bool {
     if !write_obj(mem, 0u16, avail_ring_addr)
         || !write_obj(mem, heads.len() as u16, avail_ring_addr + 2)
     {
@@ -941,8 +945,8 @@ fn write_avail_ring(mem: &GuestMemory, avail_ring_addr: u64, heads: &[u16]) -> b
     })
 }
 
-fn write_descriptor(
-    mem: &GuestMemory,
+fn write_descriptor<M: GuestMemoryBackend>(
+    mem: &M,
     desc_table_addr: u64,
     index: u16,
     addr: u64,
@@ -957,6 +961,6 @@ fn write_descriptor(
         && write_obj(mem, next, offset + 14)
 }
 
-fn write_obj<T: ByteValued>(mem: &GuestMemory, value: T, addr: u64) -> bool {
+fn write_obj<T: ByteValued, M: GuestMemoryBackend>(mem: &M, value: T, addr: u64) -> bool {
     mem.write_obj(value, GuestAddress(addr)).is_ok()
 }
