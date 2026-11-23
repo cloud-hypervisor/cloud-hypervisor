@@ -16110,10 +16110,14 @@ mod fw_cfg {
         let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
         let file = guest.tmp_dir.as_path().join("fw-cfg-item");
         fs::write(&file, "snapshot contents").unwrap();
+        let mut memory = guest.default_memory_string();
+        if cfg!(target_arch = "x86_64") {
+            memory.push_str(",hotplug_method=virtio-mem,hotplug_size=256M,hotplugged_size=128M");
+        }
         let mut child = GuestCommand::new(&guest)
             .args(["--api-socket", &api_socket])
             .default_cpus()
-            .default_memory()
+            .args(["--memory", &memory])
             .default_kernel_cmdline()
             .default_disks()
             .default_net()
@@ -16131,6 +16135,12 @@ mod fw_cfg {
         let r = panic::catch_unwind(|| {
             guest.wait_vm_boot().unwrap();
             assert_eq!(guest.ssh_command(read_item).unwrap(), "snapshot contents");
+            #[cfg(target_arch = "x86_64")]
+            guest
+                .ssh_command(
+                    "sudo cp /sys/firmware/qemu_fw_cfg/by_name/etc/e820/raw /tmp/boot-e820",
+                )
+                .unwrap();
             assert!(remote_command(&api_socket, "pause", None));
             assert!(remote_command(
                 &api_socket,
@@ -16157,6 +16167,14 @@ mod fw_cfg {
                 "snapshot contents",
                 "Restored fw_cfg content should equal the original content"
             );
+            #[cfg(target_arch = "x86_64")]
+            ssh_command_ip(
+                "sudo cmp /tmp/boot-e820 /sys/firmware/qemu_fw_cfg/by_name/etc/e820/raw",
+                &guest.network.guest_ip0,
+                1,
+                0,
+            )
+            .unwrap();
         });
         kill_child(&mut child);
         let output = child.wait_with_output().unwrap();
