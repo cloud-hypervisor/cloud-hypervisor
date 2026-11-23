@@ -22,7 +22,7 @@ use virtio_devices::{
 };
 use virtio_queue::{Queue, QueueT};
 use vm_allocator::GuestMemory;
-use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
+use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryBackend};
 use vm_migration::{Migratable, Pausable, Snapshottable};
 use vm_virtio::{AccessPlatform, AccessType};
 use vmm::EpollContext;
@@ -465,8 +465,8 @@ fn build_ctrl_queue_layout(queue_bytes: &mut [u8]) {
     set_avail_idx(queue_bytes, CTRL_QUEUE_INDEX, 5);
 }
 
-fn write_ctrl_plane(
-    mem: &GuestMemory,
+fn write_ctrl_plane<M: GuestMemoryBackend>(
+    mem: &M,
     input: &mut FuzzCursor,
     announce_mode: CtrlAnnounceMode,
 ) -> bool {
@@ -934,8 +934,8 @@ fn exercise_bad_activate(guest_mac_addr: net_util::MacAddr) {
     VirtioDevice::reset(&mut net);
 }
 
-fn write_desc_to_mem(
-    mem: &GuestMemory,
+fn write_desc_to_mem<M: GuestMemoryBackend>(
+    mem: &M,
     table_addr: u64,
     desc_index: u16,
     addr: u64,
