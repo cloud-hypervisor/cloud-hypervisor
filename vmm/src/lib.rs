@@ -3439,6 +3439,12 @@ impl RequestHandler for Vmm {
 
         {
             let vm_config = self.vm_config.as_ref().unwrap().lock().unwrap();
+            #[cfg(target_arch = "aarch64")]
+            if vm_config.cpus.nested {
+                return Err(MigratableError::MigrateSend(anyhow!(
+                    "Live migration not supported with aarch64 nested virtualization"
+                )));
+            }
             if !vm_config.backed_by_shared_memory()
                 && send_data_migration.effective_memory_mode() == MigrationMode::MemFDs
             {
