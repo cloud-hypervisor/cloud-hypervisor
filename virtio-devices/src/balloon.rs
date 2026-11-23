@@ -308,8 +308,8 @@ impl BalloonEpollHandler {
         })
     }
 
-    fn advise_memory_range(
-        memory: &GuestMemory,
+    fn advise_memory_range<M: GuestMemoryBackend>(
+        memory: &M,
         range_base: GuestAddress,
         range_len: usize,
         advice: libc::c_int,
@@ -544,7 +544,8 @@ impl BalloonEpollHandler {
         access_platform: Option<&dyn AccessPlatform>,
     ) -> BalloonStatsResult
     where
-        M: Deref<Target = GuestMemory>,
+        M: Deref,
+        M::Target: GuestMemoryBackend,
     {
         let results: SmallVec<[_; 4]> = desc_chain.checked_iter(access_platform).collect();
         let mut data = Vec::new();
