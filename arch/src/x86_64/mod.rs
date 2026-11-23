@@ -1292,7 +1292,7 @@ pub fn configure_vcpu(
             // there are 256 vCPUs in a flat hierarchy (i.e. max x2apic ID is 255),
             // so we need to enable x2apic in this case as well.
             let enable_x2_apic_mode = get_max_x2apic_id(topology) > MAX_SUPPORTED_CPUS_LEGACY;
-            regs::setup_sregs(&guest_memory.memory(), vcpu, enable_x2_apic_mode)
+            regs::setup_sregs(&*guest_memory.memory(), vcpu, enable_x2_apic_mode)
                 .map_err(Error::SregsConfiguration)?;
         }
         regs::setup_fpu(vcpu).map_err(Error::FpuConfiguration)?;
