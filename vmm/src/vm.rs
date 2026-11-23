@@ -665,7 +665,7 @@ impl Vm {
             // Restored or migrated in: the guest clock must catch up to wall time
             // on resume (the counter was reset to the saved value).
             vm_snapshot.clock.map(|state| SavedClock {
-                mode: hypervisor::ClockRestoreMode::SnapshotRestore,
+                mode: hypervisor::ClockRestoreMode::SnapshotRestore(Default::default()),
                 state,
             })
         } else {

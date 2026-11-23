@@ -45,6 +45,7 @@ mod cpu;
 mod device;
 
 use std::result;
+use std::str::FromStr;
 use std::sync::Arc;
 #[cfg(target_arch = "x86_64")]
 use std::time::SystemTime;
@@ -256,15 +257,37 @@ pub struct TimerState {
     pub cntfrq: u64,
 }
 
+/// Whether to advance the saved guest clock or preserve its value on restore.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub enum SnapshotClockMode {
+    /// Advance the clock by the wall time elapsed since capture, when supported.
+    #[default]
+    Advance,
+    /// Restore the clock without adding elapsed wall time.
+    Preserve,
+}
+
+impl FromStr for SnapshotClockMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "advance" => Ok(Self::Advance),
+            "preserve" => Ok(Self::Preserve),
+            _ => Err(format!("Invalid clock restore mode: {s}")),
+        }
+    }
+}
+
 /// How the guest clock is re-established when the vCPUs resume: a same-host
-/// pause/resume left it running, whereas a snapshot restore / migration-receive
-/// means the guest was off-host and the clock must catch up to wall time.
+/// pause leaves it running, whereas snapshot restore and incoming migration
+/// use [`SnapshotClockMode`] to decide whether to add elapsed wall time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClockRestoreMode {
     /// Same-host pause -> resume; the clock kept running, nothing to advance.
     SameHostResume,
-    /// Restored from a snapshot or migrated in; advance to current wall time.
-    SnapshotRestore,
+    /// Resume from a snapshot or incoming migration using the specified clock mode.
+    SnapshotRestore(SnapshotClockMode),
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

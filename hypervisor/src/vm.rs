@@ -319,10 +319,8 @@ pub trait Vm: Send + Sync + Any {
     fn snapshot_clock(&self, _boot_vcpu: &dyn Vcpu) -> Result<Option<ClockState>> {
         Ok(None)
     }
-    /// Re-establish the guest clock before the vCPUs resume. `mode` distinguishes a
-    /// same-host pause/resume (the clock kept running) from a restore/migration where
-    /// it must catch up to wall time. aarch64 writes the counter on all `vcpus` (older
-    /// kernels track the offset per-vCPU).
+    /// Re-establish the guest clock before the vCPUs resume. On snapshot restore
+    /// or incoming migration, the restore mode determines whether to advance it.
     fn restore_clock(
         &self,
         _vcpus: &[&dyn Vcpu],

@@ -91,7 +91,7 @@ use crate::arch::x86::{
     NUM_IOAPIC_PINS, SpecialRegisters, VcpuMsrConfigUpdate, XsaveState, msr_index,
 };
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-use crate::{ClockRestoreMode, ClockState};
+use crate::{ClockRestoreMode, ClockState, SnapshotClockMode};
 use crate::{
     CpuState, HypervisorType, HypervisorVmConfig, InterruptSourceConfig, IoEventAddress,
     IrqRoutingEntry, MpState, StandardRegisters, VmOps, cpu, hypervisor, vm,
@@ -1190,8 +1190,16 @@ impl vm::Vm for KvmVm {
         state: &ClockState,
         mode: ClockRestoreMode,
     ) -> vm::Result<()> {
+        if mode == ClockRestoreMode::SnapshotRestore(SnapshotClockMode::Preserve) {
+            // KVM_SET_CLOCK adds elapsed wall time when KVM_CLOCK_REALTIME is set.
+            let mut data = kvm_clock_data::from(state.data);
+            data.flags &= !kvm_bindings::KVM_CLOCK_REALTIME;
+            return self.set_clock(&data.into());
+        }
         self.set_clock(&state.data)?;
-        if mode != ClockRestoreMode::SnapshotRestore || !state.data.has_realtime() {
+        if mode != ClockRestoreMode::SnapshotRestore(SnapshotClockMode::Advance)
+            || !state.data.has_realtime()
+        {
             return Ok(());
         }
         if let (Some(tsc), Some(vcpu)) = (state.tsc, vcpus.first()) {
@@ -1246,9 +1254,8 @@ impl vm::Vm for KvmVm {
         Ok(())
     }
 
-    /// Advance the guest virtual counter to current wall time before the vCPUs
-    /// resume. A no-op for a `SameHostResume` (the counter free-ran across the
-    /// pause); on `SnapshotRestore`/migration-receive it must catch up.
+    /// Same-host resume leaves the counter running. Restore or migration may
+    /// advance the guest wall clock.
     #[cfg(target_arch = "aarch64")]
     fn restore_clock(
         &self,
@@ -1256,9 +1263,9 @@ impl vm::Vm for KvmVm {
         saved: &ClockState,
         mode: ClockRestoreMode,
     ) -> vm::Result<()> {
-        if mode == ClockRestoreMode::SameHostResume {
+        let ClockRestoreMode::SnapshotRestore(clock_mode) = mode else {
             return Ok(());
-        }
+        };
         // KVM does not rescale the counter frequency across hosts (unlike x86
         // TSC), so a differing destination frequency would scale the elapsed
         // ticks incorrectly. Reject rather than corrupt the guest clock.
@@ -1269,13 +1276,19 @@ impl vm::Vm for KvmVm {
                 host: host_cntfrq,
             });
         }
-        let now_ns = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| vm::HypervisorVmError::RestoreTimerState(e.into()))?
-            .as_nanos() as u64;
-        let elapsed_ns = now_ns.saturating_sub(saved.host_realtime_ns);
-        let elapsed_ticks = (elapsed_ns as u128 * saved.cntfrq as u128 / NANOS_PER_SECOND) as u64;
-        let target = saved.cntvct.wrapping_add(elapsed_ticks);
+        let target = match clock_mode {
+            SnapshotClockMode::Preserve => saved.cntvct,
+            SnapshotClockMode::Advance => {
+                let now_ns = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_err(|e| vm::HypervisorVmError::RestoreTimerState(e.into()))?
+                    .as_nanos() as u64;
+                let elapsed_ns = now_ns.saturating_sub(saved.host_realtime_ns);
+                let elapsed_ticks =
+                    (elapsed_ns as u128 * saved.cntfrq as u128 / NANOS_PER_SECOND) as u64;
+                saved.cntvct.wrapping_add(elapsed_ticks)
+            }
+        };
         // KVM shares the vtimer offset across the VM, so one write advances every vCPU.
         vcpus[0]
             .set_cntvct(target)
@@ -3736,7 +3749,7 @@ mod tests {
                 .restore_clock(
                     &[self.vcpu.as_ref()],
                     state,
-                    ClockRestoreMode::SnapshotRestore,
+                    ClockRestoreMode::SnapshotRestore(SnapshotClockMode::Advance),
                 )
                 .unwrap();
         }
@@ -3757,6 +3770,26 @@ mod tests {
         assert_eq!(vcpu.tsc_offset().unwrap(), Some(target));
         vcpu.set_tsc_offset(offset).unwrap();
         assert_eq!(vcpu.tsc_offset().unwrap(), Some(offset));
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_restore_clock_preserve() {
+        let vm = TscDeadlineVm::new();
+        let state = vm.clock_state_with_gap(3600);
+        let deadline = vm.arm_deadline_after_secs(1800);
+        vm.vm
+            .restore_clock(
+                &[vm.vcpu.as_ref()],
+                &state,
+                ClockRestoreMode::SnapshotRestore(SnapshotClockMode::Preserve),
+            )
+            .unwrap();
+        let saved = kvm_clock_data::from(state.data).clock;
+        let restored = kvm_clock_data::from(vm.vm.get_clock().unwrap()).clock;
+        assert!((saved..saved + 1_800_000_000_000).contains(&restored));
+        assert!(vm.read_msr(msr_index::MSR_IA32_TSC) < deadline);
+        assert_eq!(vm.read_msr(msr_index::MSR_IA32_TSC_DEADLINE), deadline);
     }
 
     #[test]
