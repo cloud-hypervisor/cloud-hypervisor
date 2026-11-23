@@ -14,12 +14,13 @@ use hypervisor::arch::x86::{FpuState, SpecialRegisters};
 #[cfg(all(feature = "kvm", not(feature = "sev_snp")))]
 use log::error;
 use thiserror::Error;
+use vm_allocator::GuestMemory;
 use vm_memory::{Address, Bytes, GuestMemoryBackend, GuestMemoryError};
 
+use crate::EntryPoint;
 use crate::layout::{
     BOOT_GDT_START, BOOT_IDT_START, BOOT_STACK_POINTER, PVH_INFO_START, ZERO_PAGE_START,
 };
-use crate::{EntryPoint, GuestMemory};
 
 #[derive(Debug, Error)]
 pub enum Error {

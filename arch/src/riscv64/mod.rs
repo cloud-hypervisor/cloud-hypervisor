@@ -19,10 +19,11 @@ use std::sync::{Arc, Mutex};
 use hypervisor::arch::riscv64::aia::Vaia;
 use log::{Level, log_enabled};
 use thiserror::Error;
+use vm_allocator::GuestMemory;
 use vm_memory::{Address, GuestAddress, GuestMemoryAtomic, GuestMemoryBackend};
 
 pub use self::fdt::DeviceInfoForFdt;
-use crate::{DeviceType, GuestMemory, PciSpaceInfo, RegionType};
+use crate::{DeviceType, PciSpaceInfo, RegionType};
 
 pub const CLOUDHV_IRQCHIP_NUM_MSIS: u16 = 255;
 pub const CLOUDHV_IRQCHIP_NUM_SOURCES: u8 = 96;
