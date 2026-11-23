@@ -99,8 +99,10 @@ after restore completes:
     --restore source_url=file:///home/foo/snapshot,resume=true
 ```
 
-At this point, the VM is fully restored and is identical to the VM which was
-snapshot earlier.
+On x86-64 and AArch64 KVM, `clock_restore_mode` sets the guest clock on the
+first resume after restore. The default, `advance`, adds the wall time from
+clock capture to that resume, including any time spent waiting for a manual
+`resume`. Use `clock_restore_mode=preserve` to skip that adjustment.
 
 The restored VM uses the console outputs from the snapshot. If an output is not
 available on the new host, the options `serial_file`, `serial_socket`,

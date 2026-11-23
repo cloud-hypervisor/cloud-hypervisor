@@ -322,6 +322,10 @@ following parameters. Unless marked otherwise, they apply to
   Replacement file descriptors opened on the destination. Use `net(<id>)`
   for network FDs, `vfio(<id>)` for VFIO cdev FDs, and `iommu` for the
   iommufd FD. For migratable VFIO devices, see [Destination File Descriptors](vfio.md#destination-file-descriptors).
+- `clock_restore_mode <advance|preserve>` (`receive-migration`): \
+  `advance` (default) advances the guest clock by the elapsed wall time on
+  backends that support it. `preserve` restores it without that adjustment.
+
 - `background_fetch_pages <on|off>` (`receive-migration`): \
   For postcopy migration and on-demand restore, keep fetching the remaining
   guest pages in the background after the VM resumed. With `off`, only the
