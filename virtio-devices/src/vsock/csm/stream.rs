@@ -4,6 +4,8 @@
 
 use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, RawFd};
+use std::os::unix::net::UnixStream;
+use std::path::Path;
 
 use vm_memory::{ReadVolatile, WriteVolatile};
 
@@ -11,7 +13,7 @@ use super::super::SocketType;
 use super::super::packet::VsockPacket;
 use super::transport::{PayloadRead, RxState, SendResult, Transport, TxState};
 use super::txbuf::TxBuf;
-use super::{Error, Result};
+use super::{Error, Result, connect, new_socket};
 
 pub(crate) struct StreamTransport<S> {
     pub(super) stream: S,
@@ -24,6 +26,19 @@ impl<S> From<S> for StreamTransport<S> {
             stream,
             tx_buf: TxBuf::new(),
         }
+    }
+}
+
+impl StreamTransport<UnixStream> {
+    pub(crate) fn new() -> io::Result<Self> {
+        Ok(Self::from(UnixStream::from(new_socket(
+            SocketType::Stream,
+        )?)))
+    }
+
+    /// Fails with `WouldBlock` instead of waiting when the listener's backlog is full.
+    pub(crate) fn connect(&self, path: &Path) -> io::Result<()> {
+        connect(&self.stream, path)
     }
 }
 

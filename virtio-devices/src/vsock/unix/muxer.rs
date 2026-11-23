@@ -44,7 +44,7 @@ use std::collections::hash_map::Entry;
 use std::fs::File;
 use std::io::{self, ErrorKind};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::net::UnixListener;
 use std::path::Path;
 use std::str;
 
@@ -775,9 +775,9 @@ impl VsockMuxer {
     ) -> io::Result<Box<dyn Transport + Send + Sync>> {
         match socket_type {
             SocketType::Stream => {
-                let socket = UnixStream::connect(path)?;
-                socket.set_nonblocking(true)?;
-                Ok(Box::new(StreamTransport::from(socket)))
+                let transport = StreamTransport::new()?;
+                transport.connect(Path::new(path))?;
+                Ok(Box::new(transport))
             }
             SocketType::SeqPacket => {
                 let socket = SeqPacketSocket::new()?;
@@ -973,6 +973,7 @@ mod tests {
     use std::cmp::min;
     use std::io::{Read, Write};
     use std::net::Shutdown;
+    use std::os::unix::net::UnixStream;
     use std::path::{Path, PathBuf};
     use std::time::Duration;
     use std::{fs, thread};
@@ -1351,6 +1352,28 @@ mod tests {
         assert_eq!(ctx.pkt.dst_port(), PEER_PORT);
 
         assert!(!ctx.muxer.has_pending_rx());
+    }
+
+    #[test]
+    fn test_peer_connection_full_backlog() {
+        const LOCAL_PORT: u32 = 1026;
+        const PEER_PORT: u32 = 1025;
+
+        let mut ctx = MuxerTestContext::new("peer_connection_full_backlog");
+        let listener = ctx.create_local_listener(LOCAL_PORT);
+        // SAFETY: the descriptor belongs to a bound socket owned by `listener`.
+        assert_eq!(unsafe { libc::listen(listener.sock.as_raw_fd(), 0) }, 0);
+        let _queued = UnixStream::connect(&listener.path).unwrap();
+
+        // The listener's backlog is full, so the request must be refused at once instead of
+        // blocking until the host accepts.
+        ctx.init_pkt(LOCAL_PORT, PEER_PORT, uapi::VSOCK_OP_REQUEST);
+        ctx.send();
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RST);
+        assert_eq!(ctx.pkt.src_port(), LOCAL_PORT);
+        assert_eq!(ctx.pkt.dst_port(), PEER_PORT);
+        assert!(ctx.muxer.conn_map.is_empty());
     }
 
     #[test]
