@@ -1515,6 +1515,9 @@ impl hypervisor::Hypervisor for KvmHypervisor {
         #[cfg(target_arch = "x86_64")]
         {
             if _config.nested {
+                if !fd.check_extension(Cap::NestedState) {
+                    return Err(hypervisor::HypervisorError::NestedStateNotSupported);
+                }
                 if fd.check_extension_raw(KVM_CAP_EXCEPTION_PAYLOAD as libc::c_ulong) <= 0 {
                     return Err(hypervisor::HypervisorError::NestedExceptionPayloadNotSupported);
                 }
