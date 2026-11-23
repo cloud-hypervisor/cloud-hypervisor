@@ -447,6 +447,7 @@ mod tests {
                 .unwrap()
                 .next()
                 .unwrap(),
+            &handler.handler.mem,
             None,
         )
         .unwrap()

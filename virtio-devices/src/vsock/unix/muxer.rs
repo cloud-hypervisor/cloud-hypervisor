@@ -1020,6 +1020,7 @@ mod tests {
                     .unwrap()
                     .next()
                     .unwrap(),
+                &handler_ctx.handler.mem,
                 None,
             )
             .unwrap();

@@ -133,6 +133,7 @@ where
         while let Some(mut desc_chain) = self.queues[0].pop_descriptor_chain(self.mem.memory()) {
             let used_len = match VsockPacket::from_rx_virtq_head(
                 &mut desc_chain,
+                &self.mem,
                 self.access_platform.as_deref(),
             ) {
                 Ok(mut pkt) => {
@@ -227,6 +228,7 @@ where
         while let Some(mut desc_chain) = self.queues[1].pop_descriptor_chain(self.mem.memory()) {
             let pkt = match VsockPacket::from_tx_virtq_head(
                 &mut desc_chain,
+                &self.mem,
                 self.access_platform.as_deref(),
             ) {
                 Ok(pkt) => pkt,
