@@ -1491,7 +1491,7 @@ impl Vmm {
             })?;
 
             // Create VM
-            vm.restore(&snapshot).map_err(|e| {
+            vm.restore(&snapshot, Default::default()).map_err(|e| {
                 // Inner error cannot be wrapped in anyhow::Error => print it
                 MigratableError::MigrateReceive(anyhow!(
                     "Failed restoring the VM: {}",
@@ -2076,6 +2076,7 @@ impl Vmm {
         vm_config: Arc<Mutex<VmConfig>>,
         prefault: bool,
         memory_restore_mode: MemoryRestoreMode,
+        clock_restore_mode: hypervisor::SnapshotClockMode,
     ) -> result::Result<(), VmError> {
         match &self.vm {
             VmOwnership::Owned(_) => Err(VmError::VmAlreadyCreated),
@@ -2139,7 +2140,7 @@ impl Vmm {
 
                 // Now we can restore the rest of the VM.
                 // PANIC: won't panic, we just checked that the VM is there.
-                vm.restore(&snapshot)?;
+                vm.restore(&snapshot, clock_restore_mode)?;
                 self.vm = VmOwnership::Owned(vm);
                 Ok(())
             }
@@ -2648,6 +2649,7 @@ impl RequestHandler for Vmm {
                     vm_config,
                     restore_cfg.prefault,
                     restore_cfg.memory_restore_mode,
+                    restore_cfg.clock_restore_mode,
                 )
                 .and_then(|()| {
                     if restore_cfg.resume {

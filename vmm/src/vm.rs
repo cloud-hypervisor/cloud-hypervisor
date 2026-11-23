@@ -2585,13 +2585,17 @@ impl Vm {
         Ok(())
     }
 
-    pub fn restore(&mut self, snapshot: &Snapshot) -> Result<()> {
+    pub fn restore(
+        &mut self,
+        snapshot: &Snapshot,
+        clock_restore_mode: hypervisor::SnapshotClockMode,
+    ) -> Result<()> {
         event!("vm", "restoring");
 
         let vm_snapshot = get_vm_snapshot(snapshot).map_err(Error::Restore)?;
         self.saved_clock = vm_snapshot.clock.map(|state| SavedClock {
             state,
-            mode: hypervisor::ClockRestoreMode::SnapshotRestore(Default::default()),
+            mode: hypervisor::ClockRestoreMode::SnapshotRestore(clock_restore_mode),
         });
 
         // We acquire all advisory disk image locks again.

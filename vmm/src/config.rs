@@ -3129,6 +3129,8 @@ pub struct RestoreConfig {
     #[serde(default)]
     pub resume: bool,
     #[serde(default)]
+    pub clock_restore_mode: hypervisor::SnapshotClockMode,
+    #[serde(default)]
     pub zone_updates: Vec<VmMemoryZoneUpdateData>,
     #[serde(default)]
     pub serial: Option<ConsoleOutput>,
@@ -3143,7 +3145,7 @@ impl RestoreConfig {
         \nRestore parameters \"source_url=<source_url>,prefault=on|off,\
         memory_restore_mode=copy|ondemand|ondemand_no_background_fetch_pages|copyonwrite,\
         external_fds=[net(<id>)@[<fd>,...],vfio(<id>)@[<fd>],iommu@[<fd>]],resume=true|false,\
-        zone_updates=<list_of_updates>,\
+        clock_restore_mode=advance|preserve,zone_updates=<list_of_updates>,\
         serial_file=<path>|serial_socket=<path>|serial_tcp=<ip>:<port>,\
         console_file=<path>|console_socket=<path>|console_tcp=<ip>:<port>\"\n\
         \n`source_url` should be a valid URL (e.g file:///foo/bar or tcp://192.168.1.10/foo)\
@@ -3162,6 +3164,7 @@ impl RestoreConfig {
         `vfio_fds=<list_of_vfio_ids_with_their_associated_fd>` and \
         `iommufd_fd=<fd>` are deprecated; use `external_fds` instead.\
         \n`resume` controls whether the VM will be directly resumed after restore\
+        \n`clock_restore_mode=preserve` skips advancing the saved guest clock by elapsed wall time\
         \n`zone_updates` can be used to update NUMA memory zones. \
         Expects a list of elements in the form `id@host_numa_node`";
 
@@ -3172,6 +3175,7 @@ impl RestoreConfig {
         validate_inherited_fds([restore])?;
         let mut parser = OptionParser::new();
         parser
+            .add("clock_restore_mode")
             .add("external_fds")
             .add("iommufd_fd")
             .add("memory_restore_mode")
@@ -3291,6 +3295,10 @@ impl RestoreConfig {
             vfio_fds,
             iommufd_fd,
             resume,
+            clock_restore_mode: parser
+                .convert("clock_restore_mode")
+                .map_err(Error::ParseRestore)?
+                .unwrap_or_default(),
             zone_updates,
             serial,
             console,
@@ -7047,12 +7055,13 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             // SAFETY: This input contains no inherited descriptors.
             unsafe {
                 RestoreConfig::parse(
-                    "source_url=/path/to/snapshot,resume=on,zone_updates=[zone1@1]",
+                    "source_url=/path/to/snapshot,resume=on,clock_restore_mode=preserve,zone_updates=[zone1@1]",
                 )
             }?,
             RestoreConfig {
                 source_url: PathBuf::from("/path/to/snapshot"),
                 resume: true,
+                clock_restore_mode: hypervisor::SnapshotClockMode::Preserve,
                 zone_updates: vec![VmMemoryZoneUpdateData {
                     host_numa_node: 1,
                     id: "zone1".to_string(),
