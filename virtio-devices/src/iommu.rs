@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::collections::BTreeMap;
+use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -19,7 +20,7 @@ use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
 use vm_device::interrupt::{InterruptRemapping, MsiIrqSourceConfig};
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-    GuestMemoryBackend, GuestMemoryError, GuestMemoryLoadGuard,
+    GuestMemoryBackend, GuestMemoryError,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::{AccessPlatform, AccessType};
@@ -380,14 +381,18 @@ impl Request {
     // before running the VM, but at runtime, a new domain <=> mapping hashmap
     // is created based on the information provided from the guest driver for
     // virtio-iommu (giving the link device_id <=> domain).
-    fn parse(
-        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemory>>,
+    fn parse<M>(
+        desc_chain: &mut DescriptorChain<M>,
         mapping: &Arc<IommuMapping>,
         ext_mapping: &BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
         msi_iova_space: (u64, u64),
         reserved_regions: &[(u64, u64)],
         input_range: Option<(u64, u64)>,
-    ) -> result::Result<usize, Error> {
+    ) -> result::Result<usize, Error>
+    where
+        M: Deref,
+        M::Target: GuestMemoryBackend,
+    {
         let desc = desc_chain
             .next()
             .ok_or(Error::DescriptorChainTooShort)
