@@ -690,7 +690,6 @@ mod tests {
 
     use super::super::tests::TestContext;
     use super::*;
-    use crate::GuestMemory;
     use crate::vsock::defs::MAX_PKT_BUF_SIZE;
 
     macro_rules! create_context {
@@ -725,7 +724,7 @@ mod tests {
         };
     }
 
-    fn set_pkt_len(len: u32, guest_desc: &GuestQDesc<'_, GuestMemory>, mem: &GuestMemory) {
+    fn set_pkt_len<M: GuestMemoryBackend>(len: u32, guest_desc: &GuestQDesc<'_, M>, mem: &M) {
         let hdr_gpa = guest_desc.addr.get();
         mem.write_slice(
             &len.to_le_bytes(),
