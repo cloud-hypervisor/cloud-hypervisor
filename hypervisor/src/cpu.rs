@@ -217,6 +217,8 @@ pub enum HypervisorCpuError {
     Nmi(#[source] anyhow::Error),
     #[error("Failed to get nested guest state")]
     GetNestedState(#[source] anyhow::Error),
+    #[error("Failed to set nested guest state")]
+    SetNestedState(#[source] anyhow::Error),
 }
 
 #[derive(Debug)]

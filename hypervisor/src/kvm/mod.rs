@@ -3678,7 +3678,7 @@ impl KvmVcpu {
     fn set_nested_state(&self, state: &KvmNestedStateBuffer) -> cpu::Result<()> {
         self.fd
             .set_nested_state(state)
-            .map_err(|e| cpu::HypervisorCpuError::GetNestedState(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::SetNestedState(e.into()))
     }
 }
 
