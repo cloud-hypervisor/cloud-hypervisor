@@ -356,7 +356,7 @@ struct CowSource {
 }
 
 pub struct MemoryManager {
-    boot_guest_memory: GuestMemory,
+    boot_regions: Vec<Arc<GuestRegion>>,
     guest_memory: GuestMemoryAtomic<GuestMemory>,
     next_memory_slot: Arc<AtomicU32>,
     memory_slot_allocator: Arc<MemorySlotAllocator>,
@@ -962,6 +962,21 @@ impl MemoryManager {
             }
         }
         Ok(prefault_regions)
+    }
+
+    fn boot_regions(zones: &MemoryZones) -> Result<Vec<Arc<GuestRegion>>, Error> {
+        let mut regions: Vec<_> = zones
+            .values()
+            .flat_map(|zone| &zone.regions)
+            .cloned()
+            .collect();
+        if regions.is_empty() {
+            return Err(Error::GuestRegionCollection(
+                vm_memory::GuestRegionCollectionError::NoMemoryRegion,
+            ));
+        }
+        regions.sort_unstable_by_key(|region| region.start_addr());
+        Ok(regions)
     }
 
     // Restore both GuestMemoryBackend regions along with MemoryZone zones.
@@ -2262,7 +2277,6 @@ impl MemoryManager {
             arch_mem_regions,
             memory_zones,
             guest_memory,
-            boot_guest_memory,
             hotplug_slots,
             selected_slot,
             next_hotplug_slot,
@@ -2278,7 +2292,6 @@ impl MemoryManager {
             )?;
             let guest_memory =
                 GuestMemory::from_arc_regions(regions).map_err(Error::GuestRegionCollection)?;
-            let boot_guest_memory = guest_memory.clone();
             (
                 GuestAddress(data.start_of_device_area),
                 data.boot_ram,
@@ -2286,7 +2299,6 @@ impl MemoryManager {
                 data.arch_mem_regions.clone(),
                 memory_zones,
                 guest_memory,
-                boot_guest_memory,
                 data.hotplug_slots.clone(),
                 data.selected_slot,
                 data.next_hotplug_slot,
@@ -2321,8 +2333,6 @@ impl MemoryManager {
 
             let mut guest_memory =
                 GuestMemory::from_arc_regions(mem_regions).map_err(Error::GuestRegionCollection)?;
-
-            let boot_guest_memory = guest_memory.clone();
 
             let mut start_of_device_area =
                 MemoryManager::start_addr(guest_memory.last_addr(), allow_mem_hotplug)?;
@@ -2411,13 +2421,13 @@ impl MemoryManager {
                 arch_mem_regions,
                 memory_zones,
                 guest_memory,
-                boot_guest_memory,
                 hotplug_slots,
                 0,
                 0,
             )
         };
 
+        let boot_regions = Self::boot_regions(&memory_zones)?;
         prefault::prefault_regions(&Self::prefault_regions_from_zones(
             &zones,
             &memory_zones,
@@ -2464,7 +2474,7 @@ impl MemoryManager {
 
         #[allow(unused_mut)]
         let mut memory_manager = MemoryManager {
-            boot_guest_memory,
+            boot_regions,
             guest_memory,
             next_memory_slot,
             memory_slot_allocator,
@@ -3022,7 +3032,8 @@ impl MemoryManager {
     }
 
     pub fn boot_guest_memory(&self) -> GuestMemory {
-        self.boot_guest_memory.clone()
+        GuestMemory::from_arc_regions(self.boot_regions.clone())
+            .expect("Boot regions are a non-empty, sorted subset of the initial guest memory")
     }
 
     pub fn allocator(&self) -> Arc<Mutex<SystemAllocator>> {
