@@ -21,7 +21,6 @@ use hypervisor::arch::aarch64::regs::{
 };
 use log::{debug, info};
 use thiserror::Error;
-use vm_allocator::GuestMemory;
 use vm_fdt::{FdtWriter, FdtWriterResult};
 use vm_memory::{Address, Bytes, GuestMemoryBackend, GuestMemoryError, GuestMemoryRegion};
 
@@ -96,8 +95,8 @@ type Result<T> = result::Result<T, Error>;
 
 /// Creates the flattened device tree for this aarch64 VM.
 #[expect(clippy::too_many_arguments)]
-pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
-    guest_mem: &GuestMemory,
+pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher, M: GuestMemoryBackend>(
+    guest_mem: &M,
     cmdline: &str,
     vcpu_mpidr: &[u64],
     vcpu_topology: Option<(u16, u16, u16, u16)>,
@@ -152,7 +151,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
     Ok(fdt_final)
 }
 
-pub fn write_fdt_to_memory(fdt_final: &[u8], guest_mem: &GuestMemory) -> Result<()> {
+pub fn write_fdt_to_memory<M: GuestMemoryBackend>(fdt_final: &[u8], guest_mem: &M) -> Result<()> {
     if fdt_final.len() as u64 > super::layout::FDT_MAX_SIZE {
         return Err(Error::FdtTooLarge(
             fdt_final.len(),
@@ -366,9 +365,9 @@ fn create_cpu_nodes(
     Ok(())
 }
 
-fn create_memory_node(
+fn create_memory_node<M: GuestMemoryBackend>(
     fdt: &mut FdtWriter,
-    guest_mem: &GuestMemory,
+    guest_mem: &M,
     numa_nodes: &NumaNodes,
 ) -> FdtWriterResult<()> {
     // See https://github.com/torvalds/linux/blob/58ae0b51506802713aa0e9956d1853ba4c722c98/Documentation/devicetree/bindings/numa.txt
@@ -1090,6 +1089,8 @@ fn print_node(node: FdtNode<'_, '_>, n_spaces: usize) {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+
+    use vm_allocator::GuestMemory;
 
     use super::super::layout;
     use super::*;
