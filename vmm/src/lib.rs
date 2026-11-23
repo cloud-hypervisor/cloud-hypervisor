@@ -1491,7 +1491,7 @@ impl Vmm {
             })?;
 
             // Create VM
-            vm.restore().map_err(|e| {
+            vm.restore(&snapshot).map_err(|e| {
                 // Inner error cannot be wrapped in anyhow::Error => print it
                 MigratableError::MigrateReceive(anyhow!(
                     "Failed restoring the VM: {}",
@@ -2139,7 +2139,7 @@ impl Vmm {
 
                 // Now we can restore the rest of the VM.
                 // PANIC: won't panic, we just checked that the VM is there.
-                vm.restore()?;
+                vm.restore(&snapshot)?;
                 self.vm = VmOwnership::Owned(vm);
                 Ok(())
             }

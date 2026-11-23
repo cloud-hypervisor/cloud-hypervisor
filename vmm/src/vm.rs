@@ -660,18 +660,6 @@ impl Vm {
             .transpose()
             .map_err(Error::InitramfsFile)?;
 
-        let saved_clock = if let Some(snapshot) = snapshot.as_ref() {
-            let vm_snapshot = get_vm_snapshot(snapshot).map_err(Error::Restore)?;
-            // Restored or migrated in: the guest clock must catch up to wall time
-            // on resume (the counter was reset to the saved value).
-            vm_snapshot.clock.map(|state| SavedClock {
-                mode: hypervisor::ClockRestoreMode::SnapshotRestore(Default::default()),
-                state,
-            })
-        } else {
-            None
-        };
-
         let state = if snapshot.is_some() {
             VmState::Paused
         } else {
@@ -687,7 +675,7 @@ impl Vm {
             cpu_manager,
             memory_manager,
             vm,
-            saved_clock,
+            saved_clock: None,
             #[cfg(not(target_arch = "riscv64"))]
             numa_nodes,
             stop_on_boot,
@@ -2595,8 +2583,14 @@ impl Vm {
         Ok(())
     }
 
-    pub fn restore(&mut self) -> Result<()> {
+    pub fn restore(&mut self, snapshot: &Snapshot) -> Result<()> {
         event!("vm", "restoring");
+
+        let vm_snapshot = get_vm_snapshot(snapshot).map_err(Error::Restore)?;
+        self.saved_clock = vm_snapshot.clock.map(|state| SavedClock {
+            state,
+            mode: hypervisor::ClockRestoreMode::SnapshotRestore(Default::default()),
+        });
 
         // We acquire all advisory disk image locks again.
         self.device_manager
