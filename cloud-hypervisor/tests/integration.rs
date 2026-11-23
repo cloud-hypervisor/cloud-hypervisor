@@ -3752,6 +3752,129 @@ mod common_parallel {
     #[test]
     #[cfg(not(feature = "mshv"))] // See issue #7435
     #[cfg(target_arch = "x86_64")]
+    fn test_cpu_cgroup() {
+        use std::collections::BTreeSet;
+
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let api_socket = temp_api_path(&guest.tmp_dir);
+        let console_str = "console=ttyS0";
+
+        let kernel_path = direct_kernel_boot_path();
+
+        // The vCPU cgroup must be in the threaded domain of the VMM.
+        let own_cgroup = fs::read_to_string("/proc/self/cgroup").unwrap();
+        let own_cgroup = own_cgroup
+            .trim()
+            .strip_prefix("0::/")
+            .expect("cgroup v2 is required");
+        let cgroup = Path::new("/sys/fs/cgroup").join(own_cgroup).join(format!(
+            "ch-vcpus-{}",
+            guest
+                .tmp_dir
+                .as_path()
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+        ));
+        fs::create_dir(&cgroup).unwrap();
+        fs::write(cgroup.join("cgroup.type"), "threaded").unwrap();
+
+        let mut child = GuestCommand::new(&guest)
+            .args([
+                "--cpus",
+                &format!("boot=2,max=4,cgroup={}", cgroup.display()),
+            ])
+            .default_memory()
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args([
+                "--cmdline",
+                DIRECT_KERNEL_BOOT_CMDLINE
+                    .replace("console=hvc0", console_str)
+                    .as_str(),
+            ])
+            .args(["--serial", "tty"])
+            .args(["--console", "off"])
+            .default_disks()
+            .default_net()
+            .args(["--api-socket", &api_socket])
+            .args(["--landlock"])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let pid = child.id();
+        let vcpu_threads = || -> BTreeSet<String> {
+            fs::read_dir(format!("/proc/{pid}/task"))
+                .unwrap()
+                .map(|task| task.unwrap().path())
+                .filter(|task| {
+                    fs::read_to_string(task.join("comm")).is_ok_and(|comm| comm.starts_with("vcpu"))
+                })
+                .map(|task| task.file_name().unwrap().to_string_lossy().into_owned())
+                .collect()
+        };
+        let cgroup_threads = || -> BTreeSet<String> {
+            fs::read_to_string(cgroup.join("cgroup.threads"))
+                .unwrap()
+                .lines()
+                .map(str::to_owned)
+                .collect()
+        };
+        // The cgroup must hold the vCPU threads and nothing else, in particular
+        // not kvm-nx-lpage-recovery.
+        let vcpus_in_cgroup = |count: usize| {
+            wait_until(Duration::from_secs(10), || {
+                let vcpus = vcpu_threads();
+                vcpus.len() == count && vcpus == cgroup_threads()
+            })
+        };
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
+            assert!(vcpus_in_cgroup(2));
+
+            let desired_vcpus = 4;
+            resize_command(&api_socket, Some(desired_vcpus), None, None, None);
+            guest
+                .ssh_command("echo 1 | sudo tee /sys/bus/cpu/devices/cpu2/online")
+                .unwrap();
+            guest
+                .ssh_command("echo 1 | sudo tee /sys/bus/cpu/devices/cpu3/online")
+                .unwrap();
+            assert!(wait_until(Duration::from_secs(10), || {
+                guest.get_cpu_count().unwrap_or_default() == u32::from(desired_vcpus)
+            }));
+            assert!(vcpus_in_cgroup(4));
+
+            guest.reboot_linux(0);
+            assert_eq!(
+                guest.get_cpu_count().unwrap_or_default(),
+                u32::from(desired_vcpus)
+            );
+            assert!(vcpus_in_cgroup(4));
+
+            let desired_vcpus = 2;
+            resize_command(&api_socket, Some(desired_vcpus), None, None, None);
+            assert!(wait_until(Duration::from_secs(10), || {
+                guest
+                    .ssh_command("cat /sys/devices/system/cpu/present")
+                    .is_ok_and(|present| present.trim() == "0-1")
+            }));
+            assert!(vcpus_in_cgroup(2));
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        fs::remove_dir(&cgroup).unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))] // See issue #7435
+    #[cfg(target_arch = "x86_64")]
     fn test_snapshot_restore_cpu_pause_resume() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));

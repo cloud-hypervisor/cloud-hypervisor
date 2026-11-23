@@ -27,8 +27,8 @@ use thiserror::Error;
 use virtio_devices::RateLimiterConfig;
 pub use virtio_devices::vsock::SocketType;
 
-use crate::Landlock;
 use crate::landlock::LandlockError;
+use crate::{Landlock, vcpu_cgroup};
 
 pub type LandlockResult<T> = result::Result<T, LandlockError>;
 
@@ -98,6 +98,11 @@ pub struct CpusConfig {
     pub nested: bool,
     #[serde(default)]
     pub core_scheduling: CoreScheduling,
+    #[serde(default)]
+    pub cgroup: Option<PathBuf>,
+    // Deserialized FDs are discarded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cgroup_fd: ExternalFd,
     // Defaults to "Host" if no profile is given.
     #[serde(default)]
     pub profile: CpuProfileConfig,
@@ -126,6 +131,8 @@ impl Default for CpusConfig {
             features: CpuFeatures::default(),
             nested: false,
             core_scheduling: CoreScheduling::default(),
+            cgroup: None,
+            cgroup_fd: ExternalFd::default(),
             profile: CpuProfileConfig::default(),
             #[cfg(target_arch = "x86_64")]
             cpuid_overrides: Vec::new(),
@@ -1346,6 +1353,10 @@ impl VmConfig {
         #[cfg(target_arch = "x86_64")]
         if let CpuProfileConfig::File(path) = &self.cpus.profile {
             landlock.add_rule_with_access(path, "r")?;
+        }
+
+        if let Ok(Some(cgroup_threads)) = vcpu_cgroup::open_cgroup_threads(&self.cpus) {
+            landlock.add_file_rule(cgroup_threads, "w")?;
         }
 
         if let Some(mem_zones) = &self.memory.zones {

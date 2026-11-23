@@ -234,6 +234,11 @@ over its API UNIX socket via SCM_RIGHTS:
 In this example, the network device with id `net1` is backed by FDs `23` and
 `24`, and the device with id `net2` is backed by FDs `25` and `26`.
 
+A snapshot keeps the cgroup path of the vCPU threads, and restoring uses the
+same path. If the VM used `cgroup_fd`, add a new FD to the restore options as
+`external_fds=[cpus_cgroup@[<fd>]]`. See
+[`cgroup` and `cgroup_fd`](cpu.md#cgroup-and-cgroup_fd).
+
 ## VFIO devices
 
 Snapshot and restore are supported for VFIO devices that implement the kernel

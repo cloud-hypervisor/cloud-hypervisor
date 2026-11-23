@@ -264,6 +264,9 @@ pub enum ValidationError {
     /// The GICv3 layout does not fit this many CPUs.
     #[error("Too many CPUs for the GICv3 layout: specified {0} but {1} is the limit")]
     TooManyCpusForGic(u32 /* specified CPUs */, u64 /* limit */),
+    /// Both a cgroup path and a cgroup FD were given for the vCPUs.
+    #[error("CPU config must specify at most one of `cgroup=` or `cgroup_fd=`")]
+    CpusCgroupBothPathAndFd,
     /// Requested CPU affinity matches or exceeds the size the libc accepts.
     #[error("Requested CPU affinity {0} must be below {1}")]
     CpuAffinityExceedsMax(
@@ -805,10 +808,15 @@ impl CpusConfig {
         affinity=<list_of_vcpus_with_their_associated_cpuset>,\
         features=<list_of_features_to_enable>,\
         nested=on|off,core_scheduling=vm|vcpu|off,\
+        cgroup=<path>|cgroup_fd=<fd>,\
         profile=host|path:<file>,\
         x-cpuid-overrides=[[<leaf>,<subleaf>,<eax>,<ebx>,<ecx>,<edx>],...]\"";
 
-    pub fn parse(cpus: &str) -> Result<Self> {
+    /// # Safety
+    /// Live FDs named in the input must be exclusively owned by the caller.
+    /// Referenced descriptors may be consumed even if parsing fails.
+    pub unsafe fn parse(cpus: &str) -> Result<Self> {
+        validate_inherited_fds([cpus])?;
         let mut parser = OptionParser::new();
         parser
             .add("boot")
@@ -820,6 +828,8 @@ impl CpusConfig {
             .add("features")
             .add("nested")
             .add("core_scheduling")
+            .add("cgroup")
+            .add("cgroup_fd")
             .add("profile");
         #[cfg(target_arch = "x86_64")]
         parser.add("x-cpuid-overrides");
@@ -911,6 +921,15 @@ impl CpusConfig {
             .map_err(Error::ParseCpus)?
             .unwrap_or(CoreScheduling::Vm);
 
+        let cgroup = parser.get("cgroup").map(PathBuf::from);
+        let cgroup_fd = parser
+            .convert::<RawFd>("cgroup_fd")
+            .map_err(Error::ParseCpus)?
+            // SAFETY: The caller transfers ownership of the inherited CLI descriptors.
+            .map(|fd| unsafe { take_inherited_fd(fd) })
+            .transpose()?
+            .unwrap_or_default();
+
         Ok(CpusConfig {
             boot_vcpus,
             max_vcpus,
@@ -923,6 +942,8 @@ impl CpusConfig {
             features,
             nested,
             core_scheduling,
+            cgroup,
+            cgroup_fd,
             profile,
             #[cfg(target_arch = "x86_64")]
             cpuid_overrides,
@@ -3142,7 +3163,8 @@ impl RestoreConfig {
     pub const SYNTAX: &'static str = "Restore from a VM snapshot.\
         \nRestore parameters \"source_url=<source_url>,prefault=on|off,\
         memory_restore_mode=copy|ondemand|ondemand_no_background_fetch_pages|copyonwrite,\
-        external_fds=[net(<id>)@[<fd>,...],vfio(<id>)@[<fd>],iommu@[<fd>]],resume=true|false,\
+        external_fds=[net(<id>)@[<fd>,...],vfio(<id>)@[<fd>],iommu@[<fd>],cpus_cgroup@[<fd>]],\
+        resume=true|false,\
         zone_updates=<list_of_updates>,\
         serial_file=<path>|serial_socket=<path>|serial_tcp=<ip>:<port>,\
         console_file=<path>|console_socket=<path>|console_tcp=<ip>:<port>\"\n\
@@ -3155,8 +3177,8 @@ impl RestoreConfig {
         same without prefaulting pages in the background, and `memory_restore_mode=copyonwrite` \
         maps the snapshot file copy-on-write (plain private RAM only; falls back to copy otherwise)\
         \n`external_fds` provides replacement file descriptors. `net(<id>)` entries replace \
-        the FDs of network devices, `vfio(<id>)` entries replace VFIO cdev FDs, and `iommu` \
-        provides the iommufd FD. \
+        the FDs of network devices, `vfio(<id>)` entries replace VFIO cdev FDs, `iommu` \
+        provides the iommufd FD, and `cpus_cgroup` provides the vCPU cgroup FD. \
         Do not combine `external_fds` with legacy FD fields.\
         \n`net_fds=<list_of_net_ids_with_their_associated_fds>`, \
         `vfio_fds=<list_of_vfio_ids_with_their_associated_fd>` and \
@@ -3677,6 +3699,10 @@ impl VmConfig {
         #[cfg(target_arch = "aarch64")]
         validate_gic_layout(self.cpus.max_vcpus)?;
 
+        if self.cpus.cgroup.is_some() && self.cpus.cgroup_fd.is_some() {
+            return Err(ValidationError::CpusCgroupBothPathAndFd);
+        }
+
         if let Some(affinity) = &self.cpus.affinity {
             for affinity in affinity.iter().flat_map(|affinity| &affinity.host_cpus) {
                 let max_affinity = 8 * size_of::<libc::cpu_set_t>();
@@ -4023,7 +4049,8 @@ impl VmConfig {
                 .flatten()
                 .copied()
                 .chain(vm_params.devices.iter().flatten().copied())
-                .chain(vm_params.platform),
+                .chain(vm_params.platform)
+                .chain([vm_params.cpus]),
         )?;
 
         let mut rate_limit_groups: Option<Box<[RateLimiterGroupConfig]>> = None;
@@ -4233,7 +4260,8 @@ impl VmConfig {
         }
 
         let mut config = VmConfig {
-            cpus: CpusConfig::parse(vm_params.cpus)?,
+            // SAFETY: The caller transfers ownership of the inherited CLI descriptors.
+            cpus: unsafe { CpusConfig::parse(vm_params.cpus) }?,
             memory: MemoryConfig::parse(vm_params.memory, vm_params.memory_zones)?,
             payload,
             rate_limit_groups,
@@ -4372,6 +4400,7 @@ pub(crate) fn validate_inherited_fds<'a>(configs: impl IntoIterator<Item = &'a s
         parser
             .add("fd")
             .add("iommufd_fd")
+            .add("cgroup_fd")
             .add("net_fds")
             .add("vfio_fds")
             .add("external_fds");
@@ -4395,6 +4424,7 @@ pub(crate) fn validate_inherited_fds<'a>(configs: impl IntoIterator<Item = &'a s
                 |fds| fds.0,
             );
         fds.extend(parser.convert::<u64>("iommufd_fd").ok().flatten());
+        fds.extend(parser.convert::<u64>("cgroup_fd").ok().flatten());
         if let Some(pairs) = parser
             .convert::<TupleList<String, Vec<u64>>>("net_fds")
             .ok()
@@ -4487,6 +4517,7 @@ pub(crate) mod tests {
         for input in [
             vec!["fd=[3,3]"],
             vec!["fd=3", "iommufd_fd=3"],
+            vec!["iommufd_fd=3", "cgroup_fd=3"],
             vec!["net_fds=[net0@[3,4]],vfio_fds=[vfio0@4]"],
             vec!["fd= [3,3]"],
         ] {
@@ -4495,7 +4526,7 @@ pub(crate) mod tests {
                 Err(Error::DuplicateInheritedFd(_))
             ));
         }
-        validate_inherited_fds(["fd=[3,4]", "fd=5", "iommufd_fd=6"]).unwrap();
+        validate_inherited_fds(["fd=[3,4]", "fd=5", "iommufd_fd=6", "cgroup_fd=7"]).unwrap();
     }
 
     #[test]
@@ -4550,9 +4581,12 @@ pub(crate) mod tests {
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn test_cpuid_override_parsing_and_serialization() {
-        let config = CpusConfig::parse(
-            "boot=2,x-cpuid-overrides=[[0x7,0x0,0x1,0x2,0x3,0x4], [0x80000001, 0x0, 0x0, 0x0, 0xFFFFFFFF, 0x0]],max=4",
-        )
+        // SAFETY: This input contains no inherited descriptors.
+        let config = unsafe {
+            CpusConfig::parse(
+                "boot=2,x-cpuid-overrides=[[0x7,0x0,0x1,0x2,0x3,0x4], [0x80000001, 0x0, 0x0, 0x0, 0xFFFFFFFF, 0x0]],max=4",
+            )
+        }
         .unwrap();
         assert_eq!(config.boot_vcpus, 2);
         assert_eq!(config.max_vcpus, 4);
@@ -4584,7 +4618,8 @@ pub(crate) mod tests {
             "0xffffffff"
         );
         assert_eq!(
-            CpusConfig::parse("x-cpuid-overrides=[]").unwrap(),
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe { CpusConfig::parse("x-cpuid-overrides=[]") }.unwrap(),
             CpusConfig::default()
         );
         assert!(
@@ -4614,7 +4649,8 @@ pub(crate) mod tests {
             "[[0x7,0x0,0x0,0x0,0x0,0x0]",
         ] {
             assert!(
-                CpusConfig::parse(&format!("x-cpuid-overrides={value}")).is_err(),
+                // SAFETY: This input contains no inherited descriptors.
+                unsafe { CpusConfig::parse(&format!("x-cpuid-overrides={value}")) }.is_err(),
                 "{value}"
             );
         }
@@ -4632,19 +4668,30 @@ pub(crate) mod tests {
 
     #[test]
     fn test_cpu_parsing() -> Result<()> {
-        assert_eq!(CpusConfig::parse("")?, CpusConfig::default());
+        use std::os::fd::IntoRawFd;
+
+        // SAFETY: This input contains no inherited descriptors.
+        assert_eq!(unsafe { CpusConfig::parse("") }?, CpusConfig::default());
         for host in ["host", "Host", "HOST"] {
             assert_eq!(
-                CpusConfig::parse(&format!("profile={host}"))?,
+                // SAFETY: This input contains no inherited descriptors.
+                unsafe { CpusConfig::parse(&format!("profile={host}")) }?,
                 CpusConfig::default()
             );
         }
-        assert_eq!(CpusConfig::parse("profile=")?, CpusConfig::default());
-        assert!(CpusConfig::parse("nested=on")?.nested);
-        assert!(!CpusConfig::parse("nested=off")?.nested);
+        assert_eq!(
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe { CpusConfig::parse("profile=") }?,
+            CpusConfig::default()
+        );
+        // SAFETY: This input contains no inherited descriptors.
+        assert!(unsafe { CpusConfig::parse("nested=on") }?.nested);
+        // SAFETY: This input contains no inherited descriptors.
+        assert!(!unsafe { CpusConfig::parse("nested=off") }?.nested);
 
         assert_eq!(
-            CpusConfig::parse("boot=1")?,
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe { CpusConfig::parse("boot=1") }?,
             CpusConfig {
                 boot_vcpus: 1,
                 max_vcpus: 1,
@@ -4652,7 +4699,8 @@ pub(crate) mod tests {
             }
         );
         assert_eq!(
-            CpusConfig::parse("boot=1,max=2")?,
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe { CpusConfig::parse("boot=1,max=2") }?,
             CpusConfig {
                 boot_vcpus: 1,
                 max_vcpus: 2,
@@ -4660,7 +4708,8 @@ pub(crate) mod tests {
             }
         );
         assert_eq!(
-            CpusConfig::parse("boot=8,topology=2:2:1:2")?,
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe { CpusConfig::parse("boot=8,topology=2:2:1:2") }?,
             CpusConfig {
                 boot_vcpus: 8,
                 max_vcpus: 8,
@@ -4674,10 +4723,13 @@ pub(crate) mod tests {
             }
         );
 
-        CpusConfig::parse("boot=8,topology=2:2:1").unwrap_err();
-        CpusConfig::parse("boot=8,topology=2:2:1:x").unwrap_err();
+        // SAFETY: This input contains no inherited descriptors.
+        unsafe { CpusConfig::parse("boot=8,topology=2:2:1") }.unwrap_err();
+        // SAFETY: This input contains no inherited descriptors.
+        unsafe { CpusConfig::parse("boot=8,topology=2:2:1:x") }.unwrap_err();
         assert_eq!(
-            CpusConfig::parse("boot=1,kvm_hyperv=on")?,
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe { CpusConfig::parse("boot=1,kvm_hyperv=on") }?,
             CpusConfig {
                 boot_vcpus: 1,
                 max_vcpus: 1,
@@ -4688,7 +4740,8 @@ pub(crate) mod tests {
         #[cfg(target_arch = "x86_64")]
         {
             assert_eq!(
-                CpusConfig::parse("boot=1,kvm_hint_realtime=on")?,
+                // SAFETY: This input contains no inherited descriptors.
+                unsafe { CpusConfig::parse("boot=1,kvm_hint_realtime=on") }?,
                 CpusConfig {
                     boot_vcpus: 1,
                     max_vcpus: 1,
@@ -4696,11 +4749,14 @@ pub(crate) mod tests {
                     ..Default::default()
                 }
             );
-            assert!(!CpusConfig::parse("boot=1")?.kvm_hint_realtime);
-            CpusConfig::parse("boot=1,kvm_hint_realtime=maybe").unwrap_err();
+            // SAFETY: This input contains no inherited descriptors.
+            assert!(!unsafe { CpusConfig::parse("boot=1") }?.kvm_hint_realtime);
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe { CpusConfig::parse("boot=1,kvm_hint_realtime=maybe") }.unwrap_err();
         }
         assert_eq!(
-            CpusConfig::parse("boot=2,affinity=[0@[0,2],1@[1,3]]")?,
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe { CpusConfig::parse("boot=2,affinity=[0@[0,2],1@[1,3]]") }?,
             CpusConfig {
                 boot_vcpus: 2,
                 max_vcpus: 2,
@@ -4720,7 +4776,8 @@ pub(crate) mod tests {
 
         // Test core_scheduling parsing
         assert_eq!(
-            CpusConfig::parse("boot=1,core_scheduling=vm")?,
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe { CpusConfig::parse("boot=1,core_scheduling=vm") }?,
             CpusConfig {
                 boot_vcpus: 1,
                 max_vcpus: 1,
@@ -4729,7 +4786,8 @@ pub(crate) mod tests {
             }
         );
         assert_eq!(
-            CpusConfig::parse("boot=1,core_scheduling=vcpu")?,
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe { CpusConfig::parse("boot=1,core_scheduling=vcpu") }?,
             CpusConfig {
                 boot_vcpus: 1,
                 max_vcpus: 1,
@@ -4738,7 +4796,8 @@ pub(crate) mod tests {
             }
         );
         assert_eq!(
-            CpusConfig::parse("boot=1,core_scheduling=off")?,
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe { CpusConfig::parse("boot=1,core_scheduling=off") }?,
             CpusConfig {
                 boot_vcpus: 1,
                 max_vcpus: 1,
@@ -4748,11 +4807,39 @@ pub(crate) mod tests {
         );
         // Default (no core_scheduling specified) should be Vm
         assert_eq!(
-            CpusConfig::parse("boot=1")?.core_scheduling,
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe { CpusConfig::parse("boot=1") }?.core_scheduling,
             CoreScheduling::Vm
         );
         // Invalid value should error
-        CpusConfig::parse("boot=1,core_scheduling=invalid").unwrap_err();
+        // SAFETY: This input contains no inherited descriptors.
+        unsafe { CpusConfig::parse("boot=1,core_scheduling=invalid") }.unwrap_err();
+
+        assert_eq!(
+            // SAFETY: This input contains no inherited descriptors.
+            unsafe { CpusConfig::parse("boot=1,cgroup=/sys/fs/cgroup/vm/vcpus") }?,
+            CpusConfig {
+                boot_vcpus: 1,
+                max_vcpus: 1,
+                cgroup: Some(PathBuf::from("/sys/fs/cgroup/vm/vcpus")),
+                ..Default::default()
+            }
+        );
+        let fd = test_fd().into_raw_fd();
+        // SAFETY: into_raw_fd transferred exclusive ownership of the descriptor.
+        let config = unsafe { CpusConfig::parse(&format!("boot=1,cgroup_fd={fd}")) }?;
+        assert_eq!(config.cgroup_fd.as_ref().unwrap().as_raw_fd(), fd);
+        assert_eq!(
+            config,
+            CpusConfig {
+                boot_vcpus: 1,
+                max_vcpus: 1,
+                cgroup_fd: config.cgroup_fd.clone(),
+                ..Default::default()
+            }
+        );
+        // SAFETY: This input contains no inherited descriptors.
+        unsafe { CpusConfig::parse("boot=1,cgroup_fd=-1") }.unwrap_err();
 
         Ok(())
     }
@@ -4773,7 +4860,8 @@ pub(crate) mod tests {
                 r#"boot=2,profile="path:{}",max=4"#,
                 file.as_path().display()
             );
-            let config = CpusConfig::parse(&input)?;
+            // SAFETY: This input contains no inherited descriptors.
+            let config = unsafe { CpusConfig::parse(&input) }?;
             assert_eq!(
                 config.profile,
                 CpuProfileConfig::File(file.as_path().to_owned())
@@ -4781,7 +4869,8 @@ pub(crate) mod tests {
             (input, config)
         };
 
-        assert_eq!(CpusConfig::parse(&input)?, config);
+        // SAFETY: This input contains no inherited descriptors.
+        assert_eq!(unsafe { CpusConfig::parse(&input) }?, config);
         Ok(())
     }
 
@@ -7903,6 +7992,17 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 Err(ValidationError::KvmHintRealtimeWithKvmHyperv)
             );
         }
+
+        let mut cgroup_config = valid_config.clone();
+        cgroup_config.cpus.cgroup = Some(PathBuf::from("/sys/fs/cgroup/vm/vcpus"));
+        cgroup_config.validate().unwrap();
+        cgroup_config.cpus.cgroup_fd = fd.clone();
+        assert_eq!(
+            cgroup_config.validate(),
+            Err(ValidationError::CpusCgroupBothPathAndFd)
+        );
+        cgroup_config.cpus.cgroup = None;
+        cgroup_config.validate().unwrap();
 
         let mut invalid_config = valid_config.clone();
         invalid_config.cpus.max_vcpus = 16;
