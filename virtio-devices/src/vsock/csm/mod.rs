@@ -4,9 +4,16 @@
 //! This module implements our vsock connection state machine. The heavy lifting is done by
 //! `connection::VsockConnection`, while this file only defines some constants and helper structs.
 
+use std::ffi::CString;
+use std::mem::offset_of;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::unix::ffi::OsStrExt;
+use std::path::Path;
 use std::{io, result};
 
 use thiserror::Error;
+
+use super::SocketType;
 
 mod connection;
 pub(crate) mod seqpacket;
@@ -15,6 +22,67 @@ pub(crate) mod transport;
 mod txbuf;
 
 pub(super) use connection::VsockConnection;
+
+/// Creates a non-blocking Unix socket of the given type.
+fn new_socket(socket_type: SocketType) -> io::Result<OwnedFd> {
+    let kind = match socket_type {
+        SocketType::Stream => libc::SOCK_STREAM,
+        SocketType::SeqPacket => libc::SOCK_SEQPACKET,
+    };
+    // SAFETY: socket takes only integer arguments and returns a new owned descriptor.
+    let fd = unsafe {
+        libc::socket(
+            libc::AF_UNIX,
+            kind | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC,
+            0,
+        )
+    };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: fd is a newly created socket whose ownership is transferred here.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+fn path_to_sock_addr(path: &Path) -> io::Result<(libc::sockaddr_un, libc::socklen_t)> {
+    if path.as_os_str().is_empty() {
+        return Err(io::ErrorKind::InvalidInput.into());
+    }
+    let path =
+        CString::new(path.as_os_str().as_bytes()).map_err(|_| io::ErrorKind::InvalidInput)?;
+    let mut address = libc::sockaddr_un {
+        sun_family: libc::AF_UNIX as libc::sa_family_t,
+        sun_path: [0; _],
+    };
+    let bytes = path.as_bytes_with_nul();
+    if bytes.len() > address.sun_path.len() {
+        return Err(io::ErrorKind::InvalidInput.into());
+    }
+    for (dst, src) in address.sun_path.iter_mut().zip(bytes) {
+        *dst = *src as libc::c_char;
+    }
+    let length = {
+        let off = offset_of!(libc::sockaddr_un, sun_path);
+        (off + bytes.len()) as libc::socklen_t
+    };
+    Ok((address, length))
+}
+
+fn connect(socket: &impl AsRawFd, path: &Path) -> io::Result<()> {
+    let (address, length) = path_to_sock_addr(path)?;
+    // SAFETY: address is initialized and length covers its family and terminated path.
+    if unsafe {
+        libc::connect(
+            socket.as_raw_fd(),
+            (&address as *const libc::sockaddr_un).cast(),
+            length,
+        )
+    } < 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
 
 pub(super) mod defs {
     /// Vsock connection TX buffer capacity.
