@@ -193,11 +193,7 @@ impl SerialManager {
             pty_write_out = Some(Arc::clone(&write_out));
             let writer = file.try_clone().map_err(Error::FileClone)?;
             let buffer = SerialBuffer::new(Box::new(writer), write_out);
-            serial
-                .as_ref()
-                .lock()
-                .unwrap()
-                .set_out(Some(Box::new(buffer)));
+            serial.lock().unwrap().set_out(Some(Box::new(buffer)));
         }
 
         // Install the persistent buffer as the device's sink so output produced
@@ -208,11 +204,7 @@ impl SerialManager {
             ConsoleTransport::Socket(_) | ConsoleTransport::TcpListen(_)
         ) {
             let console = SocketConsole::new();
-            serial
-                .as_ref()
-                .lock()
-                .unwrap()
-                .set_out(Some(console.out_sink()));
+            serial.lock().unwrap().set_out(Some(console.out_sink()));
             socket_console = Some(console);
         }
 
@@ -447,7 +439,6 @@ impl SerialManager {
                                         }
 
                                         serial
-                                            .as_ref()
                                             .lock()
                                             .unwrap()
                                             .queue_input_bytes(&input[..count])

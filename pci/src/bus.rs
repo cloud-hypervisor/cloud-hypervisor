@@ -315,7 +315,6 @@ impl PciConfigIo {
         }
 
         self.pci_bus
-            .as_ref()
             .lock()
             .unwrap()
             .devices

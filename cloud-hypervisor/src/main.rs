@@ -892,7 +892,6 @@ fn start_vmm(
     let mut event_monitor = cmd_arguments
         .event_monitor
         .as_ref()
-        .as_ref()
         .map(|monitor_config| {
             let mut parser = OptionParser::new();
             parser.add("path").add("fd");

@@ -2356,7 +2356,7 @@ impl vm::Vm for MshvVm {
         let end_gpfn: u64 = (gpa + size as u64 - 1) >> PAGE_SHIFT;
 
         // Enlarge the bitmap if the PFN is greater than the bitmap length
-        if end_gpfn >= self.host_access_pages.load().as_ref().len() as u64 {
+        if end_gpfn >= self.host_access_pages.load().len() as u64 {
             self.host_access_pages.rcu(|bitmap| {
                 let mut bm = bitmap.as_ref().clone();
                 bm.enlarge(ONE_GB);
@@ -2365,13 +2365,7 @@ impl vm::Vm for MshvVm {
         }
 
         let gpas: Vec<u64> = (start_gpfn..=end_gpfn)
-            .filter(|x| {
-                !self
-                    .host_access_pages
-                    .load()
-                    .as_ref()
-                    .is_bit_set(*x as usize)
-            })
+            .filter(|x| !self.host_access_pages.load().is_bit_set(*x as usize))
             .map(|x| x << PAGE_SHIFT)
             .collect();
 
