@@ -10,7 +10,6 @@ use std::result;
 use libc::c_uchar;
 use log::{info, warn};
 use thiserror::Error;
-use vm_allocator::GuestMemory;
 use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryBackend, GuestMemoryError};
 
 use super::MAX_SUPPORTED_CPUS_LEGACY;
@@ -89,9 +88,9 @@ fn compute_mp_size(num_cpus: u32) -> usize {
 }
 
 /// Performs setup of the MP table for the given `num_cpus`.
-pub(super) fn setup_mptable(
+pub(super) fn setup_mptable<M: GuestMemoryBackend>(
     offset: GuestAddress,
-    mem: &GuestMemory,
+    mem: &M,
     num_cpus: u32,
     topology: Option<(u16, u16, u16, u16)>,
 ) -> Result<()> {
@@ -271,6 +270,7 @@ pub(super) fn setup_mptable(
 
 #[cfg(test)]
 mod tests {
+    use vm_allocator::GuestMemory;
     use vm_memory::bitmap::BitmapSlice;
     use vm_memory::{GuestUsize, VolatileMemoryError, VolatileSlice, WriteVolatile};
 
