@@ -49,6 +49,10 @@ pub enum HypervisorError {
     /// Failed to check the exit hypercall capability
     #[error("Failed to check the exit hypercall capability")]
     CheckExitHypercall(#[source] anyhow::Error),
+    /// KVM cannot save and restore nested vCPU state
+    #[cfg(target_arch = "x86_64")]
+    #[error("Nested virtualization requires KVM nested state support")]
+    NestedStateNotSupported,
     /// KVM cannot preserve nested exception payloads
     #[cfg(target_arch = "x86_64")]
     #[error("Nested virtualization requires KVM exception payload support")]
