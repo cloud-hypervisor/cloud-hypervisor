@@ -3,11 +3,9 @@
 //
 
 use std::collections::VecDeque;
-use std::ffi::CString;
 use std::io;
-use std::mem::{offset_of, size_of, take, zeroed};
+use std::mem::{size_of, take, zeroed};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::ptr::null_mut;
 use std::slice::from_raw_parts;
@@ -16,7 +14,7 @@ use super::super::SocketType;
 use super::super::defs::uapi::VSOCK_FLAGS_SEQ_EOM;
 use super::super::packet::VsockPacket;
 use super::transport::{PayloadRead, RxState, SendResult, Transport, TxState};
-use super::{Error, Result, defs};
+use super::{Error, Result, connect, defs, new_socket, path_to_sock_addr};
 
 const MAX_MESSAGE_SIZE: usize = defs::CONN_TX_BUF_SIZE as usize;
 const MAX_PENDING_RECORDS: usize = 64 * 1024;
@@ -31,19 +29,7 @@ impl AsRawFd for SeqPacketSocket {
 
 impl SeqPacketSocket {
     pub(crate) fn new() -> io::Result<Self> {
-        // SAFETY: socket takes only integer arguments and returns a new owned descriptor.
-        let fd = unsafe {
-            libc::socket(
-                libc::AF_UNIX,
-                libc::SOCK_SEQPACKET | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC,
-                0,
-            )
-        };
-        if fd < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        // SAFETY: fd is a newly created socket whose ownership is transferred here.
-        let socket = Self(unsafe { OwnedFd::from_raw_fd(fd) });
+        let socket = Self(new_socket(SocketType::SeqPacket)?);
         socket.enable_passcred()?;
         Ok(socket)
     }
@@ -67,48 +53,12 @@ impl SeqPacketSocket {
         Ok(())
     }
 
-    fn path_to_sock_addr(path: &Path) -> io::Result<(libc::sockaddr_un, libc::socklen_t)> {
-        if path.as_os_str().is_empty() {
-            return Err(io::ErrorKind::InvalidInput.into());
-        }
-        let path =
-            CString::new(path.as_os_str().as_bytes()).map_err(|_| io::ErrorKind::InvalidInput)?;
-        let mut address = libc::sockaddr_un {
-            sun_family: libc::AF_UNIX as libc::sa_family_t,
-            sun_path: [0; _],
-        };
-        let bytes = path.as_bytes_with_nul();
-        if bytes.len() > address.sun_path.len() {
-            return Err(io::ErrorKind::InvalidInput.into());
-        }
-        for (dst, src) in address.sun_path.iter_mut().zip(bytes) {
-            *dst = *src as libc::c_char;
-        }
-        let length = {
-            let off = offset_of!(libc::sockaddr_un, sun_path);
-            (off + bytes.len()) as libc::socklen_t
-        };
-        Ok((address, length))
-    }
-
     pub(crate) fn connect(&self, path: &Path) -> io::Result<()> {
-        let (address, length) = Self::path_to_sock_addr(path)?;
-        // SAFETY: address is initialized and length covers its family and terminated path.
-        if unsafe {
-            libc::connect(
-                self.as_raw_fd(),
-                (&address as *const libc::sockaddr_un).cast(),
-                length,
-            )
-        } < 0
-        {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(())
+        connect(self, path)
     }
 
     pub(crate) fn bind(&self, path: &Path) -> io::Result<()> {
-        let (address, length) = Self::path_to_sock_addr(path)?;
+        let (address, length) = path_to_sock_addr(path)?;
         // SAFETY: address is initialized and length covers its family and terminated path.
         if unsafe {
             libc::bind(
