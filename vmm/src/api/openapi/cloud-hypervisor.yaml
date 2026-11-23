@@ -1852,6 +1852,14 @@ components:
         destination_url:
           type: string
 
+    SnapshotClockMode:
+      type: string
+      enum: [Advance, Preserve]
+      default: Advance
+      description: >
+        Whether to advance the guest clock by elapsed wall time when supported
+        (Advance) or restore it without that adjustment (Preserve).
+
     MemoryRestoreMode:
       type: string
       enum: [Copy, OnDemand, OnDemandNoBackgroundFetchPages, CopyOnWrite]
@@ -1958,6 +1966,8 @@ components:
             Deprecated: use external_fds with an Iommu target instead.
         resume:
           type: boolean
+        clock_restore_mode:
+          $ref: "#/components/schemas/SnapshotClockMode"
         zone_updates:
           type: array
           items:
