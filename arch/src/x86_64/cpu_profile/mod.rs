@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 use std::{fs, io};
 
 use hypervisor::CpuVendor;
-use hypervisor::arch::x86::msr_index::{MSR_IA32_VMX_BASIC, MSR_IA32_VMX_VMFUNC};
+use hypervisor::arch::x86::msr_index::{
+    MSR_AMD64_TSC_RATIO, MSR_IA32_VMX_BASIC, MSR_IA32_VMX_VMFUNC,
+};
 use hypervisor::arch::x86::{CpuIdEntry, MsrEntry, VcpuMsrConfigUpdate};
 use log::{error, warn};
 
@@ -243,12 +245,14 @@ fn required_msr_updates(
     }
 
     // Our MSR snapshottable MSRs should consist of the MSR indices that are contained in the set of required MSRs and the feature MSRs to be set.
-    // The MSR indices/addresses in this vector will be a subset of `required`, but not necessarily an equality as required may contain MSRs
-    // that the hypervisor does not permit setting (e.g. various VMX CTLS, IA32_VMX_CR0_FIXED, IA32_VMX_CR4_FIXED).
+    // Apart from MSR_AMD64_TSC_RATIO, the MSR indices/addresses in this vector will be a subset of `required`, but not necessarily an equality
+    // as required may contain MSRs that the hypervisor does not permit setting (e.g. various VMX CTLS, IA32_VMX_CR0_FIXED, IA32_VMX_CR4_FIXED).
+    // With nested virtualization, L1 may program MSR_AMD64_TSC_RATIO for L2, so it is saved whenever the hypervisor lists it, even if the
+    // profile does not require it.
     let mut snapshottable_msr_indices: Vec<u32> = msr_index_list
         .iter()
         .copied()
-        .filter(|msr| required.contains(msr))
+        .filter(|msr| required.contains(msr) || (nested && *msr == MSR_AMD64_TSC_RATIO))
         .chain(adjusted_feature_msrs.iter().map(|msr| msr.index))
         .collect();
     // Remove any duplicate entries
@@ -267,7 +271,9 @@ mod tests {
     use std::io::ErrorKind;
 
     use hypervisor::arch::x86::MsrEntry;
-    use hypervisor::arch::x86::msr_index::{MSR_IA32_UCODE_REV, MSR_IA32_VMX_MISC};
+    use hypervisor::arch::x86::msr_index::{
+        MSR_AMD64_TSC_RATIO, MSR_IA32_UCODE_REV, MSR_IA32_VMX_MISC,
+    };
     use proptest::prelude::*;
     use vmm_sys_util::tempfile::TempFile;
 
@@ -1318,6 +1324,31 @@ mod tests {
             &[MSR_IA32_UCODE_REV, MSR_IA32_VMX_MISC,][..],
             &required_updates.snapshottable_msr_indices
         );
+    }
+
+    #[test]
+    fn nested_includes_amd_tsc_ratio() {
+        let profile_data = MsrProfileData {
+            adjustments: Vec::new(),
+            required_msrs: Vec::new(),
+        };
+
+        let updates = required_msr_updates(
+            profile_data.clone(),
+            &[],
+            &[MSR_AMD64_TSC_RATIO],
+            false,
+            true,
+        )
+        .unwrap();
+        assert_eq!(updates.snapshottable_msr_indices, [MSR_AMD64_TSC_RATIO]);
+
+        let updates = required_msr_updates(profile_data.clone(), &[], &[], false, true).unwrap();
+        assert!(updates.snapshottable_msr_indices.is_empty());
+
+        let updates =
+            required_msr_updates(profile_data, &[], &[MSR_AMD64_TSC_RATIO], false, false).unwrap();
+        assert!(updates.snapshottable_msr_indices.is_empty());
     }
 
     proptest! {
