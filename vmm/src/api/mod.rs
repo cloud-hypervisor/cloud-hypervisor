@@ -406,14 +406,14 @@ impl VmReceiveMigrationData {
         validate_inherited_fds([migration])?;
         let mut parser = OptionParser::new();
         parser
+            .add("background_fetch_pages")
+            .add("external_fds")
+            .add("iommufd_fd")
             .add("receiver_url")
             .add("tls_dir")
             .add("vfio_fds")
-            .add("iommufd_fd")
             .add("zone_updates")
-            .add("background_fetch_pages")
-            .add_all(ConsoleOutput::UPDATE_OPTIONS)
-            .add("external_fds");
+            .add_all(ConsoleOutput::UPDATE_OPTIONS);
         parser
             .parse(migration)
             .map_err(VmReceiveMigrationConfigError::ParseError)?;

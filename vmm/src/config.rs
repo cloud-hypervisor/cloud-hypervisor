@@ -3172,16 +3172,16 @@ impl RestoreConfig {
         validate_inherited_fds([restore])?;
         let mut parser = OptionParser::new();
         parser
-            .add("source_url")
-            .add("prefault")
+            .add("external_fds")
+            .add("iommufd_fd")
             .add("memory_restore_mode")
             .add("net_fds")
-            .add("vfio_fds")
-            .add("iommufd_fd")
+            .add("prefault")
             .add("resume")
+            .add("source_url")
+            .add("vfio_fds")
             .add("zone_updates")
-            .add_all(ConsoleOutput::UPDATE_OPTIONS)
-            .add("external_fds");
+            .add_all(ConsoleOutput::UPDATE_OPTIONS);
         parser.parse(restore).map_err(Error::ParseRestore)?;
 
         for field in ["net_fds", "vfio_fds", "iommufd_fd"] {
