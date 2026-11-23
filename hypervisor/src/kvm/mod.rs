@@ -72,9 +72,9 @@ use crate::riscv64_reg_id;
 pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
-    KVM_CAP_HYPERV_SYNIC, KVM_CAP_SPLIT_IRQCHIP, KVM_CAP_X2APIC_API, KVM_GUESTDBG_USE_HW_BP,
-    KVM_REG_GUEST_SSP, KVM_X2APIC_API_DISABLE_BROADCAST_QUIRK, KVM_X2APIC_API_USE_32BIT_IDS,
-    MsrList, kvm_enable_cap, kvm_msr_entry, kvm_x86_reg_kvm,
+    KVM_CAP_EXCEPTION_PAYLOAD, KVM_CAP_HYPERV_SYNIC, KVM_CAP_SPLIT_IRQCHIP, KVM_CAP_X2APIC_API,
+    KVM_GUESTDBG_USE_HW_BP, KVM_REG_GUEST_SSP, KVM_X2APIC_API_DISABLE_BROADCAST_QUIRK,
+    KVM_X2APIC_API_USE_32BIT_IDS, MsrList, kvm_enable_cap, kvm_msr_entry, kvm_x86_reg_kvm,
 };
 #[cfg(target_arch = "x86_64")]
 use x86_64::check_required_kvm_extensions;
@@ -1514,6 +1514,20 @@ impl hypervisor::Hypervisor for KvmHypervisor {
 
         #[cfg(target_arch = "x86_64")]
         {
+            if _config.nested {
+                if fd.check_extension_raw(KVM_CAP_EXCEPTION_PAYLOAD as libc::c_ulong) <= 0 {
+                    return Err(hypervisor::HypervisorError::NestedExceptionPayloadNotSupported);
+                }
+
+                let cap = kvm_enable_cap {
+                    cap: KVM_CAP_EXCEPTION_PAYLOAD,
+                    args: [1, 0, 0, 0],
+                    ..Default::default()
+                };
+                fd.enable_cap(&cap)
+                    .map_err(|e| hypervisor::HypervisorError::EnableExceptionPayload(e.into()))?;
+            }
+
             let msr_list = self.get_msr_list()?;
             let num_msrs = msr_list.as_fam_struct_ref().nmsrs as usize;
             let mut msrs = vec![

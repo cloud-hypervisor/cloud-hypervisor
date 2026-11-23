@@ -49,6 +49,14 @@ pub enum HypervisorError {
     /// Failed to check the exit hypercall capability
     #[error("Failed to check the exit hypercall capability")]
     CheckExitHypercall(#[source] anyhow::Error),
+    /// KVM cannot preserve nested exception payloads
+    #[cfg(target_arch = "x86_64")]
+    #[error("Nested virtualization requires KVM exception payload support")]
+    NestedExceptionPayloadNotSupported,
+    /// Failed to enable KVM exception payload support
+    #[cfg(target_arch = "x86_64")]
+    #[error("Failed to enable KVM exception payload support")]
+    EnableExceptionPayload(#[source] anyhow::Error),
     /// Failed to set partition property
     #[error("Failed to set partition property")]
     SetPartitionProperty(#[source] anyhow::Error),
