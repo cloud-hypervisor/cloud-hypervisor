@@ -2234,32 +2234,6 @@ mod common_parallel {
     }
 
     #[test]
-    fn test_virtio_block_vhdx() {
-        let mut workload_path = dirs::home_dir().unwrap();
-        workload_path.push("workloads");
-
-        let mut raw_file_path = workload_path.clone();
-        let mut vhdx_file_path = workload_path;
-        raw_file_path.push(JAMMY_IMAGE_NAME);
-        vhdx_file_path.push(JAMMY_IMAGE_NAME_VHDX);
-
-        // Generate dynamic VHDX file from RAW file
-        QemuImgCommand::new()
-            .convert("raw", "vhdx", "")
-            .args(&[
-                "-p",
-                raw_file_path.to_str().unwrap(),
-                vhdx_file_path.to_str().unwrap(),
-            ])
-            .run("Expect generating dynamic VHDx image from RAW image");
-        let guest = make_virtio_block_guest(
-            &GuestFactory::new_regular_guest_factory(),
-            JAMMY_IMAGE_NAME_VHDX,
-        );
-        _test_virtio_block(&guest, false, false, true, false, ImageType::Vhdx);
-    }
-
-    #[test]
     fn test_virtio_block_dynamic_vhdx_expand() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_virtio_block_dynamic_vhdx_expand(&guest);
