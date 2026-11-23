@@ -1100,7 +1100,12 @@ impl Vmm {
                     })?;
                     Ok(Configured(config_data))
                 }
-                Command::State => self.vm_receive_state_command(req, socket, config_data),
+                Command::State => self.vm_receive_state_command(
+                    req,
+                    socket,
+                    config_data,
+                    receive_data_migration.clock_restore_mode,
+                ),
                 c => invalid_command(state_name, c),
             },
             StateReceived {
@@ -1224,6 +1229,7 @@ impl Vmm {
         req: &Request,
         socket: &mut SocketStream,
         mut config_data: ReceiveMigrationConfiguredData,
+        clock_restore_mode: hypervisor::SnapshotClockMode,
     ) -> result::Result<ReceiveMigrationState, MigratableError> {
         let state_receive_begin = Instant::now();
 
@@ -1258,7 +1264,7 @@ impl Vmm {
         config_data.connections.cleanup()?;
 
         let (recv_state_dur, restore_vm_dur) =
-            self.vm_receive_state(req, socket, config_data.memory_manager)?;
+            self.vm_receive_state(req, socket, config_data.memory_manager, clock_restore_mode)?;
         debug!(
             "Migration (incoming): recv_snapshot:{}ms restore:{}ms",
             recv_state_dur.as_millis(),
@@ -1408,6 +1414,7 @@ impl Vmm {
         req: &Request,
         socket: &mut T,
         mm: Arc<Mutex<MemoryManager>>,
+        clock_restore_mode: hypervisor::SnapshotClockMode,
     ) -> result::Result<
         (
             Duration, /* state receive + deserialize */
@@ -1491,7 +1498,7 @@ impl Vmm {
             })?;
 
             // Create VM
-            vm.restore(&snapshot, Default::default()).map_err(|e| {
+            vm.restore(&snapshot, clock_restore_mode).map_err(|e| {
                 // Inner error cannot be wrapped in anyhow::Error => print it
                 MigratableError::MigrateReceive(anyhow!(
                     "Failed restoring the VM: {}",
