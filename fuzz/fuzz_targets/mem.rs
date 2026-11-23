@@ -21,7 +21,7 @@ use virtio_devices::{
 use virtio_queue::{Queue, QueueT};
 use vm_allocator::{GuestMemory, GuestRegion};
 use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
-use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
+use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryBackend};
 use vm_migration::{Pausable, Snapshottable};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
@@ -559,7 +559,11 @@ fn build_chains(kind: ScenarioKind, stream: &mut FuzzCursor) -> Vec<ChainSpec> {
     }
 }
 
-fn populate_queue_memory(mem: &GuestMemory, queue: &mut Queue, chains: &[ChainSpec]) -> bool {
+fn populate_queue_memory<M: GuestMemoryBackend>(
+    mem: &M,
+    queue: &mut Queue,
+    chains: &[ChainSpec],
+) -> bool {
     if chains.len() * 2 > QUEUE_SIZE as usize {
         return false;
     }
@@ -660,12 +664,19 @@ fn populate_queue_memory(mem: &GuestMemory, queue: &mut Queue, chains: &[ChainSp
     true
 }
 
-fn write_u16(mem: &GuestMemory, addr: u64, value: u16) -> bool {
+fn write_u16<M: GuestMemoryBackend>(mem: &M, addr: u64, value: u16) -> bool {
     mem.write_slice(&value.to_le_bytes(), GuestAddress(addr))
         .is_ok()
 }
 
-fn write_desc(mem: &GuestMemory, index: u16, addr: u64, len: u32, flags: u16, next: u16) -> bool {
+fn write_desc<M: GuestMemoryBackend>(
+    mem: &M,
+    index: u16,
+    addr: u64,
+    len: u32,
+    flags: u16,
+    next: u16,
+) -> bool {
     let desc_addr = DESC_TABLE_ADDR + u64::from(index) * 16;
     let mut raw = [0u8; 16];
     raw[..8].copy_from_slice(&addr.to_le_bytes());
