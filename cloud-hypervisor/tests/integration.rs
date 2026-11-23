@@ -22,6 +22,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{fs, panic, thread};
 
 use block::ImageType;
+use hypervisor::SnapshotClockMode;
 use test_infra::*;
 use vmm::memory_manager::SNAPSHOT_FILENAME;
 use vmm_sys_util::tempdir::TempDir;
@@ -10597,7 +10598,19 @@ mod ivshmem {
         snapshot_restore_common::_test_snapshot_restore(
             snapshot_restore_common::SnapshotRestoreTest {
                 use_resume_option: true,
-                check_clock: true,
+                check_clock: Some(SnapshotClockMode::Advance),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_check_guest_time_preserve() {
+        snapshot_restore_common::_test_snapshot_restore(
+            snapshot_restore_common::SnapshotRestoreTest {
+                use_resume_option: true,
+                check_clock: Some(SnapshotClockMode::Preserve),
                 ..Default::default()
             },
         );
@@ -10766,7 +10779,7 @@ mod snapshot_restore_common {
     pub(crate) struct SnapshotRestoreTest {
         pub use_hotplug: bool,
         pub use_resume_option: bool,
-        pub check_clock: bool,
+        pub check_clock: Option<SnapshotClockMode>,
         pub memory_restore_mode: Option<&'static str>,
         pub use_prefault: bool,
         pub check_vmgenid: bool,
@@ -10808,11 +10821,9 @@ mod snapshot_restore_common {
         let socket = temp_vsock_path(&guest.tmp_dir);
         let event_path = temp_event_monitor_path(&guest.tmp_dir);
 
-        // x86_64: force kvm-clock — the restore catch-up moves kvmclock (KVM_SET_CLOCK),
-        // not the tsc clocksource, so a tsc guest wouldn't catch up. aarch64 ignores this
-        // (CNTVCT is advanced directly).
+        // Exercise kvmclock on x86_64 and the architected counter on aarch64.
         let mut boot_cmdline = DIRECT_KERNEL_BOOT_CMDLINE.to_string();
-        if check_clock && cfg!(target_arch = "x86_64") {
+        if check_clock.is_some() && cfg!(target_arch = "x86_64") {
             boot_cmdline.push_str(" clocksource=kvm-clock");
         }
         // aarch64 needs acpi=on to reach ACPI over the FDT on a direct boot.
@@ -10951,9 +10962,8 @@ mod snapshot_restore_common {
             .output()
             .unwrap();
 
-        // Simulate an off-host interval between snapshot and restore so the guest
-        // clock must visibly catch up on restore (asserted after resume below).
-        if check_clock {
+        // Make the off-host interval long enough to distinguish the two modes.
+        if check_clock.is_some() {
             thread::sleep(Duration::from_secs(CLOCK_DOWNTIME_SECS));
         }
 
@@ -10962,6 +10972,9 @@ mod snapshot_restore_common {
 
         let mut restore_params =
             format!("source_url=file://{snapshot_dir},resume={use_resume_option}");
+        if check_clock == Some(SnapshotClockMode::Preserve) {
+            restore_params.push_str(",clock_restore_mode=preserve");
+        }
         if let Some(mode) = memory_restore_mode {
             restore_params.push_str(&format!(",memory_restore_mode={mode}"));
         }
@@ -11119,29 +11132,44 @@ mod snapshot_restore_common {
                 );
             }
 
-            if check_clock {
-                // Across the off-host interval the restored guest's wall clock
-                // must catch up to real time: x86_64 via kvmclock
-                // (KVM_CLOCK_REALTIME), aarch64 via the CNTVCT advance. The test
-                // network is isolated, so the guest cannot NTP-correct itself --
-                // any catch-up is the restore path's doing.
-                let host_secs = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as i64;
-                let guest_secs = guest
-                    .ssh_command("date -u +%s")
-                    .unwrap()
-                    .trim()
-                    .parse::<i64>()
-                    .unwrap();
-                let skew = (host_secs - guest_secs).abs();
-                assert!(
-                    skew <= CLOCK_SKEW_TOLERANCE_SECS,
-                    "guest clock is {skew}s from host after restore \
-                     (host={host_secs}, guest={guest_secs}); the \
-                     {CLOCK_DOWNTIME_SECS}s off-host interval was not applied"
-                );
+            if let Some(mode) = check_clock {
+                // The guest has no NTP access on the isolated test network.
+                let host_secs = || {
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs() as i64
+                };
+                let (before, guest_secs, after) = (0..3)
+                    .find_map(|_| {
+                        let before = host_secs();
+                        let guest_secs = guest
+                            .ssh_command("date -u +%s")
+                            .unwrap()
+                            .trim()
+                            .parse::<i64>()
+                            .unwrap();
+                        let after = host_secs();
+                        // Retry if SSH took too long to distinguish the two modes.
+                        (after - before < CLOCK_SKEW_TOLERANCE_SECS)
+                            .then_some((before, guest_secs, after))
+                    })
+                    .expect("Could not sample the guest clock within the skew tolerance");
+                match mode {
+                    SnapshotClockMode::Advance => assert!(
+                        (before - CLOCK_SKEW_TOLERANCE_SECS..=after + CLOCK_SKEW_TOLERANCE_SECS)
+                            .contains(&guest_secs),
+                        "guest time {guest_secs} did not catch up to host time {before}..={after}"
+                    ),
+                    SnapshotClockMode::Preserve => {
+                        // The deliberate sleep is a lower bound on time spent off host.
+                        let min_lag = CLOCK_DOWNTIME_SECS as i64 - CLOCK_SKEW_TOLERANCE_SECS;
+                        assert!(
+                            before - guest_secs >= min_lag,
+                            "expected guest time {guest_secs} to lag host time {before}..={after} by at least {min_lag}s"
+                        );
+                    }
+                }
             }
         });
         // Shutdown the target VM and check console output
