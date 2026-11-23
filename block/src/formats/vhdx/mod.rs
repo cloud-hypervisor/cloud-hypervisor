@@ -111,3 +111,126 @@ impl disk_file::AsyncDiskFile for VhdxDisk {
         Ok(Box::new(VhdxSync::new(Arc::clone(&self.vhdx_file), size)))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::sync::Arc;
+
+    use virtio_bindings::virtio_blk::{VIRTIO_BLK_T_FLUSH, VIRTIO_BLK_T_OUT};
+    use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
+    use vmm_sys_util::tempfile::TempFile;
+
+    use crate::ImageType;
+    use crate::factory::{DiskOpenOptions, open_disk};
+    use crate::test_util::shared::QemuImgCommand;
+    use crate::test_util::{execute_virtio_blk_request, read_disk_data, require_direct_io};
+
+    fn assert_data_round_trip(direct: bool) {
+        const BLOCK_SIZE: usize = 1 << 20;
+        const WRITE_SIZE: usize = 4096;
+        const DISK_SIZE: usize = 2 * BLOCK_SIZE;
+        const DATA_ADDRESS: GuestAddress = GuestAddress(0x10000);
+
+        let mut expected = vec![0; DISK_SIZE];
+        for (offset, byte) in expected[..WRITE_SIZE].iter_mut().enumerate() {
+            *byte = (offset % 251) as u8;
+        }
+        let raw = TempFile::new().unwrap();
+        fs::write(raw.as_path(), &expected).unwrap();
+        let image = TempFile::new().unwrap();
+        let image_path = image.as_path().to_str().unwrap();
+        QemuImgCommand::new()
+            .convert("raw", "vhdx", "subformat=dynamic,block_size=1M")
+            .args(&[raw.as_path().to_str().unwrap(), image_path])
+            .run("Failed to create dynamic VHDX fixture");
+
+        let options = DiskOpenOptions {
+            path: image.as_path(),
+            readonly: false,
+            direct,
+            sparse: false,
+            backing_files: false,
+            disable_io_uring: true,
+            disable_aio: true,
+        };
+        let mem = Arc::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), DISK_SIZE + 0x20000)]).unwrap(),
+        );
+        {
+            let disk = open_disk(&options, ImageType::Vhdx).unwrap();
+            assert_eq!(disk.logical_size().unwrap(), DISK_SIZE as u64);
+            let mut io = disk.create_async_io(16).unwrap();
+            assert_eq!(
+                read_disk_data(io.as_mut(), &mem, DATA_ADDRESS, DISK_SIZE),
+                expected
+            );
+
+            for (offset, address, byte, token) in [
+                (0, DATA_ADDRESS, 0xa0, 2),
+                (
+                    BLOCK_SIZE + WRITE_SIZE,
+                    GuestAddress(DATA_ADDRESS.0 + 1),
+                    0xb1,
+                    3,
+                ),
+            ] {
+                let data = &mut expected[offset..offset + WRITE_SIZE];
+                data.fill(byte);
+                mem.write_slice(data, address).unwrap();
+                execute_virtio_blk_request(
+                    io.as_mut(),
+                    &mem,
+                    VIRTIO_BLK_T_OUT,
+                    offset as u64,
+                    (address, WRITE_SIZE),
+                    DISK_SIZE as u64,
+                    token,
+                );
+            }
+            execute_virtio_blk_request(
+                io.as_mut(),
+                &mem,
+                VIRTIO_BLK_T_FLUSH,
+                0,
+                (DATA_ADDRESS, 0),
+                DISK_SIZE as u64,
+                4,
+            );
+        }
+        {
+            let disk = open_disk(&options, ImageType::Vhdx).unwrap();
+            let mut io = disk.create_async_io(16).unwrap();
+            assert_eq!(
+                read_disk_data(
+                    io.as_mut(),
+                    &mem,
+                    GuestAddress(DATA_ADDRESS.0 + 1),
+                    DISK_SIZE
+                ),
+                expected
+            );
+        }
+
+        QemuImgCommand::new()
+            .check(image_path)
+            .run("Dynamic VHDX fixture failed its consistency check");
+        let round_trip = TempFile::new().unwrap();
+        QemuImgCommand::new()
+            .convert("vhdx", "raw", "")
+            .args(&[image_path, round_trip.as_path().to_str().unwrap()])
+            .run("Failed to read dynamic VHDX fixture with qemu-img");
+        assert_eq!(fs::read(round_trip.as_path()).unwrap(), expected);
+    }
+
+    #[test]
+    fn sync_data_round_trip() {
+        assert_data_round_trip(false);
+    }
+
+    #[test]
+    fn sync_direct_io_data_round_trip() {
+        require_direct_io!();
+        assert_data_round_trip(true);
+    }
+}
