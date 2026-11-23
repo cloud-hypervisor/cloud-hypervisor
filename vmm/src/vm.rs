@@ -1371,7 +1371,7 @@ impl Vm {
         let vm = {
             #[allow(unused_mut)]
             let mut hv_config: hypervisor::HypervisorVmConfig =
-                vm_config.as_ref().lock().unwrap().deref().into();
+                vm_config.lock().unwrap().deref().into();
             #[cfg(feature = "sev_snp")]
             if let Some(ref igvm) = igvm_file {
                 hv_config.vmsa_features = igvm_loader::extract_sev_features(igvm);
