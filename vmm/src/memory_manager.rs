@@ -3899,28 +3899,37 @@ impl Transportable for MemoryManager {
 }
 
 impl Migratable for MemoryManager {
-    // Start the dirty log in the hypervisor (kvm/mshv).
-    // Also, reset the dirty bitmap logged by the vmm.
-    // Just before we do a bulk copy we want to start/clear the dirty log so that
-    // pages touched during our bulk copy are tracked.
+    // Track writes made while the bulk copy is in progress.
     fn start_dirty_log(&mut self) -> result::Result<(), MigratableError> {
-        self.vm
-            .start_dirty_log()
-            .context("Error starting VM dirty log")
-            .map_err(MigratableError::MigrateSend)?;
-
-        for r in self.guest_memory.memory().iter() {
-            (**r).bitmap().reset();
+        for guest_ram_region in &self.guest_ram_regions {
+            let region = &guest_ram_region.region;
+            region
+                .start_dirty_log()
+                .with_context(|| {
+                    format!(
+                        "Error starting dirty log at {:#x}",
+                        region.start_addr().raw_value()
+                    )
+                })
+                .map_err(MigratableError::MigrateSend)?;
         }
 
         Ok(())
     }
 
     fn stop_dirty_log(&mut self) -> result::Result<(), MigratableError> {
-        self.vm
-            .stop_dirty_log()
-            .context("Error stopping VM dirty log")
-            .map_err(MigratableError::MigrateSend)?;
+        for guest_ram_region in &self.guest_ram_regions {
+            let region = &guest_ram_region.region;
+            region
+                .stop_dirty_log()
+                .with_context(|| {
+                    format!(
+                        "Error stopping dirty log at {:#x}",
+                        region.start_addr().raw_value()
+                    )
+                })
+                .map_err(MigratableError::MigrateSend)?;
+        }
 
         Ok(())
     }

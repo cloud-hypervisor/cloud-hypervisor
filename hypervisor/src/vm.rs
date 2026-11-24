@@ -334,10 +334,6 @@ pub trait Vm: Send + Sync + Any {
     }
     /// Create a device that is used for passthrough
     fn create_passthrough_device(&self) -> Result<vfio_ioctls::VfioDeviceFd>;
-    /// Start logging dirty pages
-    fn start_dirty_log(&self) -> Result<()>;
-    /// Stop logging dirty pages
-    fn stop_dirty_log(&self) -> Result<()>;
     /// Start dirty logging for one registered region.
     ///
     /// # Safety
