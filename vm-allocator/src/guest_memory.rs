@@ -228,6 +228,39 @@ impl GuestRegion {
         Ok(())
     }
 
+    /// Start hypervisor tracking and clear the bitmap of VMM writes.
+    pub fn start_dirty_log(&self) -> Result<(), hypervisor::HypervisorVmError> {
+        if self.log_dirty_pages && self.is_registered() {
+            // SAFETY: This region owns the slot and its backing mapping.
+            unsafe {
+                self.vm.as_ref().unwrap().start_dirty_log_region(
+                    self.slot.unwrap(),
+                    self.start_addr().raw_value(),
+                    self.len(),
+                    self.region.as_ptr(),
+                )?;
+            }
+        }
+        self.region.deref().bitmap().reset();
+        Ok(())
+    }
+
+    /// Stop hypervisor dirty logging without discarding the bitmap of VMM writes.
+    pub fn stop_dirty_log(&self) -> Result<(), hypervisor::HypervisorVmError> {
+        if self.log_dirty_pages && self.is_registered() {
+            // SAFETY: This region owns the slot and its backing mapping.
+            unsafe {
+                self.vm.as_ref().unwrap().stop_dirty_log_region(
+                    self.slot.unwrap(),
+                    self.start_addr().raw_value(),
+                    self.len(),
+                    self.region.as_ptr(),
+                )?;
+            }
+        }
+        Ok(())
+    }
+
     /// The reserved slot, including before registration.
     pub fn slot(&self) -> Option<u32> {
         self.slot
