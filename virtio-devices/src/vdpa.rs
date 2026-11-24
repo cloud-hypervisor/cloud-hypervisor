@@ -661,7 +661,7 @@ mod tests {
     use vm_memory::GuestAddress;
 
     use super::*;
-    use crate::{GuestMemory, GuestMemoryMap, VirtioInterruptType};
+    use crate::{GuestMemory, VirtioInterruptType};
 
     struct NoopInterrupt;
 
@@ -695,9 +695,7 @@ mod tests {
             migrating: false,
         };
         let context = ActivationContext {
-            mem: GuestMemory::new(
-                GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
-            ),
+            mem: GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
             interrupt_cb: Arc::new(NoopInterrupt),
             queues: vec![],
             device_status: Arc::new(AtomicU8::new(0)),
@@ -727,9 +725,7 @@ mod tests {
             migrating: false,
         };
         let context = ActivationContext {
-            mem: GuestMemory::new(
-                GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
-            ),
+            mem: GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
             interrupt_cb: Arc::new(NoopInterrupt),
             queues: vec![],
             device_status: Arc::new(AtomicU8::new(0)),

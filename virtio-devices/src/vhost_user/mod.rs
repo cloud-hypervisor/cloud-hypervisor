@@ -973,7 +973,7 @@ mod tests {
 
     use super::*;
     use crate::vsock::tests::NoopVirtioInterrupt;
-    use crate::{GuestMemoryMap, MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VirtioDevice};
+    use crate::{GuestMemory, MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VirtioDevice};
 
     fn read_request(stream: &mut UnixStream, expected_request: FrontendReq) -> Vec<u8> {
         let mut header = [0u8; 12];
@@ -1157,7 +1157,7 @@ mod tests {
             .open(temp_dir.as_path().join("memory"))
             .unwrap();
         file.set_len(0x1000).unwrap();
-        let mem = GuestMemoryMap::from_ranges_with_files(&[(
+        let mem = GuestMemory::from_ranges_with_files(&[(
             GuestAddress(0),
             0x1000,
             Some(FileOffset::new(file, 0)),
@@ -1176,7 +1176,7 @@ mod tests {
         struct BackendReqHandler;
         impl VhostUserFrontendReqHandler for BackendReqHandler {}
         vu.setup_vhost_user::<BackendReqHandler, _>(
-            &mem,
+            &*mem.memory(),
             &[],
             &NoopVirtioInterrupt {},
             (1u64 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_F_ACCESS_PLATFORM),

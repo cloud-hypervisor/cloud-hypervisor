@@ -1565,7 +1565,7 @@ mod tests {
         VirtioIommuReqAttach, VirtioIommuReqDetach, VirtioIommuReqHead, VirtioIommuReqMap,
         VirtioIommuReqTail, VirtioIommuReqUnmap,
     };
-    use crate::{DmaRemapping, GuestMemory, GuestMemoryMap};
+    use crate::{DmaRemapping, GuestMemory};
 
     /// Test stub for VfioDmaMapping.
     struct MockMapping;
@@ -1747,8 +1747,9 @@ mod tests {
         mapping: &Arc<IommuMapping>,
         ext_mapping: &BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
     ) -> (Result<usize, Error>, u8) {
-        let mem = GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
-        let vq = VirtQueue::new(GuestAddress(0x1000), &mem, 2);
+        let guest_memory = GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let mem = guest_memory.memory();
+        let vq = VirtQueue::new(GuestAddress(0x1000), &*mem, 2);
         let req_addr = GuestAddress(0x2000);
         let tail_addr = GuestAddress(0x3000);
         let head = VirtioIommuReqHead {
@@ -1769,8 +1770,7 @@ mod tests {
         vq.avail.idx.set(1);
 
         let mut queue = vq.create_queue();
-        let mem_atomic = GuestMemory::new(mem.clone());
-        let mut desc_chain = queue.pop_descriptor_chain(mem_atomic.memory()).unwrap();
+        let mut desc_chain = queue.pop_descriptor_chain(guest_memory.memory()).unwrap();
         let result = Request::parse(&mut desc_chain, mapping, ext_mapping, (0, 0), &[], None);
         (result, mem.read_obj(tail_addr).unwrap())
     }

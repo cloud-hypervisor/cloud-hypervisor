@@ -37,8 +37,6 @@ pub mod vhost_user;
 pub mod vsock;
 pub mod watchdog;
 
-#[cfg(any(test, fuzzing))]
-use vm_allocator::GuestMemoryMap;
 use vm_allocator::{GuestMemory, GuestRegion};
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{GuestAddress, GuestMemoryBackend, GuestMemoryError};
