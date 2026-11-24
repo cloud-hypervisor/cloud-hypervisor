@@ -448,10 +448,6 @@ struct KvmDirtyLogSlot {
     guest_phys_addr: u64,
     memory_size: u64,
     userspace_addr: u64,
-    flags: u32,
-    // Following fields are used by kvm_userspace_memory_region2.
-    guest_memfd_offset: u64,
-    guest_memfd: u32,
 }
 
 struct KvmMemorySlot {
@@ -481,6 +477,28 @@ pub struct KvmVm {
 }
 
 impl KvmVm {
+    // SAFETY: The arguments must identify a live slot registered for dirty logging.
+    unsafe fn set_dirty_log_region(
+        &self,
+        slot: u32,
+        base_gpa: u64,
+        memory_size: u64,
+        userspace_addr: *mut u8,
+        enable: bool,
+    ) -> Result<(), kvm_ioctls::Error> {
+        // Logging is only supported for writable slots without a guest_memfd.
+        let region = kvm_userspace_memory_region2 {
+            slot,
+            guest_phys_addr: base_gpa,
+            memory_size,
+            userspace_addr: userspace_addr as u64,
+            flags: if enable { KVM_MEM_LOG_DIRTY_PAGES } else { 0 },
+            ..Default::default()
+        };
+        // SAFETY: The caller supplies the existing slot and keeps its mapping alive.
+        unsafe { self.fd.set_user_memory_region2(region) }
+    }
+
     /// Creates an emulated device in the kernel.
     ///
     /// See the documentation for `KVM_CREATE_DEVICE`.
@@ -1022,9 +1040,6 @@ impl vm::Vm for KvmVm {
                     guest_phys_addr: region.guest_phys_addr,
                     memory_size: region.memory_size,
                     userspace_addr: region.userspace_addr,
-                    flags: region.flags,
-                    guest_memfd_offset: region.guest_memfd_offset,
-                    guest_memfd: region.guest_memfd,
                 },
             );
         }
@@ -1311,21 +1326,14 @@ impl vm::Vm for KvmVm {
     fn start_dirty_log(&self) -> vm::Result<()> {
         let dirty_log_slots = self.dirty_log_slots.read().unwrap();
         for s in dirty_log_slots.values() {
-            let region = kvm_userspace_memory_region2 {
-                slot: s.slot,
-                guest_phys_addr: s.guest_phys_addr,
-                memory_size: s.memory_size,
-                userspace_addr: s.userspace_addr,
-                flags: s.flags | KVM_MEM_LOG_DIRTY_PAGES,
-                guest_memfd: s.guest_memfd,
-                guest_memfd_offset: s.guest_memfd_offset,
-                ..Default::default()
-            };
-            // SAFETY: Safe because guest regions are guaranteed not to overlap.
+            // SAFETY: The slot record describes the mapping registered for logging.
             unsafe {
-                self.fd
-                    .set_user_memory_region2(region)
-                    .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))?;
+                self.start_dirty_log_region(
+                    s.slot,
+                    s.guest_phys_addr,
+                    s.memory_size,
+                    s.userspace_addr as *mut u8,
+                )?;
             }
         }
 
@@ -1336,25 +1344,42 @@ impl vm::Vm for KvmVm {
     fn stop_dirty_log(&self) -> vm::Result<()> {
         let dirty_log_slots = self.dirty_log_slots.read().unwrap();
         for s in dirty_log_slots.values() {
-            let region = kvm_userspace_memory_region2 {
-                slot: s.slot,
-                guest_phys_addr: s.guest_phys_addr,
-                memory_size: s.memory_size,
-                userspace_addr: s.userspace_addr,
-                flags: s.flags & !KVM_MEM_LOG_DIRTY_PAGES,
-                guest_memfd: s.guest_memfd,
-                guest_memfd_offset: s.guest_memfd_offset,
-                ..Default::default()
-            };
-            // SAFETY: Safe because guest regions are guaranteed not to overlap.
+            // SAFETY: The slot record describes the mapping registered for logging.
             unsafe {
-                self.fd
-                    .set_user_memory_region2(region)
-                    .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))?;
+                self.stop_dirty_log_region(
+                    s.slot,
+                    s.guest_phys_addr,
+                    s.memory_size,
+                    s.userspace_addr as *mut u8,
+                )?;
             }
         }
 
         Ok(())
+    }
+
+    unsafe fn start_dirty_log_region(
+        &self,
+        slot: u32,
+        base_gpa: u64,
+        memory_size: u64,
+        userspace_addr: *mut u8,
+    ) -> vm::Result<()> {
+        // SAFETY: The caller supplies a live slot registered for logging.
+        unsafe { self.set_dirty_log_region(slot, base_gpa, memory_size, userspace_addr, true) }
+            .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))
+    }
+
+    unsafe fn stop_dirty_log_region(
+        &self,
+        slot: u32,
+        base_gpa: u64,
+        memory_size: u64,
+        userspace_addr: *mut u8,
+    ) -> vm::Result<()> {
+        // SAFETY: The caller supplies a live slot registered for logging.
+        unsafe { self.set_dirty_log_region(slot, base_gpa, memory_size, userspace_addr, false) }
+            .map_err(|e| vm::HypervisorVmError::StopDirtyLog(e.into()))
     }
 
     /// Get dirty pages bitmap (one bit per page)

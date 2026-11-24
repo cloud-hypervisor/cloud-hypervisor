@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::num::NonZeroUsize;
 #[cfg(feature = "sev_snp")]
 use std::ptr;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::{fs, io, result};
 
 #[cfg(target_arch = "x86_64")]
@@ -55,8 +55,6 @@ pub mod x86_64;
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
 use std::os::unix::io::AsRawFd;
-#[cfg(target_arch = "aarch64")]
-use std::sync::Mutex;
 
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::VcpuMshvState;
@@ -365,6 +363,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             Ok(Arc::new(MshvVm {
                 fd: vm_fd,
                 msrs: ArcSwap::new(Vec::<MsrEntry>::new().into()),
+                dirty_tracking_enabled: Mutex::new(false),
                 dirty_log_slots: RwLock::new(HashMap::new()),
                 #[cfg(feature = "sev_snp")]
                 sev_snp_enabled: mshv_vm_type == VmType::Snp,
@@ -383,6 +382,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         {
             Ok(Arc::new(MshvVm {
                 fd: vm_fd,
+                dirty_tracking_enabled: Mutex::new(false),
                 dirty_log_slots: RwLock::new(HashMap::new()),
             }))
         }
@@ -1752,6 +1752,7 @@ pub struct MshvVm {
     fd: Arc<VmFd>,
     #[cfg(target_arch = "x86_64")]
     msrs: ArcSwap<Vec<MsrEntry>>,
+    dirty_tracking_enabled: Mutex<bool>,
     dirty_log_slots: RwLock<HashMap<u64, MshvDirtyLogSlot>>,
     #[cfg(feature = "sev_snp")]
     sev_snp_enabled: bool,
@@ -2120,12 +2121,52 @@ impl vm::Vm for MshvVm {
                     s.memory_size as usize,
                     MSHV_GPAP_ACCESS_OP_SET as u8,
                 )
-                .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))?;
+                .map_err(|e| vm::HypervisorVmError::StopDirtyLog(e.into()))?;
         }
         self.fd
             .disable_dirty_page_tracking()
-            .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))?;
+            .map_err(|e| vm::HypervisorVmError::StopDirtyLog(e.into()))?;
         Ok(())
+    }
+
+    unsafe fn start_dirty_log_region(
+        &self,
+        slot: u32,
+        base_gpa: u64,
+        memory_size: u64,
+        _userspace_addr: *mut u8,
+    ) -> vm::Result<()> {
+        {
+            let mut enabled = self.dirty_tracking_enabled.lock().unwrap();
+            if !*enabled {
+                self.fd
+                    .enable_dirty_page_tracking()
+                    .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))?;
+                *enabled = true;
+            }
+        }
+        self.get_dirty_log(slot, base_gpa, memory_size).map(|_| ())
+    }
+
+    unsafe fn stop_dirty_log_region(
+        &self,
+        _slot: u32,
+        base_gpa: u64,
+        memory_size: u64,
+        _userspace_addr: *mut u8,
+    ) -> vm::Result<()> {
+        // Migration cleanup may run before tracking has been enabled.
+        if !*self.dirty_tracking_enabled.lock().unwrap() {
+            return Ok(());
+        }
+        self.fd
+            .get_dirty_log(
+                base_gpa >> PAGE_SHIFT,
+                memory_size as usize,
+                MSHV_GPAP_ACCESS_OP_SET as u8,
+            )
+            .map(|_| ())
+            .map_err(|e| vm::HypervisorVmError::StopDirtyLog(e.into()))
     }
 
     /// Get dirty pages bitmap (one bit per page)
