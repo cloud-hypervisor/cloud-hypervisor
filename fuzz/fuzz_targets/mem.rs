@@ -336,7 +336,9 @@ fn run_device_scenario(stream: &mut FuzzCursor, kind: ScenarioKind) -> Result<()
     let guest_memory =
         GuestMemory::from_ranges(&[(GuestAddress(DESC_TABLE_ADDR), QUEUE_REGION_SIZE)])
             .map_err(|_| ())?;
-    guest_memory.add_region(virtio_mem_region).map_err(|_| ())?;
+    guest_memory
+        .add_region(&virtio_mem_region)
+        .map_err(|_| ())?;
 
     let chains = build_chains(kind, stream);
     if !populate_queue_memory(&*guest_memory.memory(), &mut queue, &chains) {
