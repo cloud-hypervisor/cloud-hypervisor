@@ -465,7 +465,7 @@ pub(crate) fn setup_smbios<M: GuestMemoryBackend>(
 
 #[cfg(test)]
 mod tests {
-    use vm_allocator::GuestMemory;
+    use vm_allocator::GuestMemoryMap;
 
     use super::*;
 
@@ -510,7 +510,7 @@ mod tests {
 
     #[test]
     fn entrypoint_checksum() {
-        let mem = GuestMemory::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
+        let mem = GuestMemoryMap::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
 
         setup_smbios(&mem, None).unwrap();
 
@@ -540,7 +540,7 @@ mod tests {
 
     #[test]
     fn smbios_chassis_empty_string_set_has_double_null() {
-        let mem = GuestMemory::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
+        let mem = GuestMemoryMap::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
         let smbios = SmbiosConfig {
             chassis: Some(SmbiosChassisConfig::default()),
             ..Default::default()
@@ -576,7 +576,7 @@ mod tests {
 
     #[test]
     fn smbios_chassis_oem_strings_layout() {
-        let mem = GuestMemory::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
+        let mem = GuestMemoryMap::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
 
         let smbios = SmbiosConfig {
             chassis: Some(SmbiosChassisConfig {
@@ -623,7 +623,7 @@ mod tests {
 
     #[test]
     fn smbios_strings_terminators_default() {
-        let mem = GuestMemory::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
+        let mem = GuestMemoryMap::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
 
         setup_smbios(&mem, None).unwrap();
 
@@ -669,7 +669,7 @@ mod tests {
 
     #[test]
     fn smbios_uuid_invalid_rejected() {
-        let mem = GuestMemory::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
+        let mem = GuestMemoryMap::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
         let smbios = SmbiosConfig {
             system: Some(SmbiosSystem {
                 uuid: Some("not-a-uuid".to_string()),
@@ -684,7 +684,7 @@ mod tests {
 
     #[test]
     fn smbios_uuid_written_le() {
-        let mem = GuestMemory::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
+        let mem = GuestMemoryMap::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
         let uuid_str = "00112233-4455-6677-8899-aabbccddeeff";
         let smbios = SmbiosConfig {
             system: Some(SmbiosSystem {
@@ -714,7 +714,7 @@ mod tests {
         // rejection comes from the size check below, not from running out of
         // guest memory.
         let mem =
-            GuestMemory::from_ranges(&[(SMBIOS_START, (SMBIOS_MAX_SIZE * 2) as usize)]).unwrap();
+            GuestMemoryMap::from_ranges(&[(SMBIOS_START, (SMBIOS_MAX_SIZE * 2) as usize)]).unwrap();
 
         // A single OEM string larger than the whole reservation. Reachable
         // via `--platform oem_strings=...`, which places no bound on length.
@@ -729,8 +729,8 @@ mod tests {
 
     #[test]
     fn smbios_write_fails_with_too_small_memory() {
-        let mem =
-            GuestMemory::from_ranges(&[(SMBIOS_START, size_of::<Smbios30Entrypoint>())]).unwrap();
+        let mem = GuestMemoryMap::from_ranges(&[(SMBIOS_START, size_of::<Smbios30Entrypoint>())])
+            .unwrap();
 
         let err = setup_smbios(&mem, None).unwrap_err();
         assert!(matches!(err, Error::WriteData(_)));
@@ -738,7 +738,7 @@ mod tests {
 
     #[test]
     fn smbios_type0_is_virtual_machine_bit_set() {
-        let mem = GuestMemory::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
+        let mem = GuestMemoryMap::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
 
         setup_smbios(&mem, None).unwrap();
 

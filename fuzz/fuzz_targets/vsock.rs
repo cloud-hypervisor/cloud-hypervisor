@@ -17,8 +17,8 @@ use virtio_devices::{
     ActivationContext, VirtioDevice, VirtioInterrupt, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
 };
 use virtio_queue::{Queue, QueueT};
-use vm_allocator::GuestMemory;
-use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryBackend};
+use vm_allocator::{GuestMemory, GuestMemoryMap};
+use vm_memory::{Bytes, GuestAddress, GuestMemoryBackend};
 use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::{AccessPlatform, AccessType};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
@@ -379,7 +379,7 @@ fn run_worker_scenario(
         let _ = backend.evfd.write(1);
     }
 
-    let mem = match GuestMemory::from_ranges(&[
+    let mem = match GuestMemoryMap::from_ranges(&[
         (GuestAddress(0), MEM_SIZE),
         (
             GuestAddress(BASE_VIRT_QUEUE_ADDR),
@@ -403,7 +403,7 @@ fn run_worker_scenario(
         return false;
     }
 
-    let guest_memory = GuestMemoryAtomic::new(mem);
+    let guest_memory = GuestMemory::new(mem);
     let mut queues_with_evts = Vec::with_capacity(NUM_QUEUES as usize);
     for i in 0..NUM_QUEUES {
         let q = match build_queue(
@@ -630,11 +630,11 @@ fn exercise_device_paths(bytes: &[u8]) {
     let _ = device.snapshot();
     let _ = device.id();
 
-    let mem = match GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
+    let mem = match GuestMemoryMap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
         Ok(mem) => mem,
         Err(_) => return,
     };
-    let memory = GuestMemoryAtomic::new(mem);
+    let memory = GuestMemory::new(mem);
     let _ = device.activate(ActivationContext {
         mem: memory.clone(),
         interrupt_cb: Arc::new(HarnessInterrupt {

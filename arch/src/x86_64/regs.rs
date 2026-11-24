@@ -211,13 +211,13 @@ pub fn configure_segments_and_sregs<M: GuestMemoryBackend>(
 
 #[cfg(test)]
 mod tests {
-    use vm_allocator::GuestMemory;
+    use vm_allocator::GuestMemoryMap;
     use vm_memory::GuestAddress;
 
     use super::*;
 
-    fn create_guest_mem() -> GuestMemory {
-        GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap()
+    fn create_guest_mem() -> GuestMemoryMap {
+        GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap()
     }
 
     fn read_u64<M: GuestMemoryBackend>(gm: &M, offset: GuestAddress) -> u64 {

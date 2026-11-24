@@ -21,7 +21,7 @@ use serial_buffer::{SerialBuffer, SocketConsole};
 use smallvec::SmallVec;
 use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
-use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic};
+use vm_memory::{ByteValued, Bytes, GuestAddressSpace};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
 use vm_virtio::checked_descriptor::DescriptorChainExt;
@@ -86,7 +86,7 @@ impl Default for VirtioConsoleConfig {
 unsafe impl ByteValued for VirtioConsoleConfig {}
 
 struct ConsoleEpollHandler {
-    mem: GuestMemoryAtomic<GuestMemory>,
+    mem: GuestMemory,
     input_queue: Queue,
     output_queue: Queue,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
@@ -151,7 +151,7 @@ impl Endpoint {
 impl ConsoleEpollHandler {
     #[expect(clippy::too_many_arguments)]
     fn new(
-        mem: GuestMemoryAtomic<GuestMemory>,
+        mem: GuestMemory,
         input_queue: Queue,
         output_queue: Queue,
         interrupt_cb: Arc<dyn VirtioInterrupt>,

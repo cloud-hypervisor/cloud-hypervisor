@@ -19,11 +19,10 @@ use std::sync::{Arc, Mutex};
 use hypervisor::arch::aarch64::gic::Vgic;
 use log::{Level, log_enabled};
 use thiserror::Error;
-use vm_allocator::GuestMemory;
-use vm_memory::{Address, GuestAddress, GuestMemoryAtomic, GuestMemoryBackend};
+use vm_memory::{Address, GuestAddress, GuestMemoryBackend};
 
 pub use self::fdt::DeviceInfoForFdt;
-use crate::{DeviceType, NumaNodes, PciSpaceInfo, RegionType, smbios};
+use crate::{DeviceType, GuestMemory, NumaNodes, PciSpaceInfo, RegionType, smbios};
 
 pub const _NSIG: i32 = 65;
 
@@ -74,7 +73,7 @@ pub struct EntryPoint {
 pub fn configure_vcpu(
     vcpu: &dyn hypervisor::Vcpu,
     id: u32,
-    boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemory>)>,
+    boot_setup: Option<(EntryPoint, &GuestMemory)>,
     nested: bool,
 ) -> super::Result<()> {
     if let Some((kernel_entry_point, _guest_memory)) = boot_setup {

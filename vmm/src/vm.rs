@@ -74,7 +74,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracer::trace_scoped;
 use vm_device::Bus;
-use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend};
+use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend};
 use vm_migration::protocol::{MemoryRangeTable, Request, Response};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, snapshot_from_id,
@@ -381,7 +381,7 @@ impl VmState {
 }
 
 struct VmOpsHandler {
-    memory: GuestMemoryAtomic<GuestMemory>,
+    memory: GuestMemory,
     #[cfg(target_arch = "x86_64")]
     io_bus: Arc<Bus>,
     mmio_bus: Arc<Bus>,
@@ -2694,7 +2694,7 @@ impl Vm {
         self.memory_manager.lock().unwrap().memory_range_table(mode)
     }
 
-    pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemory> {
+    pub fn guest_memory(&self) -> GuestMemory {
         self.memory_manager.lock().unwrap().guest_memory()
     }
 
@@ -3194,7 +3194,7 @@ impl Debuggable for Vm {
 
     fn read_mem(
         &self,
-        guest_memory: &GuestMemoryAtomic<GuestMemory>,
+        guest_memory: &GuestMemory,
         cpu_id: usize,
         vaddr: GuestAddress,
         len: usize,
@@ -3207,7 +3207,7 @@ impl Debuggable for Vm {
 
     fn write_mem(
         &self,
-        guest_memory: &GuestMemoryAtomic<GuestMemory>,
+        guest_memory: &GuestMemory,
         cpu_id: usize,
         vaddr: &GuestAddress,
         data: &[u8],
@@ -3356,7 +3356,7 @@ mod tests {
         use std::sync::atomic::AtomicU32;
 
         use hypervisor::VmExit;
-        use vm_allocator::{GuestRegion, MemorySlotAllocator};
+        use vm_allocator::{GuestMemoryMap, GuestRegion, MemorySlotAllocator};
         // This example based on https://lwn.net/Articles/658511/
         let code = [
             0xba, 0xf8, 0x03, /* mov $0x3f8, %dx */
@@ -3391,7 +3391,7 @@ mod tests {
             hypervisor::MemoryVisibility::Shared,
         )
         .unwrap();
-        let mem = GuestMemory::from_regions(vec![region]).unwrap();
+        let mem = GuestMemoryMap::from_regions(vec![region]).unwrap();
         mem.write_slice(&code, load_addr)
             .expect("Writing code to memory failed");
         for region in mem.iter() {
@@ -3432,6 +3432,7 @@ mod tests {
 mod tests {
     use arch::{DeviceType, MmioDeviceInfo};
     use devices::gic::Gic;
+    use vm_allocator::GuestMemoryMap;
 
     use super::*;
 
@@ -3443,7 +3444,7 @@ mod tests {
             arch::aarch64::layout::RAM_START,
             (arch::aarch64::layout::FDT_MAX_SIZE + 0x1000) as usize,
         )];
-        let mem = GuestMemory::from_ranges(&regions).expect("Cannot initialize memory");
+        let mem = GuestMemoryMap::from_ranges(&regions).expect("Cannot initialize memory");
 
         let dev_info: HashMap<(DeviceType, String), MmioDeviceInfo> = [
             (

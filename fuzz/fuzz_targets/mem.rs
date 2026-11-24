@@ -19,9 +19,9 @@ use virtio_devices::{
     VirtioMemMappingSource,
 };
 use virtio_queue::{Queue, QueueT};
-use vm_allocator::{GuestMemory, GuestRegion};
+use vm_allocator::{GuestMemory, GuestMemoryMap, GuestRegion};
 use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
-use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryBackend};
+use vm_memory::{Bytes, GuestAddress, GuestMemoryBackend};
 use vm_migration::{Pausable, Snapshottable};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
@@ -333,8 +333,9 @@ fn run_device_scenario(stream: &mut FuzzCursor, kind: ScenarioKind) -> Result<()
 
     let mut queue = setup_virt_queue(stream).ok_or(())?;
 
-    let mut mem = GuestMemory::from_ranges(&[(GuestAddress(DESC_TABLE_ADDR), QUEUE_REGION_SIZE)])
-        .map_err(|_| ())?;
+    let mut mem =
+        GuestMemoryMap::from_ranges(&[(GuestAddress(DESC_TABLE_ADDR), QUEUE_REGION_SIZE)])
+            .map_err(|_| ())?;
     mem = mem.insert_region(virtio_mem_region).map_err(|_| ())?;
 
     let chains = build_chains(kind, stream);
@@ -350,7 +351,7 @@ fn run_device_scenario(stream: &mut FuzzCursor, kind: ScenarioKind) -> Result<()
     let dma_handler: Arc<dyn ExternalDmaMapping> = Arc::new(dma_handler);
     let _ = virtio_mem.add_dma_mapping_handler(VirtioMemMappingSource::Container, &dma_handler);
 
-    let guest_memory = GuestMemoryAtomic::new(mem);
+    let guest_memory = GuestMemory::new(mem);
 
     let evt = EventFd::new(0).map_err(|_| ())?;
     let queue_evt = duplicate_eventfd(&evt).map_err(|_| ())?;

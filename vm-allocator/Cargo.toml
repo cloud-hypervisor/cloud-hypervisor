@@ -14,7 +14,11 @@ hypervisor = { path = "../hypervisor" }
 libc = { workspace = true }
 log = { workspace = true }
 thiserror = { workspace = true }
-vm-memory = { workspace = true, features = ["backend-bitmap", "backend-mmap"] }
+vm-memory = { workspace = true, features = [
+  "backend-atomic",
+  "backend-bitmap",
+  "backend-mmap",
+] }
 
 [lints]
 workspace = true

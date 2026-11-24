@@ -270,7 +270,7 @@ pub(super) fn setup_mptable<M: GuestMemoryBackend>(
 
 #[cfg(test)]
 mod tests {
-    use vm_allocator::GuestMemory;
+    use vm_allocator::GuestMemoryMap;
     use vm_memory::bitmap::BitmapSlice;
     use vm_memory::{GuestUsize, VolatileMemoryError, VolatileSlice, WriteVolatile};
 
@@ -291,7 +291,8 @@ mod tests {
     #[test]
     fn bounds_check() {
         let num_cpus = 4;
-        let mem = GuestMemory::from_ranges(&[(MPTABLE_START, compute_mp_size(num_cpus))]).unwrap();
+        let mem =
+            GuestMemoryMap::from_ranges(&[(MPTABLE_START, compute_mp_size(num_cpus))]).unwrap();
 
         setup_mptable(MPTABLE_START, &mem, num_cpus, None).unwrap();
     }
@@ -300,7 +301,7 @@ mod tests {
     fn bounds_check_fails() {
         let num_cpus = 4;
         let mem =
-            GuestMemory::from_ranges(&[(MPTABLE_START, compute_mp_size(num_cpus) - 1)]).unwrap();
+            GuestMemoryMap::from_ranges(&[(MPTABLE_START, compute_mp_size(num_cpus) - 1)]).unwrap();
 
         setup_mptable(MPTABLE_START, &mem, num_cpus, None).unwrap_err();
     }
@@ -308,7 +309,8 @@ mod tests {
     #[test]
     fn mpf_intel_checksum() {
         let num_cpus = 1;
-        let mem = GuestMemory::from_ranges(&[(MPTABLE_START, compute_mp_size(num_cpus))]).unwrap();
+        let mem =
+            GuestMemoryMap::from_ranges(&[(MPTABLE_START, compute_mp_size(num_cpus))]).unwrap();
 
         setup_mptable(MPTABLE_START, &mem, num_cpus, None).unwrap();
 
@@ -320,7 +322,8 @@ mod tests {
     #[test]
     fn mpc_table_checksum() {
         let num_cpus = 4;
-        let mem = GuestMemory::from_ranges(&[(MPTABLE_START, compute_mp_size(num_cpus))]).unwrap();
+        let mem =
+            GuestMemoryMap::from_ranges(&[(MPTABLE_START, compute_mp_size(num_cpus))]).unwrap();
 
         setup_mptable(MPTABLE_START, &mem, num_cpus, None).unwrap();
 
@@ -353,7 +356,7 @@ mod tests {
 
     #[test]
     fn cpu_entry_count() {
-        let mem = GuestMemory::from_ranges(&[(
+        let mem = GuestMemoryMap::from_ranges(&[(
             MPTABLE_START,
             compute_mp_size(MAX_SUPPORTED_CPUS_LEGACY),
         )])
@@ -390,7 +393,7 @@ mod tests {
     #[test]
     fn cpu_entry_count_max() {
         let cpus = MAX_SUPPORTED_CPUS_LEGACY + 1;
-        let mem = GuestMemory::from_ranges(&[(MPTABLE_START, compute_mp_size(cpus))]).unwrap();
+        let mem = GuestMemoryMap::from_ranges(&[(MPTABLE_START, compute_mp_size(cpus))]).unwrap();
 
         setup_mptable(MPTABLE_START, &mem, cpus, None).unwrap();
     }

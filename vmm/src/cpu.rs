@@ -75,9 +75,9 @@ use tracer::trace_scoped;
 use vm_device::BusDevice;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use vm_memory::ByteValued;
+use vm_memory::GuestAddress;
 #[cfg(feature = "guest_debug")]
 use vm_memory::{Bytes, GuestAddressSpace};
-use vm_memory::{GuestAddress, GuestMemoryAtomic};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotData, Snapshottable, Transportable,
     snapshot_from_id,
@@ -544,7 +544,7 @@ impl Vcpu {
     /// * `cpuid` - (x86_64) CpuId, wrapper over the `kvm_cpuid2` structure.
     pub fn configure(
         &mut self,
-        boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemory>)>,
+        boot_setup: Option<(EntryPoint, &GuestMemory)>,
         #[cfg(target_arch = "aarch64")] nested: bool,
         #[cfg(target_arch = "x86_64")] cpuid: Vec<CpuIdEntry>,
         #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
@@ -1097,7 +1097,7 @@ impl CpuManager {
     pub fn configure_vcpu(
         &self,
         vcpu: &mut Vcpu,
-        boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemory>)>,
+        boot_setup: Option<(EntryPoint, &GuestMemory)>,
     ) -> Result<()> {
         #[cfg(all(feature = "sev_snp", feature = "mshv"))]
         if self.sev_snp_enabled
@@ -2269,12 +2269,7 @@ impl CpuManager {
     }
 
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-    fn translate_gva(
-        &self,
-        _guest_memory: &GuestMemoryAtomic<GuestMemory>,
-        cpu_id: u8,
-        gva: u64,
-    ) -> Result<u64> {
+    fn translate_gva(&self, _guest_memory: &GuestMemory, cpu_id: u8, gva: u64) -> Result<u64> {
         let (gpa, _) = self.vcpus[usize::from(cpu_id)]
             .lock()
             .unwrap()
@@ -2299,12 +2294,7 @@ impl CpuManager {
     /// - FEAT_LVA
     /// - FEAT_LPA2
     #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
-    fn translate_gva(
-        &self,
-        guest_memory: &GuestMemoryAtomic<GuestMemory>,
-        cpu_id: u8,
-        gva: u64,
-    ) -> Result<u64> {
+    fn translate_gva(&self, guest_memory: &GuestMemory, cpu_id: u8, gva: u64) -> Result<u64> {
         let (tcr_el1, ttbr1_el1, id_aa64mmfr0_el1): (u64, u64, u64) = {
             let vcpu = self.vcpus[usize::from(cpu_id)].lock().unwrap();
             (
@@ -3104,7 +3094,7 @@ impl Debuggable for CpuManager {
 
     fn read_mem(
         &self,
-        guest_memory: &GuestMemoryAtomic<GuestMemory>,
+        guest_memory: &GuestMemory,
         cpu_id: usize,
         vaddr: GuestAddress,
         len: usize,
@@ -3135,7 +3125,7 @@ impl Debuggable for CpuManager {
 
     fn write_mem(
         &self,
-        guest_memory: &GuestMemoryAtomic<GuestMemory>,
+        guest_memory: &GuestMemory,
         cpu_id: usize,
         vaddr: &GuestAddress,
         data: &[u8],

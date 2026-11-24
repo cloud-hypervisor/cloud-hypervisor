@@ -21,8 +21,8 @@ use std::ops::Deref;
 
 use virtio_queue::DescriptorChain;
 use vm_memory::{
-    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend,
-    ReadVolatile, VolatileMemoryError, WriteVolatile,
+    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend, ReadVolatile,
+    VolatileMemoryError, WriteVolatile,
 };
 use vm_virtio::AccessPlatform;
 use vm_virtio::checked_descriptor::DescriptorChainExt;
@@ -114,7 +114,7 @@ fn set_hdr_field<const N: usize>(hdr: &mut [u8], offset: usize, field: [u8; N]) 
 ///   multiple virtq descriptors.
 enum PacketBuffer {
     Guest {
-        mem: GuestMemoryAtomic<GuestMemory>,
+        mem: GuestMemory,
         addr: GuestAddress,
         len: usize,
     },
@@ -122,7 +122,7 @@ enum PacketBuffer {
 }
 
 impl PacketBuffer {
-    fn guest(mem: GuestMemoryAtomic<GuestMemory>, addr: GuestAddress, len: usize) -> Result<Self> {
+    fn guest(mem: GuestMemory, addr: GuestAddress, len: usize) -> Result<Self> {
         // Validate the range before storing it.
         mem.memory()
             .get_slice(addr, len)
@@ -274,7 +274,7 @@ impl VsockPacket {
     /// creating the wrapper.
     pub fn from_tx_virtq_head<M>(
         desc_chain: &mut DescriptorChain<M>,
-        mem: &GuestMemoryAtomic<GuestMemory>,
+        mem: &GuestMemory,
         access_platform: Option<&dyn AccessPlatform>,
     ) -> Result<Self>
     where
@@ -416,7 +416,7 @@ impl VsockPacket {
     /// descriptor. Bounds and pointer checks are performed when creating the wrapper.
     pub fn from_rx_virtq_head<M>(
         desc_chain: &mut DescriptorChain<M>,
-        mem: &GuestMemoryAtomic<GuestMemory>,
+        mem: &GuestMemory,
         access_platform: Option<&dyn AccessPlatform>,
     ) -> Result<Self>
     where
@@ -686,7 +686,7 @@ impl VsockPacket {
 mod tests {
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::QueueOwnedT;
-    use vm_memory::{GuestAddress, GuestMemoryAtomic};
+    use vm_memory::GuestAddress;
     use vm_virtio::queue::testing::{VirtQueue as GuestQ, VirtqDesc as GuestQDesc};
 
     use super::super::tests::TestContext;
@@ -856,7 +856,7 @@ mod tests {
 
         let pkt = VsockPacket::from_tx_virtq_head(
             &mut queue.iter(&test_ctx.mem).unwrap().next().unwrap(),
-            &GuestMemoryAtomic::new(test_ctx.mem.clone()),
+            &GuestMemory::new(test_ctx.mem.clone()),
             None,
         )
         .unwrap();

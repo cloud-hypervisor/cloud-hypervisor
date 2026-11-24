@@ -19,11 +19,10 @@ use std::sync::{Arc, Mutex};
 use hypervisor::arch::riscv64::aia::Vaia;
 use log::{Level, log_enabled};
 use thiserror::Error;
-use vm_allocator::GuestMemory;
-use vm_memory::{Address, GuestAddress, GuestMemoryAtomic, GuestMemoryBackend};
+use vm_memory::{Address, GuestAddress, GuestMemoryBackend};
 
 pub use self::fdt::DeviceInfoForFdt;
-use crate::{DeviceType, PciSpaceInfo, RegionType};
+use crate::{DeviceType, GuestMemory, PciSpaceInfo, RegionType};
 
 pub const CLOUDHV_IRQCHIP_NUM_MSIS: u16 = 255;
 pub const CLOUDHV_IRQCHIP_NUM_SOURCES: u8 = 96;
@@ -84,7 +83,7 @@ pub struct EntryPoint {
 pub fn configure_vcpu(
     vcpu: &dyn hypervisor::Vcpu,
     id: u32,
-    boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemory>)>,
+    boot_setup: Option<(EntryPoint, &GuestMemory)>,
 ) -> super::Result<()> {
     if let Some((kernel_entry_point, _guest_memory)) = boot_setup {
         vcpu.setup_regs(

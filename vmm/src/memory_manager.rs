@@ -40,8 +40,8 @@ use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::mmap::MmapRegionError;
 use vm_memory::{
-    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend,
-    GuestMemoryError, GuestMemoryRegion, GuestUsize, MmapRegion,
+    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend, GuestMemoryError,
+    GuestMemoryRegion, GuestRegionCollection, GuestUsize, MmapRegion,
 };
 use vm_migration::protocol::{MemoryRange, MemoryRangeTable};
 use vm_migration::{
@@ -357,7 +357,7 @@ struct CowSource {
 
 pub struct MemoryManager {
     boot_regions: Vec<Arc<GuestRegion>>,
-    guest_memory: GuestMemoryAtomic<GuestMemory>,
+    guest_memory: GuestMemory,
     next_memory_slot: Arc<AtomicU32>,
     memory_slot_allocator: Arc<MemorySlotAllocator>,
     start_of_device_area: GuestAddress,
@@ -2331,11 +2331,11 @@ impl MemoryManager {
                 dynamic,
             )?;
 
-            let mut guest_memory =
+            let guest_memory =
                 GuestMemory::from_arc_regions(mem_regions).map_err(Error::GuestRegionCollection)?;
 
             let mut start_of_device_area =
-                MemoryManager::start_addr(guest_memory.last_addr(), allow_mem_hotplug)?;
+                MemoryManager::start_addr(guest_memory.memory().last_addr(), allow_mem_hotplug)?;
 
             // Update list of memory zones for resize.
             for zone in zones.iter() {
@@ -2387,8 +2387,8 @@ impl MemoryManager {
                                 hypervisor::MemoryVisibility::Private,
                             )?;
 
-                            guest_memory = guest_memory
-                                .insert_region(Arc::clone(&region))
+                            guest_memory
+                                .add_region(Arc::clone(&region))
                                 .map_err(Error::GuestRegionCollection)?;
 
                             let hotplugged_size = zone.hotplugged_size.unwrap_or(0);
@@ -2433,8 +2433,6 @@ impl MemoryManager {
             &memory_zones,
             prefault,
         )?)?;
-
-        let guest_memory = GuestMemoryAtomic::new(guest_memory);
 
         let allocator = Arc::new(Mutex::new(
             SystemAllocator::new(
@@ -2857,18 +2855,6 @@ impl MemoryManager {
         }
     }
 
-    // Update the GuestMemory with the new range
-    fn add_region(&mut self, region: Arc<GuestRegion>) -> Result<(), Error> {
-        let guest_memory = self
-            .guest_memory
-            .memory()
-            .insert_region(region)
-            .map_err(Error::GuestRegionCollection)?;
-        self.guest_memory.lock().unwrap().replace(guest_memory);
-
-        Ok(())
-    }
-
     //
     // Calculate the start address of an area next to RAM.
     //
@@ -2943,7 +2929,9 @@ impl MemoryManager {
 
         region.register().map_err(Error::RegisterGuestRegion)?;
         let slot = region.slot().unwrap();
-        self.add_region(Arc::clone(&region))?;
+        self.guest_memory
+            .add_region(Arc::clone(&region))
+            .map_err(Error::GuestRegionCollection)?;
 
         self.guest_ram_mappings.push(GuestRamMapping {
             gpa: region.start_addr().raw_value(),
@@ -3037,12 +3025,12 @@ impl MemoryManager {
         Ok(region)
     }
 
-    pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemory> {
+    pub fn guest_memory(&self) -> GuestMemory {
         self.guest_memory.clone()
     }
 
-    pub fn boot_guest_memory(&self) -> GuestMemory {
-        GuestMemory::from_arc_regions(self.boot_regions.clone())
+    pub fn boot_guest_memory(&self) -> GuestRegionCollection<GuestRegion> {
+        GuestRegionCollection::from_arc_regions(self.boot_regions.clone())
             .expect("Boot regions are a non-empty, sorted subset of the initial guest memory")
     }
 
@@ -4161,6 +4149,7 @@ mod tests {
     use std::io::{Read, Seek, SeekFrom, Write};
     use std::os::unix::fs::FileExt;
 
+    use vm_allocator::GuestMemoryMap;
     use vm_migration::protocol::{MemoryRange, MemoryRangeTable};
 
     use super::*;
@@ -4347,7 +4336,7 @@ mod tests {
     #[test]
     fn cow_restore_maps_data_and_reads_holes_as_zero() {
         let page = get_page_size();
-        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), (2 * page) as usize)]).unwrap();
+        let gm = GuestMemoryMap::from_ranges(&[(GuestAddress(0), (2 * page) as usize)]).unwrap();
 
         let mut file = tempfile::tempfile().unwrap();
         file.write_all(&vec![0xabu8; page as usize]).unwrap();
@@ -4379,7 +4368,7 @@ mod tests {
     #[test]
     fn cow_snapshot_writes_private_pages_over_the_source() {
         let page = get_page_size();
-        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), (16 * page) as usize)]).unwrap();
+        let gm = GuestMemoryMap::from_ranges(&[(GuestAddress(0), (16 * page) as usize)]).unwrap();
         let mut file = tempfile::tempfile().unwrap();
         for i in 0..16u8 {
             file.write_all(&vec![i + 1; page as usize]).unwrap();
@@ -4417,7 +4406,7 @@ mod tests {
     #[test]
     fn cow_restore_rejects_unaligned_or_out_of_region_ranges() {
         let page = get_page_size();
-        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), page as usize)]).unwrap();
+        let gm = GuestMemoryMap::from_ranges(&[(GuestAddress(0), page as usize)]).unwrap();
 
         let mut unaligned = MemoryRangeTable::default();
         unaligned.push(MemoryRange {
@@ -4446,7 +4435,7 @@ mod tests {
             libc::MAP_SHARED,
         )
         .unwrap();
-        let gm = GuestMemory::from_regions(vec![
+        let gm = GuestMemoryMap::from_regions(vec![
             vm_memory::GuestRegionMmap::new(region, GuestAddress(0))
                 .unwrap()
                 .into(),
@@ -4475,7 +4464,7 @@ mod tests {
                 libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | extra_flags,
             )
             .unwrap();
-            let gm = GuestMemory::from_regions(vec![
+            let gm = GuestMemoryMap::from_regions(vec![
                 vm_memory::GuestRegionMmap::new(region, GuestAddress(0))
                     .unwrap()
                     .into(),
