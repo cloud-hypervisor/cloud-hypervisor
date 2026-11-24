@@ -4,12 +4,11 @@
 //
 
 use std::any::Any;
-use std::collections::HashMap;
 #[cfg(feature = "sev_snp")]
 use std::num::NonZeroUsize;
 #[cfg(feature = "sev_snp")]
 use std::ptr;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::{fs, io, result};
 
 #[cfg(target_arch = "x86_64")]
@@ -225,11 +224,6 @@ impl From<crate::VcpuInit> for mshv_bindings::MshvVcpuInit {
     }
 }
 
-struct MshvDirtyLogSlot {
-    guest_pfn: u64,
-    memory_size: u64,
-}
-
 /// Wrapper over mshv system ioctls.
 pub struct MshvHypervisor {
     mshv: Mshv,
@@ -364,7 +358,6 @@ impl hypervisor::Hypervisor for MshvHypervisor {
                 fd: vm_fd,
                 msrs: ArcSwap::new(Vec::<MsrEntry>::new().into()),
                 dirty_tracking_enabled: Mutex::new(false),
-                dirty_log_slots: RwLock::new(HashMap::new()),
                 #[cfg(feature = "sev_snp")]
                 sev_snp_enabled: mshv_vm_type == VmType::Snp,
                 #[cfg(feature = "sev_snp")]
@@ -383,7 +376,6 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             Ok(Arc::new(MshvVm {
                 fd: vm_fd,
                 dirty_tracking_enabled: Mutex::new(false),
-                dirty_log_slots: RwLock::new(HashMap::new()),
             }))
         }
     }
@@ -1753,7 +1745,6 @@ pub struct MshvVm {
     #[cfg(target_arch = "x86_64")]
     msrs: ArcSwap<Vec<MsrEntry>>,
     dirty_tracking_enabled: Mutex<bool>,
-    dirty_log_slots: RwLock<HashMap<u64, MshvDirtyLogSlot>>,
     #[cfg(feature = "sev_snp")]
     sev_snp_enabled: bool,
     #[cfg(feature = "sev_snp")]
@@ -1981,19 +1972,7 @@ impl vm::Vm for MshvVm {
         };
         self.fd
             .map_user_memory(user_memory_region)
-            .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))?;
-        // No matter read only or not we keep track the slots.
-        // For readonly hypervisor can enable the dirty bits,
-        // but a VM exit happens before setting the dirty bits
-        self.dirty_log_slots.write().unwrap().insert(
-            user_memory_region.guest_pfn,
-            MshvDirtyLogSlot {
-                guest_pfn: user_memory_region.guest_pfn,
-                memory_size: user_memory_region.size,
-            },
-        );
-
-        Ok(())
+            .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))
     }
 
     /// Removes a guest physical memory region.
@@ -2024,14 +2003,7 @@ impl vm::Vm for MshvVm {
         };
         self.fd
             .unmap_user_memory(user_memory_region)
-            .map_err(|e| vm::HypervisorVmError::RemoveUserMemory(e.into()))?;
-        // Remove the corresponding entry from "self.dirty_log_slots" if needed
-        self.dirty_log_slots
-            .write()
-            .unwrap()
-            .remove(&user_memory_region.guest_pfn);
-
-        Ok(())
+            .map_err(|e| vm::HypervisorVmError::RemoveUserMemory(e.into()))
     }
 
     fn create_passthrough_device(&self) -> vm::Result<VfioDeviceFd> {
@@ -2099,34 +2071,6 @@ impl vm::Vm for MshvVm {
         self.fd
             .set_msi_routing(&msi_routing[0])
             .map_err(|e| vm::HypervisorVmError::SetGsiRouting(e.into()))
-    }
-
-    /// Start logging dirty pages
-    fn start_dirty_log(&self) -> vm::Result<()> {
-        self.fd
-            .enable_dirty_page_tracking()
-            .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))
-    }
-
-    /// Stop logging dirty pages
-    fn stop_dirty_log(&self) -> vm::Result<()> {
-        let dirty_log_slots = self.dirty_log_slots.read().unwrap();
-        // Before disabling the dirty page tracking we need
-        // to set the dirty bits in the Hypervisor
-        // This is a requirement from Microsoft Hypervisor
-        for s in dirty_log_slots.values() {
-            self.fd
-                .get_dirty_log(
-                    s.guest_pfn,
-                    s.memory_size as usize,
-                    MSHV_GPAP_ACCESS_OP_SET as u8,
-                )
-                .map_err(|e| vm::HypervisorVmError::StopDirtyLog(e.into()))?;
-        }
-        self.fd
-            .disable_dirty_page_tracking()
-            .map_err(|e| vm::HypervisorVmError::StopDirtyLog(e.into()))?;
-        Ok(())
     }
 
     unsafe fn start_dirty_log_region(

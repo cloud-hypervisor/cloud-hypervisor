@@ -443,13 +443,6 @@ impl From<IrqRoutingEntry> for kvm_irq_routing_entry {
     }
 }
 
-struct KvmDirtyLogSlot {
-    slot: u32,
-    guest_phys_addr: u64,
-    memory_size: u64,
-    userspace_addr: u64,
-}
-
 struct KvmMemorySlot {
     #[cfg_attr(not(feature = "sev_snp"), expect(dead_code))]
     guest_memfd: OwnedFd,
@@ -470,7 +463,6 @@ pub struct KvmVm {
     sev_fd: Option<x86_64::sev::SevFd>,
     #[cfg(feature = "sev_snp")]
     snp_guest_policy: OnceLock<u64>,
-    dirty_log_slots: RwLock<HashMap<u32, KvmDirtyLogSlot>>,
     memory_slots: Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
     #[cfg(feature = "sev_snp")]
     memory_conversion_handler: Arc<OnceLock<Arc<dyn vm::MemoryConversionHandler>>>,
@@ -1031,18 +1023,6 @@ impl vm::Vm for KvmVm {
                 },
             );
         }
-        if log_dirty_pages {
-            // Keep track of the regions that need dirty pages log
-            self.dirty_log_slots.write().unwrap().insert(
-                region.slot,
-                KvmDirtyLogSlot {
-                    slot: region.slot,
-                    guest_phys_addr: region.guest_phys_addr,
-                    memory_size: region.memory_size,
-                    userspace_addr: region.userspace_addr,
-                },
-            );
-        }
 
         Ok(())
     }
@@ -1080,9 +1060,6 @@ impl vm::Vm for KvmVm {
                 .set_user_memory_region2(region)
                 .map_err(|e| vm::HypervisorVmError::RemoveUserMemory(e.into()))?;
         }
-
-        // Remove the corresponding entry from "self.dirty_log_slots" if needed
-        self.dirty_log_slots.write().unwrap().remove(&region.slot);
 
         // Close the per-region guest_memfd if one was created for this slot
         if let Some(slots) = &self.memory_slots {
@@ -1320,42 +1297,6 @@ impl vm::Vm for KvmVm {
 
         self.create_device(&mut vfio_dev)
             .map_err(|e| vm::HypervisorVmError::CreatePassthroughDevice(e.into()))
-    }
-
-    /// Start logging dirty pages
-    fn start_dirty_log(&self) -> vm::Result<()> {
-        let dirty_log_slots = self.dirty_log_slots.read().unwrap();
-        for s in dirty_log_slots.values() {
-            // SAFETY: The slot record describes the mapping registered for logging.
-            unsafe {
-                self.start_dirty_log_region(
-                    s.slot,
-                    s.guest_phys_addr,
-                    s.memory_size,
-                    s.userspace_addr as *mut u8,
-                )?;
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Stop logging dirty pages
-    fn stop_dirty_log(&self) -> vm::Result<()> {
-        let dirty_log_slots = self.dirty_log_slots.read().unwrap();
-        for s in dirty_log_slots.values() {
-            // SAFETY: The slot record describes the mapping registered for logging.
-            unsafe {
-                self.stop_dirty_log_region(
-                    s.slot,
-                    s.guest_phys_addr,
-                    s.memory_size,
-                    s.userspace_addr as *mut u8,
-                )?;
-            }
-        }
-
-        Ok(())
     }
 
     unsafe fn start_dirty_log_region(
@@ -1609,7 +1550,6 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             Ok(Arc::new(KvmVm {
                 fd: Arc::new(fd),
                 msrs,
-                dirty_log_slots: RwLock::new(HashMap::new()),
                 #[cfg(feature = "sev_snp")]
                 sev_fd,
                 #[cfg(feature = "sev_snp")]
@@ -1624,7 +1564,6 @@ impl hypervisor::Hypervisor for KvmHypervisor {
         {
             Ok(Arc::new(KvmVm {
                 fd: Arc::new(fd),
-                dirty_log_slots: RwLock::new(HashMap::new()),
                 memory_slots: None,
             }))
         }
