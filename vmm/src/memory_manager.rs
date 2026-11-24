@@ -10,7 +10,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom};
 use std::mem::{self, MaybeUninit, zeroed};
 use std::num::NonZeroUsize;
-use std::ops::{BitAnd, Not, Sub};
+use std::ops::{BitAnd, Deref, Not, Sub};
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::{Path, PathBuf};
@@ -20,7 +20,7 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, ffi, panic, process, result, thread, time};
 
 use acpi_tables::{Aml, aml};
-use anyhow::{Context, anyhow};
+use anyhow::Context;
 use arch::{RegionType, layout};
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
@@ -297,14 +297,34 @@ impl MemoryZone {
 
 pub type MemoryZones = HashMap<String, MemoryZone>;
 
+struct GuestRamRegion {
+    region: Arc<GuestRegion>,
+    zone_id: String,
+    virtio_mem: bool,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
-struct GuestRamMapping {
+struct GuestRamRegionState {
     slot: u32,
     gpa: u64,
     size: u64,
     zone_id: String,
     virtio_mem: bool,
     file_offset: u64,
+}
+
+impl From<&GuestRamRegion> for GuestRamRegionState {
+    fn from(guest_ram_region: &GuestRamRegion) -> Self {
+        let region = &guest_ram_region.region;
+        Self {
+            slot: region.slot().unwrap(),
+            gpa: region.start_addr().raw_value(),
+            size: region.len(),
+            file_offset: region.file_offset().map_or(0, |f| f.start()),
+            zone_id: guest_ram_region.zone_id.clone(),
+            virtio_mem: guest_ram_region.virtio_mem,
+        }
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -388,10 +408,7 @@ pub struct MemoryManager {
     ram_allocator: AddressAllocator,
     dynamic: bool,
 
-    // Keep slot and range metadata for guest RAM snapshots.
-    // This is useful for getting the dirty pages as we need to know the
-    // slots that the mapping is created in.
-    guest_ram_mappings: Vec<GuestRamMapping>,
+    guest_ram_regions: Vec<GuestRamRegion>,
     uffd_handler: Option<UffdHandler>,
 
     pub acpi_address: Option<GuestAddress>,
@@ -984,7 +1001,7 @@ impl MemoryManager {
 
     // Restore both GuestMemoryBackend regions along with MemoryZone zones.
     fn restore_memory_regions_and_zones(
-        guest_ram_mappings: &[GuestRamMapping],
+        guest_ram_region_states: &[GuestRamRegionState],
         zones_config: &[MemoryZoneConfig],
         mut existing_memory_files: HashMap<u32, File>,
         thp: bool,
@@ -1008,24 +1025,24 @@ impl MemoryManager {
             );
         }
 
-        for guest_ram_mapping in guest_ram_mappings {
+        for state in guest_ram_region_states {
             for zone_config in zones_config {
-                if guest_ram_mapping.zone_id == zone_config.id {
+                if state.zone_id == zone_config.id {
                     let region = MemoryManager::create_ram_region(
-                        if guest_ram_mapping.virtio_mem {
+                        if state.virtio_mem {
                             &None
                         } else {
                             &zone_config.file
                         },
-                        guest_ram_mapping.file_offset,
-                        GuestAddress(guest_ram_mapping.gpa),
-                        guest_ram_mapping.size as usize,
+                        state.file_offset,
+                        GuestAddress(state.gpa),
+                        state.size as usize,
                         zone_config.reserve.unwrap_or(zone_config.hugepages),
                         zone_config.shared,
                         zone_config.hugepages,
                         zone_config.hugepage_size,
                         zone_config.host_numa_node,
-                        existing_memory_files.remove(&guest_ram_mapping.slot),
+                        existing_memory_files.remove(&state.slot),
                         thp,
                         Arc::clone(vm),
                         Arc::clone(slot_allocator),
@@ -1034,8 +1051,8 @@ impl MemoryManager {
                         hypervisor::MemoryVisibility::Private,
                     )?;
                     memory_regions.push(Arc::clone(&region));
-                    if let Some(memory_zone) = memory_zones.get_mut(&guest_ram_mapping.zone_id) {
-                        if guest_ram_mapping.virtio_mem {
+                    if let Some(memory_zone) = memory_zones.get_mut(&state.zone_id) {
+                        if state.virtio_mem {
                             let hotplugged_size = zone_config.hotplugged_size.unwrap_or(0);
                             let region_size = region.len();
                             memory_zone.virtio_mem_zone = Some(VirtioMemZone {
@@ -2165,21 +2182,10 @@ impl MemoryManager {
         for (zone_id, regions) in list {
             for (region, virtio_mem) in regions {
                 region.register().map_err(Error::RegisterGuestRegion)?;
-                let slot = region.slot().unwrap();
-
-                let file_offset = if let Some(file_offset) = region.file_offset() {
-                    file_offset.start()
-                } else {
-                    0
-                };
-
-                self.guest_ram_mappings.push(GuestRamMapping {
-                    gpa: region.start_addr().raw_value(),
-                    size: region.len(),
-                    slot,
+                self.guest_ram_regions.push(GuestRamRegion {
+                    region: Arc::clone(&region),
                     zone_id: zone_id.clone(),
                     virtio_mem,
-                    file_offset,
                 });
                 self.ram_allocator
                     .allocate(Some(region.start_addr()), region.len(), None)
@@ -2285,7 +2291,7 @@ impl MemoryManager {
             next_hotplug_slot,
         ) = if let Some(data) = restore_data {
             let (regions, memory_zones) = Self::restore_memory_regions_and_zones(
-                &data.guest_ram_mappings,
+                &data.guest_ram_region_states,
                 &zones,
                 existing_memory_files,
                 config.thp,
@@ -2501,7 +2507,7 @@ impl MemoryManager {
             snapshot_memory_ranges: MemoryRangeTable::default(),
             cow_source: None,
             memory_zones,
-            guest_ram_mappings: Vec::new(),
+            guest_ram_regions: Vec::new(),
             uffd_handler: None,
             acpi_address,
             log_dirty: dynamic, // Cannot log dirty pages on a CVM
@@ -2931,18 +2937,14 @@ impl MemoryManager {
         }
 
         region.register().map_err(Error::RegisterGuestRegion)?;
-        let slot = region.slot().unwrap();
         self.guest_memory
             .add_region(&region)
             .map_err(Error::GuestRegionCollection)?;
 
-        self.guest_ram_mappings.push(GuestRamMapping {
-            gpa: region.start_addr().raw_value(),
-            size: region.len(),
-            slot,
+        self.guest_ram_regions.push(GuestRamRegion {
+            region: Arc::clone(&region),
             zone_id: DEFAULT_MEMORY_ZONE.to_string(),
             virtio_mem: false,
-            file_offset: 0,
         });
 
         Ok(region)
@@ -3259,7 +3261,11 @@ impl MemoryManager {
     pub fn snapshot_data(&self) -> MemoryManagerSnapshotData {
         MemoryManagerSnapshotData {
             memory_ranges: self.snapshot_memory_ranges.clone(),
-            guest_ram_mappings: self.guest_ram_mappings.clone(),
+            guest_ram_region_states: self
+                .guest_ram_regions
+                .iter()
+                .map(GuestRamRegionState::from)
+                .collect(),
             start_of_device_area: self.start_of_device_area.0,
             boot_ram: self.boot_ram,
             current_ram: self.current_ram,
@@ -3282,15 +3288,9 @@ impl MemoryManager {
 
     pub fn memory_slot_fds(&self) -> HashMap<u32, RawFd> {
         let mut memory_slot_fds = HashMap::new();
-        for guest_ram_mapping in &self.guest_ram_mappings {
-            let slot = guest_ram_mapping.slot;
-            let guest_memory = self.guest_memory.memory();
-            let file = guest_memory
-                .find_region(GuestAddress(guest_ram_mapping.gpa))
-                .unwrap()
-                .file_offset()
-                .unwrap()
-                .file();
+        for guest_ram_region in &self.guest_ram_regions {
+            let slot = guest_ram_region.region.slot().unwrap();
+            let file = guest_ram_region.region.file_offset().unwrap().file();
             memory_slot_fds.insert(slot, file.as_raw_fd());
         }
         memory_slot_fds
@@ -3301,7 +3301,7 @@ impl MemoryManager {
     }
 
     pub fn num_guest_ram_mappings(&self) -> u32 {
-        self.guest_ram_mappings.len() as u32
+        self.guest_ram_regions.len() as u32
     }
 
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
@@ -3311,20 +3311,24 @@ impl MemoryManager {
 
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     pub fn coredump_memory_regions(&self, mem_offset: u64) -> CoredumpMemoryRegions {
-        let mut mapping_sorted_by_gpa = self.guest_ram_mappings.clone();
-        mapping_sorted_by_gpa.sort_by_key(|m| m.gpa);
+        let mut regions: Vec<_> = self
+            .guest_ram_regions
+            .iter()
+            .map(|guest_ram_region| &guest_ram_region.region)
+            .collect();
+        regions.sort_unstable_by_key(|region| region.start_addr());
 
         let mut mem_offset_in_elf = mem_offset;
         let mut ram_maps = BTreeMap::new();
-        for mapping in mapping_sorted_by_gpa.iter() {
+        for region in regions {
             ram_maps.insert(
-                mapping.gpa,
+                region.start_addr().raw_value(),
                 CoredumpMemoryRegion {
                     mem_offset_in_elf,
-                    mem_size: mapping.size,
+                    mem_size: region.len(),
                 },
             );
-            mem_offset_in_elf += mapping.size;
+            mem_offset_in_elf += region.len();
         }
 
         CoredumpMemoryRegions { ram_maps }
@@ -3762,7 +3766,8 @@ impl Drop for MemoryManager {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct MemoryManagerSnapshotData {
     memory_ranges: MemoryRangeTable,
-    guest_ram_mappings: Vec<GuestRamMapping>,
+    #[serde(alias = "guest_ram_mappings")]
+    guest_ram_region_states: Vec<GuestRamRegionState>,
     start_of_device_area: u64,
     boot_ram: u64,
     current_ram: u64,
@@ -3925,26 +3930,16 @@ impl Migratable for MemoryManager {
     fn dirty_log(&mut self) -> result::Result<MemoryRangeTable, MigratableError> {
         let page_size = get_page_size();
         let mut table = MemoryRangeTable::default();
-        for r in &self.guest_ram_mappings {
+        for guest_ram_region in &self.guest_ram_regions {
+            let region: &GuestRegion = guest_ram_region.region.as_ref();
+            let gpa = region.start_addr().raw_value();
+            let slot = region.slot().unwrap();
             let vm_dirty_bitmap = self
                 .vm
-                .get_dirty_log(r.slot, r.gpa, r.size)
+                .get_dirty_log(slot, gpa, region.len())
                 .context("Error getting VM dirty log")
                 .map_err(MigratableError::MigrateSend)?;
-            let vmm_dirty_bitmap = match self.guest_memory.memory().find_region(GuestAddress(r.gpa))
-            {
-                Some(region) => {
-                    assert_eq!(region.start_addr().raw_value(), r.gpa);
-                    assert_eq!(region.len(), r.size);
-                    (**region).bitmap().get_and_reset()
-                }
-                None => {
-                    return Err(MigratableError::MigrateSend(anyhow!(
-                        "Error finding 'guest memory region' with address {:x}",
-                        r.gpa
-                    )));
-                }
-            };
+            let vmm_dirty_bitmap = region.deref().bitmap().get_and_reset();
 
             let dirty_bitmap = vm_dirty_bitmap
                 .iter()
@@ -3952,12 +3947,12 @@ impl Migratable for MemoryManager {
                 .map(|(x, y)| x | y);
 
             let ranges_before = table.ranges().len();
-            table.extend_from_dirty_bitmap(dirty_bitmap, r.gpa, page_size);
+            table.extend_from_dirty_bitmap(dirty_bitmap, gpa, page_size);
             let slot_ranges = &table.ranges()[ranges_before..];
 
             trace!(
                 "Dirty memory range table for slot {}: ranges = {} size = {} KiB",
-                r.slot,
+                slot,
                 slot_ranges.len(),
                 slot_ranges.iter().map(|r| r.length).sum::<u64>() / 1024,
             );

@@ -355,31 +355,31 @@ fn slot_sizes(config: &VmMigrationConfig) -> Result<Vec<(u32, u64, u64)>> {
 }
 
 fn slot_info(config: &VmMigrationConfig) -> Result<Vec<(u32, u64, u64, u64)>> {
-    parse_guest_ram_mappings(&serde_json::to_value(config.memory_manager_data())?)
+    parse_guest_ram_region_states(&serde_json::to_value(config.memory_manager_data())?)
 }
 
-/// Parse the `guest_ram_mappings` array out of the serialized
+/// Parse the `guest_ram_region_states` array out of the serialized
 /// `MemoryManagerSnapshotData`.
-fn parse_guest_ram_mappings(value: &serde_json::Value) -> Result<Vec<(u32, u64, u64, u64)>> {
-    let mappings = value
-        .get("guest_ram_mappings")
+fn parse_guest_ram_region_states(value: &serde_json::Value) -> Result<Vec<(u32, u64, u64, u64)>> {
+    let guest_ram_region_states = value
+        .get("guest_ram_region_states")
         .and_then(|v| v.as_array())
-        .ok_or(Error::MissingField("guest_ram_mappings"))?;
+        .ok_or(Error::MissingField("guest_ram_region_states"))?;
     let mut out = Vec::new();
-    for m in mappings {
-        let slot = m
+    for state in guest_ram_region_states {
+        let slot = state
             .get("slot")
             .and_then(|v| v.as_u64())
             .ok_or(Error::MissingField("slot"))? as u32;
-        let gpa = m
+        let gpa = state
             .get("gpa")
             .and_then(|v| v.as_u64())
             .ok_or(Error::MissingField("gpa"))?;
-        let size = m
+        let size = state
             .get("size")
             .and_then(|v| v.as_u64())
             .ok_or(Error::MissingField("size"))?;
-        let file_offset = m
+        let file_offset = state
             .get("file_offset")
             .and_then(|v| v.as_u64())
             .ok_or(Error::MissingField("file_offset"))?;
@@ -670,33 +670,34 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_guest_ram_mappings() {
+    fn test_parse_guest_ram_region_states() {
         let value = json!({
-            "guest_ram_mappings": [
+            "guest_ram_region_states": [
                 { "slot": 0, "gpa": 0u64, "size": 4096u64, "file_offset": 0u64, "virtio_mem": true },
                 { "slot": 1, "gpa": 0x4000u64, "size": 8192u64, "file_offset": 4096u64 },
             ]
         });
         assert_eq!(
-            parse_guest_ram_mappings(&value).unwrap(),
+            parse_guest_ram_region_states(&value).unwrap(),
             vec![(0, 0, 4096, 0), (1, 0x4000, 8192, 4096)]
         );
     }
 
     #[test]
-    fn test_parse_guest_ram_mappings_missing_array() {
+    fn test_parse_guest_ram_region_states_missing_array() {
         let value = json!({});
         assert!(matches!(
-            parse_guest_ram_mappings(&value),
-            Err(Error::MissingField("guest_ram_mappings"))
+            parse_guest_ram_region_states(&value),
+            Err(Error::MissingField("guest_ram_region_states"))
         ));
     }
 
     #[test]
-    fn test_parse_guest_ram_mappings_missing_field() {
-        let value = json!({ "guest_ram_mappings": [{ "slot": 0, "gpa": 0u64, "size": 4096u64 }] });
+    fn test_parse_guest_ram_region_states_missing_field() {
+        let value =
+            json!({ "guest_ram_region_states": [{ "slot": 0, "gpa": 0u64, "size": 4096u64 }] });
         assert!(matches!(
-            parse_guest_ram_mappings(&value),
+            parse_guest_ram_region_states(&value),
             Err(Error::MissingField("file_offset"))
         ));
     }
