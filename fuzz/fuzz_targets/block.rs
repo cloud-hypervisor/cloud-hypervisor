@@ -22,8 +22,8 @@ use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
 use virtio_devices::{Block, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
-use vm_allocator::{GuestMemory, GuestMemoryMap};
-use vm_memory::{Bytes, GuestAddress, GuestMemoryBackend};
+use vm_allocator::GuestMemory;
+use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
 // Guest memory size. Kept small: everything the device touches lives in the
@@ -221,9 +221,8 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     // Setup the guest memory and lay out a virtio queue the device can
     // actually consume: a descriptor table, an available ring referring to
     // it, and request headers/payloads/status bytes in the data region.
-    let mem = GuestMemoryMap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap();
-    build_queue_content(&mem, &input);
-    let guest_memory = GuestMemory::new(mem);
+    let guest_memory = GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap();
+    build_queue_content(&*guest_memory.memory(), &input);
 
     let q = setup_virt_queue(&input);
 
