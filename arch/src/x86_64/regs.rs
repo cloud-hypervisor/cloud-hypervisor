@@ -211,13 +211,13 @@ pub fn configure_segments_and_sregs<M: GuestMemoryBackend>(
 
 #[cfg(test)]
 mod tests {
-    use vm_allocator::GuestMemoryMap;
-    use vm_memory::GuestAddress;
+    use vm_allocator::GuestMemory;
+    use vm_memory::{GuestAddress, GuestAddressSpace};
 
     use super::*;
 
-    fn create_guest_mem() -> GuestMemoryMap {
-        GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap()
+    fn create_guest_mem() -> GuestMemory {
+        GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap()
     }
 
     fn read_u64<M: GuestMemoryBackend>(gm: &M, offset: GuestAddress) -> u64 {
@@ -227,22 +227,22 @@ mod tests {
     #[test]
     fn segments_and_sregs() {
         let mut sregs: SpecialRegisters = Default::default();
-        let gm = create_guest_mem();
-        configure_segments_and_sregs(&gm, &mut sregs, false).unwrap();
-        assert_eq!(0x0, read_u64(&gm, BOOT_GDT_START));
+        let gm = create_guest_mem().memory();
+        configure_segments_and_sregs(&*gm, &mut sregs, false).unwrap();
+        assert_eq!(0x0, read_u64(&*gm, BOOT_GDT_START));
         assert_eq!(
             0xcf9b000000ffff,
-            read_u64(&gm, BOOT_GDT_START.unchecked_add(8))
+            read_u64(&*gm, BOOT_GDT_START.unchecked_add(8))
         );
         assert_eq!(
             0xcf93000000ffff,
-            read_u64(&gm, BOOT_GDT_START.unchecked_add(16))
+            read_u64(&*gm, BOOT_GDT_START.unchecked_add(16))
         );
         assert_eq!(
             0x8b0000000067,
-            read_u64(&gm, BOOT_GDT_START.unchecked_add(24))
+            read_u64(&*gm, BOOT_GDT_START.unchecked_add(24))
         );
-        assert_eq!(0x0, read_u64(&gm, BOOT_IDT_START));
+        assert_eq!(0x0, read_u64(&*gm, BOOT_IDT_START));
 
         assert_eq!(0, sregs.cs.base);
         assert_eq!(0xffffffff, sregs.ds.limit);
