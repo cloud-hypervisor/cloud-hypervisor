@@ -131,8 +131,11 @@ pub enum HypervisorVmError {
     #[error("Failed to read guest memory")]
     GuestMemRead(#[source] GuestMemoryError),
     /// Start dirty log error
-    #[error("Failed to get dirty log")]
+    #[error("Failed to start dirty log")]
     StartDirtyLog(#[source] anyhow::Error),
+    /// Stop dirty log error
+    #[error("Failed to stop dirty log")]
+    StopDirtyLog(#[source] anyhow::Error),
     /// Get dirty log error
     #[error("Failed to get dirty log")]
     GetDirtyLog(#[source] anyhow::Error),
@@ -335,6 +338,30 @@ pub trait Vm: Send + Sync + Any {
     fn start_dirty_log(&self) -> Result<()>;
     /// Stop logging dirty pages
     fn stop_dirty_log(&self) -> Result<()>;
+    /// Start dirty logging for one registered region.
+    ///
+    /// # Safety
+    /// The arguments must match the live mapping registered in `slot`. Keep
+    /// the mapping valid until slot removal, as for `create_user_memory_region`.
+    /// KVM requires the region to have been registered with `log_dirty_pages`.
+    unsafe fn start_dirty_log_region(
+        &self,
+        slot: u32,
+        base_gpa: u64,
+        memory_size: u64,
+        userspace_addr: *mut u8,
+    ) -> Result<()>;
+    /// End the dirty logging session for one registered region.
+    ///
+    /// # Safety
+    /// The same slot and mapping requirements as `start_dirty_log_region` apply.
+    unsafe fn stop_dirty_log_region(
+        &self,
+        slot: u32,
+        base_gpa: u64,
+        memory_size: u64,
+        userspace_addr: *mut u8,
+    ) -> Result<()>;
     /// Get dirty pages bitmap
     fn get_dirty_log(&self, slot: u32, base_gpa: u64, memory_size: u64) -> Result<Vec<u64>>;
     #[cfg(feature = "sev_snp")]
