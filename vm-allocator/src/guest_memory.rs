@@ -6,7 +6,6 @@
 use std::borrow::Borrow;
 use std::ops::Deref;
 use std::os::fd::AsFd;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::{fmt, io, process};
 
@@ -27,7 +26,7 @@ use crate::aligned_mapping::AlignedMapping;
 /// Errors registering guest memory with the hypervisor.
 #[derive(Error, Debug)]
 pub enum Error {
-    /// The region is already registered or registration is in progress.
+    /// The region is already registered.
     #[error("Guest region is already registered")]
     AlreadyRegistered,
     /// The region was constructed without a VM.
@@ -62,7 +61,7 @@ pub struct GuestRegion {
     vm: Option<Arc<dyn hypervisor::Vm>>,
     slot_allocator: Option<Arc<MemorySlotAllocator>>,
     slot: Option<u32>,
-    registered: AtomicBool,
+    registered: Mutex<bool>,
     mergeable: bool,
     readonly: bool,
     log_dirty_pages: bool,
@@ -101,7 +100,7 @@ impl GuestRegion {
             vm: Some(vm),
             slot_allocator: Some(slot_allocator),
             slot: Some(slot),
-            registered: AtomicBool::new(false),
+            registered: Mutex::new(false),
             mergeable,
             readonly,
             log_dirty_pages,
@@ -160,28 +159,28 @@ impl GuestRegion {
     /// Register the region with the hypervisor.
     pub fn register(&self) -> Result<(), Error> {
         let vm = self.vm.as_ref().ok_or(Error::MissingVm)?;
-        // Prevent concurrent calls from registering the same slot twice.
-        self.registered
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .map_err(|_| Error::AlreadyRegistered)?;
-        let slot = self.slot.unwrap();
         let guest_phys_addr = self.region.start_addr().raw_value();
         let memory_size = self.region.size();
         let userspace_addr = self.region.as_ptr();
-        // SAFETY: the region keeps its mapping alive until after slot removal.
-        if let Err(e) = unsafe {
-            vm.create_user_memory_region(
-                slot,
-                guest_phys_addr,
-                memory_size,
-                userspace_addr,
-                self.readonly,
-                self.log_dirty_pages,
-                self.visibility,
-            )
-        } {
-            self.registered.store(false, Ordering::Release);
-            return Err(Error::CreateRegion(e));
+        {
+            let mut registered = self.registered.lock().unwrap();
+            if *registered {
+                return Err(Error::AlreadyRegistered);
+            }
+            // SAFETY: the region keeps its mapping alive until after slot removal.
+            unsafe {
+                vm.create_user_memory_region(
+                    self.slot.unwrap(),
+                    guest_phys_addr,
+                    memory_size,
+                    userspace_addr,
+                    self.readonly,
+                    self.log_dirty_pages,
+                    self.visibility,
+                )
+            }
+            .map_err(Error::CreateRegion)?;
+            *registered = true;
         }
 
         // SAFETY: the address and size are valid since the
@@ -234,9 +233,9 @@ impl GuestRegion {
         self.slot
     }
 
-    /// Whether the region is registered or registration is in progress.
+    /// Whether registration with the hypervisor has succeeded.
     pub fn is_registered(&self) -> bool {
-        self.registered.load(Ordering::Acquire)
+        *self.registered.lock().unwrap()
     }
 
     /// Move a region to a new guest address without replacing its mapping.
@@ -246,7 +245,7 @@ impl GuestRegion {
     pub fn move_guest_address(&mut self, guest_addr: GuestAddress) -> Result<(), Error> {
         let region = GuestRegionMmap::with_arc(self.region.get_mmap(), guest_addr)
             .ok_or(Error::InvalidGuestAddress(guest_addr.raw_value()))?;
-        if !*self.registered.get_mut() {
+        if !*self.registered.get_mut().unwrap() {
             self.region = region;
             return Ok(());
         }
@@ -269,7 +268,7 @@ impl GuestRegion {
             )
         }
         .map_err(Error::RemoveRegion)?;
-        *self.registered.get_mut() = false;
+        *self.registered.get_mut().unwrap() = false;
         // SAFETY: both guest addresses refer to the same live mapping.
         unsafe {
             vm.create_user_memory_region(
@@ -284,7 +283,7 @@ impl GuestRegion {
         }
         .map_err(Error::CreateRegion)?;
         self.region = region;
-        *self.registered.get_mut() = true;
+        *self.registered.get_mut().unwrap() = true;
         Ok(())
     }
 }
@@ -344,7 +343,7 @@ impl From<GuestRegionMmap<AtomicBitmap>> for GuestRegion {
             vm: None,
             slot_allocator: None,
             slot: None,
-            registered: AtomicBool::new(false),
+            registered: Mutex::new(false),
             mergeable: false,
             readonly: false,
             log_dirty_pages: false,
@@ -358,7 +357,7 @@ impl Drop for GuestRegion {
         let guest_phys_addr = self.region.start_addr().raw_value();
         let memory_size = self.region.size();
         let userspace_addr = self.region.as_ptr();
-        if *self.registered.get_mut() {
+        if *self.registered.get_mut().unwrap() {
             let vm = self.vm.as_ref().unwrap();
             let slot = self.slot.unwrap();
             // SAFETY: the owned region remains mapped until after this destructor returns.
