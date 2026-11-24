@@ -37,6 +37,9 @@ pub enum HwInfo {
     Smmuv3 { idr: [u32; 6], ats_supported: bool },
 }
 
+/// A hardware queue of a physical IOMMU, freed when dropped
+pub trait HwQueueHandle: Send {}
+
 /// Abstraction of the common mechanisms shared across physical IOMMUs
 pub trait PhysicalIommu: Send + Sync {
     fn hw_info(&self) -> Result<HwInfo, Error>;
@@ -48,6 +51,15 @@ pub trait PhysicalIommu: Send + Sync {
     fn set_blocking(&self, device_id: u32) -> Result<(), Error>;
 
     fn invalidate(&self, invalidation: Invalidation) -> Result<(), Error>;
+
+    fn allocate_hw_queue(
+        &self,
+        _index: u32,
+        _addr: u64,
+        _size: u64,
+    ) -> Result<Box<dyn HwQueueHandle>, Error> {
+        Err(Error::Backend(io::Error::from(io::ErrorKind::Unsupported)))
+    }
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -62,6 +74,7 @@ pub struct Smmuv3AcpiInfo {
     pub coherent: bool,
     pub ats_supported: bool,
     pub attached_bdfs: Vec<PciBdf>,
+    pub iort_node_id: u32,
 }
 
 #[derive(Clone, Debug)]
