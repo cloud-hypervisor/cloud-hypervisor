@@ -974,7 +974,7 @@ impl BusDeviceSync for PvmemcontrolBusDevice {
 mod tests {
     use std::os::unix::fs::FileExt;
 
-    use vm_allocator::GuestMemoryMap;
+    use vm_allocator::GuestMemory;
     use vm_memory::FileOffset;
     use vmm_sys_util::tempfile::TempFile;
 
@@ -1014,14 +1014,14 @@ mod tests {
         file.write_all_at(&vec![0xaa; REGION_SIZE], REGION_SIZE as u64)
             .unwrap();
 
-        let mem = GuestMemoryMap::from_ranges_with_files([(
+        let mem = GuestMemory::from_ranges_with_files([(
             GuestAddress(0),
             REGION_SIZE,
             Some(FileOffset::new(file.try_clone().unwrap(), 0)),
         )])
         .unwrap();
         let dev = PvmemcontrolBusDevice {
-            mem: GuestMemory::new(mem),
+            mem,
             dev: RwLock::new(PvmemcontrolDevice::error()),
         };
 
