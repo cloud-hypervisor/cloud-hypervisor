@@ -4149,7 +4149,6 @@ mod tests {
     use std::io::{Read, Seek, SeekFrom, Write};
     use std::os::unix::fs::FileExt;
 
-    use vm_allocator::GuestMemoryMap;
     use vm_migration::protocol::{MemoryRange, MemoryRangeTable};
 
     use super::*;
@@ -4336,7 +4335,9 @@ mod tests {
     #[test]
     fn cow_restore_maps_data_and_reads_holes_as_zero() {
         let page = get_page_size();
-        let gm = GuestMemoryMap::from_ranges(&[(GuestAddress(0), (2 * page) as usize)]).unwrap();
+        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), (2 * page) as usize)])
+            .unwrap()
+            .memory();
 
         let mut file = tempfile::tempfile().unwrap();
         file.write_all(&vec![0xabu8; page as usize]).unwrap();
@@ -4349,8 +4350,8 @@ mod tests {
             length: 2 * page,
         });
 
-        assert!(is_restore_cow_compatible(&gm, &table));
-        do_mmap_cow_saved_regions(&gm, &file, &table, false).unwrap();
+        assert!(is_restore_cow_compatible(&*gm, &table));
+        do_mmap_cow_saved_regions(&*gm, &file, &table, false).unwrap();
 
         assert_eq!(gm.read_obj::<u8>(GuestAddress(0)).unwrap(), 0xab);
         assert_eq!(gm.read_obj::<u8>(GuestAddress(page - 1)).unwrap(), 0xab);
@@ -4368,7 +4369,9 @@ mod tests {
     #[test]
     fn cow_snapshot_writes_private_pages_over_the_source() {
         let page = get_page_size();
-        let gm = GuestMemoryMap::from_ranges(&[(GuestAddress(0), (16 * page) as usize)]).unwrap();
+        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), (16 * page) as usize)])
+            .unwrap()
+            .memory();
         let mut file = tempfile::tempfile().unwrap();
         for i in 0..16u8 {
             file.write_all(&vec![i + 1; page as usize]).unwrap();
@@ -4378,7 +4381,7 @@ mod tests {
             gpa: 0,
             length: 16 * page,
         });
-        do_mmap_cow_saved_regions(&gm, &file, &ranges, false).unwrap();
+        do_mmap_cow_saved_regions(&*gm, &file, &ranges, false).unwrap();
         let source = CowSource {
             file,
             ranges,
@@ -4392,7 +4395,7 @@ mod tests {
         let mut content = vec![0u8; (16 * page) as usize];
         source.file.read_exact_at(&mut content, 0).unwrap();
         snapshot.write_all(&content).unwrap();
-        write_private_pages(&gm, &source, &mut snapshot).unwrap();
+        write_private_pages(&*gm, &source, &mut snapshot).unwrap();
 
         let mut got = vec![0u8; (16 * page) as usize];
         snapshot.read_exact_at(&mut got, 0).unwrap();
@@ -4406,21 +4409,23 @@ mod tests {
     #[test]
     fn cow_restore_rejects_unaligned_or_out_of_region_ranges() {
         let page = get_page_size();
-        let gm = GuestMemoryMap::from_ranges(&[(GuestAddress(0), page as usize)]).unwrap();
+        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), page as usize)])
+            .unwrap()
+            .memory();
 
         let mut unaligned = MemoryRangeTable::default();
         unaligned.push(MemoryRange {
             gpa: 1,
             length: page,
         });
-        assert!(!is_restore_cow_compatible(&gm, &unaligned));
+        assert!(!is_restore_cow_compatible(&*gm, &unaligned));
 
         let mut spanning = MemoryRangeTable::default();
         spanning.push(MemoryRange {
             gpa: 0,
             length: 2 * page,
         });
-        assert!(!is_restore_cow_compatible(&gm, &spanning));
+        assert!(!is_restore_cow_compatible(&*gm, &spanning));
     }
 
     #[test]
@@ -4435,19 +4440,20 @@ mod tests {
             libc::MAP_SHARED,
         )
         .unwrap();
-        let gm = GuestMemoryMap::from_regions(vec![
+        let gm = GuestMemory::from_regions(vec![
             vm_memory::GuestRegionMmap::new(region, GuestAddress(0))
                 .unwrap()
                 .into(),
         ])
-        .unwrap();
+        .unwrap()
+        .memory();
 
         let mut table = MemoryRangeTable::default();
         table.push(MemoryRange {
             gpa: 0,
             length: page,
         });
-        assert!(!is_restore_cow_compatible(&gm, &table));
+        assert!(!is_restore_cow_compatible(&*gm, &table));
     }
 
     #[test]
@@ -4464,19 +4470,20 @@ mod tests {
                 libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | extra_flags,
             )
             .unwrap();
-            let gm = GuestMemoryMap::from_regions(vec![
+            let gm = GuestMemory::from_regions(vec![
                 vm_memory::GuestRegionMmap::new(region, GuestAddress(0))
                     .unwrap()
                     .into(),
             ])
-            .unwrap();
+            .unwrap()
+            .memory();
 
             let mut table = MemoryRangeTable::default();
             table.push(MemoryRange {
                 gpa: 0,
                 length: page,
             });
-            do_mmap_cow_saved_regions(&gm, &file, &table, true).unwrap();
+            do_mmap_cow_saved_regions(&*gm, &file, &table, true).unwrap();
             assert_eq!(gm.read_obj::<u8>(GuestAddress(0)).unwrap(), 0xcd);
         }
     }
