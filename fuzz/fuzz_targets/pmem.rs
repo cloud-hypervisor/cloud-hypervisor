@@ -16,9 +16,9 @@ use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
 use virtio_devices::{Pmem, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
-use vm_allocator::{GuestMemory, GuestMemoryMap, GuestRegion};
+use vm_allocator::{GuestMemory, GuestRegion};
 use vm_memory::guest_memory::FileOffset;
-use vm_memory::{Bytes, GuestAddress, GuestMemoryBackend, MmapRegion};
+use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend, MmapRegion};
 use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::{AccessPlatform, AccessType};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
@@ -89,18 +89,17 @@ fn run_pmem_case(
 
     exercise_device_api(&mut pmem, cursor, enable_access_platform);
 
-    let mem = match GuestMemoryMap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
-        Ok(mem) => mem,
+    let guest_memory = match GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
+        Ok(guest_memory) => guest_memory,
         Err(_) => return false,
     };
 
     let chain_cases = build_chain_cases(cursor);
-    if !populate_queue(&mem, &chain_cases) {
+    if !populate_queue(&*guest_memory.memory(), &chain_cases) {
         return false;
     }
 
     let queue = setup_virt_queue(cursor.next_bool(), bad_used_ring);
-    let guest_memory = GuestMemory::new(mem);
     let evt = match EventFd::new(0) {
         Ok(evt) => evt,
         Err(_) => return false,
@@ -188,13 +187,13 @@ fn run_bad_activate_case(cursor: &mut FuzzCursor<'_>) -> bool {
         Ok(pmem) => pmem,
         Err(_) => return false,
     };
-    let mem = match GuestMemoryMap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
+    let mem = match GuestMemory::from_ranges(&[(GuestAddress(0), MEM_SIZE)]) {
         Ok(mem) => mem,
         Err(_) => return false,
     };
 
     pmem.activate(virtio_devices::ActivationContext {
-        mem: GuestMemory::new(mem),
+        mem,
         interrupt_cb: Arc::new(HarnessInterrupt {
             fail_interrupt: false,
         }),

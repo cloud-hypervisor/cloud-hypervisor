@@ -15,9 +15,9 @@ use virtio_devices::{
     AccessPlatformMapping, DmaRemapping, VirtioDevice, VirtioInterrupt, VirtioInterruptType,
 };
 use virtio_queue::{Queue, QueueT};
-use vm_allocator::{GuestMemory, GuestMemoryMap};
+use vm_allocator::GuestMemory;
 use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
-use vm_memory::{Bytes, GuestAddress, GuestMemoryBackend};
+use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend};
 use vm_migration::{Pausable, Snapshottable};
 use vm_virtio::{AccessPlatform, AccessType};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
@@ -300,18 +300,16 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     // with exactly the same shape as the 'request_queue'.
     let event_queue = setup_virt_queue();
 
-    let mem = GuestMemoryMap::from_ranges(&[
+    let guest_memory = GuestMemory::from_ranges(&[
         (GuestAddress(0), MEM_SIZE),
         (GuestAddress(DESC_TABLE_ADDR), QUEUE_BYTES_SIZE),
     ])
     .unwrap();
     let mut chains = baseline_chains();
     append_fuzz_chains(&mut chains, bytes, &fuzz_plan);
-    if write_request_queue(&mem, &chains).is_err() {
+    if write_request_queue(&*guest_memory.memory(), &chains).is_err() {
         return Corpus::Reject;
     }
-
-    let guest_memory = GuestMemory::new(mem);
 
     let request_evt = EventFd::new(0).unwrap();
     let event_evt = EventFd::new(0).unwrap();
