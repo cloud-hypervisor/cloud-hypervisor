@@ -32,8 +32,8 @@ use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
 use vm_allocator::page_size::{align_page_size_down, get_page_size};
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-    GuestMemoryBackend, GuestMemoryError, GuestMemoryRegion,
+    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend,
+    GuestMemoryError, GuestMemoryRegion,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
@@ -285,7 +285,7 @@ struct BalloonStatsHandler {
 }
 
 struct BalloonEpollHandler {
-    mem: GuestMemoryAtomic<GuestMemory>,
+    mem: GuestMemory,
     queues: Vec<Queue>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     inflate_queue_evt: EventFd,
@@ -1175,9 +1175,9 @@ mod tests {
     use vm_virtio::queue::testing::VirtQueue;
 
     use super::*;
-    use crate::GuestMemory;
+    use crate::GuestMemoryMap;
 
-    type TestMemory = GuestMemory;
+    type TestMemory = GuestMemoryMap;
 
     struct NoopInterrupt;
 
@@ -1204,7 +1204,7 @@ mod tests {
         let (_, request_receiver) = mpsc::channel();
 
         BalloonEpollHandler {
-            mem: GuestMemoryAtomic::new(memory.clone()),
+            mem: GuestMemory::new(memory.clone()),
             queues: vec![queue],
             interrupt_cb: Arc::new(NoopInterrupt),
             inflate_queue_evt: EventFd::new(EFD_NONBLOCK).unwrap(),
@@ -1261,7 +1261,7 @@ mod tests {
         let region = vm_memory::GuestRegionMmap::new(mmap, GuestAddress(0))
             .unwrap()
             .into();
-        let memory = GuestMemory::from_regions(vec![region]).unwrap();
+        let memory = GuestMemoryMap::from_regions(vec![region]).unwrap();
         memory.write_slice(&[0xa5], GuestAddress(0)).unwrap();
         assert_eq!(memory.read_obj::<u8>(GuestAddress(0)).unwrap(), 0xa5);
 
@@ -1488,7 +1488,7 @@ mod tests {
 
         balloon
             .activate(ActivationContext {
-                mem: GuestMemoryAtomic::new(memory.clone()),
+                mem: GuestMemory::new(memory.clone()),
                 interrupt_cb: Arc::new(QueueInterruptSender(Mutex::new(tx))),
                 queues: vec![
                     (

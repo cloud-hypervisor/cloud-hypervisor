@@ -15,9 +15,10 @@ use thiserror::Error;
 use vm_memory::bitmap::{AtomicBitmap, BS, NewBitmap};
 use vm_memory::mmap::{FromRangesError, MmapRegionBuilder, MmapRegionError};
 use vm_memory::{
-    Address, FileOffset, GuestAddress, GuestMemoryBackend, GuestMemoryError, GuestMemoryRegion,
-    GuestMemoryRegionBytes, GuestRegionCollection, GuestRegionCollectionError, GuestRegionMmap,
-    GuestUsize, MemoryRegionAddress, MmapRegion, VolatileSlice,
+    Address, FileOffset, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend,
+    GuestMemoryError, GuestMemoryLoadGuard, GuestMemoryRegion, GuestMemoryRegionBytes,
+    GuestRegionCollection, GuestRegionCollectionError, GuestRegionMmap, GuestUsize,
+    MemoryRegionAddress, MmapRegion, VolatileSlice,
 };
 
 use crate::MemorySlotAllocator;
@@ -409,9 +410,9 @@ impl Drop for GuestRegion {
 
 /// A sorted collection of non-overlapping guest memory regions.
 #[derive(Clone, Debug, Default)]
-pub struct GuestMemory(GuestRegionCollection<GuestRegion>);
+pub struct GuestMemoryMap(GuestRegionCollection<GuestRegion>);
 
-impl GuestMemory {
+impl GuestMemoryMap {
     /// The regions must be sorted by guest address and must not overlap.
     pub fn from_regions(regions: Vec<GuestRegion>) -> Result<Self, GuestRegionCollectionError> {
         GuestRegionCollection::from_regions(regions).map(Self)
@@ -457,7 +458,7 @@ impl GuestMemory {
     }
 }
 
-impl GuestMemoryBackend for GuestMemory {
+impl GuestMemoryBackend for GuestMemoryMap {
     type R = GuestRegion;
 
     fn num_regions(&self) -> usize {
@@ -470,5 +471,60 @@ impl GuestMemoryBackend for GuestMemory {
 
     fn iter(&self) -> impl Iterator<Item = &Self::R> {
         self.0.iter()
+    }
+}
+
+/// A wrapper for mutable set of guest memory ranges
+#[derive(Clone, Debug)]
+pub struct GuestMemory(GuestMemoryAtomic<GuestMemoryMap>);
+
+impl GuestMemory {
+    /// Creates an address space with the given initial map.
+    pub fn new(map: GuestMemoryMap) -> Self {
+        Self(GuestMemoryAtomic::new(map))
+    }
+
+    /// Adds a region. Overlapping regions will be rejected.
+    pub fn add_region(&self, region: Arc<GuestRegion>) -> Result<(), GuestRegionCollectionError> {
+        self.0
+            .lock()
+            .unwrap()
+            .replace(self.memory().insert_region(region)?);
+        Ok(())
+    }
+
+    /// Creates guest memory from non-overlapping regions sorted by guest address.
+    pub fn from_regions(regions: Vec<GuestRegion>) -> Result<Self, GuestRegionCollectionError> {
+        GuestMemoryMap::from_regions(regions).map(Self::new)
+    }
+
+    /// Creates guest memory from shared, non-overlapping regions sorted by guest address.
+    pub fn from_arc_regions(
+        regions: Vec<Arc<GuestRegion>>,
+    ) -> Result<Self, GuestRegionCollectionError> {
+        GuestMemoryMap::from_arc_regions(regions).map(Self::new)
+    }
+
+    /// Allocates anonymous regions from non-overlapping ranges sorted by guest address.
+    pub fn from_ranges(ranges: &[(GuestAddress, usize)]) -> Result<Self, FromRangesError> {
+        GuestMemoryMap::from_ranges(ranges).map(Self::new)
+    }
+
+    /// Allocates regions from sorted, non-overlapping ranges with optional backing files.
+    pub fn from_ranges_with_files<A, T>(ranges: T) -> Result<Self, FromRangesError>
+    where
+        A: Borrow<(GuestAddress, usize, Option<FileOffset>)>,
+        T: IntoIterator<Item = A>,
+    {
+        GuestMemoryMap::from_ranges_with_files(ranges).map(Self::new)
+    }
+}
+
+impl GuestAddressSpace for GuestMemory {
+    type M = GuestMemoryMap;
+    type T = GuestMemoryLoadGuard<GuestMemoryMap>;
+
+    fn memory(&self) -> Self::T {
+        self.0.memory()
     }
 }

@@ -29,8 +29,8 @@ use thiserror::Error;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
 use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingError};
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-    GuestMemoryBackend, GuestMemoryError, GuestMemoryRegion,
+    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend,
+    GuestMemoryError, GuestMemoryRegion,
 };
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -402,7 +402,7 @@ impl BlocksState {
 }
 
 struct MemEpollHandler {
-    mem: GuestMemoryAtomic<GuestMemory>,
+    mem: GuestMemory,
     region: Arc<GuestRegion>,
     host_fd: Option<RawFd>,
     blocks_state: Arc<Mutex<BlocksState>>,

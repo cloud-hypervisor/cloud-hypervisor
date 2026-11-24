@@ -29,16 +29,14 @@ use linux_loader::loader::elf::start_info::{
 };
 use log::{debug, error, info};
 use thiserror::Error;
-use vm_allocator::GuestMemory;
 use vm_memory::{
-    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend,
-    GuestMemoryRegion,
+    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryBackend, GuestMemoryRegion,
 };
 
 use crate::smbios::SmbiosConfig;
 use crate::x86_64::cpu_profile::CpuProfile;
 use crate::x86_64::cpu_profile::cpuid_adjustments::MissingCpuidEntriesError;
-use crate::{InitramfsConfig, RegionType, smbios};
+use crate::{GuestMemory, InitramfsConfig, RegionType, smbios};
 
 // While modern architectures support more than 255 CPUs via x2APIC,
 // legacy devices such as mptable support at most 254 CPUs.
@@ -1205,7 +1203,7 @@ fn required_common_cpuid_updates(
 pub fn configure_vcpu(
     vcpu: &dyn hypervisor::Vcpu,
     id: u32,
-    boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemory>)>,
+    boot_setup: Option<(EntryPoint, &GuestMemory)>,
     cpuid: Vec<CpuIdEntry>,
     kvm_hyperv: bool,
     cpu_vendor: CpuVendor,
@@ -1886,6 +1884,7 @@ fn update_cpuid_topology(
 #[cfg(test)]
 mod tests {
     use linux_loader::loader::bootparam::boot_e820_entry;
+    use vm_allocator::GuestMemoryMap;
 
     use super::*;
 
@@ -2036,7 +2035,7 @@ mod tests {
     #[test]
     fn test_system_configuration() {
         let no_vcpus = 4;
-        let gm = GuestMemory::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let gm = GuestMemoryMap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
         let config_err = configure_system(
             &gm,
             GuestAddress(0),
@@ -2057,7 +2056,7 @@ mod tests {
             .filter(|r| r.2 == RegionType::Ram && r.0 < layout::RAM_64BIT_START)
             .map(|r| (r.0, r.1))
             .collect();
-        let gm = GuestMemory::from_ranges(&ram_regions).unwrap();
+        let gm = GuestMemoryMap::from_ranges(&ram_regions).unwrap();
 
         configure_system(
             &gm,
@@ -2085,7 +2084,7 @@ mod tests {
                 }
             })
             .collect();
-        let gm = GuestMemory::from_ranges(&ram_regions).unwrap();
+        let gm = GuestMemoryMap::from_ranges(&ram_regions).unwrap();
         configure_system(
             &gm,
             GuestAddress(0),
@@ -2115,7 +2114,7 @@ mod tests {
 
     #[test]
     fn test_generate_e820_memory_map() {
-        let gm = GuestMemory::from_ranges(&[
+        let gm = GuestMemoryMap::from_ranges(&[
             (GuestAddress(0), 2 << 20),
             (layout::RAM_64BIT_START, 2 << 20),
             (layout::RAM_64BIT_START.unchecked_add(4 << 20), 2 << 20),
