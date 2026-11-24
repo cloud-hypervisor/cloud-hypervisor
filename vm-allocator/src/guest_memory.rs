@@ -6,8 +6,8 @@
 use std::borrow::Borrow;
 use std::ops::Deref;
 use std::os::fd::AsFd;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, Weak};
 use std::{fmt, io, process};
 
 use log::{error, info, warn};
@@ -408,23 +408,77 @@ impl Drop for GuestRegion {
     }
 }
 
+/// Receives changes to guest memory regions. Callbacks may read the address
+/// space but must not change it or register another notifier on it.
+pub trait GuestMemoryNotification: Send + Sync {
+    /// Called after a region is added.
+    fn region_added(&self, region: &Arc<GuestRegion>);
+
+    /// Called after a region is removed.
+    fn region_removed(&self, region: &Arc<GuestRegion>);
+}
+
 /// A wrapper for mutable set of guest memory ranges
 #[derive(Clone, Debug)]
-pub struct GuestMemory(GuestMemoryAtomic<GuestRegionCollection<GuestRegion>>);
+pub struct GuestMemory {
+    regions: GuestMemoryAtomic<GuestRegionCollection<GuestRegion>>,
+    notifiers: Arc<Mutex<Vec<Weak<dyn GuestMemoryNotification>>>>,
+}
 
 impl GuestMemory {
-    /// Creates an address space with the given initial map.
-    fn new(map: GuestRegionCollection<GuestRegion>) -> Self {
-        Self(GuestMemoryAtomic::new(map))
+    /// Creates an address space with the given initial regions.
+    fn new(regions: GuestRegionCollection<GuestRegion>) -> Self {
+        Self {
+            regions: GuestMemoryAtomic::new(regions),
+            notifiers: Arc::default(),
+        }
+    }
+
+    /// Registers a notifier for future region changes.
+    pub fn add_notifier(&self, notifier: Weak<dyn GuestMemoryNotification>) {
+        let mut notifiers = self.notifiers.lock().unwrap();
+        notifiers.retain(|weak| weak.strong_count() != 0);
+        notifiers.push(notifier);
     }
 
     /// Adds a region. Overlapping regions will be rejected.
-    pub fn add_region(&self, region: Arc<GuestRegion>) -> Result<(), GuestRegionCollectionError> {
-        self.0
-            .lock()
-            .unwrap()
-            .replace(self.memory().insert_region(region)?);
+    pub fn add_region(&self, region: &Arc<GuestRegion>) -> Result<(), GuestRegionCollectionError> {
+        let active: Vec<_>;
+        {
+            let mut notifiers = self.notifiers.lock().unwrap();
+            self.regions
+                .lock()
+                .unwrap()
+                .replace(self.memory().insert_region(Arc::clone(region))?);
+            notifiers.retain(|weak| weak.strong_count() != 0);
+            active = notifiers.iter().filter_map(Weak::upgrade).collect();
+            for notifier in &active {
+                notifier.region_added(region);
+            }
+        }
         Ok(())
+    }
+
+    /// Removes and returns the region matching the exact base and size.
+    pub fn remove_region(
+        &self,
+        base: GuestAddress,
+        size: GuestUsize,
+    ) -> Result<Arc<GuestRegion>, GuestRegionCollectionError> {
+        let active: Vec<_>;
+        let region = {
+            let mut notifiers = self.notifiers.lock().unwrap();
+            let guard = self.regions.lock().unwrap();
+            let (regions, region) = self.memory().remove_region(base, size)?;
+            guard.replace(regions);
+            notifiers.retain(|weak| weak.strong_count() != 0);
+            active = notifiers.iter().filter_map(Weak::upgrade).collect();
+            for notifier in &active {
+                notifier.region_removed(&region);
+            }
+            region
+        };
+        Ok(region)
     }
 
     /// Creates guest memory from non-overlapping regions sorted by guest address.
@@ -466,6 +520,6 @@ impl GuestAddressSpace for GuestMemory {
     type T = GuestMemoryLoadGuard<Self::M>;
 
     fn memory(&self) -> Self::T {
-        self.0.memory()
+        self.regions.memory()
     }
 }
