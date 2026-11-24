@@ -393,7 +393,7 @@ mod tests {
         let mut handler = context.create_epoll_handler_context();
         VsockPacket::from_rx_virtq_head(
             &mut handler.handler.queues[0]
-                .iter(&context.mem)
+                .iter(&*context.map)
                 .unwrap()
                 .next()
                 .unwrap(),

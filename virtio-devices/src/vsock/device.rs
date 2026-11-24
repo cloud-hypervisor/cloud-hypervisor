@@ -678,7 +678,7 @@ mod tests {
         // A warning is, however, logged, if the guest driver attempts to write any config data.
         ctx.device.write_config(0, &data[..4]);
 
-        let memory = GuestMemory::new(ctx.mem.clone());
+        let memory = ctx.mem.clone();
 
         // Test a bad activation.
         let bad_activate = ctx.device.activate(ActivationContext {

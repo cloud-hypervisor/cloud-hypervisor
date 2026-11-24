@@ -1175,9 +1175,6 @@ mod tests {
     use vm_virtio::queue::testing::VirtQueue;
 
     use super::*;
-    use crate::GuestMemoryMap;
-
-    type TestMemory = GuestMemoryMap;
 
     struct NoopInterrupt;
 
@@ -1197,14 +1194,14 @@ mod tests {
     }
 
     fn create_stats_handler(
-        memory: &TestMemory,
+        memory: &GuestMemory,
         queue: Queue,
         state: BalloonStatsState,
     ) -> BalloonEpollHandler {
         let (_, request_receiver) = mpsc::channel();
 
         BalloonEpollHandler {
-            mem: GuestMemory::new(memory.clone()),
+            mem: memory.clone(),
             queues: vec![queue],
             interrupt_cb: Arc::new(NoopInterrupt),
             inflate_queue_evt: EventFd::new(EFD_NONBLOCK).unwrap(),
@@ -1261,11 +1258,12 @@ mod tests {
         let region = vm_memory::GuestRegionMmap::new(mmap, GuestAddress(0))
             .unwrap()
             .into();
-        let memory = GuestMemoryMap::from_regions(vec![region]).unwrap();
+        let guest_memory = GuestMemory::from_regions(vec![region]).unwrap();
+        let memory = guest_memory.memory();
         memory.write_slice(&[0xa5], GuestAddress(0)).unwrap();
         assert_eq!(memory.read_obj::<u8>(GuestAddress(0)).unwrap(), 0xa5);
 
-        let res = BalloonEpollHandler::release_memory_range(&memory, GuestAddress(0), 4096);
+        let res = BalloonEpollHandler::release_memory_range(&*memory, GuestAddress(0), 4096);
         assert!(res.is_ok(), "release_memory_range failed: {res:?}");
         assert_eq!(memory.read_obj::<u8>(GuestAddress(0)).unwrap(), 0x5a);
         assert_eq!(fs::read(backing_file.as_path()).unwrap(), original);
@@ -1291,12 +1289,13 @@ mod tests {
         }
 
         let memory_size = page_size * 4;
-        let memory = TestMemory::from_ranges(&[(GuestAddress(0), memory_size)]).unwrap();
+        let guest_memory = GuestMemory::from_ranges(&[(GuestAddress(0), memory_size)]).unwrap();
+        let memory = guest_memory.memory();
         memory
             .write_slice(&vec![0xa5; memory_size], GuestAddress(0))
             .unwrap();
         let mut handler = create_stats_handler(
-            &memory,
+            &guest_memory,
             Queue::new(16).unwrap(),
             BalloonStatsState::WaitingForInitialDescriptor,
         );
@@ -1305,7 +1304,7 @@ mod tests {
             .map(|pfn| GuestAddress(pfn << VIRTIO_BALLOON_PFN_SHIFT))
             .collect();
 
-        handler.process_inflate_addresses(&memory, &mut addresses);
+        handler.process_inflate_addresses(&*memory, &mut addresses);
 
         assert_eq!(
             &addresses[..],
@@ -1338,11 +1337,12 @@ mod tests {
         // whole host pages on hosts with pages larger than 4 KiB.
         for num_pfns in [512, 512 + pfns_per_page, 1024] {
             let balloon_size = num_pfns * VIRTIO_BALLOON_PAGE_SIZE;
-            let memory = TestMemory::from_ranges(&[
+            let guest_memory = GuestMemory::from_ranges(&[
                 (GuestAddress(0), PAGES_ADDRESS.0 as usize),
                 (PAGES_ADDRESS, balloon_size + page_size),
             ])
             .unwrap();
+            let memory = guest_memory.memory();
             memory
                 .write_slice(&vec![0xa5; balloon_size + page_size], PAGES_ADDRESS)
                 .unwrap();
@@ -1355,12 +1355,12 @@ mod tests {
                     )
                     .unwrap();
             }
-            let guest_queue = VirtQueue::new(QUEUE_ADDRESS, &memory, 16);
+            let guest_queue = VirtQueue::new(QUEUE_ADDRESS, &*memory, 16);
             guest_queue.dtable[0].set(PFNS_ADDRESS.0, (num_pfns * size_of::<u32>()) as u32, 0, 0);
             guest_queue.avail.ring[0].set(0);
             guest_queue.avail.idx.set(1);
             let mut handler = create_stats_handler(
-                &memory,
+                &guest_memory,
                 guest_queue.create_queue(),
                 BalloonStatsState::WaitingForInitialDescriptor,
             );
@@ -1387,11 +1387,12 @@ mod tests {
         }
 
         let pfns_per_page = page_size / VIRTIO_BALLOON_PAGE_SIZE;
-        let memory = TestMemory::from_ranges(&[
+        let guest_memory = GuestMemory::from_ranges(&[
             (GuestAddress(0), PAGES_ADDRESS.0 as usize),
             (PAGES_ADDRESS, page_size),
         ])
         .unwrap();
+        let memory = guest_memory.memory();
         memory
             .write_slice(&vec![0xa5; page_size], PAGES_ADDRESS)
             .unwrap();
@@ -1407,14 +1408,14 @@ mod tests {
 
         // Cover each half of the host page from a separate buffer.
         let half_len = (pfns_per_page / 2 * size_of::<u32>()) as u32;
-        let guest_queue = VirtQueue::new(QUEUE_ADDRESS, &memory, 16);
+        let guest_queue = VirtQueue::new(QUEUE_ADDRESS, &*memory, 16);
         guest_queue.dtable[0].set(PFNS_ADDRESS.0, half_len, 0, 0);
         guest_queue.dtable[1].set(PFNS_ADDRESS.0 + u64::from(half_len), half_len, 0, 0);
         guest_queue.avail.ring[0].set(0);
         guest_queue.avail.ring[1].set(1);
         guest_queue.avail.idx.set(2);
         let mut handler = create_stats_handler(
-            &memory,
+            &guest_memory,
             guest_queue.create_queue(),
             BalloonStatsState::WaitingForInitialDescriptor,
         );
@@ -1467,14 +1468,15 @@ mod tests {
         .unwrap();
         balloon.common.acked_features =
             1u64 << VIRTIO_BALLOON_F_STATS_VQ | 1u64 << VIRTIO_BALLOON_F_REPORTING;
-        let memory = TestMemory::from_ranges(&[
+        let guest_memory = GuestMemory::from_ranges(&[
             (GuestAddress(0), PAGES_ADDRESS.0 as usize),
             (PAGES_ADDRESS, page_size),
         ])
         .unwrap();
-        let inflate_queue = VirtQueue::new(GuestAddress(0x1_0000), &memory, 16);
-        let deflate_queue = VirtQueue::new(GuestAddress(0x2_0000), &memory, 16);
-        let reporting_queue = VirtQueue::new(GuestAddress(0x3_0000), &memory, 16);
+        let memory = guest_memory.memory();
+        let inflate_queue = VirtQueue::new(GuestAddress(0x1_0000), &*memory, 16);
+        let deflate_queue = VirtQueue::new(GuestAddress(0x2_0000), &*memory, 16);
+        let reporting_queue = VirtQueue::new(GuestAddress(0x3_0000), &*memory, 16);
         reporting_queue.dtable[0].set(
             PAGES_ADDRESS.0,
             page_size as u32,
@@ -1488,7 +1490,7 @@ mod tests {
 
         balloon
             .activate(ActivationContext {
-                mem: GuestMemory::new(memory.clone()),
+                mem: guest_memory,
                 interrupt_cb: Arc::new(QueueInterruptSender(Mutex::new(tx))),
                 queues: vec![
                     (
@@ -1674,8 +1676,9 @@ mod tests {
         const QUEUE_ADDRESS: GuestAddress = GuestAddress(0x1_0000);
         const STATS_ADDRESS: GuestAddress = GuestAddress(0x1_000);
 
-        let memory = TestMemory::from_ranges(&[(GuestAddress(0), 0x2_0000)]).unwrap();
-        let guest_queue = VirtQueue::new(QUEUE_ADDRESS, &memory, 16);
+        let guest_memory = GuestMemory::from_ranges(&[(GuestAddress(0), 0x2_0000)]).unwrap();
+        let memory = guest_memory.memory();
+        let guest_queue = VirtQueue::new(QUEUE_ADDRESS, &*memory, 16);
         let initial = stat(VIRTIO_BALLOON_S_MEMFREE, 100);
         memory.write_slice(&initial, STATS_ADDRESS).unwrap();
         guest_queue.dtable[0].set(STATS_ADDRESS.raw_value(), initial.len() as u32, 0, 0);
@@ -1683,7 +1686,7 @@ mod tests {
         guest_queue.avail.idx.set(1);
 
         let mut handler = create_stats_handler(
-            &memory,
+            &guest_memory,
             guest_queue.create_queue(),
             BalloonStatsState::WaitingForInitialDescriptor,
         );
@@ -1750,13 +1753,14 @@ mod tests {
         const QUEUE_ADDRESS: GuestAddress = GuestAddress(0x1_0000);
         const STATS_ADDRESS: GuestAddress = GuestAddress(0x1_000);
 
-        let memory = TestMemory::from_ranges(&[(GuestAddress(0), 0x2_0000)]).unwrap();
-        let guest_queue = VirtQueue::new(QUEUE_ADDRESS, &memory, 16);
+        let guest_memory = GuestMemory::from_ranges(&[(GuestAddress(0), 0x2_0000)]).unwrap();
+        let memory = guest_memory.memory();
+        let guest_queue = VirtQueue::new(QUEUE_ADDRESS, &*memory, 16);
         guest_queue.dtable[0].set(STATS_ADDRESS.raw_value(), 10, 0, 0);
         guest_queue.avail.ring[0].set(0);
         guest_queue.avail.idx.set(1);
         let mut handler = create_stats_handler(
-            &memory,
+            &guest_memory,
             guest_queue.create_queue(),
             BalloonStatsState::Idle {
                 descriptor_index: 1,
@@ -1778,10 +1782,11 @@ mod tests {
     fn stats_request_is_ignored_while_refresh_is_pending() {
         const QUEUE_ADDRESS: GuestAddress = GuestAddress(0x1_0000);
 
-        let memory = TestMemory::from_ranges(&[(GuestAddress(0), 0x2_0000)]).unwrap();
-        let guest_queue = VirtQueue::new(QUEUE_ADDRESS, &memory, 16);
+        let guest_memory = GuestMemory::from_ranges(&[(GuestAddress(0), 0x2_0000)]).unwrap();
+        let memory = guest_memory.memory();
+        let guest_queue = VirtQueue::new(QUEUE_ADDRESS, &*memory, 16);
         let mut handler = create_stats_handler(
-            &memory,
+            &guest_memory,
             guest_queue.create_queue(),
             BalloonStatsState::Pending,
         );
@@ -1799,10 +1804,11 @@ mod tests {
         const QUEUE_ADDRESS: GuestAddress = GuestAddress(0x1_0000);
         const STATS_ADDRESS: GuestAddress = GuestAddress(0x1_000);
 
-        let memory = TestMemory::from_ranges(&[(GuestAddress(0), 0x2_0000)]).unwrap();
-        let guest_queue = VirtQueue::new(QUEUE_ADDRESS, &memory, 16);
+        let guest_memory = GuestMemory::from_ranges(&[(GuestAddress(0), 0x2_0000)]).unwrap();
+        let memory = guest_memory.memory();
+        let guest_queue = VirtQueue::new(QUEUE_ADDRESS, &*memory, 16);
         let mut handler = create_stats_handler(
-            &memory,
+            &guest_memory,
             guest_queue.create_queue(),
             BalloonStatsState::WaitingForInitialDescriptor,
         );
@@ -1845,10 +1851,11 @@ mod tests {
     fn stats_request_propagates_queue_error() {
         const QUEUE_ADDRESS: GuestAddress = GuestAddress(0x1_0000);
 
-        let memory = TestMemory::from_ranges(&[(GuestAddress(0), 0x2_0000)]).unwrap();
-        let guest_queue = VirtQueue::new(QUEUE_ADDRESS, &memory, 16);
+        let guest_memory = GuestMemory::from_ranges(&[(GuestAddress(0), 0x2_0000)]).unwrap();
+        let memory = guest_memory.memory();
+        let guest_queue = VirtQueue::new(QUEUE_ADDRESS, &*memory, 16);
         let mut handler = create_stats_handler(
-            &memory,
+            &guest_memory,
             guest_queue.create_queue(),
             BalloonStatsState::Idle {
                 descriptor_index: 16,
@@ -1865,13 +1872,14 @@ mod tests {
         const QUEUE_ADDRESS: GuestAddress = GuestAddress(0x1_0000);
         const INVALID_STATS_ADDRESS: GuestAddress = GuestAddress(0x3_0000);
 
-        let memory = TestMemory::from_ranges(&[(GuestAddress(0), 0x2_0000)]).unwrap();
-        let guest_queue = VirtQueue::new(QUEUE_ADDRESS, &memory, 16);
+        let guest_memory = GuestMemory::from_ranges(&[(GuestAddress(0), 0x2_0000)]).unwrap();
+        let memory = guest_memory.memory();
+        let guest_queue = VirtQueue::new(QUEUE_ADDRESS, &*memory, 16);
         guest_queue.dtable[0].set(INVALID_STATS_ADDRESS.raw_value(), 10, 0, 0);
         guest_queue.avail.ring[0].set(0);
         guest_queue.avail.idx.set(1);
         let mut handler = create_stats_handler(
-            &memory,
+            &guest_memory,
             guest_queue.create_queue(),
             BalloonStatsState::Pending,
         );
