@@ -68,7 +68,6 @@ const VIRTIO_IOMMU_F_MAP_UNMAP: u32 = 2;
 #[expect(dead_code)]
 const VIRTIO_IOMMU_F_BYPASS: u32 = 3;
 const VIRTIO_IOMMU_F_PROBE: u32 = 4;
-#[expect(dead_code)]
 const VIRTIO_IOMMU_F_MMIO: u32 = 5;
 const VIRTIO_IOMMU_F_BYPASS_CONFIG: u32 = 6;
 
@@ -1303,6 +1302,7 @@ impl Iommu {
             } else {
                 let avail_features = (1u64 << VIRTIO_F_VERSION_1)
                     | (1u64 << VIRTIO_IOMMU_F_MAP_UNMAP)
+                    | (1u64 << VIRTIO_IOMMU_F_MMIO)
                     | (1u64 << VIRTIO_IOMMU_F_PROBE)
                     | (1u64 << VIRTIO_IOMMU_F_BYPASS_CONFIG);
 
