@@ -66,22 +66,28 @@ assets:
 
   # Kernels
   - filename: vmlinux-x86_64
-    url: https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v7.2.8-20261009/vmlinux-x86_64
-    sha256: edfeb8a8a6c04ff2979e9f1c700feaa29b8f564f952261834ef0b7d2e673a853
+    url: https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v7.2.8-20261125/vmlinux-x86_64
+    sha256: 77690853bc1ebe56aa316e602c3b98f8cbb708c280980d90c4e4d00169ae15e4
     arch: [x86_64]
     test: [integration, rate-limiter, metrics]
 
   - filename: bzImage-x86_64
-    url: https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v7.2.8-20261009/bzImage-x86_64
-    sha256: 40f5ac32a703528a850dd2cedb3de5cb5bfc383c5abbff1424a135d7a85bec35
+    url: https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v7.2.8-20261125/bzImage-x86_64
+    sha256: 9dcaf870cc42ad74aea02ef551c1fc638bea3778d4fd5e6f790d35b7923482d5
     arch: [x86_64]
     test: [integration, cvm]
 
   - filename: Image-arm64
-    url: https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v7.2.8-20261009/Image-arm64
-    sha256: 8f8f3d5a983809f87a4e1e9a13053a3361fda47ef04e09c771a41c5e037cb6c2
+    url: https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v7.2.8-20261125/Image-arm64
+    sha256: 9f213bdf7f5d7e92db5e0b81639f373084cb364a78cabef38bc01e7f4ecec3fb
     arch: [aarch64]
     test: [integration, metrics]
+
+  - filename: Image-riscv
+    url: https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v7.2.8-20261125/Image-riscv
+    sha256: f86520d63d9cb24118019fbb31446e0ab88453ed1b6a4ca5b3689086d1ddf3cf
+    arch: [riscv64]
+    test: [integration]
 
   # Previous release binaries for live-upgrade tests. Keep each ch-remote
   # version in sync with its corresponding cloud-hypervisor version.
