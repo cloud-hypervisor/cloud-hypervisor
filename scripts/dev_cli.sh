@@ -512,7 +512,14 @@ cmd_tests() {
     [ "$integration_windows" = true ] && workload_args+=(--test windows)
     [ "$integration_rate_limiter" = true ] && workload_args+=(--test rate-limiter)
     [ "$metrics" = true ] && workload_args+=(--test metrics)
-    [ "$integration_cvm" = true ] && workload_args+=(--test cvm)
+    if [ "$integration_cvm" = true ]; then
+        if [ "$exported_device" = /dev/mshv ]; then
+            # MSHV uses a prebuilt IGVM from the host.
+            workload_args+=(--test cvm-mshv)
+        else
+            workload_args+=(--test cvm)
+        fi
+    fi
     if ((${#workload_args[@]})); then
         say "Fetching workloads..."
         python3 "$CLH_SCRIPTS_DIR/fetch_workloads.py" "${workload_args[@]}" \
