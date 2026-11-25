@@ -3993,13 +3993,15 @@ fn write_guest_range<M: GuestMemoryBackend>(
     Ok(())
 }
 
-// Writes the guest pages that no longer read from the restore source over
-// the clone of that source in `file`.
-fn write_private_pages<M: GuestMemoryBackend>(
+// Returns the guest ranges that no longer read from the restore source,
+// each with its offset in the memory file of that source. Runs of unchanged
+// pages of `gap_pages` pages or less between them are joined in.
+fn private_guest_ranges<M: GuestMemoryBackend>(
     guest_memory: &M,
     source: &CowSource,
-    file: &mut File,
-) -> result::Result<(), MigratableError> {
+    gap_pages: u64,
+) -> result::Result<Vec<(u64, MemoryRange)>, MigratableError> {
+    let mut ranges = Vec::new();
     let mut file_offset: u64 = 0;
     for range in source.ranges.ranges() {
         let host_addr = guest_memory
@@ -4008,19 +4010,33 @@ fn write_private_pages<M: GuestMemoryBackend>(
             .map_err(MigratableError::MigrateSend)?;
         let private_ranges = source
             .pagemap
-            .private_ranges(host_addr as u64, range.length, COW_SNAPSHOT_GAP_PAGES)
+            .private_ranges(host_addr as u64, range.length, gap_pages)
             .context("Error reading the pagemap")
             .map_err(MigratableError::MigrateSend)?;
         for private in private_ranges {
-            write_guest_range(
-                guest_memory,
-                file,
+            ranges.push((
                 file_offset + private.start,
-                range.gpa + private.start,
-                private.end - private.start,
-            )?;
+                MemoryRange {
+                    gpa: range.gpa + private.start,
+                    length: private.end - private.start,
+                },
+            ));
         }
         file_offset += range.length;
+    }
+    Ok(ranges)
+}
+
+// Writes the guest pages that no longer read from the restore source over
+// the clone of that source in `file`.
+fn write_private_pages<M: GuestMemoryBackend>(
+    guest_memory: &M,
+    source: &CowSource,
+    file: &mut File,
+) -> result::Result<(), MigratableError> {
+    for (file_offset, range) in private_guest_ranges(guest_memory, source, COW_SNAPSHOT_GAP_PAGES)?
+    {
+        write_guest_range(guest_memory, file, file_offset, range.gpa, range.length)?;
     }
     Ok(())
 }
