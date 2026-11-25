@@ -1428,7 +1428,7 @@ mod tests {
             memory: MemoryConfig {
                 size: 536_870_912,
                 mergeable: false,
-                hotplug_method: HotplugMethod::Acpi,
+                hotplug_method: HotplugMethod::VirtioMem,
                 hotplug_size: None,
                 hotplugged_size: None,
                 shared: false,
@@ -1594,15 +1594,15 @@ mod tests {
                 vec!["cloud-hypervisor", "--kernel", "/path/to/kernel", "--memory", "size=1G,hotplug_size=1G"],
                 r#"{
                     "payload": {"kernel": "/path/to/kernel"},
-                    "memory": {"size": 1073741824, "hotplug_method": "Acpi", "hotplug_size": 1073741824}
+                    "memory": {"size": 1073741824, "hotplug_method": "VirtioMem", "hotplug_size": 1073741824}
                 }"#,
                 true,
             ),
             (
-                vec!["cloud-hypervisor", "--kernel", "/path/to/kernel", "--memory", "size=1G,hotplug_method=virtio-mem,hotplug_size=1G"],
+                vec!["cloud-hypervisor", "--kernel", "/path/to/kernel", "--memory", "size=1G,hotplug_method=acpi,hotplug_size=1G"],
                 r#"{
                     "payload": {"kernel": "/path/to/kernel"},
-                    "memory": {"size": 1073741824, "hotplug_method": "VirtioMem", "hotplug_size": 1073741824}
+                    "memory": {"size": 1073741824, "hotplug_method": "Acpi", "hotplug_size": 1073741824}
                 }"#,
                 true,
             )]

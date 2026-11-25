@@ -3914,8 +3914,10 @@ mod common_parallel {
         let api_socket = temp_api_path(&guest.tmp_dir);
 
         let mut cmd = GuestCommand::new(&guest);
-        cmd.args(["--cpus", "boot=2,max=4"])
-            .args(["--memory", "size=512M,hotplug_size=8192M"]);
+        cmd.args(["--cpus", "boot=2,max=4"]).args([
+            "--memory",
+            "size=512M,hotplug_method=acpi,hotplug_size=8192M",
+        ]);
         #[cfg(target_arch = "x86_64")]
         cmd.default_kernel_cmdline();
         #[cfg(target_arch = "aarch64")]
@@ -4000,10 +4002,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=2,max=4"])
-            .args([
-                "--memory",
-                "size=512M,hotplug_method=virtio-mem,hotplug_size=8192M",
-            ])
+            .args(["--memory", "size=512M,hotplug_size=8192M"])
             .default_kernel_cmdline()
             .default_disks()
             .default_net()
@@ -14150,7 +14149,7 @@ mod windows {
         let mut child = GuestCommand::new(windows_guest.guest())
             .args(["--api-socket", &api_socket])
             .args(["--cpus", "boot=2,kvm_hyperv=on"])
-            .args(["--memory", "size=2G,hotplug_size=5G"])
+            .args(["--memory", "size=2G,hotplug_method=acpi,hotplug_size=5G"])
             .args(["--firmware", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
             .args(["--console", "off"])
