@@ -50,7 +50,7 @@ use vm_migration::{
 };
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::config::MemoryRestoreMode;
+use crate::config::{MemoryRestoreMode, SnapshotMode};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::{
     CoredumpMemoryRegion, CoredumpMemoryRegions, DumpState, GuestDebuggableError,
@@ -384,6 +384,7 @@ pub struct MemoryManager {
     thp: bool,
     user_provided_zones: bool,
     snapshot_memory_ranges: MemoryRangeTable,
+    snapshot_mode: SnapshotMode,
     cow_source: Option<CowSource>,
     memory_zones: MemoryZones,
     log_dirty: bool, // Enable dirty logging for created RAM regions
@@ -2502,6 +2503,7 @@ impl MemoryManager {
             reserve: config.reserve,
             user_provided_zones,
             snapshot_memory_ranges: MemoryRangeTable::default(),
+            snapshot_mode: SnapshotMode::Full,
             cow_source: None,
             memory_zones,
             guest_ram_mappings: Vec::new(),
@@ -3271,6 +3273,7 @@ impl MemoryManager {
             next_memory_slot: self.next_memory_slot.load(Ordering::SeqCst),
             selected_slot: self.selected_slot,
             next_hotplug_slot: self.next_hotplug_slot,
+            snapshot_mode: self.snapshot_mode,
         }
     }
 
@@ -3774,6 +3777,8 @@ pub struct MemoryManagerSnapshotData {
     next_memory_slot: u32,
     selected_slot: usize,
     next_hotplug_slot: usize,
+    #[serde(default)]
+    snapshot_mode: SnapshotMode,
 }
 
 impl Snapshottable for MemoryManager {
@@ -4511,5 +4516,29 @@ mod tests {
             do_mmap_cow_saved_regions(&*gm, &file, &table, true).unwrap();
             assert_eq!(gm.read_obj::<u8>(GuestAddress(0)).unwrap(), 0xcd);
         }
+    }
+
+    #[test]
+    fn snapshot_state_without_mode_reads_as_full() {
+        let data = MemoryManagerSnapshotData {
+            memory_ranges: MemoryRangeTable::default(),
+            guest_ram_mappings: Vec::new(),
+            start_of_device_area: 0,
+            boot_ram: 0,
+            current_ram: 0,
+            arch_mem_regions: Vec::new(),
+            hotplug_slots: Vec::new(),
+            next_memory_slot: 0,
+            selected_slot: 0,
+            next_hotplug_slot: 0,
+            snapshot_mode: SnapshotMode::Delta,
+        };
+        let mut json = serde_json::to_value(&data).unwrap();
+        assert_eq!(json["snapshot_mode"], "Delta");
+
+        // A snapshot from a release without the field
+        json.as_object_mut().unwrap().remove("snapshot_mode");
+        let old: MemoryManagerSnapshotData = serde_json::from_value(json).unwrap();
+        assert_eq!(old.snapshot_mode, SnapshotMode::Full);
     }
 }

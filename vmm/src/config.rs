@@ -3070,6 +3070,17 @@ pub enum MemoryRestoreMode {
     CopyOnWrite,
 }
 
+/// What a snapshot writes for guest memory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub enum SnapshotMode {
+    /// Write all guest memory.
+    #[default]
+    Full,
+    /// Write only the pages that changed since a copy-on-write restore. The
+    /// caller provides the restore source as the base before a restore.
+    Delta,
+}
+
 #[derive(Debug, Error)]
 pub enum MemoryRestoreModeParseError {
     #[error("Invalid value: {0}")]
