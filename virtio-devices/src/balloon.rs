@@ -74,7 +74,7 @@ const STATS_REQUEST_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 5;
 const VIRTIO_BALLOON_PFN_SHIFT: u64 = 12;
 const VIRTIO_BALLOON_PAGE_SIZE: usize = 1 << VIRTIO_BALLOON_PFN_SHIFT;
 
-// Batch the number of PFNs handled in one pass
+// Bound the sorting buffer, not the size of a coalesced release.
 const VIRTIO_BALLOON_PFNS_PER_BATCH: usize = 256;
 
 // Enable statistics virtqueue.
@@ -338,6 +338,7 @@ impl BalloonEpollHandler {
         memory: &M,
         addresses: &mut SmallVec<[GuestAddress; VIRTIO_BALLOON_PFNS_PER_BATCH]>,
         page_size: u64,
+        pending: &mut Option<Range<u64>>,
         mut release: impl FnMut(Range<u64>),
     ) {
         let page_mask = !(page_size - 1);
@@ -348,6 +349,9 @@ impl BalloonEpollHandler {
         addresses.sort_unstable();
         addresses.dedup();
 
+        // A later run in this batch may adjoin the previous batch's pending
+        // range, even if the first run does not.
+        let mut next_pending = None;
         let mut remaining = addresses.as_slice();
         while let Some(&first) = remaining.first() {
             let Some(region) = memory.find_region(first) else {
@@ -375,8 +379,23 @@ impl BalloonEpollHandler {
                 if partial_page.is_some_and(|page| (start..end).contains(&page)) {
                     partial_page = None;
                 }
-                release(start..end);
+                if let Some(prev) = pending
+                    && start <= prev.end
+                    && prev.start <= end
+                    && region.to_region_addr(GuestAddress(prev.start)).is_some()
+                {
+                    prev.start = prev.start.min(start);
+                    prev.end = prev.end.max(end);
+                } else if let Some(prev) = next_pending.replace(start..end) {
+                    release(prev);
+                }
             }
+        }
+
+        if let Some(next) = next_pending
+            && let Some(prev) = pending.replace(next)
+        {
+            release(prev);
         }
 
         if let Some(page) = partial_page {
@@ -394,6 +413,7 @@ impl BalloonEpollHandler {
         {
             let data_chunk_size = size_of::<u32>();
             let mut inflate_addresses = SmallVec::new();
+            let mut pending = None;
             let results: SmallVec<[_; 4]> = desc_chain
                 .checked_iter(self.access_platform.as_deref())
                 .collect();
@@ -443,6 +463,7 @@ impl BalloonEpollHandler {
                                     memory,
                                     &mut inflate_addresses,
                                     page_size,
+                                    &mut pending,
                                     release,
                                 );
                             }
@@ -453,13 +474,18 @@ impl BalloonEpollHandler {
                         _ => return Err(Error::InvalidQueueIndex(queue_index)),
                     }
                 }
-                if queue_index == INFLATE_QUEUE {
-                    Self::process_inflate_addresses(
-                        memory,
-                        &mut inflate_addresses,
-                        page_size,
-                        release,
-                    );
+            }
+
+            if queue_index == INFLATE_QUEUE {
+                Self::process_inflate_addresses(
+                    memory,
+                    &mut inflate_addresses,
+                    page_size,
+                    &mut pending,
+                    release,
+                );
+                if let Some(range) = pending {
+                    release(range);
                 }
             }
             self.queues[queue_index as usize]
@@ -1229,13 +1255,16 @@ mod tests {
                     .flat_map(|start| start..start + pfns_per_guest_page)
                     .map(|pfn| GuestAddress((pfn as u64) << VIRTIO_BALLOON_PFN_SHIFT))
                     .collect();
+                let mut pending = None;
                 let mut released = Vec::new();
                 BalloonEpollHandler::process_inflate_addresses(
                     &*memory,
                     &mut addresses,
                     host_page_size,
+                    &mut pending,
                     |r| released.push(r),
                 );
+                released.extend(pending);
                 assert_eq!(released.len(), 1);
                 assert_eq!(released[0], 0..(1 << 20));
             }
@@ -1258,13 +1287,16 @@ mod tests {
             .rev()
             .map(|pfn| GuestAddress(pfn << VIRTIO_BALLOON_PFN_SHIFT))
             .collect();
+        let mut pending = None;
         let mut released = Vec::new();
         BalloonEpollHandler::process_inflate_addresses(
             &*memory,
             &mut addresses,
             page_size as u64,
+            &mut pending,
             |r| released.push(r),
         );
+        released.extend(pending);
         released.sort_unstable_by_key(|r| r.start);
         let p = page_size as u64;
         assert_eq!(released, [0..2 * p, 2 * p..3 * p, 4 * p..5 * p]);
