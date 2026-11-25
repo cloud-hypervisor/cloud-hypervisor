@@ -18,7 +18,7 @@ const PREFIX_LEN: u64 = 16;
 const ENTRY_LEN: u64 = 16;
 
 #[derive(Debug, Error)]
-pub(crate) enum DeltaError {
+pub enum DeltaError {
     #[error("Error reading the memory delta header")]
     Read(#[source] io::Error),
     #[error("Not a memory delta file")]

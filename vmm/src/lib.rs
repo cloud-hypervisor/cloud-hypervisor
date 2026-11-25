@@ -91,8 +91,7 @@ pub mod device_tree;
 pub mod external_fds;
 #[cfg(feature = "guest_debug")]
 mod gdb;
-#[cfg_attr(not(test), expect(dead_code))]
-mod guest_memory_delta;
+pub mod guest_memory_delta;
 #[cfg(feature = "igvm")]
 mod igvm;
 pub mod interrupt;
