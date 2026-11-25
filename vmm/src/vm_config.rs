@@ -291,8 +291,8 @@ impl ApplyLandlock for MemoryZoneConfig {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub enum HotplugMethod {
-    #[default]
     Acpi,
+    #[default]
     VirtioMem,
 }
 
@@ -335,7 +335,7 @@ impl Default for MemoryConfig {
         MemoryConfig {
             size: DEFAULT_MEMORY_MB << 20,
             mergeable: false,
-            hotplug_method: HotplugMethod::Acpi,
+            hotplug_method: HotplugMethod::default(),
             hotplug_size: None,
             hotplugged_size: None,
             shared: false,

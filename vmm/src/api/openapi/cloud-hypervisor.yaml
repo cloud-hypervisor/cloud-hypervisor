@@ -1176,7 +1176,7 @@ components:
         hotplug_method:
           type: string
           enum: ["Acpi", "VirtioMem"]
-          default: "Acpi"
+          default: "VirtioMem"
           description: >-
             ACPI memory hotplug is deprecated and will be removed in a future
             release. Use VirtioMem instead.

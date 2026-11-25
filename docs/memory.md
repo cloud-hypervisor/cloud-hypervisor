@@ -50,10 +50,9 @@ _Example_
 
 Selects the way of adding and/or removing memory to/from a booted VM.
 
-Possible values are `acpi` and `virtio-mem`. Default value is `acpi`.
+Possible values are `acpi` and `virtio-mem`. The default is `virtio-mem`.
 
 ACPI memory hotplug is deprecated and will be removed in a future release.
-Use `hotplug_method=virtio-mem` instead.
 
 _Example_
 
@@ -339,9 +338,8 @@ _Example_
 
 ### `hotplug_size`
 
-Amount of memory that can be dynamically added to the memory zone. Since
-`virtio-mem` is the only way of resizing a memory zone, one must specify
-the `hotplug_method=virtio-mem` to the `--memory` parameter.
+Amount of memory that can be dynamically added to the memory zone. Only
+`virtio-mem` supports resizing memory zones.
 
 Value is an unsigned integer of 64 bits. A value of 0 is invalid.
 

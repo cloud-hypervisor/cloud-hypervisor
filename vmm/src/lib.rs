@@ -3650,7 +3650,7 @@ pub(crate) mod tests {
             memory: MemoryConfig {
                 size: 536_870_912,
                 mergeable: false,
-                hotplug_method: HotplugMethod::Acpi,
+                hotplug_method: HotplugMethod::VirtioMem,
                 hotplug_size: None,
                 hotplugged_size: None,
                 shared: true,

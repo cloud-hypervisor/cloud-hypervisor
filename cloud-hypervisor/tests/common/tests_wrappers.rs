@@ -610,7 +610,10 @@ pub(crate) fn test_vhost_user_net(
     let mut ch_command = GuestCommand::new(&guest);
     ch_command
         .args(["--cpus", format!("boot={}", num_queues / 2).as_str()])
-        .args(["--memory", "size=512M,hotplug_size=2048M,shared=on"])
+        .args([
+            "--memory",
+            "size=512M,hotplug_method=acpi,hotplug_size=2048M,shared=on",
+        ])
         .default_kernel_cmdline()
         .default_disks()
         .args(["--net", net_params.as_str()])
@@ -765,7 +768,10 @@ pub(crate) fn test_vhost_user_blk(
 
     let mut child = GuestCommand::new(&guest)
         .args(["--cpus", format!("boot={num_queues}").as_str()])
-        .args(["--memory", "size=512M,hotplug_size=2048M,shared=on"])
+        .args([
+            "--memory",
+            "size=512M,hotplug_method=acpi,hotplug_size=2048M,shared=on",
+        ])
         .default_kernel_cmdline()
         .default_disks()
         .args(["--disk", blk_params.as_str()])
@@ -946,9 +952,10 @@ pub(crate) fn _test_virtio_fs(
         prepare_daemon(&guest.tmp_dir, shared_dir.to_str().unwrap());
 
     let mut guest_command = GuestCommand::new(&guest);
-    guest_command
-        .default_cpus()
-        .args(["--memory", "size=512M,hotplug_size=2048M,shared=on"]);
+    guest_command.default_cpus().args([
+        "--memory",
+        "size=512M,hotplug_method=acpi,hotplug_size=2048M,shared=on",
+    ]);
     if cfg!(target_arch = "aarch64") && hotplug {
         guest_command.args(["--firmware", edk2_path().to_str().unwrap()]);
     } else {

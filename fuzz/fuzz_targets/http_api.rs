@@ -152,7 +152,7 @@ impl RequestHandler for StubApiRequestHandler {
                 memory: MemoryConfig {
                     size: 536_870_912,
                     mergeable: false,
-                    hotplug_method: HotplugMethod::Acpi,
+                    hotplug_method: HotplugMethod::default(),
                     hotplug_size: None,
                     hotplugged_size: None,
                     shared: false,

@@ -62,9 +62,8 @@ As per adding CPUs to the guest, after a reboot the VM will be running with the 
 
 ## Memory Hot Plug
 
+Memory hotplug uses [virtio-mem](#virtio-mem-method) by default.
 ACPI memory hotplug is deprecated and will be removed in a future release.
-Use the [virtio-mem method](#virtio-mem-method) with
-`--memory hotplug_method=virtio-mem` instead.
 
 ### ACPI method
 
@@ -75,7 +74,7 @@ Extra memory can be added from a running `cloud-hypervisor` instance. This is co
 
 To use memory hotplug start the VM specifying some size RAM in the `hotplug_size` parameter to the memory configuration. Not all the memory specified in this parameter will be available to hotplug as there are spacing and alignment requirements so it is recommended to make it larger than the hotplug RAM needed.
 
-Because the ACPI method is the default, there is no need to add the extra option `hotplug_method=acpi`.
+To select ACPI, set `hotplug_method=acpi`.
 
 ```shell
 $ pushd $CLOUDH
@@ -85,7 +84,7 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
 	--disk path=focal-server-cloudimg-amd64.raw,image_type=raw \
 	--cpus boot=4,max=8 \
-	--memory size=1024M,hotplug_size=8192M \
+	--memory size=1024M,hotplug_size=8192M,hotplug_method=acpi \
 	--net "tap=,mac=,ip=,mask=" \
 	--api-socket=/tmp/ch-socket
 $ popd
@@ -125,7 +124,7 @@ Extra memory can be added and removed from a running Cloud Hypervisor instance. 
 1. Allocating some of the guest physical address space for hotplug memory.
 2. Making a HTTP API request to the VMM to ask for a new amount of RAM to be assigned to the VM.
 
-To use memory hotplug start the VM specifying some size RAM in the `hotplug_size` parameter along with `hotplug_method=virtio-mem` to the memory configuration.
+Set `hotplug_size` to the amount of RAM that can be added to the running VM.
 
 ```shell
 $ pushd $CLOUDH
@@ -134,7 +133,7 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--kernel custom-vmlinux.bin \
 	--cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
 	--disk path=focal-server-cloudimg-amd64.raw,image_type=raw \
-	--memory size=1024M,hotplug_size=8192M,hotplug_method=virtio-mem \
+	--memory size=1024M,hotplug_size=8192M \
 	--net "tap=,mac=,ip=,mask=" \
 	--api-socket=/tmp/ch-socket
 $ popd

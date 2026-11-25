@@ -1194,7 +1194,7 @@ impl MemoryConfig {
         hotplug_size=<hotpluggable_memory_size>,\
         hotplugged_size=<hotplugged_memory_size>,\
         prefault=on|off,reserve=on|off,thp=on|off\" \
-        (ACPI memory hotplug is deprecated: use hotplug_method=virtio-mem)";
+        (virtio-mem is the default. ACPI memory hotplug is deprecated)";
 
     #[expect(clippy::needless_pass_by_value)]
     pub fn parse(memory: &str, memory_zones: Option<Vec<&str>>) -> Result<Self> {
@@ -4845,7 +4845,6 @@ pub(crate) mod tests {
             MemoryConfig {
                 size: 1 << 30,
                 mergeable: false,
-                hotplug_method: HotplugMethod::Acpi,
                 zones: Some(vec![MemoryZoneConfig {
                     id: "hotplug".to_string(),
                     size: 0,
@@ -4923,12 +4922,14 @@ pub(crate) mod tests {
         assert_eq!(
             MemoryConfig::parse("hotplug_method=acpi", None)?,
             MemoryConfig {
+                hotplug_method: HotplugMethod::Acpi,
                 ..Default::default()
             }
         );
         assert_eq!(
             MemoryConfig::parse("hotplug_method=acpi,hotplug_size=512M", None)?,
             MemoryConfig {
+                hotplug_method: HotplugMethod::Acpi,
                 hotplug_size: Some(512 << 20),
                 ..Default::default()
             }
@@ -7676,7 +7677,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             memory: MemoryConfig {
                 size: 536_870_912,
                 mergeable: false,
-                hotplug_method: HotplugMethod::Acpi,
+                hotplug_method: HotplugMethod::VirtioMem,
                 hotplug_size: None,
                 hotplugged_size: None,
                 shared: false,
