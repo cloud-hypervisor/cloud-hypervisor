@@ -15,14 +15,16 @@ flag.
 
 Test workloads (guest images, kernels, firmware) are stored on the host
 under `$HOME/workloads` and bind-mounted into the container at
-`/root/workloads` for suites that use them. Unit tests do not use
-these workloads, so `dev_cli.sh tests --unit` skips the fetch. For
-other suites, `dev_cli.sh tests` runs `scripts/fetch_workloads.py` on
-the host before starting the container. It downloads the workloads
-listed in `scripts/test_assets.yaml` that are missing or have a wrong
-checksum. `dev_cli.sh fetch-workloads` runs only this step. The test
-scripts do not download anything: run directly, they exit with a
-`Missing:` error if a workload is absent.
+`/root/workloads` for suites that use them. Before starting the
+container, `dev_cli.sh tests` checks only the assets listed in
+[`scripts/test_assets.yaml`](../scripts/test_assets.yaml) for the selected
+suites and host architecture.
+It downloads missing assets and replaces files with a wrong checksum.
+Unit tests and coverage reports need no guest workloads.
+
+To fetch workloads without running tests, use `dev_cli.sh fetch-workloads`.
+Pass `--test` once per suite (for example, `--test windows`), or omit it
+to fetch all workloads listed for the host architecture.
 
 ## Prerequisites
 

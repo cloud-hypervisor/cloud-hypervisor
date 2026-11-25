@@ -506,12 +506,16 @@ cmd_tests() {
 
     process_volumes_args
 
-    # Unit tests do not use guest workloads.
-    if [[ "$integration" = true || "$integration_vfio" = true ||
-        "$integration_windows" = true || "$integration_rate_limiter" = true ||
-        "$integration_cvm" = true || "$metrics" = true || "$coverage" = true ]]; then
+    local workload_args=()
+    [ "$integration" = true ] && workload_args+=(--test integration)
+    [ "$integration_vfio" = true ] && workload_args+=(--test vfio)
+    [ "$integration_windows" = true ] && workload_args+=(--test windows)
+    [ "$integration_rate_limiter" = true ] && workload_args+=(--test rate-limiter)
+    [ "$metrics" = true ] && workload_args+=(--test metrics)
+    [ "$integration_cvm" = true ] && workload_args+=(--test cvm)
+    if ((${#workload_args[@]})); then
         say "Fetching workloads..."
-        python3 "$CLH_SCRIPTS_DIR/fetch_workloads.py" \
+        python3 "$CLH_SCRIPTS_DIR/fetch_workloads.py" "${workload_args[@]}" \
             --workloads-dir "$CLH_INTEGRATION_WORKLOADS" || die "Failed to fetch workloads"
     fi
 
