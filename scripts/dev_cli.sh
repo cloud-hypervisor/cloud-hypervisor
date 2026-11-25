@@ -506,10 +506,14 @@ cmd_tests() {
 
     process_volumes_args
 
-    # Fetch workload assets on the host before launching the container.
-    say "Fetching workloads..."
-    python3 "$CLH_SCRIPTS_DIR/fetch_workloads.py" \
-        --workloads-dir "$CLH_INTEGRATION_WORKLOADS" || die "Failed to fetch workloads"
+    # Unit tests do not use guest workloads.
+    if [[ "$integration" = true || "$integration_vfio" = true ||
+        "$integration_windows" = true || "$integration_rate_limiter" = true ||
+        "$integration_cvm" = true || "$metrics" = true || "$coverage" = true ]]; then
+        say "Fetching workloads..."
+        python3 "$CLH_SCRIPTS_DIR/fetch_workloads.py" \
+            --workloads-dir "$CLH_INTEGRATION_WORKLOADS" || die "Failed to fetch workloads"
+    fi
 
     target="$(uname -m)-unknown-linux-${libc}"
 
