@@ -506,74 +506,53 @@ impl Aml for PciSegment {
         let pci_dsm = PciDsmMethod {};
         pci_dsdt_inner_data.push(&pci_dsm);
 
-        #[allow(clippy::if_same_then_else)]
-        let crs = if self.id == 0 {
-            aml::Name::new(
-                "_CRS".into(),
-                &aml::ResourceTemplate::new(vec![
-                    &aml::AddressSpace::new_bus_number(0x0u16, 0x0u16),
-                    #[cfg(target_arch = "x86_64")]
-                    &aml::IO::new(0xcf8, 0xcf8, 1, 0x8),
-                    &aml::Memory32Fixed::new(
-                        true,
-                        self.mmio_config_address as u32,
-                        layout::PCI_MMIO_CONFIG_SIZE_PER_SEGMENT as u32,
-                    ),
-                    &aml::AddressSpace::new_memory(
-                        aml::AddressSpaceCacheable::NotCacheable,
-                        true,
-                        self.start_of_mem32_area,
-                        self.end_of_mem32_area,
-                        None,
-                    ),
-                    &aml::AddressSpace::new_memory(
-                        aml::AddressSpaceCacheable::NotCacheable,
-                        true,
-                        self.start_of_mem64_area,
-                        self.end_of_mem64_area,
-                        None,
-                    ),
-                    // Split range up to serial port PIO
-                    #[cfg(target_arch = "x86_64")]
-                    &aml::AddressSpace::new_io(0u16, 0x03f7u16, None),
-                    // Split range up to fw_cfg PIO
-                    #[cfg(target_arch = "x86_64")]
-                    &aml::AddressSpace::new_io(0x0400u16, 0x050fu16, None),
-                    // Split range up to PCI config PIO
-                    #[cfg(target_arch = "x86_64")]
-                    &aml::AddressSpace::new_io(0x051cu16, 0x0cf7u16, None),
-                    // Remainder
-                    #[cfg(target_arch = "x86_64")]
-                    &aml::AddressSpace::new_io(0x0d00u16, 0xffffu16, None),
-                ]),
-            )
-        } else {
-            aml::Name::new(
-                "_CRS".into(),
-                &aml::ResourceTemplate::new(vec![
-                    &aml::AddressSpace::new_bus_number(0x0u16, 0x0u16),
-                    &aml::Memory32Fixed::new(
-                        true,
-                        self.mmio_config_address as u32,
-                        layout::PCI_MMIO_CONFIG_SIZE_PER_SEGMENT as u32,
-                    ),
-                    &aml::AddressSpace::new_memory(
-                        aml::AddressSpaceCacheable::NotCacheable,
-                        true,
-                        self.start_of_mem32_area,
-                        self.end_of_mem32_area,
-                        None,
-                    ),
-                    &aml::AddressSpace::new_memory(
-                        aml::AddressSpaceCacheable::NotCacheable,
-                        true,
-                        self.start_of_mem64_area,
-                        self.end_of_mem64_area,
-                        None,
-                    ),
-                ]),
-            )
-        };
+        let bus_numbers = aml::AddressSpace::new_bus_number(0x0u16, 0x0u16);
+        #[cfg(target_arch = "x86_64")]
+        let pci_config_io = aml::IO::new(0xcf8, 0xcf8, 1, 0x8);
+        let mmio_config = aml::Memory32Fixed::new(
+            true,
+            self.mmio_config_address as u32,
+            layout::PCI_MMIO_CONFIG_SIZE_PER_SEGMENT as u32,
+        );
+        let mem32 = aml::AddressSpace::new_memory(
+            aml::AddressSpaceCacheable::NotCacheable,
+            true,
+            self.start_of_mem32_area,
+            self.end_of_mem32_area,
+            None,
+        );
+        let mem64 = aml::AddressSpace::new_memory(
+            aml::AddressSpaceCacheable::NotCacheable,
+            true,
+            self.start_of_mem64_area,
+            self.end_of_mem64_area,
+            None,
+        );
+        #[cfg(target_arch = "x86_64")]
+        let io_ranges = [
+            // Split range up to serial port PIO
+            aml::AddressSpace::new_io(0u16, 0x03f7u16, None),
+            // Split range up to fw_cfg PIO
+            aml::AddressSpace::new_io(0x0400u16, 0x050fu16, None),
+            // Split range up to PCI config PIO
+            aml::AddressSpace::new_io(0x051cu16, 0x0cf7u16, None),
+            // Remainder
+            aml::AddressSpace::new_io(0x0d00u16, 0xffffu16, None),
+        ];
+
+        let mut resources: Vec<&dyn Aml> = vec![&bus_numbers];
+        #[cfg(target_arch = "x86_64")]
+        if self.id == 0 {
+            resources.push(&pci_config_io);
+        }
+        resources.push(&mmio_config);
+        resources.push(&mem32);
+        resources.push(&mem64);
+        #[cfg(target_arch = "x86_64")]
+        if self.id == 0 {
+            resources.extend(io_ranges.iter().map(|range| range as &dyn Aml));
+        }
+        let crs = aml::Name::new("_CRS".into(), &aml::ResourceTemplate::new(resources));
         pci_dsdt_inner_data.push(&crs);
 
         for slot in &self.slots {
