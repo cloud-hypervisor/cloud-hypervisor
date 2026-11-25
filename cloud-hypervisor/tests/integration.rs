@@ -3725,6 +3725,28 @@ mod common_parallel {
     }
 
     #[test]
+    fn test_snapshot_restore_offload() {
+        snapshot_restore_common::_test_snapshot_restore_offload(false, false);
+    }
+
+    #[test]
+    fn test_snapshot_restore_offload_virtio_mem() {
+        snapshot_restore_common::_test_snapshot_restore_offload(true, false);
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_restore_offload_ondemand() {
+        snapshot_restore_common::_test_snapshot_restore_offload(false, true);
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_restore_offload_preserve_source() {
+        snapshot_restore_common::_test_snapshot_restore_offload_preserve_source();
+    }
+
+    #[test]
     #[cfg(not(feature = "mshv"))] // See issue #7435
     #[cfg(target_arch = "x86_64")]
     fn test_snapshot_restore_cpu_pause_resume() {
@@ -10666,28 +10688,6 @@ mod ivshmem {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     fn test_snapshot_restore_pvpanic() {
         snapshot_restore_common::_test_snapshot_restore_devices(true);
-    }
-
-    #[test]
-    fn test_snapshot_restore_offload() {
-        snapshot_restore_common::_test_snapshot_restore_offload(false, false);
-    }
-
-    #[test]
-    fn test_snapshot_restore_offload_virtio_mem() {
-        snapshot_restore_common::_test_snapshot_restore_offload(true, false);
-    }
-
-    #[test]
-    #[cfg(not(feature = "mshv"))]
-    fn test_snapshot_restore_offload_ondemand() {
-        snapshot_restore_common::_test_snapshot_restore_offload(false, true);
-    }
-
-    #[test]
-    #[cfg(not(feature = "mshv"))]
-    fn test_snapshot_restore_offload_preserve_source() {
-        snapshot_restore_common::_test_snapshot_restore_offload_preserve_source();
     }
 
     #[test]
