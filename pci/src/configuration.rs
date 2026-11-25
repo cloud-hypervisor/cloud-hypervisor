@@ -20,6 +20,7 @@ use crate::device::BarReprogrammingParams;
 const NUM_CONFIGURATION_REGISTERS: usize = 1024;
 
 pub(crate) const COMMAND_REG: usize = 1;
+pub(crate) const COMMAND_REG_IO_SPACE_MASK: u32 = 0x0000_0001;
 pub(crate) const COMMAND_REG_MEMORY_SPACE_MASK: u32 = 0x0000_0002;
 const STATUS_REG: usize = 1;
 const STATUS_REG_CAPABILITIES_USED_MASK: u32 = 0x0010_0000;
@@ -1131,26 +1132,36 @@ impl PciConfiguration {
         self.drain_pending_bar_reprogram()
     }
 
-    // Return pending BAR reprogramming if MSE bit is set
+    // Return the pending BAR moves whose address space decoding is enabled
     pub(crate) fn drain_pending_bar_reprogram(&mut self) -> Vec<BarReprogrammingParams> {
+        if self.pending_bar_reprogram.is_empty() {
+            return Vec::new();
+        }
+
+        let command = self.read_config_register(COMMAND_REG);
+        let (ready, pending): (Vec<_>, Vec<_>) = mem::take(&mut self.pending_bar_reprogram)
+            .into_iter()
+            .partition(|param| {
+                let decode = if param.region_type == PciBarRegionType::IoRegion {
+                    COMMAND_REG_IO_SPACE_MASK
+                } else {
+                    COMMAND_REG_MEMORY_SPACE_MASK
+                };
+                command & decode == decode
+            });
+        self.pending_bar_reprogram = pending;
+
+        if !ready.is_empty() {
+            info!("BAR reprogramming parameter is returned: {ready:x?}");
+        }
         if !self.pending_bar_reprogram.is_empty() {
-            // Return bar reprogramming only if the MSE bit is enabled;
-            if self.read_config_register(COMMAND_REG) & COMMAND_REG_MEMORY_SPACE_MASK
-                == COMMAND_REG_MEMORY_SPACE_MASK
-            {
-                info!(
-                    "BAR reprogramming parameter is returned: {:x?}",
-                    self.pending_bar_reprogram
-                );
-                return mem::take(&mut self.pending_bar_reprogram);
-            }
             info!(
-                "MSE bit is disabled. No BAR reprogramming parameter is returned: {:x?}",
+                "Decoding is disabled. No BAR reprogramming parameter is returned: {:x?}",
                 self.pending_bar_reprogram
             );
         }
 
-        Vec::new()
+        ready
     }
 
     pub fn read_config_register(&self, reg_idx: usize) -> u32 {
@@ -2044,6 +2055,49 @@ mod tests {
         assert!(cfg.write_config_register(
             COMMAND_REG, 0, &COMMAND_REG_MEMORY_SPACE_MASK.to_le_bytes(),
         ).is_empty());
+    }
+
+    #[test]
+    fn pending_bar_moves_wait_for_their_decoding() {
+        let mut cfg = reloc_config(None);
+        let io_bar = PciBarConfiguration::new(
+            0,
+            0x100,
+            PciBarRegionType::IoRegion,
+            PciBarPrefetchable::NotPrefetchable,
+        );
+        cfg.add_pci_bar(&io_bar).unwrap();
+        let mem_bar = PciBarConfiguration::new(
+            1,
+            RELOC_BAR_SIZE,
+            PciBarRegionType::Memory32BitRegion,
+            PciBarPrefetchable::NotPrefetchable,
+        );
+        cfg.add_pci_bar(&mem_bar).unwrap();
+
+        // The guest assigns both unassigned BARs with decoding disabled.
+        assert!(
+            cfg.write_config_register(BAR0_REG, 0, &0xc001u32.to_le_bytes())
+                .is_empty()
+        );
+        assert!(
+            cfg.write_config_register(BAR0_REG + 1, 0, &0xd000_0000u32.to_le_bytes())
+                .is_empty()
+        );
+
+        let mem =
+            cfg.write_config_register(COMMAND_REG, 0, &COMMAND_REG_MEMORY_SPACE_MASK.to_le_bytes());
+        assert_eq!(mem.len(), 1);
+        assert_eq!(mem[0].bar_idx, Some(1));
+        assert_eq!(mem[0].old_base, 0);
+        assert_eq!(mem[0].new_base, 0xd000_0000);
+
+        let command = COMMAND_REG_MEMORY_SPACE_MASK | COMMAND_REG_IO_SPACE_MASK;
+        let io = cfg.write_config_register(COMMAND_REG, 0, &command.to_le_bytes());
+        assert_eq!(io.len(), 1);
+        assert_eq!(io[0].bar_idx, Some(0));
+        assert_eq!(io[0].old_base, 0);
+        assert_eq!(io[0].new_base, 0xc000);
     }
 
     #[test]
