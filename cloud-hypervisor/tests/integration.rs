@@ -3290,7 +3290,7 @@ mod common_parallel {
             .args([
                 "--cmdline",
                 format!(
-                    "{DIRECT_KERNEL_BOOT_CMDLINE} kvm-intel.nested=1 vfio_iommu_type1.allow_unsafe_interrupts"
+                    "{DIRECT_KERNEL_BOOT_CMDLINE} kvm-intel.nested=1 iommufd.allow_unsafe_interrupts=1"
                 )
                 .as_str(),
             ])
@@ -14767,7 +14767,7 @@ mod vfio {
 
     fn platform_cfg(iommufd: bool) -> String {
         if iommufd {
-            "iommufd=on,vfio_p2p_dma=off".to_string()
+            "vfio_p2p_dma=off".to_string()
         } else {
             "iommufd=off".to_string()
         }

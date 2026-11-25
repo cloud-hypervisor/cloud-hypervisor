@@ -4208,7 +4208,7 @@ impl DeviceManager {
             .unwrap()
             .platform
             .as_ref()
-            .is_some_and(|p| p.iommufd);
+            .is_none_or(|p| p.iommufd);
 
         let ops: Arc<dyn VfioOps> = if iommufd_on {
             #[cfg(feature = "kvm")]
@@ -4281,7 +4281,7 @@ impl DeviceManager {
         {
             let config = self.config.lock().unwrap();
             assert!(
-                config.platform.as_ref().is_some_and(|p| p.iommufd),
+                config.platform.as_ref().is_none_or(|p| p.iommufd),
                 "DeviceConfig::validate enforces iommufd when fd is set",
             );
             assert!(
@@ -6182,7 +6182,7 @@ impl DeviceManager {
         let sev_snp_config_enabled = {
             let config = config.lock().unwrap();
             config.is_sev_snp_enabled()
-                && config.platform.as_ref().is_some_and(|p| p.iommufd)
+                && config.platform.as_ref().is_none_or(|p| p.iommufd)
                 && config
                     .user_devices
                     .as_ref()

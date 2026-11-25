@@ -13,6 +13,10 @@ its native driver, which is not the VFIO one.
 As a consequence, a device must be unbound from its native driver before passing
 it to `cloud-hypervisor` for assigning it to a guest.
 
+Cloud Hypervisor uses VFIO cdev with iommufd by default. This requires KVM
+and host kernel support for VFIO cdev and iommufd. To use the deprecated
+VFIO container/group interface instead, pass `--platform iommufd=off`.
+
 ### Example
 
 In this example we're going to assign a PCI memory card (SD, MMC, etc) reader
@@ -78,7 +82,6 @@ takes the device's sysfs path as an argument. In our example it is
     --cmdline "console=ttyS0 root=/dev/vda1 rw" \
     --cpus boot=4 \
     --memory size=512M \
-    --platform iommufd=on \
     --device path=/sys/bus/pci/devices/0000:01:00.0/
 ```
 
