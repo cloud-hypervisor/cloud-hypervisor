@@ -15,12 +15,14 @@ flag.
 
 Test workloads (guest images, kernels, firmware) are stored on the host
 under `$HOME/workloads` and bind-mounted into the container at
-`/root/workloads`. Before it starts the container, `dev_cli.sh tests`
-runs `scripts/fetch_workloads.py` on the host. It downloads the
-workloads listed in `scripts/test_assets.yaml` that are missing or
-have a wrong checksum. `dev_cli.sh fetch-workloads` runs only this
-step. The test scripts do not download anything: run directly, they
-exit with a `Missing:` error if a workload is absent.
+`/root/workloads` for suites that use them. Unit tests do not use
+these workloads, so `dev_cli.sh tests --unit` skips the fetch. For
+other suites, `dev_cli.sh tests` runs `scripts/fetch_workloads.py` on
+the host before starting the container. It downloads the workloads
+listed in `scripts/test_assets.yaml` that are missing or have a wrong
+checksum. `dev_cli.sh fetch-workloads` runs only this step. The test
+scripts do not download anything: run directly, they exit with a
+`Missing:` error if a workload is absent.
 
 ## Prerequisites
 
@@ -34,8 +36,8 @@ ls -l /dev/kvm
 ```
 
 The container image bundles all build dependencies. No Rust toolchain
-is needed on the host, but `dev_cli.sh tests` needs `python3` on the
-host to fetch the workloads.
+is needed on the host. Runs that fetch workloads need `python3` on
+the host.
 
 ## The dev_cli.sh entry point
 
