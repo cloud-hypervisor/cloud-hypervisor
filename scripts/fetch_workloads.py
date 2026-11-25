@@ -10,7 +10,7 @@ Reads scripts/test_assets.yaml, downloads missing files, and verifies
 SHA-1 and/or SHA-256 checksums.  Uses only the Python 3 standard library.
 
 Usage:
-    fetch_workloads.py [--arch ARCH] [--test TEST] [--workloads-dir DIR]
+    fetch_workloads.py [--arch ARCH] [--test TEST]... [--workloads-dir DIR]
                        [--verify-only] [--asset-file FILE] [-j JOBS]
 """
 
@@ -234,8 +234,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--arch", default=platform.machine(),
                         help="Target architecture (default: host arch)")
-    parser.add_argument("--test", dest="test_filter", default=None,
-                        help="Only fetch assets for this test group")
+    parser.add_argument("--test", action="append", default=[],
+                        help="Only fetch assets for this test group (repeatable)")
     parser.add_argument("--workloads-dir", default=None,
                         help="Directory to store assets (default: ~/workloads)")
     parser.add_argument("--verify-only", action="store_true",
@@ -263,20 +263,20 @@ def main() -> int:
     assets = parse_yaml(asset_file)
     auth_token = os.environ.get("AUTH_DOWNLOAD_TOKEN")
 
+    tests = set(args.test)
     filtered = []
     for asset in assets:
         arch_list = asset.get("arch") or []
         if arch_list and args.arch not in arch_list:
             continue
-        if args.test_filter:
-            test_list = asset.get("test") or []
-            if test_list and args.test_filter not in test_list:
-                continue
+        test_list = asset.get("test") or []
+        if tests and test_list and tests.isdisjoint(test_list):
+            continue
         filtered.append(asset)
 
     if not filtered:
         print(f"No assets match arch={args.arch}"
-              + (f" test={args.test_filter}" if args.test_filter else ""))
+              + (f" test={','.join(args.test)}" if tests else ""))
         return 0
 
     jobs = max(1, args.jobs)

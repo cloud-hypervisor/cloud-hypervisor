@@ -319,7 +319,7 @@ cmd_help() {
     echo "        Run the development container into an interactive, privileged BASH shell."
     echo "        --volumes             Hash separated volumes to be exported. Example --volumes /mnt:/mnt#/myvol:/myvol"
     echo ""
-    echo "    fetch-workloads [--test TEST] [--verify-only]"
+    echo "    fetch-workloads [--test TEST]... [--verify-only]"
     echo "        Download workload assets needed for integration tests."
     echo ""
     echo "    help"
