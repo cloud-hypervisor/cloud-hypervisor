@@ -49,7 +49,7 @@ assets:
     url: https://ch-images.azureedge.net/jammy-server-cloudimg-arm64-custom-20220329-0.qcow2
     sha1: 7118f4d4cad18c8357bc2ad9824a50f9a82a860a
     arch: [aarch64]
-    test: [integration]
+    test: [integration, metrics]
 
   # Alpine minirootfs
   - filename: alpine-minirootfs-x86_64.tar.gz
