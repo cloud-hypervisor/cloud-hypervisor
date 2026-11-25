@@ -462,8 +462,11 @@ fn rest_api_do_command(
             simple_api_command(socket, "PUT", "add-vsock", Some(&vsock_config))
                 .map_err(Error::HttpApiClient)
         }
-        Command::Snapshot { destination_url } => {
-            let snapshot_config = snapshot_config(destination_url);
+        Command::Snapshot {
+            destination_url,
+            mode,
+        } => {
+            let snapshot_config = snapshot_config(destination_url, mode.as_deref());
             simple_api_command(socket, "PUT", "snapshot", Some(&snapshot_config))
                 .map_err(Error::HttpApiClient)
         }
@@ -598,8 +601,11 @@ fn dbus_api_do_command(
             let vsock_config = add_vsock_config(arg_vsock_config)?;
             proxy.api_vm_add_vsock(&vsock_config)
         }
-        Command::Snapshot { destination_url } => {
-            let snapshot_config = snapshot_config(destination_url);
+        Command::Snapshot {
+            destination_url,
+            mode,
+        } => {
+            let snapshot_config = snapshot_config(destination_url, mode.as_deref());
             proxy.api_vm_snapshot(&snapshot_config)
         }
         Command::Restore { .. } => proxy.api_vm_restore(fd_request_body.as_deref().unwrap()),
@@ -747,10 +753,13 @@ fn add_vsock_config(config: &str) -> Result<String, Error> {
     Ok(vsock_config)
 }
 
-fn snapshot_config(url: &str) -> String {
+fn snapshot_config(url: &str, mode: Option<&str>) -> String {
     let snapshot_config = api::VmSnapshotConfig {
         destination_url: String::from(url),
-        ..Default::default()
+        mode: match mode {
+            Some("delta") => config::SnapshotMode::Delta,
+            _ => config::SnapshotMode::Full,
+        },
     };
 
     serde_json::to_string(&snapshot_config).unwrap()
@@ -1000,6 +1009,12 @@ enum Command {
         // TODO: Take a PathBuf, as only file:// URLs are supported.
         #[arg(help = "file:// URL of an existing snapshot directory, e.g. file:///tmp/snapshot")]
         destination_url: String,
+        #[arg(
+            long,
+            value_parser = ["full", "delta"],
+            help = "full writes all guest memory, delta writes only the pages changed since a copyonwrite restore (default: full)"
+        )]
+        mode: Option<String>,
     },
 }
 
@@ -1193,6 +1208,13 @@ mod tests {
                 "PUT /api/v1/vm.snapshot HTTP/1.1",
                 Some(
                     serde_json::json!({"destination_url": "file:///tmp/snapshot", "mode": "Full"}),
+                ),
+            ),
+            (
+                vec!["snapshot", "--mode", "delta", "file:///tmp/snapshot"],
+                "PUT /api/v1/vm.snapshot HTTP/1.1",
+                Some(
+                    serde_json::json!({"destination_url": "file:///tmp/snapshot", "mode": "Delta"}),
                 ),
             ),
         ] {
