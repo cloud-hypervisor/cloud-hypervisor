@@ -3305,6 +3305,28 @@ impl MemoryManager {
         Some(ranges)
     }
 
+    /// Makes the next snapshot a delta one. Fails unless guest memory still
+    /// maps the copy-on-write restore source with the layout it was restored with.
+    pub fn prepare_delta_snapshot(&mut self) -> anyhow::Result<()> {
+        let Some(source) = &self.cow_source else {
+            return Err(anyhow!(
+                "The VM was not restored with memory_restore_mode=copyonwrite"
+            ));
+        };
+        let ranges = self.memory_range_table(MemoryRangePolicy::SkipPersisted)?;
+        if ranges != source.ranges {
+            return Err(anyhow!("The guest memory layout changed since the restore"));
+        }
+        self.snapshot_mode = SnapshotMode::Delta;
+
+        Ok(())
+    }
+
+    /// Makes the next snapshot a full one again.
+    pub fn clear_snapshot_mode(&mut self) {
+        self.snapshot_mode = SnapshotMode::Full;
+    }
+
     pub fn snapshot_data(&self) -> MemoryManagerSnapshotData {
         MemoryManagerSnapshotData {
             memory_ranges: self.snapshot_memory_ranges.clone(),
