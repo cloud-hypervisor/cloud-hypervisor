@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
-use std::io::{self, Seek, SeekFrom};
+use std::io::{self, Seek, SeekFrom, Write};
 use std::mem::{self, MaybeUninit, zeroed};
 use std::num::NonZeroUsize;
 use std::ops::{BitAnd, Not, Sub};
@@ -55,6 +55,7 @@ use crate::config::{MemoryRestoreMode, SnapshotMode};
 use crate::coredump::{
     CoredumpMemoryRegion, CoredumpMemoryRegions, DumpState, GuestDebuggableError,
 };
+use crate::guest_memory_delta::GuestMemoryDeltaHeader;
 use crate::migration::transport::SocketStream;
 use crate::migration::url_to_path;
 use crate::pagemap::PageMap;
@@ -190,6 +191,8 @@ const VMM_UFFD_ID: &str = "__vmm";
 
 /// Filename used to store guest RAM in snapshot directories.
 pub const SNAPSHOT_FILENAME: &str = "memory-ranges";
+/// Filename used to store the changed guest pages in delta snapshot directories.
+pub const SNAPSHOT_DELTA_FILENAME: &str = "memory-ranges-delta";
 // A copy-on-write snapshot also writes runs of unchanged pages this short
 // between changed pages, to cut down on the number of writes.
 const COW_SNAPSHOT_GAP_PAGES: u64 = 8;
@@ -3815,6 +3818,16 @@ impl Transportable for MemoryManager {
             return Ok(());
         }
 
+        if self.snapshot_mode == SnapshotMode::Delta {
+            let source = self
+                .cow_source
+                .as_ref()
+                .context("Delta snapshot without a copy-on-write restore source")
+                .map_err(MigratableError::MigrateSend)?;
+            let dir = url_to_path(destination_url)?;
+            return write_memory_delta(&*self.guest_memory.memory(), source, &dir);
+        }
+
         let mut memory_file_path = url_to_path(destination_url)?;
         memory_file_path.push(String::from(SNAPSHOT_FILENAME));
 
@@ -4043,6 +4056,49 @@ fn write_private_pages<M: GuestMemoryBackend>(
     {
         write_guest_range(guest_memory, file, file_offset, range.gpa, range.length)?;
     }
+    Ok(())
+}
+
+// Writes the guest pages that no longer read from the restore source to
+// the memory delta file of a snapshot in `dir`.
+fn write_memory_delta<M: GuestMemoryBackend>(
+    guest_memory: &M,
+    source: &CowSource,
+    dir: &Path,
+) -> result::Result<(), MigratableError> {
+    // No gap, so a restore doesn't copy unchanged base pages into private
+    // memory
+    let entries: Vec<MemoryRange> = private_guest_ranges(guest_memory, source, 0)?
+        .into_iter()
+        .map(|(_, range)| range)
+        .collect();
+
+    let path = dir.join(SNAPSHOT_DELTA_FILENAME);
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .with_context(|| format!("Error creating memory delta file {path:?}"))
+        .map_err(MigratableError::MigrateSend)?;
+    let header = GuestMemoryDeltaHeader::new(entries);
+    let header_bytes = header.to_bytes();
+    file.write_all(&header_bytes)
+        .context("Error writing memory delta header")
+        .map_err(MigratableError::MigrateSend)?;
+    let mut file_offset = header_bytes.len() as u64;
+    for entry in header.entries() {
+        write_guest_range(
+            guest_memory,
+            &mut file,
+            file_offset,
+            entry.gpa,
+            entry.length,
+        )?;
+        file_offset += entry.length;
+    }
+    file.sync_all()
+        .context("Error syncing memory delta file")
+        .map_err(MigratableError::MigrateSend)?;
     Ok(())
 }
 
