@@ -218,7 +218,8 @@ impl Bus {
         Ok(())
     }
 
-    /// Updates the address range for an existing device.
+    /// Updates the address range for an existing device. The device keeps its
+    /// old range if the new one overlaps another device.
     pub fn update_range(
         &self,
         old_base: u64,
@@ -226,18 +227,38 @@ impl Bus {
         new_base: u64,
         new_len: u64,
     ) -> Result<()> {
-        // Retrieve the device corresponding to the range
-        let device = if let Some((_, _, dev)) = self.resolve(old_base) {
-            Arc::clone(&dev)
-        } else {
-            return Err(Error::UnassignedAddressRange(old_base));
-        };
+        if new_len == 0 {
+            return Err(Error::ZeroSizedRange);
+        }
+        if new_base.checked_add(new_len).is_none() {
+            return Err(Error::Overlap);
+        }
 
-        // Remove the old address range
-        self.remove(old_base, old_len)?;
+        let mut devices = self.devices.write().unwrap();
+        let (old_range, device) = devices
+            .remove_entry(&BusRange {
+                base: old_base,
+                len: old_len,
+            })
+            .ok_or(Error::UnassignedAddressRange(old_base))?;
 
-        // Insert the new address range
-        self.insert(device, new_base, new_len)
+        if devices
+            .keys()
+            .any(|range| range.overlaps(new_base, new_len))
+        {
+            devices.insert(old_range, device);
+            return Err(Error::Overlap);
+        }
+
+        devices.insert(
+            BusRange {
+                base: new_base,
+                len: new_len,
+            },
+            device,
+        );
+
+        Ok(())
     }
 
     /// Reads data from the device that owns the range containing `addr` and puts it into `data`.
@@ -397,6 +418,25 @@ mod tests {
         // Range where base + len overflows u64 (equals 2^64).
         let res = bus.insert(dev, 0xffff_0000_0000_0000, 0x0001_0000_0000_0000);
         assert!(res.is_err(), "Overflowing address range must be rejected");
+    }
+
+    #[test]
+    fn bus_update_range() {
+        let bus = Bus::new();
+        let dummy: Arc<dyn BusDeviceSync> = Arc::new(DummyDevice);
+        bus.insert(Arc::clone(&dummy), 0x10, 0x10).unwrap();
+        bus.insert(Arc::clone(&dummy), 0x40, 0x10).unwrap();
+
+        bus.update_range(0x10, 0x10, 0x20, 0x10).unwrap();
+        bus.read(0x10, &mut [0]).unwrap_err();
+        bus.read(0x20, &mut [0]).unwrap();
+
+        // An overlapping destination leaves the device at its old range.
+        bus.update_range(0x20, 0x10, 0x38, 0x10).unwrap_err();
+        bus.read(0x20, &mut [0]).unwrap();
+        bus.read(0x38, &mut [0]).unwrap_err();
+
+        bus.update_range(0x30, 0x10, 0x60, 0x10).unwrap_err();
     }
 
     #[test]
