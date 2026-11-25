@@ -18,8 +18,6 @@ const SWAPPED: u64 = 1 << 62;
 const FILE_PAGE: u64 = 1 << 61;
 const ENTRY_SIZE: u64 = 8;
 const CHUNK_PAGES: u64 = 1 << 17;
-// Private pages spaced by this many pages or less come back as one range.
-const MERGE_GAP_PAGES: u64 = 8;
 
 pub(crate) struct PageMap {
     file: File,
@@ -33,8 +31,14 @@ impl PageMap {
     }
 
     /// Returns the private copies in `[addr, addr + len)` as byte ranges
-    /// relative to `addr`.
-    pub(crate) fn private_ranges(&self, addr: u64, len: u64) -> io::Result<Vec<Range<u64>>> {
+    /// relative to `addr`. Private pages spaced by `gap_pages` pages or less
+    /// come back as one range.
+    pub(crate) fn private_ranges(
+        &self,
+        addr: u64,
+        len: u64,
+        gap_pages: u64,
+    ) -> io::Result<Vec<Range<u64>>> {
         let page_size = get_page_size();
         let first_page = addr / page_size;
         let pages = len / page_size;
@@ -52,7 +56,7 @@ impl PageMap {
                 }
                 let index = page + i as u64;
                 match ranges.last_mut() {
-                    Some(last) if index - last.end <= MERGE_GAP_PAGES => last.end = index + 1,
+                    Some(last) if index - last.end <= gap_pages => last.end = index + 1,
                     _ => ranges.push(index..index + 1),
                 }
             }
@@ -109,12 +113,18 @@ mod tests {
         assert_eq!(memory.read_obj::<u8>(31 * page).unwrap(), 1);
 
         let page = page as u64;
+        let pagemap = PageMap::open().unwrap();
         assert_eq!(
-            PageMap::open()
-                .unwrap()
-                .private_ranges(region.as_ptr() as u64, 32 * page)
+            pagemap
+                .private_ranges(region.as_ptr() as u64, 32 * page, 8)
                 .unwrap(),
             vec![page..7 * page, 20 * page..21 * page]
+        );
+        assert_eq!(
+            pagemap
+                .private_ranges(region.as_ptr() as u64, 32 * page, 0)
+                .unwrap(),
+            vec![page..3 * page, 6 * page..7 * page, 20 * page..21 * page]
         );
     }
 }

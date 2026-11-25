@@ -190,6 +190,9 @@ const VMM_UFFD_ID: &str = "__vmm";
 
 /// Filename used to store guest RAM in snapshot directories.
 pub const SNAPSHOT_FILENAME: &str = "memory-ranges";
+// A copy-on-write snapshot also writes runs of unchanged pages this short
+// between changed pages, to cut down on the number of writes.
+const COW_SNAPSHOT_GAP_PAGES: u64 = 8;
 
 #[cfg(target_arch = "x86_64")]
 const X86_64_IRQ_BASE: u32 = 5;
@@ -4005,7 +4008,7 @@ fn write_private_pages<M: GuestMemoryBackend>(
             .map_err(MigratableError::MigrateSend)?;
         let private_ranges = source
             .pagemap
-            .private_ranges(host_addr as u64, range.length)
+            .private_ranges(host_addr as u64, range.length, COW_SNAPSHOT_GAP_PAGES)
             .context("Error reading the pagemap")
             .map_err(MigratableError::MigrateSend)?;
         for private in private_ranges {
