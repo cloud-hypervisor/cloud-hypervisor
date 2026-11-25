@@ -206,7 +206,7 @@ passing through is `0000:00:01.0`.
     --memory size=8G,hugepages=on \
     --disk path=focal-server-cloudimg-amd64.raw,image_type=raw \
     --kernel custom-vmlinux \
-    --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw kvm-intel.nested=1 vfio_iommu_type1.allow_unsafe_interrupts rw hugepagesz=2M hugepages=2048" \
+    --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw kvm-intel.nested=1 iommufd.allow_unsafe_interrupts=1 rw hugepagesz=2M hugepages=2048" \
     --device path=/sys/bus/pci/devices/0000:00:01.0,iommu=virtio
 ```
 
@@ -293,8 +293,8 @@ Requirements:
 
 - AArch64, KVM, and a host kernel with iommufd nested translation support for
   ARM SMMUv3.
-- `--platform iommufd=on`, since the offload goes through iommufd. Requesting
-  `iommu=smmuv3` without it is rejected.
+- The default iommufd backend, since the offload goes through iommufd.
+  Requesting `iommu=smmuv3` with `--platform iommufd=off` is rejected.
 - A host kernel able to map VFIO BAR MMIO into iommufd, or
   `--platform vfio_p2p_dma=off`. See the `vfio_p2p_dma` notes in the
   [VFIO documentation](vfio.md).

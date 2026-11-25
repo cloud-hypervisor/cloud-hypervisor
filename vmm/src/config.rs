@@ -1097,11 +1097,11 @@ impl PlatformConfig {
             .map(|fd| unsafe { take_inherited_fd(fd) })
             .transpose()?
             .unwrap_or_default();
-        // `iommufd_fd=<n>` implies `iommufd=on` unless the user explicitly set the value.
         let iommufd = parser
             .convert::<Toggle>("iommufd")
             .map_err(Error::ParsePlatform)?
-            .map_or(iommufd_fd.is_some(), |Toggle(v)| v);
+            .unwrap_or(Toggle(true))
+            .0;
         let vfio_p2p_dma = parser
             .convert::<Toggle>("vfio_p2p_dma")
             .map_err(Error::ParsePlatform)?
@@ -2780,7 +2780,7 @@ impl DeviceConfig {
         }
 
         if self.pci_common.iommu == IommuType::Smmuv3
-            && !vm_config.platform.as_ref().is_some_and(|p| p.iommufd)
+            && !vm_config.platform.as_ref().is_none_or(|p| p.iommufd)
         {
             return Err(ValidationError::IommuSmmuv3RequiresIommufd);
         }
@@ -3621,7 +3621,7 @@ impl VmConfig {
                 }
 
                 if self.devices.as_ref().is_some_and(|d| !d.is_empty())
-                    && !self.platform.as_ref().is_some_and(|p| p.iommufd)
+                    && !self.platform.as_ref().is_none_or(|p| p.iommufd)
                 {
                     return Err(ValidationError::SevSnpRequiresIommufd);
                 }
@@ -6775,8 +6775,13 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
     fn test_platform_iommufd_fd_parsing() -> Result<()> {
         // SAFETY: This input contains no inherited descriptors.
         let platform = unsafe { PlatformConfig::parse("") }?;
-        assert!(!platform.iommufd);
+        assert!(platform.iommufd);
         assert!(platform.iommufd_fd.is_none());
+        assert_eq!(platform, serde_json::from_str("{}").unwrap());
+
+        // SAFETY: This input contains no inherited descriptors.
+        let legacy = unsafe { PlatformConfig::parse("iommufd=off") }?;
+        assert!(!legacy.iommufd);
 
         use std::os::fd::IntoRawFd;
         for prefix in ["", "iommufd=on,"] {

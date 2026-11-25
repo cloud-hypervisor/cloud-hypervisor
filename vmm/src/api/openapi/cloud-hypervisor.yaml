@@ -1110,7 +1110,7 @@ components:
           default: false
         iommufd:
           type: boolean
-          default: false
+          default: true
         vfio_p2p_dma:
           type: boolean
           default: true

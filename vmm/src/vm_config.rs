@@ -143,6 +143,10 @@ pub fn default_platformconfig_iommu_address_width_bits() -> u8 {
     DEFAULT_IOMMU_ADDRESS_WIDTH_BITS
 }
 
+fn default_platformconfig_iommufd() -> bool {
+    true
+}
+
 pub fn default_platformconfig_vfio_p2p_dma() -> bool {
     true
 }
@@ -177,7 +181,7 @@ pub struct PlatformConfig {
     #[cfg(feature = "sev_snp")]
     #[serde(default)]
     pub sev_snp: bool,
-    #[serde(default)]
+    #[serde(default = "default_platformconfig_iommufd")]
     pub iommufd: bool,
     // Deserialized FDs are discarded.
     #[serde(default, skip_serializing_if = "Option::is_none")]

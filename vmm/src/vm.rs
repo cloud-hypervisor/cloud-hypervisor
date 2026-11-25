@@ -2181,7 +2181,7 @@ impl Vm {
         #[cfg(feature = "sev_snp")]
         {
             let config = self.config.lock().unwrap();
-            if config.is_sev_snp_enabled() && !config.platform.as_ref().is_some_and(|p| p.iommufd) {
+            if config.is_sev_snp_enabled() && !config.platform.as_ref().is_none_or(|p| p.iommufd) {
                 return Err(Error::ConfigValidation(
                     ValidationError::SevSnpRequiresIommufd,
                 ));

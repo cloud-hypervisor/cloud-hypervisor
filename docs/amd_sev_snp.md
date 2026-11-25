@@ -51,4 +51,4 @@ Note that Cloud Hypervisor does not support the following features with SEV-SNP:
 - Huge Pages (HugeTLB)
 - Virtual IOMMU
 - vDPA devices
-- VFIO devices without `--platform iommufd=on`
+- VFIO devices with `--platform iommufd=off`
