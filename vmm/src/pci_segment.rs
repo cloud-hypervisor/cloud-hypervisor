@@ -529,16 +529,11 @@ impl Aml for PciSegment {
             None,
         );
         #[cfg(target_arch = "x86_64")]
-        let io_ranges = [
-            // Split range up to serial port PIO
-            aml::AddressSpace::new_io(0u16, 0x03f7u16, None),
-            // Split range up to fw_cfg PIO
-            aml::AddressSpace::new_io(0x0400u16, 0x050fu16, None),
-            // Split range up to PCI config PIO
-            aml::AddressSpace::new_io(0x051cu16, 0x0cf7u16, None),
-            // Remainder
-            aml::AddressSpace::new_io(0x0d00u16, 0xffffu16, None),
-        ];
+        let io_range = aml::AddressSpace::new_io(
+            *layout::PCI_IO_RANGE.start(),
+            *layout::PCI_IO_RANGE.end(),
+            None,
+        );
 
         let mut resources: Vec<&dyn Aml> = vec![&bus_numbers];
         #[cfg(target_arch = "x86_64")]
@@ -550,7 +545,7 @@ impl Aml for PciSegment {
         resources.push(&mem64);
         #[cfg(target_arch = "x86_64")]
         if self.id == 0 {
-            resources.extend(io_ranges.iter().map(|range| range as &dyn Aml));
+            resources.push(&io_range);
         }
         let crs = aml::Name::new("_CRS".into(), &aml::ResourceTemplate::new(resources));
         pci_dsdt_inner_data.push(&crs);
