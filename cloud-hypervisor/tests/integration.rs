@@ -11284,8 +11284,6 @@ mod ivshmem {
 
             // Check ivshmem device in src guest.
             _test_ivshmem(&guest, &ivshmem_file_path, file_size);
-            // Allow some normal time to elapse to check we don't get spurious reboots
-            thread::sleep(Duration::new(40, 0));
 
             #[cfg(target_arch = "x86_64")]
             guest.add_test_disk(&src_api_socket);
