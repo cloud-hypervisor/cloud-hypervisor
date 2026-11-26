@@ -6117,18 +6117,10 @@ mod common_parallel {
             println!("RSS {rss} < 1048576");
             assert!(rss < 1048576);
 
-            // Spawn a command inside the guest to consume 2GiB of RAM for 60
-            // seconds
-            let guest_ip = guest.network.guest_ip0.clone();
-            thread::spawn(move || {
-                ssh_command_ip(
-                    "stress --vm 1 --vm-bytes 2G --vm-keep --timeout 60",
-                    &guest_ip,
-                    DEFAULT_SSH_RETRIES,
-                    DEFAULT_SSH_TIMEOUT,
-                )
+            // Consume 2GiB of RAM inside the guest until stress is stopped
+            guest
+                .ssh_command("screen -dmS stress stress --vm 1 --vm-bytes 2G --vm-keep")
                 .unwrap();
-            });
 
             // Wait for guest memory consumption to reach the expected level.
             assert!(wait_until(Duration::from_secs(60), || process_rss_kib(pid) >= 2097152));
@@ -6136,7 +6128,8 @@ mod common_parallel {
             println!("RSS {rss} >= 2097152");
             assert!(rss >= 2097152);
 
-            // Wait for stress to complete and free-page reporting to shrink RSS again.
+            // Stop stress and wait for free-page reporting to shrink RSS again.
+            guest.ssh_command("pkill -x stress").unwrap();
             assert!(wait_until(Duration::from_secs(120), || process_rss_kib(
                 pid
             ) < 2097152));
