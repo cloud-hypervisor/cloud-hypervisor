@@ -24,15 +24,23 @@ struct Event<'a> {
     properties: Option<&'a HashMap<Cow<'a, str>, Cow<'a, str>>>,
 }
 
+pub enum Message {
+    Event(String),
+    Shutdown,
+}
+
 pub struct Monitor {
-    pub rx: mpsc::Receiver<String>,
+    pub tx: mpsc::Sender<Message>,
+    pub rx: mpsc::Receiver<Message>,
     pub file: Option<File>,
     pub broadcast: Vec<mpsc::Sender<Arc<String>>>,
 }
 
 impl Monitor {
-    pub fn new(rx: mpsc::Receiver<String>, file: Option<File>) -> Self {
+    pub fn new(file: Option<File>) -> Self {
+        let (tx, rx) = mpsc::channel();
         Self {
+            tx,
             rx,
             file,
             broadcast: vec![],
@@ -47,7 +55,7 @@ impl Monitor {
 }
 
 struct MonitorHandle {
-    tx: mpsc::Sender<String>,
+    tx: mpsc::Sender<Message>,
     start: Instant,
 }
 
@@ -78,11 +86,10 @@ pub fn set_monitor(file: Option<File>) -> io::Result<Monitor> {
         set_file_nonblocking(file)?;
     }
 
-    let (tx, rx) = mpsc::channel();
-    let monitor = Monitor::new(rx, file);
+    let monitor = Monitor::new(file);
 
     MONITOR.get_or_init(|| MonitorHandle {
-        tx,
+        tx: monitor.tx.clone(),
         start: Instant::now(),
     });
 
@@ -118,7 +125,7 @@ pub fn event_log(source: &str, event: &str, properties: Option<&HashMap<Cow<str>
         };
 
         if let Ok(event) = serde_json::to_string_pretty(&event) {
-            monitor_handle.tx.send(event).ok();
+            monitor_handle.tx.send(Message::Event(event)).ok();
         }
     }
 }

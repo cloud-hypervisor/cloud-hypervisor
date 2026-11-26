@@ -403,17 +403,33 @@ pub fn feature_list() -> Vec<String> {
     ]
 }
 
+#[must_use = "Dropping the handle stops the event monitor"]
+pub struct EventMonitorThread {
+    tx: Sender<event_monitor::Message>,
+    thread: Option<thread::JoinHandle<Result<()>>>,
+}
+
+impl Drop for EventMonitorThread {
+    fn drop(&mut self) {
+        self.tx.send(event_monitor::Message::Shutdown).ok();
+        if let Some(thread) = self.thread.take() {
+            thread.join().ok();
+        }
+    }
+}
+
 pub fn start_event_monitor_thread(
     mut monitor: event_monitor::Monitor,
     seccomp_action: &SeccompAction,
     landlock_enable: bool,
     exit_event: EventFd,
-) -> Result<thread::JoinHandle<Result<()>>> {
+) -> Result<EventMonitorThread> {
     // Retrieve seccomp filter
     let seccomp_filter = get_seccomp_filter(seccomp_action, Thread::EventMonitor, None)
         .map_err(Error::CreateSeccompFilter)?;
 
-    thread::Builder::new()
+    let tx = monitor.tx;
+    let thread = thread::Builder::new()
         .name("event-monitor".to_owned())
         .spawn(move || {
             // Apply seccomp filter
@@ -437,7 +453,7 @@ pub fn start_event_monitor_thread(
             }
 
             panic::catch_unwind(AssertUnwindSafe(move || {
-                while let Ok(event) = monitor.rx.recv() {
+                while let Ok(event_monitor::Message::Event(event)) = monitor.rx.recv() {
                     let event = Arc::new(event);
 
                     if let Some(ref mut file) = monitor.file {
@@ -458,7 +474,12 @@ pub fn start_event_monitor_thread(
 
             Ok(())
         })
-        .map_err(Error::EventMonitorThreadSpawn)
+        .map_err(Error::EventMonitorThreadSpawn)?;
+
+    Ok(EventMonitorThread {
+        tx,
+        thread: Some(thread),
+    })
 }
 
 #[expect(clippy::too_many_arguments)]
