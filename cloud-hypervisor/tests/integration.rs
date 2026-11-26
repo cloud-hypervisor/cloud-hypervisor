@@ -6541,9 +6541,14 @@ mod common_parallel {
             }));
         });
 
-        // Shutdown the source VM
+        // Shutdown the source VM, and on failure the first VM and the OVS
+        // bridge too, so that a retry can use the same vhost-user sockets.
         kill_child(&mut child2);
         let output = child2.wait_with_output().unwrap();
+        if r.is_err() {
+            kill_child(&mut child1);
+            cleanup_ovs_dpdk();
+        }
         handle_child_output(r, &output);
 
         // Remove the vhost-user socket file.
