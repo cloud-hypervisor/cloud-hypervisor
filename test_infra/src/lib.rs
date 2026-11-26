@@ -584,6 +584,13 @@ impl DiskConfig for UbuntuDiskConfig {
         let mut osdisk_base_path = workload_path;
         osdisk_base_path.push(&self.image_name);
 
+        // The integration test scripts copy guest images into /tmp/workloads
+        // when /tmp supports reflinks, so the copy below shares its blocks.
+        let tmp_osdisk_base_path = Path::new("/tmp/workloads").join(&self.image_name);
+        if tmp_osdisk_base_path.exists() {
+            osdisk_base_path = tmp_osdisk_base_path;
+        }
+
         let osdisk_path = String::from(tmp_dir.as_path().join("osdisk.img").to_str().unwrap());
         let cloudinit_path = self.prepare_cloudinit(tmp_dir, network);
 
