@@ -47,8 +47,9 @@ macro_rules! basic_regular_guest {
 
 mod common_parallel {
     use std::cell::Cell;
+    use std::fs::remove_dir_all;
     use std::io::{self, SeekFrom};
-    use std::net::TcpStream;
+    use std::net::{IpAddr, Ipv4Addr, TcpStream};
     use std::num::NonZeroU32;
     use std::os::unix::net::UnixStream;
     use std::process::Command;
@@ -10012,6 +10013,361 @@ mod common_parallel {
     fn test_live_migration_virtio_fs_memfds() {
         _test_live_migration_virtio_fs(true);
     }
+
+    // One rx-* entry on the host per attached tap queue.
+    fn attached_tap_queues(tap_name: &str) -> usize {
+        fs::read_dir(format!("/sys/class/net/{tap_name}/queues"))
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("rx-")
+            })
+            .count()
+    }
+
+    // Name of the guest interface with this MAC.
+    fn guest_iface(guest: &Guest, mac: &str) -> String {
+        guest
+            .ssh_command(&format!(
+                "basename \"$(dirname \"$(grep -lx {mac} /sys/class/net/*/address)\")\""
+            ))
+            .unwrap()
+            .trim()
+            .to_string()
+    }
+
+    // Receive queues the guest driver is using on the interface.
+    fn guest_rx_queues(guest: &Guest, iface: &str) -> usize {
+        guest
+            .ssh_command(&format!("ls /sys/class/net/{iface}/queues | grep -c rx-"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap()
+    }
+
+    #[test]
+    fn test_snapshot_restore_net_queue_pairs() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
+
+        let net_id = "net123";
+        // Four pairs need four vCPUs, but with one CPU online the guest
+        // negotiates a single pair.
+        let num_queue_pairs: usize = 4;
+        // use a name that does not conflict with tap dev created from other tests
+        let tap_name = "chtap998";
+        use std::str::FromStr;
+        let open_taps = || {
+            net_util::open_tap(
+                Some(tap_name),
+                Some(IpAddr::V4(
+                    Ipv4Addr::from_str(&guest.network.host_ip0).unwrap(),
+                )),
+                None,
+                None,
+                None,
+                num_queue_pairs,
+                Some(libc::O_RDWR | libc::O_NONBLOCK),
+            )
+            .unwrap()
+        };
+        let fd_list = |taps: &[net_util::Tap]| {
+            taps.iter()
+                .map(|tap| tap.as_raw_fd().to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+
+        let taps = open_taps();
+        let net_params = format!(
+            "id={},fd=[{}],mac={},ip={},mask=255.255.255.128,num_queues={}",
+            net_id,
+            fd_list(&taps),
+            guest.network.guest_mac0,
+            guest.network.host_ip0,
+            num_queue_pairs * 2
+        );
+
+        let cloudinit_params = format!(
+            "path={},iommu=on,image_type=raw",
+            guest.disk_config.disk(DiskType::CloudInit).unwrap()
+        );
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_source])
+            .args(["--cpus", "boot=4"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args([
+                "--disk",
+                format!(
+                    "path={},image_type=raw",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                )
+                .as_str(),
+                cloudinit_params.as_str(),
+            ])
+            .args(["--net", net_params.as_str()])
+            .args([
+                "--cmdline",
+                format!("{DIRECT_KERNEL_BOOT_CMDLINE} maxcpus=1").as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+            let iface = guest_iface(&guest, &guest.network.guest_mac0);
+
+            // One pair negotiated, so one tap queue attached out of four.
+            assert_eq!(guest_rx_queues(&guest, &iface), 1);
+            assert_eq!(attached_tap_queues(tap_name), 1);
+
+            // Raise it through the control queue to a value that is neither the
+            // default nor the maximum, for the restore to preserve.
+            guest
+                .ssh_command(&format!("sudo ethtool -L {iface} combined 3"))
+                .unwrap();
+            assert_eq!(guest_rx_queues(&guest, &iface), 3);
+            assert_eq!(attached_tap_queues(tap_name), 3);
+
+            assert!(remote_command(&api_socket_source, "pause", None));
+            assert!(remote_command(
+                &api_socket_source,
+                "snapshot",
+                Some(format!("file://{snapshot_dir}").as_str()),
+            ));
+        });
+
+        // CH holds its own copies; drop ours so the tap goes away with the VM.
+        drop(taps);
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
+
+        // Restore the VM from the snapshot
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_restored])
+            .capture_output()
+            .spawn()
+            .unwrap();
+        assert!(wait_until(Duration::from_secs(30), || {
+            remote_command(&api_socket_restored, "ping", None)
+        }));
+
+        let taps = open_taps();
+        let restore_params = format!(
+            "source_url=file://{},net_fds=[{}@[{}]]",
+            snapshot_dir,
+            net_id,
+            fd_list(&taps)
+        );
+
+        let r = panic::catch_unwind(|| {
+            // A fresh tap comes with every queue attached.
+            assert_eq!(attached_tap_queues(tap_name), num_queue_pairs);
+
+            assert!(remote_command(
+                &api_socket_restored,
+                "restore",
+                Some(restore_params.as_str())
+            ));
+
+            // Wait for the VM to be restored
+            assert!(wait_until(Duration::from_secs(20), || {
+                remote_command(&api_socket_restored, "info", None)
+            }));
+
+            assert!(remote_command(&api_socket_restored, "resume", None));
+
+            // The guest did not renegotiate, and the device kept its count.
+            let iface = guest_iface(&guest, &guest.network.guest_mac0);
+            assert_eq!(guest_rx_queues(&guest, &iface), 3);
+            assert_eq!(attached_tap_queues(tap_name), 3);
+
+            // A reboot rebuilds the device on the same taps, and the driver starts
+            // over at one pair.
+            guest.reboot_linux(0);
+            assert_eq!(guest_rx_queues(&guest, &iface), 1);
+            assert_eq!(attached_tap_queues(tap_name), 1);
+        });
+
+        let _ = remove_dir_all(snapshot_dir.as_str());
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_snapshot_restore_virtio_fs() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
+
+        let shared_dir = guest.tmp_dir.as_path().join("virtiofs_shared");
+        fs::create_dir(&shared_dir).unwrap();
+        fs::write(shared_dir.join("file1"), "foo\n").unwrap();
+
+        let (mut daemon_child, virtiofsd_socket_path) =
+            prepare_virtiofsd(&guest.tmp_dir, shared_dir.to_str().unwrap());
+
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_source])
+            .args(["--event-monitor", format!("path={event_path}").as_str()])
+            .args(["--cpus", "boot=2"])
+            .args(["--memory", "size=512M,shared=on"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .default_disks()
+            .default_net()
+            .args([
+                "--fs",
+                format!("socket={virtiofsd_socket_path},tag=myfs,num_queues=1,queue_size=1024")
+                    .as_str(),
+            ])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            // Mount virtiofs and write a test file
+            guest
+                .ssh_command("mkdir -p mount_dir && sudo mount -t virtiofs myfs mount_dir/")
+                .unwrap();
+
+            // Verify the shared directory is accessible
+            assert_eq!(
+                guest.ssh_command("cat mount_dir/file1").unwrap().trim(),
+                "foo"
+            );
+
+            // Write a file from the guest
+            guest
+                .ssh_command(
+                    "sudo bash -c 'echo snapshot_test_data > mount_dir/snapshot_test_file'",
+                )
+                .unwrap();
+            snapshot_restore_common::snapshot_and_check_events(
+                &api_socket_source,
+                &snapshot_dir,
+                &event_path,
+            );
+        });
+
+        // Shutdown the source VM
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        // Kill the old virtiofsd
+        let _ = daemon_child.kill();
+        let _ = daemon_child.wait();
+
+        // Start a fresh virtiofsd (reusing the same socket path)
+        let (mut daemon_child, _) = prepare_virtiofsd(&guest.tmp_dir, shared_dir.to_str().unwrap());
+
+        let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
+        let event_path_restored = format!("{}.2", temp_event_monitor_path(&guest.tmp_dir));
+
+        // Restore the VM from the snapshot
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_restored])
+            .args([
+                "--event-monitor",
+                format!("path={event_path_restored}").as_str(),
+            ])
+            .args([
+                "--restore",
+                format!("source_url=file://{snapshot_dir}").as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        // Wait for the VM to be restored
+        assert!(wait_until(Duration::from_secs(30), || {
+            remote_command(&api_socket_restored, "info", None)
+        }));
+
+        let latest_events = [&MetaEvent {
+            event: "restored".to_string(),
+            device_id: None,
+        }];
+        assert!(check_latest_events_exact(
+            &latest_events,
+            &event_path_restored
+        ));
+
+        // Remove the snapshot dir
+        let _ = remove_dir_all(snapshot_dir.as_str());
+
+        let r = panic::catch_unwind(|| {
+            // Resume the VM
+            assert!(wait_until(Duration::from_secs(30), || remote_command(
+                &api_socket_restored,
+                "info",
+                None
+            )));
+            assert!(remote_command(&api_socket_restored, "resume", None));
+            thread::sleep(Duration::new(5, 0));
+
+            // Verify virtiofs still works after restore
+            // Read the file written before snapshot
+            assert_eq!(
+                guest
+                    .ssh_command("cat mount_dir/snapshot_test_file")
+                    .unwrap()
+                    .trim(),
+                "snapshot_test_data"
+            );
+
+            // Read the pre-existing shared file
+            assert_eq!(
+                guest.ssh_command("cat mount_dir/file1").unwrap().trim(),
+                "foo"
+            );
+
+            // Write a new file after restore
+            guest
+                .ssh_command("sudo bash -c 'echo post_restore_data > mount_dir/post_restore_file'")
+                .unwrap();
+
+            // Verify the new file exists on the host
+            let post_restore_content =
+                fs::read_to_string(shared_dir.join("post_restore_file")).unwrap();
+            assert_eq!(post_restore_content.trim(), "post_restore_data");
+        });
+
+        // Shutdown the target VM
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        // Clean up virtiofsd
+        let _ = daemon_child.kill();
+        let _ = daemon_child.wait();
+    }
 }
 
 mod dbus_api {
@@ -12159,362 +12515,6 @@ mod common_sequential {
         });
 
         handle_child_output(r, &output);
-    }
-
-    // One rx-* entry on the host per attached tap queue.
-    fn attached_tap_queues(tap_name: &str) -> usize {
-        fs::read_dir(format!("/sys/class/net/{tap_name}/queues"))
-            .unwrap()
-            .filter(|e| {
-                e.as_ref()
-                    .unwrap()
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with("rx-")
-            })
-            .count()
-    }
-
-    // Name of the guest interface with this MAC.
-    fn guest_iface(guest: &Guest, mac: &str) -> String {
-        guest
-            .ssh_command(&format!(
-                "basename \"$(dirname \"$(grep -lx {mac} /sys/class/net/*/address)\")\""
-            ))
-            .unwrap()
-            .trim()
-            .to_string()
-    }
-
-    // Receive queues the guest driver is using on the interface.
-    fn guest_rx_queues(guest: &Guest, iface: &str) -> usize {
-        guest
-            .ssh_command(&format!("ls /sys/class/net/{iface}/queues | grep -c rx-"))
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap()
-    }
-
-    #[test]
-    fn test_snapshot_restore_net_queue_pairs() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
-
-        let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
-
-        let net_id = "net123";
-        // Four pairs need four vCPUs, but with one CPU online the guest
-        // negotiates a single pair.
-        let num_queue_pairs: usize = 4;
-        // use a name that does not conflict with tap dev created from other tests
-        let tap_name = "chtap998";
-        use std::str::FromStr;
-        let open_taps = || {
-            net_util::open_tap(
-                Some(tap_name),
-                Some(IpAddr::V4(
-                    Ipv4Addr::from_str(&guest.network.host_ip0).unwrap(),
-                )),
-                None,
-                None,
-                None,
-                num_queue_pairs,
-                Some(libc::O_RDWR | libc::O_NONBLOCK),
-            )
-            .unwrap()
-        };
-        let fd_list = |taps: &[net_util::Tap]| {
-            taps.iter()
-                .map(|tap| tap.as_raw_fd().to_string())
-                .collect::<Vec<_>>()
-                .join(",")
-        };
-
-        let taps = open_taps();
-        let net_params = format!(
-            "id={},fd=[{}],mac={},ip={},mask=255.255.255.128,num_queues={}",
-            net_id,
-            fd_list(&taps),
-            guest.network.guest_mac0,
-            guest.network.host_ip0,
-            num_queue_pairs * 2
-        );
-
-        let cloudinit_params = format!(
-            "path={},iommu=on,image_type=raw",
-            guest.disk_config.disk(DiskType::CloudInit).unwrap()
-        );
-
-        let mut child = GuestCommand::new(&guest)
-            .args(["--api-socket", &api_socket_source])
-            .args(["--cpus", "boot=4"])
-            .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args([
-                "--disk",
-                format!(
-                    "path={},image_type=raw",
-                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                )
-                .as_str(),
-                cloudinit_params.as_str(),
-            ])
-            .args(["--net", net_params.as_str()])
-            .args([
-                "--cmdline",
-                format!("{DIRECT_KERNEL_BOOT_CMDLINE} maxcpus=1").as_str(),
-            ])
-            .capture_output()
-            .spawn()
-            .unwrap();
-
-        let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
-
-        let r = panic::catch_unwind(|| {
-            guest.wait_vm_boot().unwrap();
-            let iface = guest_iface(&guest, &guest.network.guest_mac0);
-
-            // One pair negotiated, so one tap queue attached out of four.
-            assert_eq!(guest_rx_queues(&guest, &iface), 1);
-            assert_eq!(attached_tap_queues(tap_name), 1);
-
-            // Raise it through the control queue to a value that is neither the
-            // default nor the maximum, for the restore to preserve.
-            guest
-                .ssh_command(&format!("sudo ethtool -L {iface} combined 3"))
-                .unwrap();
-            assert_eq!(guest_rx_queues(&guest, &iface), 3);
-            assert_eq!(attached_tap_queues(tap_name), 3);
-
-            assert!(remote_command(&api_socket_source, "pause", None));
-            assert!(remote_command(
-                &api_socket_source,
-                "snapshot",
-                Some(format!("file://{snapshot_dir}").as_str()),
-            ));
-        });
-
-        // CH holds its own copies; drop ours so the tap goes away with the VM.
-        drop(taps);
-        kill_child(&mut child);
-        let output = child.wait_with_output().unwrap();
-        handle_child_output(r, &output);
-
-        let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
-
-        // Restore the VM from the snapshot
-        let mut child = GuestCommand::new(&guest)
-            .args(["--api-socket", &api_socket_restored])
-            .capture_output()
-            .spawn()
-            .unwrap();
-        thread::sleep(Duration::new(2, 0));
-
-        let taps = open_taps();
-        let restore_params = format!(
-            "source_url=file://{},net_fds=[{}@[{}]]",
-            snapshot_dir,
-            net_id,
-            fd_list(&taps)
-        );
-
-        let r = panic::catch_unwind(|| {
-            // A fresh tap comes with every queue attached.
-            assert_eq!(attached_tap_queues(tap_name), num_queue_pairs);
-
-            assert!(remote_command(
-                &api_socket_restored,
-                "restore",
-                Some(restore_params.as_str())
-            ));
-
-            // Wait for the VM to be restored
-            assert!(wait_until(Duration::from_secs(20), || {
-                remote_command(&api_socket_restored, "info", None)
-            }));
-
-            assert!(remote_command(&api_socket_restored, "resume", None));
-
-            // The guest did not renegotiate, and the device kept its count.
-            let iface = guest_iface(&guest, &guest.network.guest_mac0);
-            assert_eq!(guest_rx_queues(&guest, &iface), 3);
-            assert_eq!(attached_tap_queues(tap_name), 3);
-
-            // A reboot rebuilds the device on the same taps, and the driver starts
-            // over at one pair.
-            guest.reboot_linux(0);
-            assert_eq!(guest_rx_queues(&guest, &iface), 1);
-            assert_eq!(attached_tap_queues(tap_name), 1);
-        });
-
-        let _ = remove_dir_all(snapshot_dir.as_str());
-
-        kill_child(&mut child);
-        let output = child.wait_with_output().unwrap();
-        handle_child_output(r, &output);
-    }
-
-    #[test]
-    fn test_snapshot_restore_virtio_fs() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
-
-        let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
-
-        let mut workload_path = dirs::home_dir().unwrap();
-        workload_path.push("workloads");
-        let mut shared_dir = workload_path;
-        shared_dir.push("shared_dir");
-
-        let (mut daemon_child, virtiofsd_socket_path) =
-            prepare_virtiofsd(&guest.tmp_dir, shared_dir.to_str().unwrap());
-
-        let event_path = temp_event_monitor_path(&guest.tmp_dir);
-
-        let mut child = GuestCommand::new(&guest)
-            .args(["--api-socket", &api_socket_source])
-            .args(["--event-monitor", format!("path={event_path}").as_str()])
-            .args(["--cpus", "boot=2"])
-            .args(["--memory", "size=512M,shared=on"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .default_disks()
-            .default_net()
-            .args([
-                "--fs",
-                format!("socket={virtiofsd_socket_path},tag=myfs,num_queues=1,queue_size=1024")
-                    .as_str(),
-            ])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .capture_output()
-            .spawn()
-            .unwrap();
-
-        let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
-
-        let r = panic::catch_unwind(|| {
-            guest.wait_vm_boot().unwrap();
-
-            // Mount virtiofs and write a test file
-            guest
-                .ssh_command("mkdir -p mount_dir && sudo mount -t virtiofs myfs mount_dir/")
-                .unwrap();
-
-            // Verify the shared directory is accessible
-            assert_eq!(
-                guest.ssh_command("cat mount_dir/file1").unwrap().trim(),
-                "foo"
-            );
-
-            // Write a file from the guest
-            guest
-                .ssh_command(
-                    "sudo bash -c 'echo snapshot_test_data > mount_dir/snapshot_test_file'",
-                )
-                .unwrap();
-            snapshot_restore_common::snapshot_and_check_events(
-                &api_socket_source,
-                &snapshot_dir,
-                &event_path,
-            );
-        });
-
-        // Shutdown the source VM
-        kill_child(&mut child);
-        let output = child.wait_with_output().unwrap();
-        handle_child_output(r, &output);
-
-        // Kill the old virtiofsd
-        let _ = daemon_child.kill();
-        let _ = daemon_child.wait();
-
-        // Start a fresh virtiofsd (reusing the same socket path)
-        let (mut daemon_child, _) = prepare_virtiofsd(&guest.tmp_dir, shared_dir.to_str().unwrap());
-
-        let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
-        let event_path_restored = format!("{}.2", temp_event_monitor_path(&guest.tmp_dir));
-
-        // Restore the VM from the snapshot
-        let mut child = GuestCommand::new(&guest)
-            .args(["--api-socket", &api_socket_restored])
-            .args([
-                "--event-monitor",
-                format!("path={event_path_restored}").as_str(),
-            ])
-            .args([
-                "--restore",
-                format!("source_url=file://{snapshot_dir}").as_str(),
-            ])
-            .capture_output()
-            .spawn()
-            .unwrap();
-
-        // Wait for the VM to be restored
-        assert!(wait_until(Duration::from_secs(30), || {
-            remote_command(&api_socket_restored, "info", None)
-        }));
-
-        let latest_events = [&MetaEvent {
-            event: "restored".to_string(),
-            device_id: None,
-        }];
-        assert!(check_latest_events_exact(
-            &latest_events,
-            &event_path_restored
-        ));
-
-        // Remove the snapshot dir
-        let _ = remove_dir_all(snapshot_dir.as_str());
-
-        let r = panic::catch_unwind(|| {
-            // Resume the VM
-            assert!(wait_until(Duration::from_secs(30), || remote_command(
-                &api_socket_restored,
-                "info",
-                None
-            )));
-            assert!(remote_command(&api_socket_restored, "resume", None));
-            thread::sleep(Duration::new(5, 0));
-
-            // Verify virtiofs still works after restore
-            // Read the file written before snapshot
-            assert_eq!(
-                guest
-                    .ssh_command("cat mount_dir/snapshot_test_file")
-                    .unwrap()
-                    .trim(),
-                "snapshot_test_data"
-            );
-
-            // Read the pre-existing shared file
-            assert_eq!(
-                guest.ssh_command("cat mount_dir/file1").unwrap().trim(),
-                "foo"
-            );
-
-            // Write a new file after restore
-            guest
-                .ssh_command("sudo bash -c 'echo post_restore_data > mount_dir/post_restore_file'")
-                .unwrap();
-
-            // Verify the new file exists on the host
-            let post_restore_content =
-                fs::read_to_string(shared_dir.join("post_restore_file")).unwrap();
-            assert_eq!(post_restore_content.trim(), "post_restore_data");
-        });
-
-        // Shutdown the target VM
-        kill_child(&mut child);
-        let output = child.wait_with_output().unwrap();
-        handle_child_output(r, &output);
-
-        // Clean up virtiofsd and test files
-        let _ = daemon_child.kill();
-        let _ = daemon_child.wait();
-        let _ = fs::remove_file(shared_dir.join("snapshot_test_file"));
-        let _ = fs::remove_file(shared_dir.join("post_restore_file"));
     }
 
     fn _test_live_migration_balloon(upgrade_test: bool, memfds: bool) {
