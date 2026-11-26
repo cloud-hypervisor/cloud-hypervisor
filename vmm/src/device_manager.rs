@@ -889,7 +889,7 @@ pub struct VfioContext {
 }
 
 impl GuestMemoryNotification for VfioContext {
-    fn region_added(&self, region: &Arc<GuestRegion>) {
+    fn region_added(&self, region: &GuestRegion) {
         let gpa = region.start_addr().raw_value();
         if let Err(e) = self.dma_mapping.map(gpa, gpa, region.len()) {
             error!("FATAL: VFIO: {}", flatten_error_chain_to_string(&e));
@@ -897,7 +897,7 @@ impl GuestMemoryNotification for VfioContext {
         }
     }
 
-    fn region_removed(&self, region: &Arc<GuestRegion>) {
+    fn region_removed(&self, region: &GuestRegion) {
         if let Err(e) = self
             .dma_mapping
             .unmap(region.start_addr().raw_value(), region.len())
