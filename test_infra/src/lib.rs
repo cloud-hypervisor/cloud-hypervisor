@@ -1615,9 +1615,13 @@ impl Guest {
     ) {
         if let Some(mem_ref) = mem_ref {
             // Check each NUMA node has been assigned the right amount of
-            // memory.
+            // memory. Memory that has just been hotplugged takes a moment to
+            // come online.
             for (i, &m) in mem_ref.iter().enumerate() {
-                assert!(self.get_numa_node_memory(i).unwrap_or_default() > m);
+                assert!(wait_until(Duration::from_secs(30), || self
+                    .get_numa_node_memory(i)
+                    .unwrap_or_default()
+                    > m));
             }
         }
 
