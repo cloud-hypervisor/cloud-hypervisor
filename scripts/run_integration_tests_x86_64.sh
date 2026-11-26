@@ -167,7 +167,16 @@ if [ "$(stat -f -c %T /tmp)" = xfs ]; then
     cp "$JAMMY_OS_RAW_IMAGE" "$JAMMY_OS_IMAGE" /tmp/workloads || exit 1
 fi
 
-cargo build --features mshv --all --release --target "$BUILD_TARGET"
+# With dbus_api, a build against the glibc of the dev container needs a newer
+# glibc than the L1 guest of test_vfio, which runs this binary as well. So build
+# and test dbus_api with musl only.
+features="mshv,fw_cfg,ivshmem"
+skip_args=(--skip dbus_api::)
+if [[ "$BUILD_TARGET" == *-musl ]]; then
+    features="$features,dbus_api"
+    skip_args=()
+fi
+cargo build --features "$features" --all --release --target "$BUILD_TARGET"
 
 # We always copy a fresh version of our binary for our L2 guest.
 cp target/"$BUILD_TARGET"/release/cloud-hypervisor "$VFIO_DIR"
@@ -200,28 +209,4 @@ if ! [[ "${PARALLEL_INTEGRATION_TESTS_NUM:-}" =~ ^[1-9][0-9]*$ ]]; then
     PARALLEL_INTEGRATION_TESTS_NUM="${TEST_THREADS_DEFAULT}"
 fi
 echo "nproc:$(nproc), parallel_integration_tests:${PARALLEL_INTEGRATION_TESTS_NUM}"
-time cargo nextest run -p cloud-hypervisor $test_features --profile common_tests --no-tests=pass --test-threads="${PARALLEL_INTEGRATION_TESTS_NUM}" "$test_filter" -- ${test_binary_args[*]}
-RES=$?
-
-# Run tests on dbus_api
-if [ $RES -eq 0 ]; then
-    cargo build --features "mshv,dbus_api" --all --release --target "$BUILD_TARGET"
-    # integration tests now do not reply on build feature "dbus_api"
-    time cargo nextest run -p cloud-hypervisor $test_features --profile dbus --no-tests=pass --test-threads="${PARALLEL_INTEGRATION_TESTS_NUM}" "$test_filter" -- ${test_binary_args[*]}
-    RES=$?
-fi
-
-# Run tests on fw_cfg
-if [ $RES -eq 0 ]; then
-    cargo build --features "mshv,fw_cfg" --all --release --target "$BUILD_TARGET"
-    time cargo nextest run -p cloud-hypervisor $test_features --profile fw_cfg --no-tests=pass --test-threads="${PARALLEL_INTEGRATION_TESTS_NUM}" "$test_filter" -- ${test_binary_args[*]}
-    RES=$?
-fi
-
-if [ $RES -eq 0 ]; then
-    cargo build --features "mshv,ivshmem" --all --release --target "$BUILD_TARGET"
-    time cargo nextest run -p cloud-hypervisor $test_features --profile ivshmem --no-tests=pass --test-threads="${PARALLEL_INTEGRATION_TESTS_NUM}" "$test_filter" -- ${test_binary_args[*]}
-    RES=$?
-fi
-
-exit $RES
+time cargo nextest run -p cloud-hypervisor $test_features --profile common_tests --no-tests=pass --test-threads="${PARALLEL_INTEGRATION_TESTS_NUM}" "$test_filter" -- ${test_binary_args[*]} "${skip_args[@]}"
