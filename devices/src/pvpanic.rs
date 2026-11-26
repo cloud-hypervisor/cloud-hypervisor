@@ -192,9 +192,15 @@ impl PciDevice for PvPanicDevice {
             }
         }
 
-        let bar_addr = mmio32_allocator
-            .allocate(bar_addr, region_size, Some(PVPANIC_DEVICE_MMIO_ALIGNMENT))
-            .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
+        let bar_addr = if let Some(addr) = bar_addr
+            && !self.configuration.is_bar_mapped(bar_id as usize)
+        {
+            addr
+        } else {
+            mmio32_allocator
+                .allocate(bar_addr, region_size, Some(PVPANIC_DEVICE_MMIO_ALIGNMENT))
+                .ok_or(PciDeviceError::IoAllocationFailed(region_size))?
+        };
 
         let bar = PciBarConfiguration::default()
             .set_index(bar_id as usize)
@@ -223,6 +229,9 @@ impl PciDevice for PvPanicDevice {
         _mmio64_allocator: &mut AddressAllocator,
     ) -> result::Result<(), PciDeviceError> {
         for bar in self.bar_regions.drain(..) {
+            if !self.configuration.is_bar_mapped(bar.idx()) {
+                continue;
+            }
             mmio32_allocator.free(GuestAddress(bar.addr()), bar.size());
         }
 
@@ -241,6 +250,18 @@ impl PciDevice for PvPanicDevice {
 
     fn restore_bar_addr(&mut self, params: &BarReprogrammingParams) {
         self.configuration.restore_bar_addr(params);
+    }
+
+    fn is_bar_mapped(&self, bar_idx: usize) -> bool {
+        self.configuration.is_bar_mapped(bar_idx)
+    }
+
+    fn set_bar_mapped(&mut self, bar_idx: usize, mapped: bool) {
+        self.configuration.set_bar_mapped(bar_idx, mapped);
+    }
+
+    fn undecoded_bar(&self, bar_idx: usize) -> Option<BarReprogrammingParams> {
+        self.configuration.undecoded_bar(bar_idx)
     }
 
     fn read_bar(&mut self, _base: u64, _offset: u64, data: &mut [u8]) {

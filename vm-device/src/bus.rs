@@ -67,6 +67,9 @@ pub enum Error {
     /// Failed to find unassigned address range.
     #[error("No device assigned to address {0:#x}")]
     UnassignedAddressRange(u64),
+    /// The device has no range at the address with the given length.
+    #[error("No range of the device at {0:#x} with that length")]
+    RangeNotOwned(u64),
 }
 
 pub(crate) type Result<T> = result::Result<T, Error>;
@@ -218,6 +221,29 @@ impl Bus {
         Ok(())
     }
 
+    /// Removes the range at `base` only if it has `len` and belongs to `device`.
+    pub fn remove_device_range(
+        &self,
+        device: &dyn BusDeviceSync,
+        base: u64,
+        len: u64,
+    ) -> Result<()> {
+        let mut devices = self.devices.write().unwrap();
+        let key = BusRange { base, len };
+        let owned = devices.get_key_value(&key).is_some_and(|(range, dev)| {
+            range.len == len
+                && dev
+                    .upgrade()
+                    .is_some_and(|dev| ptr::eq(Arc::as_ptr(&dev), device))
+        });
+        if !owned {
+            return Err(Error::RangeNotOwned(base));
+        }
+        devices.remove(&key);
+
+        Ok(())
+    }
+
     /// Updates the address range for an existing device.
     pub fn update_range(
         &self,
@@ -312,6 +338,26 @@ mod tests {
         bus.insert(Arc::clone(&dummy), 0x20, 0x05).unwrap();
         bus.insert(Arc::clone(&dummy), 0x25, 0x05).unwrap();
         bus.insert(dummy, 0x0, 0x10).unwrap();
+    }
+
+    #[test]
+    fn bus_remove_device_range() {
+        let bus = Bus::new();
+        let dummy: Arc<dyn BusDeviceSync> = Arc::new(DummyDevice);
+        let other: Arc<dyn BusDeviceSync> = Arc::new(DummyDevice);
+        bus.insert(Arc::clone(&dummy), 0x10, 0x10).unwrap();
+
+        // Another device, another length or another base: left as is.
+        bus.remove_device_range(other.as_ref(), 0x10, 0x10)
+            .unwrap_err();
+        bus.remove_device_range(dummy.as_ref(), 0x10, 0x20)
+            .unwrap_err();
+        bus.remove_device_range(dummy.as_ref(), 0x20, 0x10)
+            .unwrap_err();
+        bus.read(0x10, &mut [0]).unwrap();
+
+        bus.remove_device_range(dummy.as_ref(), 0x10, 0x10).unwrap();
+        bus.read(0x10, &mut [0]).unwrap_err();
     }
 
     #[test]

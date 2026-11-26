@@ -20,19 +20,20 @@ use crate::device::BarReprogrammingParams;
 const NUM_CONFIGURATION_REGISTERS: usize = 1024;
 
 pub(crate) const COMMAND_REG: usize = 1;
+const COMMAND_REG_IO_SPACE_MASK: u32 = 0x0000_0001;
 pub(crate) const COMMAND_REG_MEMORY_SPACE_MASK: u32 = 0x0000_0002;
 const STATUS_REG: usize = 1;
 const STATUS_REG_CAPABILITIES_USED_MASK: u32 = 0x0010_0000;
 const BAR0_REG: usize = 4;
 const ROM_BAR_REG: usize = 12;
-const ROM_BAR_IDX: usize = 6;
+pub(crate) const ROM_BAR_IDX: usize = 6;
 const BAR_SIZE_PROBE_ALL_ONES: u32 = 0xffff_ffff;
 const BAR_IO_ADDR_MASK: u32 = 0xffff_fffc;
 const BAR_MEM_ADDR_MASK: u32 = 0xffff_fff0;
 const ROM_BAR_ADDR_MASK: u32 = 0xffff_f800;
 const MSI_CAPABILITY_REGISTER_MASK: u32 = 0x0071_0000;
 const MSIX_CAPABILITY_REGISTER_MASK: u32 = 0xc000_0000;
-const NUM_BAR_REGS: usize = 6;
+pub(crate) const NUM_BAR_REGS: usize = 6;
 const CAPABILITY_LIST_HEAD_OFFSET: usize = 0x34;
 const FIRST_CAPABILITY_OFFSET: usize = 0x40;
 const CAPABILITY_MAX_OFFSET: usize = 192;
@@ -544,6 +545,9 @@ pub struct PciConfigurationState {
     // Preserve deferred BAR moves across snapshot and restore.
     #[serde(default)]
     pending_bar_reprogram: Vec<BarReprogrammingParams>,
+    // Absent from an older snapshot, whose BARs are all mapped.
+    #[serde(default)]
+    bar_mapped: Option<[bool; NUM_BAR_REGS + 1]>,
 }
 
 /// Contains the configuration space of a PCI node.
@@ -562,6 +566,7 @@ pub struct PciConfiguration {
     msix_cap_reg_idx: Option<usize>,
     msix_config: Option<Arc<Mutex<MsixConfig>>>,
     pending_bar_reprogram: Vec<BarReprogrammingParams>,
+    bar_mapped: [bool; NUM_BAR_REGS + 1],
 }
 
 /// See pci_regs.h in kernel
@@ -664,6 +669,11 @@ impl PciConfiguration {
         msix_config: Option<Arc<Mutex<MsixConfig>>>,
         state: Option<PciConfigurationState>,
     ) -> Self {
+        let bar_mapped = state
+            .as_ref()
+            .and_then(|state| state.bar_mapped)
+            // BARs are mapped at creation, whatever the COMMAND register says.
+            .unwrap_or([true; NUM_BAR_REGS + 1]);
         let (
             registers,
             writable_bits,
@@ -741,6 +751,7 @@ impl PciConfiguration {
             msix_cap_reg_idx,
             msix_config,
             pending_bar_reprogram,
+            bar_mapped,
         };
         config.fixup_pending_bar_reprogram()
     }
@@ -820,6 +831,7 @@ impl PciConfiguration {
             last_capability: self.last_capability,
             msix_cap_reg_idx: self.msix_cap_reg_idx,
             pending_bar_reprogram: self.pending_bar_reprogram.clone(),
+            bar_mapped: Some(self.bar_mapped),
         }
     }
 
@@ -1131,26 +1143,109 @@ impl PciConfiguration {
         self.drain_pending_bar_reprogram()
     }
 
-    // Return pending BAR reprogramming if MSE bit is set
+    // Return the pending BAR reprogramming if the MSE bit is set, and the
+    // unmapped BARs whose address space is decoded.
     pub(crate) fn drain_pending_bar_reprogram(&mut self) -> Vec<BarReprogrammingParams> {
+        let command = self.read_config_register(COMMAND_REG);
+        let mut params = Vec::new();
         if !self.pending_bar_reprogram.is_empty() {
             // Return bar reprogramming only if the MSE bit is enabled;
-            if self.read_config_register(COMMAND_REG) & COMMAND_REG_MEMORY_SPACE_MASK
-                == COMMAND_REG_MEMORY_SPACE_MASK
-            {
+            if command & COMMAND_REG_MEMORY_SPACE_MASK == COMMAND_REG_MEMORY_SPACE_MASK {
                 info!(
                     "BAR reprogramming parameter is returned: {:x?}",
                     self.pending_bar_reprogram
                 );
-                return mem::take(&mut self.pending_bar_reprogram);
+                params = mem::take(&mut self.pending_bar_reprogram);
+            } else {
+                info!(
+                    "MSE bit is disabled. No BAR reprogramming parameter is returned: {:x?}",
+                    self.pending_bar_reprogram
+                );
             }
-            info!(
-                "MSE bit is disabled. No BAR reprogramming parameter is returned: {:x?}",
-                self.pending_bar_reprogram
-            );
         }
 
-        Vec::new()
+        // A move recorded while a BAR was unmapped is dropped: the BAR is
+        // mapped at its registers once its own space is decoded.
+        for slot in (0..NUM_BAR_REGS).chain([ROM_BAR_IDX]) {
+            if self.bar_mapped[slot] {
+                continue;
+            }
+            self.pending_bar_reprogram
+                .retain(|p| p.bar_idx != Some(slot));
+            params.retain(|p| p.bar_idx != Some(slot));
+            if let Some(p) = self.bar_params(slot)
+                && command & Self::decode_mask(p.region_type) != 0
+            {
+                debug!("Unmapped BAR {slot} is mapped at its placement: {p:x?}");
+                params.push(p);
+            }
+        }
+
+        params
+    }
+
+    fn decode_mask(region_type: PciBarRegionType) -> u32 {
+        match region_type {
+            PciBarRegionType::IoRegion => COMMAND_REG_IO_SPACE_MASK,
+            PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
+                COMMAND_REG_MEMORY_SPACE_MASK
+            }
+        }
+    }
+
+    pub fn is_bar_mapped(&self, slot: usize) -> bool {
+        self.bar_mapped[slot]
+    }
+
+    pub fn set_bar_mapped(&mut self, slot: usize, mapped: bool) {
+        self.bar_mapped[slot] = mapped;
+    }
+
+    // The placement of BAR `slot`: mapped at old_base, with new_base in its
+    // registers.
+    pub(crate) fn bar_params(&self, slot: usize) -> Option<BarReprogrammingParams> {
+        let (base, len, region_type) = if slot == ROM_BAR_IDX {
+            if !self.rom_bar_used {
+                return None;
+            }
+            (
+                u64::from(self.rom_bar_addr & self.writable_bits[ROM_BAR_REG]),
+                u64::from(decode_32_bits_bar_size(self.rom_bar_size)?),
+                PciBarRegionType::Memory32BitRegion,
+            )
+        } else {
+            let bar = self.bars.get(slot).filter(|bar| bar.used)?;
+            let region_type = bar.r#type?;
+            let len = match region_type {
+                PciBarRegionType::Memory64BitRegion => {
+                    decode_64_bits_bar_size(self.bars.get(slot + 1)?.size, bar.size)?
+                }
+                _ => u64::from(decode_32_bits_bar_size(bar.size)?),
+            };
+            (self.get_bar_addr(slot), len, region_type)
+        };
+        let old_base = self
+            .pending_bar_reprogram
+            .iter()
+            .find(|p| p.bar_idx == Some(slot))
+            .map_or(base, |p| p.old_base);
+
+        Some(BarReprogrammingParams {
+            bar_idx: Some(slot),
+            old_base,
+            new_base: base,
+            len,
+            region_type,
+        })
+    }
+
+    /// The placement of BAR `slot` if it is mapped while its address space
+    /// is not decoded.
+    pub fn undecoded_bar(&self, slot: usize) -> Option<BarReprogrammingParams> {
+        self.bar_params(slot).filter(|p| {
+            self.bar_mapped[slot]
+                && self.read_config_register(COMMAND_REG) & Self::decode_mask(p.region_type) == 0
+        })
     }
 
     pub fn read_config_register(&self, reg_idx: usize) -> u32 {
@@ -1787,6 +1882,32 @@ mod tests {
         .set_address(addr);
         cfg.add_pci_bar(&bar).unwrap();
         cfg.write_reg(COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK);
+    }
+
+    #[test]
+    fn unmapped_bar_is_mapped_back_when_mse_is_set() {
+        let mut cfg = reloc_config(None);
+        add_reloc_bar(&mut cfg, 0, 0xc000_0000);
+        cfg.write_reg(COMMAND_REG, 0);
+        cfg.set_bar_mapped(0, false);
+
+        assert!(
+            cfg.write_config_register(COMMAND_REG, 0, &0u16.to_le_bytes())
+                .is_empty()
+        );
+
+        // The BAR stays unmapped until the bus reports the mapping.
+        let params = cfg.write_config_register(
+            COMMAND_REG,
+            0,
+            &(COMMAND_REG_MEMORY_SPACE_MASK as u16).to_le_bytes(),
+        );
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].bar_idx, Some(0));
+        assert_eq!(params[0].old_base, 0xc000_0000);
+        assert_eq!(params[0].new_base, 0xc000_0000);
+        assert_eq!(params[0].len, RELOC_BAR_SIZE);
+        assert!(!cfg.is_bar_mapped(0));
     }
 
     #[test]

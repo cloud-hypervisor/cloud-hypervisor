@@ -11,7 +11,7 @@ use std::{io, result};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_allocator::{AddressAllocator, SystemAllocator};
-use vm_device::Resource;
+use vm_device::{BusDeviceSync, Resource};
 
 use crate::configuration::{self, PciBarRegionType};
 use crate::{PciBarConfiguration, PciBdf};
@@ -99,6 +99,17 @@ pub trait PciDevice: Send {
     /// This rolls back the address update made by detect_bar_reprogramming()
     /// so that the config register stays consistent with the MMIO bus mapping.
     fn restore_bar_addr(&mut self, _params: &BarReprogrammingParams) {}
+    /// Whether BAR `bar_idx` is mapped.
+    fn is_bar_mapped(&self, _bar_idx: usize) -> bool {
+        true
+    }
+    /// Records whether BAR `bar_idx` is mapped.
+    fn set_bar_mapped(&mut self, _bar_idx: usize, _mapped: bool) {}
+    /// The placement of BAR `bar_idx` if it is mapped while its address
+    /// space is not decoded.
+    fn undecoded_bar(&self, _bar_idx: usize) -> Option<BarReprogrammingParams> {
+        None
+    }
     /// Provides a mutable reference to the Any trait. This is useful to let
     /// the caller have access to the underlying type behind the trait.
     fn as_any_mut(&mut self) -> &mut dyn Any;
@@ -127,6 +138,28 @@ pub trait DeviceRelocation: Send + Sync {
         new_base: u64,
         len: u64,
         pci_dev: &mut dyn PciDevice,
+        region_type: PciBarRegionType,
+    ) -> result::Result<(), io::Error>;
+
+    /// Unmaps the BAR at `base`, which keeps its config space address.
+    fn unmap_bar(
+        &self,
+        bar_idx: usize,
+        base: u64,
+        len: u64,
+        pci_dev: &mut dyn PciDevice,
+        bus_device: &Arc<dyn BusDeviceSync>,
+        region_type: PciBarRegionType,
+    ) -> result::Result<(), io::Error>;
+
+    /// Maps an unmapped BAR at `base`.
+    fn map_bar(
+        &self,
+        bar_idx: usize,
+        base: u64,
+        len: u64,
+        pci_dev: &mut dyn PciDevice,
+        bus_device: &Arc<dyn BusDeviceSync>,
         region_type: PciBarRegionType,
     ) -> result::Result<(), io::Error>;
 }

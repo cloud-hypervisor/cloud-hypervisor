@@ -632,6 +632,30 @@ mod tests {
         ) -> Result<(), io::Error> {
             Ok(())
         }
+
+        fn unmap_bar(
+            &self,
+            _bar_idx: usize,
+            _base: u64,
+            _len: u64,
+            _pci_dev: &mut dyn pci::PciDevice,
+            _bus_device: &Arc<dyn BusDeviceSync>,
+            _region_type: pci::PciBarRegionType,
+        ) -> Result<(), io::Error> {
+            Ok(())
+        }
+
+        fn map_bar(
+            &self,
+            _bar_idx: usize,
+            _base: u64,
+            _len: u64,
+            _pci_dev: &mut dyn pci::PciDevice,
+            _bus_device: &Arc<dyn BusDeviceSync>,
+            _region_type: pci::PciBarRegionType,
+        ) -> Result<(), io::Error> {
+            Ok(())
+        }
     }
 
     fn setup() -> PciSegment {

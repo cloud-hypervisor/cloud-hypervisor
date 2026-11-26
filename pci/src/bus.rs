@@ -7,17 +7,20 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::ops::DerefMut;
-use std::result;
 use std::sync::{Arc, Barrier, Mutex};
+use std::{array, result};
 
-use log::warn;
+use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use vm_device::BusDevice;
+use vm_device::{BusDevice, BusDeviceSync};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 
 use crate::PciBdf;
-use crate::configuration::{PciBridgeSubclass, PciClassCode, PciConfiguration, PciHeaderType};
+use crate::configuration::{
+    COMMAND_REG, NUM_BAR_REGS, PciBridgeSubclass, PciClassCode, PciConfiguration, PciHeaderType,
+    ROM_BAR_IDX,
+};
 use crate::device::{BarReprogrammingParams, DeviceRelocation, PciDevice};
 
 /// Denotes the PCI device ID of a bus' root bridge device.
@@ -113,20 +116,32 @@ enum DeviceIdState {
     Allocated,
 }
 
+struct PciBusDevice {
+    pci: Arc<Mutex<dyn PciDevice>>,
+    /// None only for the host bridge, which has no BARs.
+    bus_device: Option<Arc<dyn BusDeviceSync>>,
+}
+
 pub struct PciBus {
     /// Devices attached to this bus.
-    devices: HashMap<u8, Arc<Mutex<dyn PciDevice>>>,
+    devices: HashMap<u8, PciBusDevice>,
     device_reloc: Arc<dyn DeviceRelocation>,
     device_ids: [DeviceIdState; NUM_DEVICE_IDS as usize],
 }
 
 impl PciBus {
     pub fn new(pci_root: Option<PciRoot>, device_reloc: Arc<dyn DeviceRelocation>) -> Self {
-        let mut devices: HashMap<u8, Arc<Mutex<dyn PciDevice>>> = HashMap::new();
+        let mut devices: HashMap<u8, PciBusDevice> = HashMap::new();
         let mut device_ids = [DeviceIdState::Free; NUM_DEVICE_IDS as usize];
 
         if let Some(pci_root) = pci_root {
-            devices.insert(PCI_ROOT_DEVICE_ID, Arc::new(Mutex::new(pci_root)));
+            devices.insert(
+                PCI_ROOT_DEVICE_ID,
+                PciBusDevice {
+                    pci: Arc::new(Mutex::new(pci_root)),
+                    bus_device: None,
+                },
+            );
             device_ids[PCI_ROOT_DEVICE_ID as usize] = DeviceIdState::Allocated;
         }
 
@@ -137,8 +152,19 @@ impl PciBus {
         }
     }
 
-    pub fn add_device(&mut self, device_id: u8, device: Arc<Mutex<dyn PciDevice>>) -> Result<()> {
-        self.devices.insert(device_id, device);
+    pub fn add_device(
+        &mut self,
+        device_id: u8,
+        device: Arc<Mutex<dyn PciDevice>>,
+        bus_device: Arc<dyn BusDeviceSync>,
+    ) -> Result<()> {
+        self.devices.insert(
+            device_id,
+            PciBusDevice {
+                pci: device,
+                bus_device: Some(bus_device),
+            },
+        );
         Ok(())
     }
 
@@ -148,11 +174,11 @@ impl PciBus {
     pub fn is_device_removable(&self, device_id: u8) -> Option<bool> {
         self.devices
             .get(&device_id)
-            .map(|device| device.lock().unwrap().is_removable())
+            .map(|device| device.pci.lock().unwrap().is_removable())
     }
 
     pub fn remove_by_device(&mut self, device: &Arc<Mutex<dyn PciDevice>>) -> Result<()> {
-        self.devices.retain(|_, dev| !Arc::ptr_eq(dev, device));
+        self.devices.retain(|_, dev| !Arc::ptr_eq(&dev.pci, device));
         Ok(())
     }
 
@@ -244,19 +270,96 @@ impl PciBus {
         data: &[u8],
     ) -> Option<Arc<Barrier>> {
         let d = self.devices.get(&device_id)?;
-        let mut device = d.lock().unwrap();
+        let mut device = d.pci.lock().unwrap();
+        // Only the BARs this write stops decoding are unmapped. A BAR mapped at
+        // creation with its space off stays mapped.
+        let undecoded: [bool; NUM_BAR_REGS + 1] =
+            array::from_fn(|slot| register == COMMAND_REG && device.undecoded_bar(slot).is_some());
 
         let (bar_reprogram, ret) = device.write_config_register(register, offset, data);
-        self.apply_bar_reprogramming(device.deref_mut(), &bar_reprogram);
+        self.apply_bar_reprogramming(device.deref_mut(), d.bus_device.as_ref(), &bar_reprogram);
+
+        let Some(bus_device) = &d.bus_device else {
+            return ret;
+        };
+        if register != COMMAND_REG {
+            return ret;
+        }
+        for slot in (0..NUM_BAR_REGS).chain([ROM_BAR_IDX]) {
+            if undecoded[slot] {
+                continue;
+            }
+            let Some(p) = device.undecoded_bar(slot) else {
+                continue;
+            };
+            if let Err(e) = self.device_reloc.unmap_bar(
+                slot,
+                p.old_base,
+                p.len,
+                device.deref_mut(),
+                bus_device,
+                p.region_type,
+            ) {
+                warn!(
+                    "Failed unmapping BAR {} of device {}: {}: 0x{:x}(0x{:x})",
+                    slot,
+                    device.bdf(),
+                    e,
+                    p.old_base,
+                    p.len
+                );
+                continue;
+            }
+            device.set_bar_mapped(slot, false);
+            debug!(
+                "Unmapped BAR {} of device {} at 0x{:x}(0x{:x})",
+                slot,
+                device.bdf(),
+                p.old_base,
+                p.len
+            );
+        }
 
         ret
     }
 
-    fn apply_bar_reprogramming(&self, device: &mut dyn PciDevice, bars: &[BarReprogrammingParams]) {
+    fn apply_bar_reprogramming(
+        &self,
+        device: &mut dyn PciDevice,
+        bus_device: Option<&Arc<dyn BusDeviceSync>>,
+        bars: &[BarReprogrammingParams],
+    ) {
         for bar in bars {
+            let bar_idx = bar
+                .bar_idx
+                .expect("bar_idx is set on detection and on restore");
+
+            // An unmapped BAR has nothing to move.
+            if !device.is_bar_mapped(bar_idx) {
+                let bus_device = bus_device.expect("a device with BARs has a bus device");
+                match self.device_reloc.map_bar(
+                    bar_idx,
+                    bar.new_base,
+                    bar.len,
+                    device,
+                    bus_device,
+                    bar.region_type,
+                ) {
+                    Ok(()) => device.set_bar_mapped(bar_idx, true),
+                    Err(e) => warn!(
+                        "Failed mapping BAR {} of device {}: {}: 0x{:x}(0x{:x}), left unmapped",
+                        bar_idx,
+                        device.bdf(),
+                        e,
+                        bar.new_base,
+                        bar.len
+                    ),
+                }
+                continue;
+            }
+
             if let Err(e) = self.device_reloc.move_bar(
-                bar.bar_idx
-                    .expect("bar_idx is set on detection and on restore"),
+                bar_idx,
                 bar.old_base,
                 bar.new_base,
                 bar.len,
@@ -320,7 +423,7 @@ impl PciConfigIo {
             .devices
             .get(&(device as u8))
             .map_or(0xffff_ffff, |d| {
-                d.lock().unwrap().read_config_register(register)
+                d.pci.lock().unwrap().read_config_register(register)
             })
     }
 
@@ -447,7 +550,7 @@ impl PciConfigMmio {
             .devices
             .get(&(device as u8))
             .map_or(0xffff_ffff, |d| {
-                d.lock().unwrap().read_config_register(register)
+                d.pci.lock().unwrap().read_config_register(register)
             })
     }
 
@@ -566,6 +669,30 @@ mod tests {
             _new_base: u64,
             _len: u64,
             _pci_dev: &mut dyn PciDevice,
+            _region_type: PciBarRegionType,
+        ) -> Result<(), io::Error> {
+            Ok(())
+        }
+
+        fn unmap_bar(
+            &self,
+            _bar_idx: usize,
+            _base: u64,
+            _len: u64,
+            _pci_dev: &mut dyn PciDevice,
+            _bus_device: &Arc<dyn vm_device::BusDeviceSync>,
+            _region_type: PciBarRegionType,
+        ) -> Result<(), io::Error> {
+            Ok(())
+        }
+
+        fn map_bar(
+            &self,
+            _bar_idx: usize,
+            _base: u64,
+            _len: u64,
+            _pci_dev: &mut dyn PciDevice,
+            _bus_device: &Arc<dyn vm_device::BusDeviceSync>,
             _region_type: PciBarRegionType,
         ) -> Result<(), io::Error> {
             Ok(())
