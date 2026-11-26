@@ -2624,6 +2624,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))] // File backed virtio-pmem does not work under MSHV on XFS
     fn test_boot_from_virtio_pmem() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -6147,17 +6148,20 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))] // File backed virtio-pmem does not work under MSHV on XFS
     #[cfg_attr(target_arch = "aarch64", ignore = "See #8187")]
     fn test_pmem_hotplug() {
         _test_pmem_hotplug(None);
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))] // File backed virtio-pmem does not work under MSHV on XFS
     #[cfg_attr(target_arch = "aarch64", ignore = "See #8187")]
     fn test_pmem_multi_segment_hotplug() {
         _test_pmem_hotplug(Some(15));
     }
 
+    #[cfg(not(feature = "mshv"))]
     fn _test_pmem_hotplug(pci_segment: Option<u16>) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -7392,7 +7396,7 @@ mod common_parallel {
             .arg(pmem_temp_file.as_path())
             .output()
             .expect("Expect creating disk image to succeed");
-        let pmem_path = String::from("/dev/pmem0");
+        let pmem_path = (!cfg!(feature = "mshv")).then(|| String::from("/dev/pmem0"));
 
         // Start the source VM
         let src_vm_path = if upgrade_test {
@@ -7419,10 +7423,7 @@ mod common_parallel {
             .default_kernel_cmdline()
             .args(["--net", net_params.as_str()])
             .args(["--api-socket", &src_api_socket])
-            .args([
-                "--pmem",
-                format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
-            ]);
+            .args(pmem_args(pmem_temp_file.as_path()));
         if upgrade_test {
             src_vm_cmd.args(["--seccomp", "false"]);
         }
@@ -7449,7 +7450,7 @@ mod common_parallel {
             assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
 
             // Check the guest virtio-devices, e.g. block, rng, console, and net
-            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
+            guest.check_devices_common(None, Some(&console_text), pmem_path.as_ref());
 
             #[cfg(target_arch = "x86_64")]
             guest.add_test_disk(&src_api_socket);
@@ -7505,7 +7506,7 @@ mod common_parallel {
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
             assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
 
-            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
+            guest.check_devices_common(None, Some(&console_text), pmem_path.as_ref());
 
             #[cfg(target_arch = "x86_64")]
             guest.remove_test_disk(&dest_api_socket);
@@ -10410,7 +10411,7 @@ mod common_parallel {
             .arg(pmem_temp_file.as_path())
             .output()
             .expect("Expect creating disk image to succeed");
-        let pmem_path = String::from("/dev/pmem0");
+        let pmem_path = (!cfg!(feature = "mshv")).then(|| String::from("/dev/pmem0"));
 
         // Start the source VM
         let src_vm_path = if upgrade_test {
@@ -10429,10 +10430,7 @@ mod common_parallel {
             .default_kernel_cmdline()
             .args(["--net", net_params.as_str()])
             .args(["--api-socket", &src_api_socket])
-            .args([
-                "--pmem",
-                format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
-            ])
+            .args(pmem_args(pmem_temp_file.as_path()))
             .args(["--watchdog"]);
         if upgrade_test {
             src_vm_cmd.args(["--seccomp", "false"]);
@@ -10458,7 +10456,7 @@ mod common_parallel {
             // Check the guest RAM
             assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
             // Check the guest virtio-devices, e.g. block, rng, console, and net
-            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
+            guest.check_devices_common(None, Some(&console_text), pmem_path.as_ref());
 
             // Enable watchdog and ensure its functional
             let expected_reboot_count = 1;
@@ -10531,7 +10529,7 @@ mod common_parallel {
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
             assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
 
-            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
+            guest.check_devices_common(None, Some(&console_text), pmem_path.as_ref());
 
             // Perform checks on watchdog
             let mut expected_reboot_count = 1;
@@ -10619,7 +10617,7 @@ mod common_parallel {
             .arg(pmem_temp_file.as_path())
             .output()
             .expect("Expect creating disk image to succeed");
-        let pmem_path = String::from("/dev/pmem0");
+        let pmem_path = (!cfg!(feature = "mshv")).then(|| String::from("/dev/pmem0"));
 
         // Start the source VM
         let src_vm_path = if upgrade_test {
@@ -10646,10 +10644,7 @@ mod common_parallel {
             .default_kernel_cmdline()
             .args(["--net", net_params.as_str()])
             .args(["--api-socket", &src_api_socket])
-            .args([
-                "--pmem",
-                format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
-            ]);
+            .args(pmem_args(pmem_temp_file.as_path()));
         if upgrade_test {
             src_vm_cmd.args(["--seccomp", "false"]);
         }
@@ -10691,7 +10686,7 @@ mod common_parallel {
             assert!(total_memory < 5_760_000);
 
             // Check the guest virtio-devices, e.g. block, rng, console, and net
-            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
+            guest.check_devices_common(None, Some(&console_text), pmem_path.as_ref());
 
             #[cfg(target_arch = "x86_64")]
             guest.add_test_disk(&src_api_socket);
@@ -10747,7 +10742,7 @@ mod common_parallel {
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
             assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
 
-            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
+            guest.check_devices_common(None, Some(&console_text), pmem_path.as_ref());
 
             // Perform checks on guest RAM using balloon
             let total_memory = guest.get_total_memory().unwrap_or_default();
@@ -10827,7 +10822,7 @@ mod common_parallel {
             .arg(pmem_temp_file.as_path())
             .output()
             .expect("Expect creating disk image to succeed");
-        let pmem_path = String::from("/dev/pmem0");
+        let pmem_path = (!cfg!(feature = "mshv")).then(|| String::from("/dev/pmem0"));
 
         // Start the source VM
         let src_vm_path = if upgrade_test {
@@ -10854,10 +10849,7 @@ mod common_parallel {
             .default_kernel_cmdline()
             .args(["--net", net_params.as_str()])
             .args(["--api-socket", &src_api_socket])
-            .args([
-                "--pmem",
-                format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
-            ]);
+            .args(pmem_args(pmem_temp_file.as_path()));
         if upgrade_test {
             src_vm_cmd.args(["--seccomp", "false"]);
         }
@@ -10884,7 +10876,7 @@ mod common_parallel {
             assert!(guest.get_total_memory().unwrap_or_default() > 2_880_000);
 
             // Check the guest virtio-devices, e.g. block, rng, console, and net
-            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
+            guest.check_devices_common(None, Some(&console_text), pmem_path.as_ref());
 
             // Check the NUMA parameters are applied correctly and resize
             // each zone to test the case where we migrate a VM with the
@@ -10970,7 +10962,7 @@ mod common_parallel {
             #[cfg(target_arch = "aarch64")]
             assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
 
-            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
+            guest.check_devices_common(None, Some(&console_text), pmem_path.as_ref());
 
             // Perform NUMA related checks
             {
@@ -11226,7 +11218,7 @@ mod ivshmem {
             .arg(pmem_temp_file.as_path())
             .output()
             .expect("Expect creating disk image to succeed");
-        let pmem_path = String::from("/dev/pmem0");
+        let pmem_path = (!cfg!(feature = "mshv")).then(|| String::from("/dev/pmem0"));
 
         let ivshmem_file_path = String::from(
             guest
@@ -11263,10 +11255,7 @@ mod ivshmem {
             .default_disks()
             .args(["--net", net_params.as_str()])
             .args(["--api-socket", &src_api_socket])
-            .args([
-                "--pmem",
-                format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
-            ])
+            .args(pmem_args(pmem_temp_file.as_path()))
             .args([
                 "--ivshmem",
                 format!("path={ivshmem_file_path},size={file_size}").as_str(),
@@ -11291,7 +11280,7 @@ mod ivshmem {
             // Check the guest RAM
             assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
             // Check the guest virtio-devices, e.g. block, rng, console, and net
-            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
+            guest.check_devices_common(None, Some(&console_text), pmem_path.as_ref());
 
             // Check ivshmem device in src guest.
             _test_ivshmem(&guest, &ivshmem_file_path, file_size);
@@ -11352,7 +11341,7 @@ mod ivshmem {
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
             assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
 
-            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
+            guest.check_devices_common(None, Some(&console_text), pmem_path.as_ref());
 
             // Check ivshmem device
             _test_ivshmem(&guest, &ivshmem_file_path, file_size);
@@ -11744,6 +11733,7 @@ mod ivshmem {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))] // File backed virtio-pmem does not work under MSHV on XFS
     fn test_virtio_pmem_persist_writes() {
         test_virtio_pmem(false, false);
     }
