@@ -1137,6 +1137,7 @@ fn event_monitor_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendE
     Ok(vec![
         (libc::SYS_brk, vec![]),
         (libc::SYS_close, vec![]),
+        (libc::SYS_exit, vec![]),
         (libc::SYS_getcwd, vec![]),
         (libc::SYS_futex, vec![]),
         (libc::SYS_landlock_create_ruleset, vec![]),
@@ -1146,6 +1147,7 @@ fn event_monitor_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendE
         (libc::SYS_munmap, vec![]),
         (libc::SYS_prctl, vec![]),
         (libc::SYS_sched_yield, vec![]),
+        (libc::SYS_sigaltstack, vec![]),
     ])
 }
 
