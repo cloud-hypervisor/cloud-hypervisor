@@ -131,6 +131,7 @@ if ! [[ "${PARALLEL_INTEGRATION_TESTS_NUM:-}" =~ ^[1-9][0-9]*$ ]]; then
     PARALLEL_INTEGRATION_TESTS_NUM="${TEST_THREADS_DEFAULT}"
 fi
 echo "nproc:$(nproc), parallel_integration_tests:${PARALLEL_INTEGRATION_TESTS_NUM}"
+start_telemetry
 # Run all direct kernel boot (Device Tree) test cases in mod `parallel`,
 # `sequential`, ACPI cases and the tests of the optional features. The
 # `common_tests` profile filter covers all of these, and the per-mod
