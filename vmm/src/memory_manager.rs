@@ -10,7 +10,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom};
 use std::mem::{self, MaybeUninit, zeroed};
 use std::num::NonZeroUsize;
-use std::ops::{BitAnd, Deref, Not, Sub};
+use std::ops::{BitAnd, Deref, Not, Range, Sub};
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::{Path, PathBuf};
@@ -3046,8 +3046,11 @@ impl MemoryManager {
         Arc::clone(&self.allocator)
     }
 
-    pub fn reserved_regions(&self) -> Vec<(u64, u64)> {
+    pub fn reserved_ranges(&self) -> Vec<Range<u64>> {
         reserved_spans(&self.arch_mem_regions)
+            .into_iter()
+            .map(|(base, end)| base..end)
+            .collect()
     }
 
     pub fn start_of_device_area(&self) -> GuestAddress {

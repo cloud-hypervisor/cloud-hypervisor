@@ -1304,9 +1304,9 @@ impl DeviceManager {
         )?;
 
         // Keep BARs off reserved ranges.
-        for (base, end) in memory_manager.lock().unwrap().reserved_regions() {
+        for range in memory_manager.lock().unwrap().reserved_ranges() {
             for allocator in pci_mmio64_allocators.iter() {
-                claim_reserved(&mut allocator.lock().unwrap(), base, end)?;
+                claim_reserved(&mut allocator.lock().unwrap(), range.start, range.end)?;
             }
         }
 
@@ -1795,9 +1795,9 @@ impl DeviceManager {
                 self.memory_manager
                     .lock()
                     .unwrap()
-                    .reserved_regions()
+                    .reserved_ranges()
                     .into_iter()
-                    .map(|(base, end)| (base, end - 1))
+                    .map(|range| (range.start, range.end - 1))
                     .collect(),
                 iommu_address_width_bits,
                 self.force_access_platform,
@@ -2267,11 +2267,11 @@ impl DeviceManager {
             let memory_manager = self.memory_manager.lock().unwrap();
             let mem_size = memory_manager.boot_guest_memory().last_addr().0 + 1;
             // CMOS holds RAM above 4 GiB as a single size, so end it at the
-            // first reserved region there.
+            // first reserved range there.
             let mem_size = memory_manager
-                .reserved_regions()
+                .reserved_ranges()
                 .into_iter()
-                .map(|(base, _)| base)
+                .map(|range| range.start)
                 .filter(|&base| base >= layout::RAM_64BIT_START.0)
                 .fold(mem_size, cmp::min);
             let mem_below_4g = cmp::min(layout::MEM_32BIT_RESERVED_START.0, mem_size);
