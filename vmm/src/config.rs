@@ -462,6 +462,13 @@ pub enum ValidationError {
     #[cfg(target_arch = "x86_64")]
     #[error("The IO port was not properly provided in hex or a `0x` prefix is missing: {0}")]
     InvalidIoPortHex(String),
+    /// The debug console I/O port must be below the PCI I/O range.
+    #[cfg(target_arch = "x86_64")]
+    #[error(
+        "Debug console I/O port {0:#x} is inside the PCI I/O range {range:#x?}",
+        range = arch::layout::PCI_IO_RANGE
+    )]
+    DebugConsoleIoPortInPciIoRange(u16),
     #[cfg(feature = "sev_snp")]
     #[error("Invalid host data format")]
     InvalidHostData,
@@ -3650,6 +3657,13 @@ impl VmConfig {
         }
         if tty_consoles.len() > 1 {
             warn!("Using TTY output for multiple consoles: {tty_consoles:?}");
+        }
+
+        #[cfg(target_arch = "x86_64")]
+        if let Some(iobase) = self.debug_console.iobase
+            && arch::layout::PCI_IO_RANGE.contains(&iobase)
+        {
+            return Err(ValidationError::DebugConsoleIoPortInPciIoRange(iobase));
         }
 
         if self.cpus.boot_vcpus == 0 {
@@ -7775,6 +7789,16 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             let mut valid_phys_config = valid_config.clone();
             valid_phys_config.cpus.max_phys_bits = max_phys_bits;
             valid_phys_config.validate().unwrap();
+        }
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            let mut invalid_config = valid_config.clone();
+            invalid_config.debug_console.iobase = Some(0x1000);
+            assert_eq!(
+                invalid_config.validate(),
+                Err(ValidationError::DebugConsoleIoPortInPciIoRange(0x1000))
+            );
         }
 
         let mut invalid_config = valid_config.clone();
