@@ -1360,6 +1360,7 @@ impl DeviceManager {
             &address_manager,
             Arc::clone(&address_manager.pci_mmio32_allocators[0]),
             Arc::clone(&address_manager.pci_mmio64_allocators[0]),
+            &reserved_ranges,
             &pci_irq_slots,
             #[cfg(target_arch = "x86_64")]
             state_from_id(snapshot, pci::PCI_CONFIG_IO_SNAPSHOT_ID)
@@ -1377,6 +1378,7 @@ impl DeviceManager {
                 &address_manager,
                 Arc::clone(&address_manager.pci_mmio32_allocators[i]),
                 Arc::clone(&address_manager.pci_mmio64_allocators[i]),
+                &reserved_ranges,
                 &pci_irq_slots,
                 state
                     .as_ref()
@@ -6908,6 +6910,7 @@ mod tests {
             &address_manager,
             Arc::clone(&allocator),
             Arc::clone(&allocator),
+            &[],
             &[0; 32],
             None,
         )
@@ -6925,6 +6928,7 @@ mod tests {
             &address_manager,
             Arc::clone(&allocator),
             allocator,
+            &[],
             &[0; 32],
             #[cfg(target_arch = "x86_64")]
             None,
