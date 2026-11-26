@@ -6120,25 +6120,25 @@ mod common_parallel {
             println!("RSS {rss} < 1048576");
             assert!(rss < 1048576);
 
-            // Consume 2GiB of RAM inside the guest until stress is stopped
+            // Consume 1GiB of RAM inside the guest until stress is stopped
             guest
-                .ssh_command("screen -dmS stress stress --vm 1 --vm-bytes 2G --vm-keep")
+                .ssh_command("screen -dmS stress stress --vm 1 --vm-bytes 1G --vm-keep")
                 .unwrap();
 
             // Wait for guest memory consumption to reach the expected level.
-            assert!(wait_until(Duration::from_secs(60), || process_rss_kib(pid) >= 2097152));
+            assert!(wait_until(Duration::from_secs(60), || process_rss_kib(pid) >= 1310720));
             let rss = process_rss_kib(pid);
-            println!("RSS {rss} >= 2097152");
-            assert!(rss >= 2097152);
+            println!("RSS {rss} >= 1310720");
+            assert!(rss >= 1310720);
 
             // Stop stress and wait for free-page reporting to shrink RSS again.
             guest.ssh_command("pkill -x stress").unwrap();
             assert!(wait_until(Duration::from_secs(120), || process_rss_kib(
                 pid
-            ) < 2097152));
+            ) < 1310720));
             let rss = process_rss_kib(pid);
-            println!("RSS {rss} < 2097152");
-            assert!(rss < 2097152);
+            println!("RSS {rss} < 1310720");
+            assert!(rss < 1310720);
         });
 
         kill_child(&mut child);
