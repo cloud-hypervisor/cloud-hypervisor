@@ -68,7 +68,7 @@ use crate::{
     MsixConfig, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType,
     PciBdf, PciCapabilityId, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
     PciExpressCapability, PciExpressCapabilityId, PciHeaderType, PciSubclass,
-    msi_num_enabled_vectors,
+    msi_num_capable_vectors,
 };
 
 pub(crate) const VFIO_COMMON_ID: &str = "vfio_common";
@@ -1447,7 +1447,7 @@ impl VfioCommon {
             .msi_interrupt_manager
             .create_group(MsiIrqGroupConfig {
                 base: 0,
-                count: msi_num_enabled_vectors(msg_ctl) as InterruptIndex,
+                count: msi_num_capable_vectors(msg_ctl) as InterruptIndex,
             })
             .map_err(VfioPciError::CreateMsiInterruptGroup)?;
 

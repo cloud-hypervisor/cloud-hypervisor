@@ -33,7 +33,7 @@ pub use self::configuration::{
 pub use self::device::{
     BarReprogrammingParams, DeviceRelocation, Error as PciDeviceError, PciDevice,
 };
-pub use self::msi::{MsiCap, MsiConfig, msi_num_enabled_vectors};
+pub use self::msi::{MsiCap, MsiConfig, msi_num_capable_vectors, msi_num_enabled_vectors};
 pub use self::msix::{
     MSIX_CONFIG_ID, MSIX_TABLE_ENTRY_SIZE, MaybeMutInterruptSourceGroup, MsixCap, MsixConfig,
     MsixTableEntry,

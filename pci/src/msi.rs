@@ -16,12 +16,13 @@ use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
 
 // MSI control masks
 const MSI_CTL_ENABLE: u16 = 0x1;
+const MSI_CTL_MULTI_MSG_CAPABLE: u16 = 0xe;
 const MSI_CTL_MULTI_MSG_ENABLE: u16 = 0x70;
 const MSI_CTL_64_BITS: u16 = 0x80;
 const MSI_CTL_PER_VECTOR: u16 = 0x100;
 
-// Largest "Multiple Message Enable" encoding defined by the PCI
-// specification: 2^5, i.e. 32 vectors.
+// Largest "Multiple Message Capable" and "Multiple Message Enable" encoding
+// defined by the PCI specification: 2^5, i.e. 32 vectors.
 const MSI_MULTI_MSG_ENC_MAX: u16 = 0b101;
 
 // MSI message offsets
@@ -36,6 +37,15 @@ const MSI_MSG_ADDR_LO_MASK: u32 = 0xffff_fffc;
 /// maximum.
 pub fn msi_num_enabled_vectors(msg_ctl: u16) -> usize {
     let field = ((msg_ctl & MSI_CTL_MULTI_MSG_ENABLE) >> 4).min(MSI_MULTI_MSG_ENC_MAX);
+
+    1 << field
+}
+
+/// Number of vectors the device reports it is able to request, taken from the
+/// read-only "Multiple Message Capable" field. "Multiple Message Enable"
+/// cannot exceed it, so this is how many vectors the device may end up using.
+pub fn msi_num_capable_vectors(msg_ctl: u16) -> usize {
+    let field = ((msg_ctl & MSI_CTL_MULTI_MSG_CAPABLE) >> 1).min(MSI_MULTI_MSG_ENC_MAX);
 
     1 << field
 }
@@ -116,6 +126,18 @@ impl MsiCap {
         size
     }
 
+    /// Applies a guest write to "Message Control", keeping the read-only bits
+    /// and capping "Multiple Message Enable" at "Multiple Message Capable",
+    /// which the PCI specification requires of the driver.
+    fn set_msg_ctl(&mut self, value: u16) {
+        let capable = (self.msg_ctl & MSI_CTL_MULTI_MSG_CAPABLE) >> 1;
+        let enable = ((value & MSI_CTL_MULTI_MSG_ENABLE) >> 4).min(capable);
+
+        self.msg_ctl = (self.msg_ctl & !(MSI_CTL_ENABLE | MSI_CTL_MULTI_MSG_ENABLE))
+            | (value & MSI_CTL_ENABLE)
+            | (enable << 4);
+    }
+
     fn update(&mut self, offset: u64, data: &[u8]) {
         // Calculate message data offset depending on the address being 32 or
         // 64 bits.
@@ -144,11 +166,7 @@ impl MsiCap {
             2 => {
                 let value = u16::from_le_bytes(data.try_into().expect("data should be 2 bytes"));
                 match offset {
-                    MSI_MSG_CTL_OFFSET => {
-                        self.msg_ctl = (self.msg_ctl
-                            & !(MSI_CTL_ENABLE | MSI_CTL_MULTI_MSG_ENABLE))
-                            | (value & (MSI_CTL_ENABLE | MSI_CTL_MULTI_MSG_ENABLE));
-                    }
+                    MSI_MSG_CTL_OFFSET => self.set_msg_ctl(value),
                     x if x == msg_data_offset => self.msg_data = value,
                     _ => debug!("invalid offset"),
                 }
@@ -156,11 +174,7 @@ impl MsiCap {
             4 => {
                 let value = u32::from_le_bytes(data.try_into().expect("data should be 4 bytes"));
                 match offset {
-                    0x0 => {
-                        self.msg_ctl = (self.msg_ctl
-                            & !(MSI_CTL_ENABLE | MSI_CTL_MULTI_MSG_ENABLE))
-                            | ((value >> 16) as u16 & (MSI_CTL_ENABLE | MSI_CTL_MULTI_MSG_ENABLE));
-                    }
+                    0x0 => self.set_msg_ctl((value >> 16) as u16),
                     MSI_MSG_ADDR_LO_OFFSET => self.msg_addr_lo = value & MSI_MSG_ADDR_LO_MASK,
                     x if x == msg_data_offset => self.msg_data = value as u16,
                     x if addr_hi_offset.is_some() && x == addr_hi_offset.unwrap() => {
@@ -301,11 +315,57 @@ impl Snapshottable for MsiConfig {
 mod tests {
     use super::*;
 
+    // "Multiple Message Capable" == 2, so the device can request 4 vectors.
+    const MMC_FOUR_VECTORS: u16 = 2 << 1;
+
     #[test]
     fn enabled_vectors_come_from_the_enable_field() {
         assert_eq!(msi_num_enabled_vectors(0), 1);
         assert_eq!(msi_num_enabled_vectors(2 << 4), 4);
         // Reserved encodings are capped at the architectural maximum.
         assert_eq!(msi_num_enabled_vectors(MSI_CTL_MULTI_MSG_ENABLE), 32);
+    }
+
+    #[test]
+    fn capable_vectors_come_from_the_capable_field() {
+        assert_eq!(msi_num_capable_vectors(0), 1);
+        assert_eq!(msi_num_capable_vectors(MMC_FOUR_VECTORS), 4);
+        // "Multiple Message Enable" does not change the capability.
+        let enabled = MMC_FOUR_VECTORS | MSI_CTL_MULTI_MSG_ENABLE;
+        assert_eq!(msi_num_capable_vectors(enabled), 4);
+        // Reserved encodings are capped at the architectural maximum.
+        assert_eq!(msi_num_capable_vectors(MSI_CTL_MULTI_MSG_CAPABLE), 32);
+    }
+
+    #[test]
+    fn multiple_message_enable_is_capped_at_multiple_message_capable() {
+        let mut cap = MsiCap {
+            msg_ctl: MMC_FOUR_VECTORS,
+            ..Default::default()
+        };
+
+        // A driver asking for 32 vectors from a device that can request 4.
+        let msg_ctl = MSI_CTL_ENABLE | (MSI_MULTI_MSG_ENC_MAX << 4);
+        cap.update(MSI_MSG_CTL_OFFSET, &msg_ctl.to_le_bytes());
+
+        assert!(cap.enabled());
+        assert_eq!(cap.num_enabled_vectors(), 4);
+        // The read-only capability field is untouched.
+        assert_eq!(cap.msg_ctl & MSI_CTL_MULTI_MSG_CAPABLE, MMC_FOUR_VECTORS);
+    }
+
+    #[test]
+    fn enabled_vectors_never_exceed_the_capable_vectors() {
+        for capable in 0..=7u16 {
+            for enable in 0..=7u16 {
+                let mut cap = MsiCap {
+                    msg_ctl: capable << 1,
+                    ..Default::default()
+                };
+                cap.update(MSI_MSG_CTL_OFFSET, &(enable << 4).to_le_bytes());
+
+                assert!(cap.num_enabled_vectors() <= msi_num_capable_vectors(cap.msg_ctl));
+            }
+        }
     }
 }
