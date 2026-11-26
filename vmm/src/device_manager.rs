@@ -21,6 +21,7 @@ use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{self, IsTerminal, Seek, SeekFrom, stdout};
 use std::num::Wrapping;
+use std::ops::Range;
 #[cfg(feature = "kvm")]
 use std::os::fd::BorrowedFd;
 use std::os::unix::fs::OpenOptionsExt;
@@ -1156,18 +1157,30 @@ pub struct DeviceManager {
     ivshmem_device: Option<Arc<Mutex<devices::IvshmemDevice>>>,
 }
 
-// Claims the part of [base, end) that falls inside the allocator.
-fn claim_reserved(
+/// Reserve the given ranges, sorted by start, in a 64-bit PCI segment
+/// allocator.
+fn reserve_ranges(
     allocator: &mut AddressAllocator,
-    base: u64,
-    end: u64,
+    reserved: &[Range<u64>],
 ) -> DeviceManagerResult<()> {
-    let start = base.max(allocator.base().0);
-    let last = (end - 1).min(allocator.end().0);
-    if start <= last {
+    let (mut start, end) = (allocator.base().0, allocator.end().0);
+    for reserved_range in reserved {
+        if reserved_range.end <= start || reserved_range.start > end {
+            continue;
+        }
+        let reserved_start = reserved_range.start.max(start);
+        let reserved_end = (reserved_range.end - 1).min(end);
         allocator
-            .allocate(Some(GuestAddress(start)), last - start + 1, None)
+            .allocate(
+                Some(GuestAddress(reserved_start)),
+                reserved_end - reserved_start + 1,
+                None,
+            )
             .ok_or(DeviceManagerError::AllocateMmioAddress)?;
+        if reserved_range.end > end {
+            return Ok(());
+        }
+        start = reserved_range.end;
     }
     Ok(())
 }
@@ -1304,10 +1317,9 @@ impl DeviceManager {
         )?;
 
         // Keep BARs off reserved ranges.
-        for range in memory_manager.lock().unwrap().reserved_ranges() {
-            for allocator in pci_mmio64_allocators.iter() {
-                claim_reserved(&mut allocator.lock().unwrap(), range.start, range.end)?;
-            }
+        let reserved_ranges = memory_manager.lock().unwrap().reserved_ranges();
+        for allocator in pci_mmio64_allocators.iter() {
+            reserve_ranges(&mut allocator.lock().unwrap(), &reserved_ranges)?;
         }
 
         let address_manager = Arc::new(AddressManager {
@@ -6924,18 +6936,20 @@ mod tests {
     }
 
     #[test]
-    fn claim_reserved_keeps_bars_off_the_range() {
+    fn reserve_ranges_keeps_bars_off_the_ranges() {
         use vm_allocator::AddressAllocator;
         use vm_memory::GuestAddress;
 
-        use super::claim_reserved;
+        use super::reserve_ranges;
 
         const GIB: u64 = 1 << 30;
-        let (base, end) = (1012 * GIB, 1024 * GIB);
+        let hole = 1012 * GIB..1024 * GIB;
+        let (base, end) = (hole.start, hole.end);
+        let reserved = [hole];
 
         // Wholly inside the allocator.
         let mut a = AddressAllocator::new(GuestAddress(8 * GIB), 2040 * GIB).unwrap();
-        claim_reserved(&mut a, base, end).unwrap();
+        reserve_ranges(&mut a, &reserved).unwrap();
         assert!(a.allocate(Some(GuestAddress(base)), 4096, None).is_none());
         assert!(
             a.allocate(Some(GuestAddress(end - 4096)), 4096, None)
@@ -6943,18 +6957,18 @@ mod tests {
         );
         assert!(a.allocate(Some(GuestAddress(end)), 4096, None).is_some());
 
-        // Straddling the allocator end, only the overlap is claimed.
+        // Straddling the allocator end, only the overlap is reserved.
         let mut a = AddressAllocator::new(GuestAddress(8 * GIB), 1008 * GIB).unwrap();
-        claim_reserved(&mut a, base, end).unwrap();
+        reserve_ranges(&mut a, &reserved).unwrap();
         assert!(a.allocate(Some(GuestAddress(base)), 4096, None).is_none());
         assert!(
             a.allocate(Some(GuestAddress(base - 4096)), 4096, None)
                 .is_some()
         );
 
-        // Clear of the allocator, nothing is claimed.
+        // Clear of the allocator, nothing is reserved.
         let mut a = AddressAllocator::new(GuestAddress(8 * GIB), 8 * GIB).unwrap();
-        claim_reserved(&mut a, base, end).unwrap();
+        reserve_ranges(&mut a, &reserved).unwrap();
         assert!(
             a.allocate(Some(GuestAddress(8 * GIB)), 8 * GIB, None)
                 .is_some()
