@@ -3437,7 +3437,11 @@ pub(crate) fn _test_watchdog(guest: &Guest) {
                     device_id: None,
                 },
             ];
-            assert!(check_latest_events_exact(&latest_events, &event_path));
+            assert!(wait_for_latest_events_exact(
+                Duration::from_secs(10),
+                &latest_events,
+                &event_path
+            ));
             assert!(remote_command(&api_socket, "resume", None));
 
             // Check no reboot
