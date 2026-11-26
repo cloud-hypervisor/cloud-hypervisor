@@ -10,6 +10,7 @@
 //
 
 use std::array;
+use std::ops::{Range, RangeInclusive};
 use std::sync::{Arc, Mutex};
 
 use acpi_tables::{Aml, aml};
@@ -55,9 +56,34 @@ pub(crate) struct PciSegment {
 
     pub(crate) start_of_mem64_area: u64,
     pub(crate) end_of_mem64_area: u64,
+    reserved_ranges: Vec<Range<u64>>,
 
     pub(crate) mem32_allocator: Arc<Mutex<AddressAllocator>>,
     pub(crate) mem64_allocator: Arc<Mutex<AddressAllocator>>,
+}
+
+/// Return the ranges of the inclusive `range` available around the
+/// reserved ranges, which are sorted by start.
+fn available_ranges(
+    range: RangeInclusive<u64>,
+    reserved: &[Range<u64>],
+) -> Vec<RangeInclusive<u64>> {
+    let (mut start, end) = range.into_inner();
+    let mut ranges = Vec::new();
+    for reserved_range in reserved {
+        if reserved_range.end <= start || reserved_range.start > end {
+            continue;
+        }
+        if reserved_range.start > start {
+            ranges.push(start..=reserved_range.start - 1);
+        }
+        if reserved_range.end > end {
+            return ranges;
+        }
+        start = reserved_range.end;
+    }
+    ranges.push(start..=end);
+    ranges
 }
 
 impl PciSegment {
@@ -68,12 +94,14 @@ impl PciSegment {
         }
     }
 
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         id: u16,
         numa_node: u32,
         address_manager: &Arc<AddressManager>,
         mem32_allocator: Arc<Mutex<AddressAllocator>>,
         mem64_allocator: Arc<Mutex<AddressAllocator>>,
+        reserved_ranges: &[Range<u64>],
         pci_irq_slots: &[u8; 32],
         state: Option<PciSegmentState>,
     ) -> DeviceManagerResult<PciSegment> {
@@ -106,6 +134,9 @@ impl PciSegment {
             let allocator = mem64_allocator.lock().unwrap();
             (allocator.base().0, allocator.end().0)
         };
+        if available_ranges(start_of_mem64_area..=end_of_mem64_area, reserved_ranges).is_empty() {
+            return Err(DeviceManagerError::PciSegmentMmioAperture(id));
+        }
 
         let segment = PciSegment {
             id,
@@ -123,6 +154,7 @@ impl PciSegment {
             end_of_mem32_area,
             start_of_mem64_area,
             end_of_mem64_area,
+            reserved_ranges: reserved_ranges.to_vec(),
             slots: array::from_fn(|device_id| PciDevSlot {
                 device_id: device_id as u8,
                 ejectable: true,
@@ -147,6 +179,7 @@ impl PciSegment {
         address_manager: &Arc<AddressManager>,
         mem32_allocator: Arc<Mutex<AddressAllocator>>,
         mem64_allocator: Arc<Mutex<AddressAllocator>>,
+        reserved_ranges: &[Range<u64>],
         pci_irq_slots: &[u8; 32],
         pci_config_io_state: Option<PciConfigIoState>,
         state: Option<PciSegmentState>,
@@ -157,6 +190,7 @@ impl PciSegment {
             address_manager,
             mem32_allocator,
             mem64_allocator,
+            reserved_ranges,
             pci_irq_slots,
             state,
         )?;
@@ -184,6 +218,7 @@ impl PciSegment {
         address_manager: &Arc<AddressManager>,
         mem32_allocator: Arc<Mutex<AddressAllocator>>,
         mem64_allocator: Arc<Mutex<AddressAllocator>>,
+        reserved_ranges: &[Range<u64>],
         pci_irq_slots: &[u8; 32],
         state: Option<PciSegmentState>,
     ) -> DeviceManagerResult<PciSegment> {
@@ -193,6 +228,7 @@ impl PciSegment {
             address_manager,
             mem32_allocator,
             mem64_allocator,
+            reserved_ranges,
             pci_irq_slots,
             state,
         )
@@ -267,6 +303,7 @@ impl PciSegment {
         numa_node: u32,
         mem32_allocator: Arc<Mutex<AddressAllocator>>,
         mem64_allocator: Arc<Mutex<AddressAllocator>>,
+        reserved_ranges: &[Range<u64>],
         pci_irq_slots: &[u8; 32],
         device_reloc: &Arc<dyn DeviceRelocation>,
     ) -> DeviceManagerResult<Self> {
@@ -286,6 +323,9 @@ impl PciSegment {
             let allocator = mem64_allocator.lock().unwrap();
             (allocator.base().0, allocator.end().0)
         };
+        if available_ranges(start_of_mem64_area..=end_of_mem64_area, reserved_ranges).is_empty() {
+            return Err(DeviceManagerError::PciSegmentMmioAperture(id));
+        }
 
         let segment = PciSegment {
             id,
@@ -303,6 +343,7 @@ impl PciSegment {
             end_of_mem32_area,
             start_of_mem64_area,
             end_of_mem64_area,
+            reserved_ranges: reserved_ranges.to_vec(),
             slots: array::from_fn(|device_id| PciDevSlot {
                 device_id: device_id as u8,
                 ejectable: true,
@@ -521,13 +562,21 @@ impl Aml for PciSegment {
             self.end_of_mem32_area,
             None,
         );
-        let mem64 = aml::AddressSpace::new_memory(
-            aml::AddressSpaceCacheable::NotCacheable,
-            true,
-            self.start_of_mem64_area,
-            self.end_of_mem64_area,
-            None,
-        );
+        let mem64: Vec<_> = available_ranges(
+            self.start_of_mem64_area..=self.end_of_mem64_area,
+            &self.reserved_ranges,
+        )
+        .into_iter()
+        .map(|range| {
+            aml::AddressSpace::new_memory(
+                aml::AddressSpaceCacheable::NotCacheable,
+                true,
+                *range.start(),
+                *range.end(),
+                None,
+            )
+        })
+        .collect();
         #[cfg(target_arch = "x86_64")]
         let io_range = aml::AddressSpace::new_io(
             *layout::PCI_IO_RANGE.start(),
@@ -542,7 +591,7 @@ impl Aml for PciSegment {
         }
         resources.push(&mmio_config);
         resources.push(&mem32);
-        resources.push(&mem64);
+        resources.extend(mem64.iter().map(|range| range as &dyn Aml));
         #[cfg(target_arch = "x86_64")]
         if self.id == 0 {
             resources.push(&io_range);
@@ -647,6 +696,7 @@ mod tests {
             0,
             allocator_1,
             allocator_2,
+            &[],
             &arr,
             &mock_device_reloc,
         )
@@ -712,5 +762,38 @@ mod tests {
                 pci::PciRootError::InvalidPciDeviceSlot(0xff)
             )
         ));
+    }
+
+    #[test]
+    fn test_available_ranges() {
+        const GIB: u64 = 1 << 30;
+        let hole = 1012 * GIB..1024 * GIB;
+        let reserved = [hole.clone()];
+
+        // Inside the range, which is split around it.
+        assert_eq!(
+            available_ranges(4 * GIB..=2048 * GIB - 1, &reserved),
+            [4 * GIB..=1012 * GIB - 1, 1024 * GIB..=2048 * GIB - 1]
+        );
+        // Straddling either end of the range.
+        assert_eq!(
+            available_ranges(4 * GIB..=1016 * GIB - 1, &reserved),
+            vec![4 * GIB..=1012 * GIB - 1]
+        );
+        assert_eq!(
+            available_ranges(1016 * GIB..=2048 * GIB - 1, &reserved),
+            vec![1024 * GIB..=2048 * GIB - 1]
+        );
+        // Clear of the range, or covering it entirely.
+        assert_eq!(
+            available_ranges(4 * GIB..=8 * GIB - 1, &reserved),
+            vec![4 * GIB..=8 * GIB - 1]
+        );
+        assert!(available_ranges(1013 * GIB..=1014 * GIB - 1, &reserved).is_empty());
+        // Several reserved ranges, including one below the range.
+        assert_eq!(
+            available_ranges(4 * GIB..=2048 * GIB - 1, &[3 * GIB..5 * GIB, hole]),
+            [5 * GIB..=1012 * GIB - 1, 1024 * GIB..=2048 * GIB - 1]
+        );
     }
 }
