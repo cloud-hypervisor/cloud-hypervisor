@@ -927,6 +927,20 @@ pub(crate) fn vm_state(api_socket: &str) -> String {
     state.to_string()
 }
 
+/// Return the arguments adding a virtio-pmem device backed by `file`, or none
+/// under MSHV, where virtio-pmem devices backed by files on the XFS /tmp of
+/// the CI runners do not work.
+pub(crate) fn pmem_args(file: &Path) -> Vec<String> {
+    if cfg!(feature = "mshv") {
+        Vec::new()
+    } else {
+        vec![
+            "--pmem".to_string(),
+            format!("file={}", file.to_str().unwrap()),
+        ]
+    }
+}
+
 pub(crate) fn make_virtio_block_guest(factory: &GuestFactory, image_name: &str) -> Guest {
     let disk_config = UbuntuDiskConfig::new(image_name.to_string());
     factory.create_guest(Box::new(disk_config)).with_cpu(4)
