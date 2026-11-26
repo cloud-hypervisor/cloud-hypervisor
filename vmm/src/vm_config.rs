@@ -18,6 +18,7 @@ use block::ImageType;
 pub use block::fcntl::LockGranularityChoice;
 #[cfg(target_arch = "x86_64")]
 use devices::debug_console;
+pub use hypervisor::VmType;
 use landlock::AccessFs;
 use log::warn;
 use net_util::MacAddr;
@@ -151,6 +152,30 @@ pub fn default_platformconfig_vfio_p2p_dma() -> bool {
     true
 }
 
+impl PlatformConfig {
+    /// Applies the deprecated sev_snp option to vm_type. An explicit vm_type
+    /// wins, because vm_type=default cannot be told apart from an unset field.
+    pub(crate) fn apply_deprecated_sev_snp(&mut self) {
+        #[cfg(feature = "sev_snp")]
+        if self.sev_snp && self.vm_type == VmType::Default {
+            self.vm_type = VmType::SevSnp;
+        }
+    }
+}
+
+/// Applies the deprecated platform option on the way in. VM creation reads
+/// vm_type before validation runs, and the API path never validates at all.
+fn deserialize_platform_config<'de, D>(deserializer: D) -> Result<Option<PlatformConfig>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let mut platform = Option::<PlatformConfig>::deserialize(deserializer)?;
+    if let Some(platform) = platform.as_mut() {
+        platform.apply_deprecated_sev_snp();
+    }
+    Ok(platform)
+}
+
 #[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PlatformConfig {
@@ -188,6 +213,8 @@ pub struct PlatformConfig {
     pub iommufd_fd: ExternalFd,
     #[serde(default = "default_platformconfig_vfio_p2p_dma")]
     pub vfio_p2p_dma: bool,
+    #[serde(default)]
+    pub vm_type: VmType,
 }
 
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
@@ -1329,6 +1356,7 @@ pub struct VmConfig {
     #[serde(default)]
     pub gdb: bool,
     pub pci_segments: Option<Box<[PciSegmentConfig]>>,
+    #[serde(default, deserialize_with = "deserialize_platform_config")]
     pub platform: Option<PlatformConfig>,
     pub tpm: Option<TpmConfig>,
     #[serde(default)]
@@ -1422,7 +1450,7 @@ impl VmConfig {
         }
 
         #[cfg(feature = "sev_snp")]
-        if self.platform.as_ref().is_some_and(|p| p.sev_snp) {
+        if self.is_sev_snp_enabled() {
             landlock.add_rule_with_access(Path::new("/dev/sev"), "rw")?;
         }
 

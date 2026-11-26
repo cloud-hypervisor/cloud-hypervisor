@@ -290,6 +290,32 @@ pub enum ClockRestoreMode {
     SnapshotRestore(SnapshotClockMode),
 }
 
+/// VM type requested in the platform configuration.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum VmType {
+    #[default]
+    Default,
+    #[cfg(feature = "sev_snp")]
+    SevSnp,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("VmType {0} is not supported")]
+pub struct ParseVmTypeError(String);
+
+impl FromStr for VmType {
+    type Err = ParseVmTypeError;
+
+    fn from_str(s: &str) -> Result<Self, ParseVmTypeError> {
+        match s {
+            "default" => Ok(VmType::Default),
+            #[cfg(feature = "sev_snp")]
+            "sev_snp" => Ok(VmType::SevSnp),
+            _ => Err(ParseVmTypeError(s.to_owned())),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct HypervisorVmConfig {
     #[cfg(feature = "sev_snp")]

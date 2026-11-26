@@ -113,6 +113,22 @@ mod tests {
     use crate::vm_config::{DeviceConfig, PciDeviceCommonConfig};
 
     #[test]
+    fn restore_reads_deprecated_sev_snp_off() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(
+            directory.path().join(super::SNAPSHOT_CONFIG_FILE),
+            r#"{"platform":{"sev_snp":false}}"#,
+        )
+        .unwrap();
+
+        let config =
+            super::recv_vm_config(&format!("file://{}", directory.path().display())).unwrap();
+        assert_eq!(config.vm_type(), Some(hypervisor::VmType::Default));
+        let json = serde_json::to_value(&config).unwrap();
+        assert_eq!(json["platform"]["vm_type"], "Default");
+    }
+
+    #[test]
     fn recv_vm_config_removes_vfio_paths() {
         let directory = tempfile::tempdir().unwrap();
         let mut config = create_dummy_vm_config();

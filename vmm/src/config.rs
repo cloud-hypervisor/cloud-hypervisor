@@ -1009,7 +1009,7 @@ macro_rules! platform_syntax {
 
 impl PlatformConfig {
     #[cfg(feature = "sev_snp")]
-    pub const SYNTAX: &'static str = platform_syntax!(",sev_snp=on|off");
+    pub const SYNTAX: &'static str = platform_syntax!(",sev_snp=on|off,vm_type=default|sev_snp");
     #[cfg(not(feature = "sev_snp"))]
     pub const SYNTAX: &'static str = platform_syntax!();
 
@@ -1072,6 +1072,8 @@ impl PlatformConfig {
         }
         #[cfg(feature = "sev_snp")]
         parser.add("sev_snp");
+        #[cfg(feature = "sev_snp")]
+        parser.add("vm_type");
         parser.parse(platform).map_err(Error::ParsePlatform)?;
 
         let num_pci_segments: u16 = parser
@@ -1114,6 +1116,14 @@ impl PlatformConfig {
             .unwrap_or(Toggle(false))
             .0;
 
+        #[cfg(feature = "sev_snp")]
+        let vm_type = parser
+            .convert::<VmType>("vm_type")
+            .map_err(Error::ParsePlatform)?
+            .unwrap_or_default();
+        #[cfg(not(feature = "sev_snp"))]
+        let vm_type = VmType::default();
+
         let mut platform_config = PlatformConfig {
             num_pci_segments,
             iommu_segments,
@@ -1132,7 +1142,9 @@ impl PlatformConfig {
             #[cfg(feature = "sev_snp")]
             sev_snp,
             vfio_p2p_dma,
+            vm_type,
         };
+        platform_config.apply_deprecated_sev_snp();
 
         for field in SMBIOS_STRING_FIELDS {
             if let Some(value) = parser
@@ -3565,7 +3577,7 @@ impl VmConfig {
 
         #[cfg(feature = "sev_snp")]
         {
-            let sev_snp_enabled = self.platform.as_ref().is_some_and(|p| p.sev_snp);
+            let sev_snp_enabled = self.is_sev_snp_enabled();
             if sev_snp_enabled {
                 let host_data_opt = &self.payload.as_ref().unwrap().host_data;
                 if let Some(host_data) = host_data_opt
@@ -4002,7 +4014,7 @@ impl VmConfig {
         self.iommu = self.virtio_iommu_attached();
 
         #[cfg(feature = "sev_snp")]
-        if self.virtio_iommu_attached() && self.platform.as_ref().is_some_and(|p| p.sev_snp) {
+        if self.virtio_iommu_attached() && self.is_sev_snp_enabled() {
             return Err(ValidationError::SevSnpNoViommu);
         }
 
@@ -4349,9 +4361,13 @@ impl VmConfig {
         removed
     }
 
+    pub fn vm_type(&self) -> Option<VmType> {
+        self.platform.as_ref().map(|platform| platform.vm_type)
+    }
+
     #[cfg(feature = "sev_snp")]
     pub fn is_sev_snp_enabled(&self) -> bool {
-        self.platform.as_ref().is_some_and(|p| p.sev_snp)
+        self.vm_type() == Some(VmType::SevSnp)
     }
 }
 
@@ -7614,6 +7630,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             chassis_asset_tag: None,
             #[cfg(feature = "sev_snp")]
             sev_snp: false,
+            vm_type: VmType::Default,
         }
     }
 
@@ -7629,10 +7646,75 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
     }
 
     #[test]
+    #[cfg(feature = "sev_snp")]
+    fn test_platform_cvm_parsing() -> Result<()> {
+        // SAFETY: This test input contains no inherited descriptors.
+        let config = unsafe { PlatformConfig::parse("vm_type=sev_snp") }?;
+        assert_eq!(config.vm_type, VmType::SevSnp);
+
+        let json = serde_json::to_value(&config).unwrap();
+        assert_eq!(json["vm_type"], "SevSnp");
+        assert_eq!(
+            serde_json::from_value::<PlatformConfig>(json).unwrap(),
+            config
+        );
+
+        assert!(matches!(
+            // SAFETY: This test input contains no inherited descriptors.
+            unsafe { PlatformConfig::parse("vm_type=none") },
+            Err(Error::ParsePlatform(OptionParserError::Conversion(option, _)))
+                if option == "vm_type"
+        ));
+        // SAFETY: This test input contains no inherited descriptors.
+        let config = unsafe { PlatformConfig::parse("vm_type=") }?;
+        assert_eq!(config.vm_type, VmType::Default);
+
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(feature = "sev_snp")]
+    fn test_deprecated_sev_snp_selects_sev_snp_vm() -> Result<()> {
+        for (cli, platform, expected_sev_snp) in [
+            ("sev_snp=on", serde_json::json!({ "sev_snp": true }), true),
+            (
+                "sev_snp=on,vm_type=default",
+                serde_json::json!({ "sev_snp": true, "vm_type": "Default" }),
+                true,
+            ),
+            (
+                "sev_snp=off,vm_type=sev_snp",
+                serde_json::json!({ "sev_snp": false, "vm_type": "SevSnp" }),
+                false,
+            ),
+        ] {
+            // SAFETY: These test inputs contain no inherited descriptors.
+            let from_cli = unsafe { PlatformConfig::parse(cli) }?;
+            let from_api = serde_json::from_value::<VmConfig>(serde_json::json!({
+                "platform": platform,
+            }))
+            .unwrap()
+            .platform
+            .unwrap();
+
+            for config in [&from_cli, &from_api] {
+                assert_eq!(config.vm_type, VmType::SevSnp);
+                // vm.info keeps reporting the option while it is supported.
+                assert_eq!(config.sev_snp, expected_sev_snp);
+                assert_eq!(
+                    serde_json::to_value(config).unwrap()["sev_snp"],
+                    expected_sev_snp
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     #[cfg(all(feature = "kvm", feature = "sev_snp"))]
     fn test_sev_snp_fw_cfg_validation() {
         let mut config: VmConfig = serde_json::from_value(serde_json::json!({
-            "platform": { "sev_snp": true },
+            "platform": { "vm_type": "SevSnp" },
             "payload": { "igvm": "/path/to/igvm" },
         }))
         .unwrap();
@@ -7654,9 +7736,9 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 config.validate(),
                 Err(ValidationError::SevSnpRequiresFwCfgAcpi)
             );
-            config.platform.as_mut().unwrap().sev_snp = false;
+            config.platform.as_mut().unwrap().vm_type = VmType::Default;
             config.validate().unwrap();
-            config.platform.as_mut().unwrap().sev_snp = true;
+            config.platform.as_mut().unwrap().vm_type = VmType::SevSnp;
             config
                 .payload
                 .as_mut()
@@ -8896,7 +8978,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         {
             let mut sev_snp_config = valid_config.clone();
             sev_snp_config.platform = Some(PlatformConfig {
-                sev_snp: true,
+                vm_type: VmType::SevSnp,
                 ..platform_fixture()
             });
 
@@ -9008,7 +9090,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 ..device_fixture()
             }]);
             invalid_config.platform = Some(PlatformConfig {
-                sev_snp: true,
+                vm_type: VmType::SevSnp,
                 iommufd: true,
                 ..platform_fixture()
             });
@@ -9019,7 +9101,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
             let mut invalid_config = sev_snp_config.clone();
             invalid_config.platform = Some(PlatformConfig {
-                sev_snp: true,
+                vm_type: VmType::SevSnp,
                 iommu_segments: Some(Box::new([1])),
                 ..platform_fixture()
             });
@@ -9048,7 +9130,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             let mut valid = sev_snp_config.clone();
             valid.devices = Some(vec![device_fixture()]);
             valid.platform = Some(PlatformConfig {
-                sev_snp: true,
+                vm_type: VmType::SevSnp,
                 iommufd: true,
                 ..platform_fixture()
             });
