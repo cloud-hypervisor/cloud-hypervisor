@@ -238,13 +238,7 @@ pub(crate) fn _test_api_pause_resume(target_api: &TargetApi, guest: &Guest) {
         thread::sleep(Duration::new(2, 0));
 
         // SSH into the VM should fail
-        ssh_command_ip(
-            "grep -c processor /proc/cpuinfo",
-            &guest.network.guest_ip0,
-            2,
-            5,
-        )
-        .unwrap_err();
+        assert!(guest.wait_for_ssh_unresponsive(Duration::from_secs(10)));
 
         // Resume the VM
         assert!(target_api.remote_command("resume", None));
