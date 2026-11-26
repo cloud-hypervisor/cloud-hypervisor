@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::str::FromStr;
 use std::sync::{LazyLock, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{env, fmt, fs, io, mem, num, panic, thread};
 
 use rand::Rng;
@@ -1211,6 +1211,8 @@ pub struct Guest {
     pub mem_size_str: String,
     /// Test name, set from the current thread name at construction.
     pub test_name: Option<String>,
+    created: Instant,
+    disk_prepare_time: Duration,
 }
 
 // Return the next id that can be used for this guest. This is stored in a
@@ -1271,7 +1273,9 @@ impl Guest {
             notify_ip: format!("{class}.{id}.1"),
         };
 
+        let created = Instant::now();
         disk_config.prepare_files(&tmp_dir, &network);
+        let disk_prepare_time = created.elapsed();
 
         Guest {
             tmp_dir,
@@ -1286,6 +1290,8 @@ impl Guest {
             nested: false,
             mem_size_str: "512M".to_string(),
             test_name: thread::current().name().map(String::from),
+            created,
+            disk_prepare_time,
         }
     }
 
@@ -1530,15 +1536,43 @@ impl Guest {
     }
 
     pub fn wait_vm_boot(&self) -> Result<(), Error> {
-        self.network
-            .wait_vm_boot(self.default_boot_timeout())
-            .map_err(Error::WaitForBoot)
+        self.wait_vm_boot_custom_timeout(self.default_boot_timeout())
     }
 
     pub fn wait_vm_boot_custom_timeout(&self, custom_timeout: u32) -> Result<(), Error> {
-        self.network
+        let start = Instant::now();
+        let result = self
+            .network
             .wait_vm_boot(custom_timeout)
-            .map_err(Error::WaitForBoot)
+            .map_err(Error::WaitForBoot);
+        self.record_boot(start.elapsed(), result.is_ok());
+        result
+    }
+
+    // Append the time taken to prepare this guest's disks and to boot it to
+    // the telemetry that the integration test scripts collect, when they have
+    // created its file.
+    fn record_boot(&self, boot_wait: Duration, booted: bool) {
+        let path = dirs::home_dir()
+            .unwrap()
+            .join("workloads/telemetry/boots.csv");
+        let Ok(mut file) = OpenOptions::new().append(true).open(path) else {
+            return;
+        };
+        let time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
+        // Write each line at once, as several tests append to the file.
+        let line = format!(
+            "{},{},{},{:.3},{:.3},{:.3},{booted}\n",
+            time.as_secs(),
+            self.test_name.as_deref().unwrap_or_default(),
+            env::var("NEXTEST_ATTEMPT").unwrap_or_default(),
+            self.disk_prepare_time.as_secs_f64(),
+            boot_wait.as_secs_f64(),
+            self.created.elapsed().as_secs_f64(),
+        );
+        let _ = file.write_all(line.as_bytes());
     }
 
     pub fn prepare_l2_cloudinit(&self) -> (TempDir, String) {
