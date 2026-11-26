@@ -1650,13 +1650,11 @@ pub(crate) fn _test_simple_launch(guest: &Guest, use_fw: bool) {
             &event_path
         ));
 
-        // It's been observed on the Bionic image that udev and snapd
-        // services can cause some delay in the VM's shutdown. Disabling
-        // them improves the reliability of this test.
+        // It's been observed on the Bionic image that the udev service can
+        // cause some delay in the VM's shutdown. Disabling it improves the
+        // reliability of this test.
         let _ = guest.ssh_command("sudo systemctl disable udev");
         let _ = guest.ssh_command("sudo systemctl stop udev");
-        let _ = guest.ssh_command("sudo systemctl disable snapd");
-        let _ = guest.ssh_command("sudo systemctl stop snapd");
 
         guest.ssh_command("sudo poweroff").unwrap();
         assert!(wait_for_latest_events_exact_str(
