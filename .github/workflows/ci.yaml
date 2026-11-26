@@ -706,6 +706,15 @@ jobs:
       - name: Run integration tests
         timeout-minutes: 60
         run: scripts/dev_cli.sh tests --integration --ci --libc ${{ matrix.libc }}
+      - name: Upload integration test telemetry
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: telemetry-${{ github.job }}-${{ matrix.runner }}-${{ matrix.libc }}
+          path: |
+            ~/workloads/telemetry
+            ~/workloads/junit
+          if-no-files-found: ignore
   # MQ and dev branch pushes start all four matrix entries after preflight, in
   # parallel with the build and quality jobs. The PR job keeps existing gates.
   integration-x86-64-mq:
@@ -812,6 +821,15 @@ jobs:
       - name: Run integration tests (musl)
         timeout-minutes: 60
         run: scripts/dev_cli.sh tests --integration --ci --libc musl
+      - name: Upload integration test telemetry
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: telemetry-${{ github.job }}
+          path: |
+            ~/workloads/telemetry
+            ~/workloads/junit
+          if-no-files-found: ignore
   # integration-vfio:
   #   name: integration-vfio
   #   needs: [preflight]
@@ -904,6 +922,15 @@ jobs:
   #     - name: Run integration tests
   #       timeout-minutes: 45
   #       run: scripts/dev_cli.sh tests --integration --ci
+  #     - name: Upload integration test telemetry
+  #       if: always()
+  #       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+  #       with:
+  #         name: telemetry-${{ github.job }}
+  #         path: |
+  #           ~/workloads/telemetry
+  #           ~/workloads/junit
+  #         if-no-files-found: ignore
   # Rate-limiter host is not available
   # integration-rate-limiter:
   #   name: integration-rate-limiter
