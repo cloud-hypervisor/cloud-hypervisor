@@ -3665,7 +3665,7 @@ impl DeviceManager {
             return Err(DeviceManagerError::PmemSizeNotAligned);
         }
 
-        let (region_base, region_size) = if let Some((base, size)) = region_range {
+        let (region_base, region_size) = if let Some((base, _)) = region_range {
             // The memory needs to be 2MiB aligned in order to support
             // hugepages.
             self.pci_segments[pmem_cfg.pci_common.pci_segment as usize]
