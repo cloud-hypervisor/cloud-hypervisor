@@ -1009,7 +1009,7 @@ macro_rules! platform_syntax {
 
 impl PlatformConfig {
     #[cfg(feature = "sev_snp")]
-    pub const SYNTAX: &'static str = platform_syntax!(",sev_snp=on|off,vm_type=default|sev_snp");
+    pub const SYNTAX: &'static str = platform_syntax!(",vm_type=default|sev_snp");
     #[cfg(not(feature = "sev_snp"))]
     pub const SYNTAX: &'static str = platform_syntax!();
 
@@ -1115,6 +1115,10 @@ impl PlatformConfig {
             .map_err(Error::ParsePlatform)?
             .unwrap_or(Toggle(false))
             .0;
+        #[cfg(feature = "sev_snp")]
+        if parser.is_set("sev_snp") {
+            eprintln!("Warning: --platform sev_snp is deprecated. Use vm_type=sev_snp.");
+        }
 
         #[cfg(feature = "sev_snp")]
         let vm_type = parser

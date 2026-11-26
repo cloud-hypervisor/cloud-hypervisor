@@ -126,6 +126,8 @@ mod tests {
         assert_eq!(config.vm_type(), Some(hypervisor::VmType::Default));
         let json = serde_json::to_value(&config).unwrap();
         assert_eq!(json["platform"]["vm_type"], "Default");
+        #[cfg(feature = "sev_snp")]
+        assert_eq!(json["platform"]["sev_snp"], false);
     }
 
     #[test]

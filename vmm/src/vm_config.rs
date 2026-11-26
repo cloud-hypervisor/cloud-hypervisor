@@ -203,6 +203,7 @@ pub struct PlatformConfig {
     pub system_sku_number: Option<String>,
     #[serde(default)]
     pub chassis_asset_tag: Option<String>,
+    /// Deprecated. Select SEV-SNP with `vm_type` instead.
     #[cfg(feature = "sev_snp")]
     #[serde(default)]
     pub sev_snp: bool,

@@ -1108,6 +1108,8 @@ components:
         sev_snp:
           type: boolean
           default: false
+          deprecated: true
+          description: Set vm_type to SevSnp to enable SEV-SNP.
         iommufd:
           type: boolean
           default: true
