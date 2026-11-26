@@ -6501,8 +6501,23 @@ mod common_parallel {
                 )
                 .unwrap();
 
+            // Removing the port takes effect asynchronously, so wait for the
+            // first VM to become unreachable. Each check is a single attempt,
+            // as SSH command retries would wait for minutes on the expected
+            // failures.
+            let guest2_ip = guest2.network.guest_ip0.as_str();
+            let fails = |command: &str| {
+                matches!(
+                    ssh_command_ip(command, guest2_ip, 1, 0),
+                    Err(SshCommandError::NonZeroExitStatus(_))
+                )
+            };
+            assert!(wait_until(Duration::from_secs(30), || fails(
+                "ping -c 1 -W 1 172.100.0.1"
+            )));
+
             // Check the connection fails this time
-            guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap_err();
+            assert!(fails("nc -vz -w 2 172.100.0.1 12345"));
 
             // Add the OVS port back
             assert!(exec_host_command_status("ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient1").success());
