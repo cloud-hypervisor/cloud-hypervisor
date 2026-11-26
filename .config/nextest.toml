@@ -4,6 +4,8 @@ slow-timeout = { period = "60s", terminate-after = 10 }
 
 [test-groups]
 windows = { max-threads = 4 }
+# Each of these tests migrates a pair of guests with several GiB of memory.
+large_live_migration = { max-threads = 1 }
 
 [profile.integration]
 fail-fast = false
@@ -21,6 +23,13 @@ filter = 'test(common_sequential::)'
 threads-required = 'num-test-threads'
 # Run them after all the other tests, which can then share the threads.
 priority = -100
+
+[[profile.common_tests.overrides]]
+filter = 'test(/test_live_(migration|upgrade)_(balloon|numa)/)'
+# Run them one at a time alongside the other tests, starting them first as
+# together they take several minutes.
+test-group = 'large_live_migration'
+priority = 100
 
 [[profile.common_tests.overrides]]
 filter = 'test(watchdog)'
