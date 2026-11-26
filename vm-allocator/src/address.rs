@@ -22,6 +22,15 @@ pub(crate) enum Error {
 
 pub(crate) type Result<T> = result::Result<T, Error>;
 
+/// Direction in which [`AddressAllocator`] searches for a free address range.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AllocateDirection {
+    /// Allocate from the top of the managed region downward.
+    TopDown,
+    /// Allocate from the bottom of the managed region upward.
+    BottomUp,
+}
+
 /// Manages allocating address ranges.
 /// Use `AddressAllocator` whenever an address range needs to be allocated to different users.
 ///
@@ -124,7 +133,7 @@ impl AddressAllocator {
         Err(Error::Overflow)
     }
 
-    fn first_available_range(
+    fn first_available_range_top_down(
         &self,
         req_size: GuestUsize,
         alignment: GuestUsize,
@@ -161,6 +170,25 @@ impl AddressAllocator {
         None
     }
 
+    fn first_available_range_bottom_up(
+        &self,
+        req_size: GuestUsize,
+        alignment: GuestUsize,
+    ) -> Option<GuestAddress> {
+        let mut prev_end_address = self.base;
+        for (address, size) in self.ranges.iter() {
+            let aligned_addr = self.align_address(prev_end_address, alignment);
+            if let Some(size_delta) = address.checked_sub(aligned_addr.raw_value())
+                && size_delta.raw_value() >= req_size
+            {
+                return Some(aligned_addr);
+            }
+            prev_end_address = address.unchecked_add(*size);
+        }
+
+        None
+    }
+
     /// Allocates a range of addresses from the managed region. Returns `Some(allocated_address)`
     /// when successful, or `None` if an area of `size` can't be allocated or if alignment isn't
     /// a power of two.
@@ -169,6 +197,19 @@ impl AddressAllocator {
         address: Option<GuestAddress>,
         size: GuestUsize,
         align_size: Option<GuestUsize>,
+    ) -> Option<GuestAddress> {
+        self.allocate_direction(address, size, align_size, AllocateDirection::TopDown)
+    }
+
+    /// Allocates a range of addresses from the managed region using the specified allocation
+    /// `direction` when `address` is `None`. Returns `Some(allocated_address)` when successful,
+    /// or `None` if an area of `size` can't be allocated or if alignment isn't a power of two.
+    pub fn allocate_direction(
+        &mut self,
+        address: Option<GuestAddress>,
+        size: GuestUsize,
+        align_size: Option<GuestUsize>,
+        direction: AllocateDirection,
     ) -> Option<GuestAddress> {
         if size == 0 {
             debug!("Cannot allocate an address range of zero size");
@@ -192,7 +233,14 @@ impl AddressAllocator {
                     return None;
                 }
             },
-            None => self.first_available_range(size, alignment)?,
+            None => match direction {
+                AllocateDirection::TopDown => {
+                    self.first_available_range_top_down(size, alignment)?
+                }
+                AllocateDirection::BottomUp => {
+                    self.first_available_range_bottom_up(size, alignment)?
+                }
+            },
         };
 
         self.ranges.insert(new_addr, size);
@@ -495,5 +543,63 @@ mod tests {
             None
         );
         assert_eq!(pool.ranges, old_ranges);
+    }
+
+    #[test]
+    fn allocate_bottom_up_alignment_and_coexistence() {
+        let mut pool = AddressAllocator::new(GuestAddress(0x1000), 0x10000).unwrap();
+
+        // Invalid size or alignment fails.
+        assert_eq!(
+            pool.allocate_direction(None, 0, Some(0x100), AllocateDirection::BottomUp),
+            None
+        );
+        assert_eq!(
+            pool.allocate_direction(None, 0x100, Some(0), AllocateDirection::BottomUp),
+            None
+        );
+        assert_eq!(
+            pool.allocate_direction(None, 0x100, Some(200), AllocateDirection::BottomUp),
+            None
+        );
+
+        // Bottom-up allocations start from base (0x1000) and grow upward.
+        assert_eq!(
+            pool.allocate_direction(None, 0x110, Some(0x100), AllocateDirection::BottomUp),
+            Some(GuestAddress(0x1000))
+        );
+        assert_eq!(
+            pool.allocate_direction(None, 0x100, Some(0x100), AllocateDirection::BottomUp),
+            Some(GuestAddress(0x1200))
+        );
+        assert_eq!(
+            pool.allocate_direction(None, 0x10, Some(0x100), AllocateDirection::BottomUp),
+            Some(GuestAddress(0x1300))
+        );
+
+        // Top-down allocations still start from end (0x11000) and grow downward.
+        assert_eq!(
+            pool.allocate(None, 0x100, Some(0x100)),
+            Some(GuestAddress(0x10f00))
+        );
+
+        // Freeing the first bottom-up range allows a subsequent bottom-up allocation to reuse it
+        // if it fits, or skip past existing ranges if it does not fit.
+        pool.free(GuestAddress(0x1000), 0x110);
+        assert_eq!(
+            pool.allocate_direction(None, 0x300, Some(0x100), AllocateDirection::BottomUp),
+            Some(GuestAddress(0x1400))
+        );
+        assert_eq!(
+            pool.allocate_direction(None, 0x200, Some(0x100), AllocateDirection::BottomUp),
+            Some(GuestAddress(0x1000))
+        );
+
+        // Requesting more than the remaining gap between bottom-up (0x1700) and top-down (0x10f00)
+        // fails.
+        assert_eq!(
+            pool.allocate_direction(None, 0xf900, Some(0x100), AllocateDirection::BottomUp),
+            None
+        );
     }
 }
