@@ -892,7 +892,9 @@ jobs:
           mkdir $HOME/workloads
           # Pull the dev container while the image downloads.
           docker pull -q "ghcr.io/cloud-hypervisor/cloud-hypervisor:$(sed -n 's/^CTR_IMAGE_VERSION="\(.*\)"$/\1/p' scripts/dev_cli.sh)" &
-          az storage blob download --max-connections 16 --no-progress --container-name private-images --file "$HOME/workloads/windows-server-2025-amd64-1.raw" --name windows-server-2025-amd64-1.raw --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
+          sudo apt-get -y install zstd
+          az storage blob download --max-connections 16 --no-progress --container-name private-images --file /dev/shm/windows-server-2025-amd64-1.raw.zst --name windows-server-2025-amd64-1.raw.zst --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
+          zstd -d -q --sparse --rm /dev/shm/windows-server-2025-amd64-1.raw.zst -o "$HOME/workloads/windows-server-2025-amd64-1.raw"
           wait
       - name: Run Windows guest integration tests
         timeout-minutes: 30
