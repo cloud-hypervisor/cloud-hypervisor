@@ -3251,12 +3251,13 @@ mod common_parallel {
         let mut vfio_disk_path = workload_path.clone();
         vfio_disk_path.push("vfio.img");
 
-        // Create the vfio disk image
+        // Create the vfio disk image, with room for the blocks the L2 guest
+        // writes into its sparse OS disk image
         let output = Command::new("mkfs.ext4")
             .arg("-d")
             .arg(vfio_path.to_str().unwrap())
             .arg(vfio_disk_path.to_str().unwrap())
-            .arg("2g")
+            .arg("4g")
             .output()
             .unwrap();
         if !output.status.success() {
