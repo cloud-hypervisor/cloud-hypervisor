@@ -118,6 +118,15 @@ update_workloads() {
         echo "foo" >"$SHARED_DIR/file1"
         echo "bar" >"$SHARED_DIR/file3" || exit 1
     fi
+
+    # Tests take guest images from /tmp/workloads in preference to the
+    # workloads directory. When /tmp is the XFS filesystem set up by
+    # dev_cli.sh --ci, their copies of the images there are reflinks rather
+    # than full copies in memory.
+    if [ "$(stat -f -c %T /tmp)" = xfs ]; then
+        mkdir -p /tmp/workloads
+        cp "$JAMMY_OS_RAW_IMAGE" "$JAMMY_OS_QCOW2_UNCOMPRESSED_IMAGE" /tmp/workloads || exit 1
+    fi
 }
 
 process_common_args "$@"
