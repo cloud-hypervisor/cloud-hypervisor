@@ -890,7 +890,10 @@ jobs:
         run: |
           set -eufo pipefail
           mkdir $HOME/workloads
-          az storage blob download --container-name private-images --file "$HOME/workloads/windows-server-2025-amd64-1.raw" --name windows-server-2025-amd64-1.raw --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
+          # Pull the dev container while the image downloads.
+          docker pull -q "ghcr.io/cloud-hypervisor/cloud-hypervisor:$(sed -n 's/^CTR_IMAGE_VERSION="\(.*\)"$/\1/p' scripts/dev_cli.sh)" &
+          az storage blob download --max-connections 16 --no-progress --container-name private-images --file "$HOME/workloads/windows-server-2025-amd64-1.raw" --name windows-server-2025-amd64-1.raw --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
+          wait
       - name: Run Windows guest integration tests
         timeout-minutes: 30
         run: scripts/dev_cli.sh tests --integration-windows --libc ${{ matrix.libc }}
