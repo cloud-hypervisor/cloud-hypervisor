@@ -22,6 +22,12 @@ threads-required = 'num-test-threads'
 # Run them after all the other tests, which can then share the threads.
 priority = -100
 
+[[profile.common_tests.overrides]]
+filter = 'test(watchdog)'
+# Start the watchdog tests first, as their fixed waits would otherwise
+# extend the run.
+priority = 100
+
 [profile.common_cvm]
 inherits = "integration"
 default-filter = 'test(common_cvm::)'
