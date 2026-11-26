@@ -88,6 +88,8 @@ use crate::console_devices::{ConsoleDeviceError, ConsoleInfo};
 use crate::coredump::{
     CpuElf64Writable, DumpState, Elf64Writable, GuestDebuggable, GuestDebuggableError, NoteDescType,
 };
+#[cfg(feature = "sev_snp")]
+use crate::cpu::CpuManager;
 use crate::device_manager::{DeviceManager, DeviceManagerError};
 use crate::device_tree::DeviceTree;
 use crate::external_fds::UpdateFdsError;
@@ -524,21 +526,55 @@ impl Drop for Vm {
     }
 }
 
+#[cfg(feature = "sev_snp")]
+fn default_guest_policy() -> SnpPolicy {
+    SnpPolicy::new()
+        .with_abi_minor(0)
+        .with_abi_major(0)
+        // SMT permitted: allows the guest to run on an SMT-enabled host.
+        // This is the permissive default; future work can expose this as a
+        // configurable platform option.
+        .with_smt(1)
+        .with_reserved_must_be_one(1)
+        .with_migrate_ma(0)
+}
+
+#[cfg(feature = "sev_snp")]
+pub(crate) fn start_launch(
+    vm: &dyn hypervisor::Vm,
+    memory_manager: &Arc<Mutex<MemoryManager>>,
+    cpu_manager: &Arc<Mutex<CpuManager>>,
+    config: &Arc<Mutex<VmConfig>>,
+    snapshot: Option<&Snapshot>,
+    igvm_file: Option<IgvmFile>,
+) -> Result<Option<thread::JoinHandle<Result<EntryPoint>>>> {
+    // Create vCPUs before SEV-SNP initialization, including reserved
+    // hotplug vCPUs on KVM. Only boot_vcpus are started at boot.
+    cpu_manager
+        .lock()
+        .unwrap()
+        .create_boot_vcpus(snapshot_from_id(snapshot, CPU_MANAGER_SNAPSHOT_ID))
+        .map_err(Error::CpuManager)?;
+
+    // Extract guest policy from IGVM if available, otherwise use default.
+    let guest_policy = igvm_file
+        .as_ref()
+        .and_then(igvm_loader::extract_guest_policy)
+        .unwrap_or_else(default_guest_policy);
+
+    vm.sev_snp_init(guest_policy)
+        .map_err(Error::InitializeSevSnpVm)?;
+
+    // Load payload for SEV-SNP (IGVM parser needs cpu_manager for cpuid)
+    if snapshot.is_none() {
+        Vm::load_payload_async(memory_manager, config, cpu_manager, igvm_file)
+    } else {
+        Ok(None)
+    }
+}
+
 impl Vm {
     pub const HANDLED_SIGNALS: [i32; 1] = [SIGWINCH];
-
-    #[cfg(feature = "sev_snp")]
-    pub fn get_default_sev_snp_guest_policy() -> SnpPolicy {
-        SnpPolicy::new()
-            .with_abi_minor(0)
-            .with_abi_major(0)
-            // SMT permitted: allows the guest to run on an SMT-enabled host.
-            // This is the permissive default; future work can expose this as a
-            // configurable platform option.
-            .with_smt(1)
-            .with_reserved_must_be_one(1)
-            .with_migrate_ma(0)
-    }
 
     #[expect(clippy::needless_pass_by_value)]
     #[expect(clippy::too_many_arguments)]
@@ -845,24 +881,31 @@ impl Vm {
         // SEV-SNP specific initialization
         #[cfg(feature = "sev_snp")]
         if sev_snp_enabled {
-            return Self::init_sev_snp(
-                vm,
+            let payload = start_launch(
+                vm.as_ref(),
                 memory_manager,
                 cpu_manager,
-                device_manager,
                 config,
+                snapshot,
+                igvm_file,
+            )?;
+            Self::create_boot_devices(
+                vm,
+                device_manager,
                 console_info,
                 console_resize_pipe,
                 original_termios,
                 snapshot,
-                igvm_file,
-            );
+            )?;
+            #[cfg(feature = "fw_cfg")]
+            Self::create_fw_cfg_if_enabled(config, device_manager, snapshot)?;
+            return Ok(payload);
         }
 
         // MSHV initialization (create interrupt controller and devices)
         #[cfg(feature = "mshv")]
         if is_mshv {
-            Self::init_mshv(
+            Self::create_boot_devices(
                 vm,
                 device_manager,
                 console_info,
@@ -920,77 +963,8 @@ impl Vm {
         Ok(load_payload_handle)
     }
 
-    /// Initialize SEV-SNP specific components.
-    #[cfg(feature = "sev_snp")]
-    #[expect(clippy::too_many_arguments)]
-    fn init_sev_snp(
-        vm: &Arc<dyn hypervisor::Vm>,
-        memory_manager: &Arc<Mutex<MemoryManager>>,
-        cpu_manager: &Arc<Mutex<cpu::CpuManager>>,
-        device_manager: &Arc<Mutex<DeviceManager>>,
-        config: &Arc<Mutex<VmConfig>>,
-        console_info: Option<&ConsoleInfo>,
-        console_resize_pipe: Option<&Arc<File>>,
-        original_termios: &Arc<Mutex<Option<termios>>>,
-        snapshot: Option<&Snapshot>,
-        igvm_file: Option<IgvmFile>,
-    ) -> Result<Option<thread::JoinHandle<Result<EntryPoint>>>> {
-        // Create vCPUs before SEV-SNP initialization, including reserved
-        // hotplug vCPUs on KVM. Only boot_vcpus are started at boot.
-        cpu_manager
-            .lock()
-            .unwrap()
-            .create_boot_vcpus(snapshot_from_id(snapshot, CPU_MANAGER_SNAPSHOT_ID))
-            .map_err(Error::CpuManager)?;
-
-        // Extract guest policy from IGVM if available, otherwise use default.
-        let guest_policy = igvm_file
-            .as_ref()
-            .and_then(igvm_loader::extract_guest_policy)
-            .unwrap_or_else(Self::get_default_sev_snp_guest_policy);
-
-        vm.sev_snp_init(guest_policy)
-            .map_err(Error::InitializeSevSnpVm)?;
-
-        // Load payload for SEV-SNP (IGVM parser needs cpu_manager for cpuid)
-        let load_payload_handle = if snapshot.is_none() {
-            Self::load_payload_async(memory_manager, config, cpu_manager, igvm_file)?
-        } else {
-            None
-        };
-
-        // Create interrupt controller and devices for MSHV
-        let dm_snapshot = snapshot_from_id(snapshot, DEVICE_MANAGER_SNAPSHOT_ID);
-        let ic = device_manager
-            .lock()
-            .unwrap()
-            .create_interrupt_controller(dm_snapshot)
-            .map_err(Error::DeviceManager)?;
-
-        #[cfg(target_arch = "aarch64")]
-        vm.init().map_err(Error::InitializeVm)?;
-
-        device_manager
-            .lock()
-            .unwrap()
-            .create_devices(
-                console_info.cloned(),
-                console_resize_pipe.cloned(),
-                Arc::clone(original_termios),
-                ic,
-                dm_snapshot,
-            )
-            .map_err(Error::DeviceManager)?;
-
-        #[cfg(feature = "fw_cfg")]
-        Self::create_fw_cfg_if_enabled(config, device_manager, snapshot)?;
-
-        Ok(load_payload_handle)
-    }
-
-    /// Initialize MSHV-specific components.
-    #[cfg(feature = "mshv")]
-    fn init_mshv(
+    #[cfg(any(feature = "mshv", feature = "sev_snp"))]
+    fn create_boot_devices(
         _vm: &Arc<dyn hypervisor::Vm>,
         device_manager: &Arc<Mutex<DeviceManager>>,
         console_info: Option<&ConsoleInfo>,
@@ -1765,7 +1739,7 @@ impl Vm {
         }
     }
 
-    fn load_payload_async(
+    pub(crate) fn load_payload_async(
         memory_manager: &Arc<Mutex<MemoryManager>>,
         config: &Arc<Mutex<VmConfig>>,
         #[cfg(feature = "igvm")] cpu_manager: &Arc<Mutex<cpu::CpuManager>>,
