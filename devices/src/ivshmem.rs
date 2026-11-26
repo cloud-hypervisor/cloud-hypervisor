@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_allocator::{AddressAllocator, GuestRegion, SystemAllocator};
 use vm_device::{BusDevice, Resource};
-use vm_memory::{Address, GuestAddress};
+use vm_memory::{Address, GuestAddress, GuestMemoryRegion};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 
 const IVSHMEM_BAR0_IDX: usize = 0;
@@ -312,11 +312,26 @@ impl PciDevice for IvshmemDevice {
 
     fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> io::Result<()> {
         if bar_idx == IVSHMEM_DATA_BAR_IDX {
-            self.region
+            let region = self
+                .region
                 .as_mut()
-                .ok_or_else(|| io::Error::other(IvshmemError::MissingMemoryRegion))?
-                .move_guest_address(GuestAddress(new_base))
-                .map_err(io::Error::other)?;
+                .ok_or_else(|| io::Error::other(IvshmemError::MissingMemoryRegion))?;
+            let old_address = region.start_addr();
+            let was_registered = region.is_registered();
+            if let Err(e) = region.move_guest_address(GuestAddress(new_base)) {
+                // The BAR stays where it was, so map the memory there again.
+                let restored = region.move_guest_address(old_address).and_then(|()| {
+                    if was_registered && !region.is_registered() {
+                        region.register()
+                    } else {
+                        Ok(())
+                    }
+                });
+                if let Err(e) = restored {
+                    error!("Failed to restore the shared memory mapping: {e}");
+                }
+                return Err(io::Error::other(e));
+            }
         }
         for bar in self.bar_regions.iter_mut() {
             if bar.idx() == bar_idx {
