@@ -3242,6 +3242,7 @@ pub struct VfioDmaMapping<M: GuestAddressSpace> {
     vfio_ops: Arc<dyn VfioOps>,
     memory: Arc<M>,
     mmio_regions: Arc<Mutex<Vec<VfioBar>>>,
+    p2p_dma: bool,
 }
 
 impl<M: GuestAddressSpace> VfioDmaMapping<M> {
@@ -3254,11 +3255,13 @@ impl<M: GuestAddressSpace> VfioDmaMapping<M> {
         vfio_ops: Arc<dyn VfioOps>,
         memory: Arc<M>,
         mmio_regions: Arc<Mutex<Vec<VfioBar>>>,
+        p2p_dma: bool,
     ) -> Self {
         VfioDmaMapping {
             vfio_ops,
             memory,
             mmio_regions,
+            p2p_dma,
         }
     }
 }
@@ -3282,6 +3285,9 @@ where
             assert!(slice.len() >= size as usize);
             Ok(slice.ptr_guard_mut())
         } else {
+            if !self.p2p_dma {
+                return Err(ExternalDmaMappingError::InvalidGuestRange { gpa, size });
+            }
             let mmio_regions = self.mmio_regions.lock().unwrap();
             if mmio_regions.check_range(gpa, size) {
                 Err(mmio_regions.find_user_address(gpa, size).map_err(|e| {

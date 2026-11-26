@@ -4202,13 +4202,14 @@ impl DeviceManager {
             .try_clone()
             .map_err(DeviceManagerError::VfioCreate)?;
 
-        let iommufd_on = self
-            .config
-            .lock()
-            .unwrap()
-            .platform
-            .as_ref()
-            .is_none_or(|p| p.iommufd);
+        let (iommufd_on, p2p_dma) = {
+            let config = self.config.lock().unwrap();
+            let platform = config.platform.as_ref();
+            (
+                platform.is_none_or(|p| p.iommufd),
+                platform.is_none_or(|p| p.vfio_p2p_dma),
+            )
+        };
 
         let ops: Arc<dyn VfioOps> = if iommufd_on {
             #[cfg(feature = "kvm")]
@@ -4258,6 +4259,7 @@ impl DeviceManager {
             Arc::clone(&ops),
             Arc::new(self.memory_manager.lock().unwrap().guest_memory()),
             Arc::clone(&self.mmio_regions),
+            p2p_dma,
         ));
         Ok(Arc::new(VfioContext { ops, dma_mapping }))
     }
