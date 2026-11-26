@@ -20,6 +20,10 @@ const MSI_CTL_MULTI_MSG_ENABLE: u16 = 0x70;
 const MSI_CTL_64_BITS: u16 = 0x80;
 const MSI_CTL_PER_VECTOR: u16 = 0x100;
 
+// Largest "Multiple Message Enable" encoding defined by the PCI
+// specification: 2^5, i.e. 32 vectors.
+const MSI_MULTI_MSG_ENC_MAX: u16 = 0b101;
+
 // MSI message offsets
 const MSI_MSG_CTL_OFFSET: u64 = 0x2;
 const MSI_MSG_ADDR_LO_OFFSET: u64 = 0x4;
@@ -27,12 +31,11 @@ const MSI_MSG_ADDR_LO_OFFSET: u64 = 0x4;
 // MSI message masks
 const MSI_MSG_ADDR_LO_MASK: u32 = 0xffff_fffc;
 
+/// Number of vectors the driver has requested, taken from the "Multiple
+/// Message Enable" field. Reserved encodings are read as the architectural
+/// maximum.
 pub fn msi_num_enabled_vectors(msg_ctl: u16) -> usize {
-    let field = (msg_ctl >> 4) & 0x7;
-
-    if field > 5 {
-        return 0;
-    }
+    let field = ((msg_ctl & MSI_CTL_MULTI_MSG_ENABLE) >> 4).min(MSI_MULTI_MSG_ENC_MAX);
 
     1 << field
 }
@@ -291,5 +294,18 @@ impl Snapshottable for MsiConfig {
 
     fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_state(&self.state())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn enabled_vectors_come_from_the_enable_field() {
+        assert_eq!(msi_num_enabled_vectors(0), 1);
+        assert_eq!(msi_num_enabled_vectors(2 << 4), 4);
+        // Reserved encodings are capped at the architectural maximum.
+        assert_eq!(msi_num_enabled_vectors(MSI_CTL_MULTI_MSG_ENABLE), 32);
     }
 }
