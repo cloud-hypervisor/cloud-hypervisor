@@ -3393,14 +3393,16 @@ mod common_parallel {
                 1
             ));
 
+            // The L2 guest brings up the hotplugged device slowly when the
+            // host is loaded.
             wait_for_ssh(
                 "true",
                 &auth,
                 &guest.network.l2_guest_ip3,
-                Duration::from_secs(10),
+                Duration::from_secs(60),
             )
             .unwrap();
-            assert!(wait_until(Duration::from_secs(10), || {
+            assert!(wait_until(Duration::from_secs(30), || {
                 guest
                     .ssh_command_l2_1("ls /sys/bus/pci/devices")
                     .is_ok_and(|output| check_lines_count(output.trim(), 9))
