@@ -159,6 +159,14 @@ cp "$JAMMY_OS_RAW_IMAGE" "$VFIO_DIR"
 cp "$FW" "$VFIO_DIR"
 cp "$VMLINUX_IMAGE" "$VFIO_DIR" || exit 1
 
+# Tests take guest images from /tmp/workloads in preference to the workloads
+# directory. When /tmp is the XFS filesystem set up by dev_cli.sh --ci, their
+# copies of the images there are reflinks rather than full copies in memory.
+if [ "$(stat -f -c %T /tmp)" = xfs ]; then
+    mkdir -p /tmp/workloads
+    cp "$JAMMY_OS_RAW_IMAGE" "$JAMMY_OS_IMAGE" /tmp/workloads || exit 1
+fi
+
 cargo build --features mshv --all --release --target "$BUILD_TARGET"
 
 # We always copy a fresh version of our binary for our L2 guest.

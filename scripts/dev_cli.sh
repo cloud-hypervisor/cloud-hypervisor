@@ -22,6 +22,8 @@ CLH_CARGO_TARGET="${CLH_BUILD_DIR}/cargo_target"
 CLH_DOCKERFILE="${CLH_SCRIPTS_DIR}/../resources/Dockerfile"
 CLH_CTR_BUILD_DIR="/tmp/cloud-hypervisor-${USER}/ctr-build"
 CLH_INTEGRATION_WORKLOADS="${HOME}/workloads"
+CLH_CI_TMPFS_DIR="/tmp/cloud-hypervisor-${USER}/ci-tmpfs"
+CLH_CI_TMP_DIR="/tmp/cloud-hypervisor-${USER}/ci-tmp"
 
 # Container paths
 CTR_CLH_ROOT_DIR="/cloud-hypervisor"
@@ -272,6 +274,38 @@ prepare_igvm_files() {
     fi
 }
 
+# Set up the XFS filesystem used as /tmp by the integration tests with --ci.
+# It supports reflinks, so copies of guest images made within it share their
+# blocks rather than each taking a full copy in memory. It is backed by a
+# tmpfs and removed again on exit.
+setup_ci_tmp() {
+    # Remove a filesystem left behind by an earlier run that was killed.
+    teardown_ci_tmp
+    trap teardown_ci_tmp EXIT
+
+    local image="$CLH_CI_TMPFS_DIR/xfs.img"
+    local loop_device
+
+    mkdir -p "$CLH_CI_TMPFS_DIR" "$CLH_CI_TMP_DIR" || die "Failed to create the CI tmp directories"
+    sudo mount -t tmpfs -o size=50% tmpfs "$CLH_CI_TMPFS_DIR" || die "Failed to mount the CI tmpfs"
+    # An image filling the tmpfs makes XFS run out of space before the tmpfs.
+    truncate -s "$(findmnt -bno SIZE "$CLH_CI_TMPFS_DIR")" "$image" || die "Failed to create the CI XFS image"
+    sudo mkfs.xfs -q -m reflink=1 "$image" || die "Failed to create the CI XFS filesystem"
+    loop_device=$(sudo losetup --find --show --direct-io=on "$image") || die "Failed to attach the CI XFS image"
+    # Discarding the blocks of deleted files frees their memory in the tmpfs.
+    sudo mount -o discard "$loop_device" "$CLH_CI_TMP_DIR" || die "Failed to mount the CI XFS filesystem"
+    sudo chmod 1777 "$CLH_CI_TMP_DIR" || die "Failed to set the CI tmp directory permissions"
+    say "Using $(findmnt -rno FSTYPE,SOURCE "$CLH_CI_TMP_DIR") backed by $image for /tmp"
+}
+
+teardown_ci_tmp() {
+    mountpoint -q "$CLH_CI_TMP_DIR" && sudo umount "$CLH_CI_TMP_DIR"
+    sudo losetup -j "$CLH_CI_TMPFS_DIR/xfs.img" | cut -d : -f 1 | while read -r loop_device; do
+        sudo losetup -d "$loop_device"
+    done
+    mountpoint -q "$CLH_CI_TMPFS_DIR" && sudo umount "$CLH_CI_TMPFS_DIR"
+}
+
 cmd_help() {
     echo ""
     echo "Cloud Hypervisor $(basename "$0")"
@@ -307,6 +341,7 @@ cmd_help() {
     echo "        --volumes                    Hash separated volumes to be exported. Example --volumes /mnt:/mnt#/myvol:/myvol"
     echo "        --hypervisor                 Underlying hypervisor. Options kvm, mshv. Auto-detected from the host device node when omitted."
     echo "        --vm-type                    Type of VM to run. Options regular, confidential"
+    echo "        --ci                         Use an XFS filesystem on a tmpfs as /tmp so that copies of guest images are reflinks. Needs sudo and xfsprogs."
     echo "        --all                        Run all tests."
     echo ""
     echo "    build-container [--type]"
@@ -438,6 +473,7 @@ cmd_tests() {
     integration_cvm=false
     metrics=false
     coverage=false
+    ci=false
     libc="gnu"
     arg_vols=""
     hypervisor=""
@@ -455,6 +491,7 @@ cmd_tests() {
         "--integration-cvm") { integration_cvm=true; } ;;
         "--metrics") { metrics=true; } ;;
         "--coverage") { coverage=true; } ;;
+        "--ci") { ci=true; } ;;
         "--libc")
             shift
             [[ "$1" =~ ^(musl|gnu)$ ]] ||
@@ -596,11 +633,16 @@ cmd_tests() {
     fi
 
     # Extend common_args with integration-specific runtime settings.
+    local tmp_args=(--mount "type=tmpfs,destination=/tmp")
+    if [ "$ci" = true ]; then
+        setup_ci_tmp
+        tmp_args=(--volume "$CLH_CI_TMP_DIR:/tmp")
+    fi
     common_args+=(
         --privileged
         --ipc=host
         --net="$CTR_CLH_NET"
-        "--mount" "type=tmpfs,destination=/tmp"
+        "${tmp_args[@]}"
         --volume /dev:/dev
         --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS"
     )
