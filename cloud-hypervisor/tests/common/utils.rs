@@ -164,7 +164,9 @@ pub(crate) fn prepare_vubd(
         .spawn()
         .unwrap();
 
-    thread::sleep(Duration::new(10, 0));
+    assert!(wait_until(Duration::from_secs(10), || {
+        Path::new(&vubd_socket_path).exists()
+    }));
 
     (child, vubd_socket_path)
 }
