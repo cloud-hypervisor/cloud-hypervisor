@@ -10900,7 +10900,6 @@ mod common_parallel {
                     resize_zone_command(&src_api_socket, "mem0", "2G");
                     resize_zone_command(&src_api_socket, "mem1", "2G");
                     resize_zone_command(&src_api_socket, "mem2", "3G");
-                    thread::sleep(Duration::new(5, 0));
 
                     guest.check_numa_common(Some(&[1_920_000, 1_920_000, 1_920_000]), None, None);
                 }
@@ -10996,7 +10995,6 @@ mod common_parallel {
                     // Resize to the maximum amount of CPUs and check each NUMA
                     // node has been assigned the right CPUs set.
                     resize_command(&dest_api_socket, Some(max_vcpus), None, None, None);
-                    thread::sleep(Duration::new(5, 0));
 
                     guest.check_numa_common(
                         Some(&[3_840_000, 3_840_000, 3_840_000]),

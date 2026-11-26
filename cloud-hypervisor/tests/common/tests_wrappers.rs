@@ -483,7 +483,6 @@ pub(crate) fn _test_guest_numa_nodes(use_fw: bool) {
             // Resize to the maximum amount of CPUs and check each NUMA
             // node has been assigned the right CPUs set.
             resize_command(&api_socket, Some(12), None, None, None);
-            thread::sleep(Duration::new(5, 0));
 
             guest.check_numa_common(
                 Some(&[3_840_000, 3_840_000, 3_840_000]),
