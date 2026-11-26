@@ -12503,13 +12503,13 @@ mod snapshot_restore_common {
 
             if pvpanic {
                 make_guest_panic(&guest);
-                thread::sleep(Duration::new(10, 0));
 
                 let expected_sequential_events = [&MetaEvent {
                     event: "panic".to_string(),
                     device_id: None,
                 }];
-                assert!(check_latest_events_exact(
+                assert!(wait_for_latest_events_exact(
+                    Duration::from_secs(30),
                     &expected_sequential_events,
                     &event_path_restored
                 ));
