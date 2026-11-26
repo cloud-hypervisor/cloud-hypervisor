@@ -555,11 +555,11 @@ impl VhostUserMemoryNotifier {
 }
 
 impl GuestMemoryNotification for VhostUserMemoryNotifier {
-    fn region_added(&self, region: &Arc<GuestRegion>) {
+    fn region_added(&self, region: &GuestRegion) {
         self.update(region, true);
     }
 
-    fn region_removed(&self, region: &Arc<GuestRegion>) {
+    fn region_removed(&self, region: &GuestRegion) {
         self.update(region, false);
     }
 }

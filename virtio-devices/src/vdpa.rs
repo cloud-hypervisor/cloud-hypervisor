@@ -659,7 +659,7 @@ impl<M: GuestAddressSpace + Send + Sync> GuestMemoryNotification for VdpaDmaMapp
 where
     M::M: GuestMemoryBackend,
 {
-    fn region_added(&self, region: &Arc<GuestRegion>) {
+    fn region_added(&self, region: &GuestRegion) {
         let gpa = region.start_addr().raw_value();
         if let Err(e) = self.map(gpa, gpa, region.len()) {
             error!("FATAL: vDPA: {e:?}");
@@ -667,7 +667,7 @@ where
         }
     }
 
-    fn region_removed(&self, region: &Arc<GuestRegion>) {
+    fn region_removed(&self, region: &GuestRegion) {
         if let Err(e) = self.unmap(region.start_addr().raw_value(), region.len()) {
             error!("FATAL: vDPA: {e:?}");
             process::exit(1);

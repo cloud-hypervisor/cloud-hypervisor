@@ -517,7 +517,7 @@ impl<M: GuestAddressSpace + Send + Sync> GuestMemoryNotification for VfioUserDma
 where
     M::M: GuestMemoryBackend,
 {
-    fn region_added(&self, region: &Arc<GuestRegion>) {
+    fn region_added(&self, region: &GuestRegion) {
         if region.file_offset().is_some() {
             let gpa = region.start_addr().raw_value();
             if let Err(e) = self.map(gpa, gpa, region.len()) {
@@ -527,7 +527,7 @@ where
         }
     }
 
-    fn region_removed(&self, region: &Arc<GuestRegion>) {
+    fn region_removed(&self, region: &GuestRegion) {
         if region.file_offset().is_some()
             && let Err(e) = self.unmap(region.start_addr().raw_value(), region.len())
         {

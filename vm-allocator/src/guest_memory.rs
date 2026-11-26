@@ -444,16 +444,17 @@ impl Drop for GuestRegion {
 /// space but must not change it or register another notifier on it.
 pub trait GuestMemoryNotification: Send + Sync {
     /// Called after a region is added.
-    fn region_added(&self, region: &Arc<GuestRegion>);
+    fn region_added(&self, region: &GuestRegion);
 
     /// Called after a region is removed.
-    fn region_removed(&self, region: &Arc<GuestRegion>);
+    fn region_removed(&self, region: &GuestRegion);
 }
 
 /// A wrapper for mutable set of guest memory ranges
 #[derive(Clone, Debug)]
 pub struct GuestMemory {
     regions: GuestMemoryAtomic<GuestRegionCollection<GuestRegion>>,
+    // Weak refs: registrants own their notifiers, and dropped ones are pruned.
     notifiers: Arc<Mutex<Vec<Weak<dyn GuestMemoryNotification>>>>,
 }
 
