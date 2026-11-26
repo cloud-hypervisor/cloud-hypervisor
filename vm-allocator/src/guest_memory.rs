@@ -454,7 +454,8 @@ pub trait GuestMemoryNotification: Send + Sync {
 #[derive(Clone, Debug)]
 pub struct GuestMemory {
     regions: GuestMemoryAtomic<GuestRegionCollection<GuestRegion>>,
-    // Weak refs: registrants own their notifiers, and dropped ones are pruned.
+    // Weak: notifiers may hold a clone of this GuestMemory, so a strong ref
+    // would form a cycle. Dropped notifiers are pruned lazily.
     notifiers: Arc<Mutex<Vec<Weak<dyn GuestMemoryNotification>>>>,
 }
 
@@ -474,7 +475,8 @@ impl GuestMemory {
         notifiers.push(notifier);
     }
 
-    /// Adds a region. Overlapping regions will be rejected.
+    /// Adds a region and notifies all observers. Overlapping regions will be
+    /// rejected.
     pub fn add_region(&self, region: &Arc<GuestRegion>) -> Result<(), GuestRegionCollectionError> {
         let active: Vec<_>;
         {
@@ -492,7 +494,8 @@ impl GuestMemory {
         Ok(())
     }
 
-    /// Removes and returns the region matching the exact base and size.
+    /// Removes a region and notifies all observers. Returns the region matching
+    /// the exact base and size.
     pub fn remove_region(
         &self,
         base: GuestAddress,
