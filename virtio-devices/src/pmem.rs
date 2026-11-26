@@ -296,6 +296,13 @@ impl Pmem {
     ) -> io::Result<Pmem> {
         let (avail_features, acked_features, config, paused) = if let Some(state) = state {
             info!("Restoring virtio-pmem {id}");
+            let size = u64::from_le(state.config.size);
+            if size != mapping.size() as u64 {
+                return Err(io::Error::other(format!(
+                    "Size {:#x} differs from the restored size {size:#x}",
+                    mapping.size()
+                )));
+            }
             (
                 state.avail_features,
                 state.acked_features,
