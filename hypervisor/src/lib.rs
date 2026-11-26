@@ -316,14 +316,43 @@ impl FromStr for VmType {
     }
 }
 
+/// Launch settings for each confidential computing platform.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CvmConfig {
+    #[cfg(feature = "sev_snp")]
+    SevSnp { vmsa_features: u64 },
+}
+
+impl CvmConfig {
+    #[cfg(feature = "sev_snp")]
+    pub fn new(vm_type: VmType, igvm: Option<&igvm::IgvmFile>) -> Option<Self> {
+        match vm_type {
+            VmType::Default => None,
+            VmType::SevSnp => Some(CvmConfig::SevSnp {
+                vmsa_features: igvm.map_or(0, sev_features),
+            }),
+        }
+    }
+}
+
+/// Extract sev_features from the boot CPU (vp_index 0) VMSA.
+#[cfg(feature = "sev_snp")]
+fn sev_features(igvm_file: &igvm::IgvmFile) -> u64 {
+    for header in igvm_file.directives() {
+        if let igvm::IgvmDirectiveHeader::SnpVpContext { vp_index, vmsa, .. } = header
+            && *vp_index == 0
+        {
+            return vmsa.sev_features.into();
+        }
+    }
+    0
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct HypervisorVmConfig {
-    #[cfg(feature = "sev_snp")]
-    pub sev_snp_enabled: bool,
+    pub cvm: Option<CvmConfig>,
     #[cfg(feature = "sev_snp")]
     pub mem_size: u64,
-    #[cfg(feature = "sev_snp")]
-    pub vmsa_features: u64,
     pub nested: bool,
     pub smt_enabled: bool,
 }

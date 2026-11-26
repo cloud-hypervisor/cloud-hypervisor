@@ -30,6 +30,8 @@ use vm::DataMatch;
 #[cfg(feature = "sev_snp")]
 use vm_memory::bitmap::AtomicBitmap;
 
+#[cfg(feature = "sev_snp")]
+use crate::CvmConfig;
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::regs::{
     AARCH64_ARCH_TIMER_VIRT_IRQ, AARCH64_MIN_PPI_IRQ, AARCH64_PMU_IRQ,
@@ -285,17 +287,11 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             return Err(hypervisor::HypervisorError::NestedVirtualizationNotSupported);
         }
 
-        #[allow(unused_mut)]
-        #[allow(unused_assignments)]
-        let mut mshv_vm_type = VmType::Normal; // Create with default platform type
-        #[cfg(feature = "sev_snp")]
-        {
-            mshv_vm_type = if _config.sev_snp_enabled {
-                VmType::Snp
-            } else {
-                VmType::Normal
-            };
-        }
+        let mshv_vm_type = match _config.cvm {
+            None => VmType::Normal,
+            #[cfg(feature = "sev_snp")]
+            Some(CvmConfig::SevSnp { .. }) => VmType::Snp,
+        };
 
         let mut create_args = self.mshv.make_default_partition_create_arg(mshv_vm_type);
         let mut disable_proc_features = hv_partition_processor_features::default();

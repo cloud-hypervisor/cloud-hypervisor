@@ -254,11 +254,13 @@ impl From<&VmConfig> for hypervisor::HypervisorVmConfig {
     fn from(_value: &VmConfig) -> Self {
         hypervisor::HypervisorVmConfig {
             #[cfg(feature = "sev_snp")]
-            sev_snp_enabled: _value.is_sev_snp_enabled(),
+            cvm: _value
+                .vm_type()
+                .and_then(|vm_type| hypervisor::CvmConfig::new(vm_type, None)),
+            #[cfg(not(feature = "sev_snp"))]
+            cvm: None,
             #[cfg(feature = "sev_snp")]
             mem_size: _value.memory.total_size(),
-            #[cfg(feature = "sev_snp")]
-            vmsa_features: 0,
             nested: _value.cpus.nested,
             smt_enabled: _value
                 .cpus
