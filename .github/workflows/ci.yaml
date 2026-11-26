@@ -699,13 +699,15 @@ jobs:
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
           sudo apt-get update
           sudo apt install -y docker-ce docker-ce-cli
+      - name: Install xfsprogs
+        run: sudo apt-get -y install xfsprogs
       - name: Prepare for VDPA
         run: scripts/prepare_vdpa.sh
       - name: Load openvswitch module
         run: sudo modprobe openvswitch
       - name: Run integration tests
         timeout-minutes: 60
-        run: scripts/dev_cli.sh tests --integration --libc ${{ matrix.libc }}
+        run: scripts/dev_cli.sh tests --integration --ci --libc ${{ matrix.libc }}
   # MQ and dev branch pushes start all four matrix entries after preflight, in
   # parallel with the build and quality jobs. The PR job keeps existing gates.
   integration-x86-64-mq:
@@ -807,11 +809,13 @@ jobs:
           fetch-depth: 0
       - name: Run unit tests (musl)
         run: scripts/dev_cli.sh tests --unit --libc musl
+      - name: Install xfsprogs
+        run: sudo apt-get update && sudo apt-get -y install xfsprogs
       - name: Load openvswitch module
         run: sudo modprobe openvswitch
       - name: Run integration tests (musl)
         timeout-minutes: 60
-        run: scripts/dev_cli.sh tests --integration --libc musl
+        run: scripts/dev_cli.sh tests --integration --ci --libc musl
   # integration-vfio:
   #   name: integration-vfio
   #   needs: [preflight]
@@ -895,9 +899,12 @@ jobs:
   #         fetch-depth: 0
   #     - name: Prepare for VDPA
   #       run: scripts/prepare_vdpa.sh
+  #     # The MSHV runner runs Azure Linux.
+  #     - name: Install xfsprogs
+  #       run: sudo tdnf -y install xfsprogs
   #     - name: Run integration tests
   #       timeout-minutes: 45
-  #       run: scripts/dev_cli.sh tests --integration
+  #       run: scripts/dev_cli.sh tests --integration --ci
   # Rate-limiter host is not available
   # integration-rate-limiter:
   #   name: integration-rate-limiter
