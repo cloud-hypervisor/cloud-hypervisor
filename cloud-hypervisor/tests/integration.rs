@@ -1011,28 +1011,26 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2_zlib() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2_ZLIB.to_string());
-        let guest = GuestFactory::new_regular_guest_factory()
-            .create_guest(Box::new(disk_config))
-            .with_cpu(4);
+        let guest =
+            make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), JAMMY_IMAGE_NAME);
+        compress_os_disk(&guest, "zlib");
         _test_virtio_block(&guest, false, false, true, false, ImageType::Qcow2);
     }
 
     #[test]
     fn test_virtio_block_qcow2_zstd() {
-        let guest = make_virtio_block_guest(
-            &GuestFactory::new_regular_guest_factory(),
-            JAMMY_IMAGE_NAME_QCOW2_ZSTD,
-        );
+        let guest =
+            make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), JAMMY_IMAGE_NAME);
+        compress_os_disk(&guest, "zstd");
         _test_virtio_block(&guest, false, false, true, false, ImageType::Qcow2);
     }
 
     #[test]
     fn test_virtio_block_qcow2_backing_zstd_file() {
-        let guest = make_virtio_block_guest(
-            &GuestFactory::new_regular_guest_factory(),
-            JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE,
-        );
+        let guest =
+            make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), JAMMY_IMAGE_NAME);
+        compress_os_disk(&guest, "zstd");
+        overlay_os_disk(&guest, "qcow2");
         _test_virtio_block(&guest, false, false, true, true, ImageType::Qcow2);
     }
 
@@ -1040,17 +1038,17 @@ mod common_parallel {
     fn test_virtio_block_qcow2_backing_uncompressed_file() {
         let guest = make_virtio_block_guest(
             &GuestFactory::new_regular_guest_factory(),
-            JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE,
+            JAMMY_IMAGE_NAME_QCOW2,
         );
+        overlay_os_disk(&guest, "qcow2");
         _test_virtio_block(&guest, false, false, true, true, ImageType::Qcow2);
     }
 
     #[test]
     fn test_virtio_block_qcow2_backing_raw_file() {
-        let guest = make_virtio_block_guest(
-            &GuestFactory::new_regular_guest_factory(),
-            JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE,
-        );
+        let guest =
+            make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), JAMMY_IMAGE_NAME);
+        overlay_os_disk(&guest, "raw");
         _test_virtio_block(&guest, false, false, true, true, ImageType::Qcow2);
     }
 

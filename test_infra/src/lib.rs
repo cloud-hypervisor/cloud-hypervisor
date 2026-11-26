@@ -2816,16 +2816,6 @@ pub mod x86_64 {
     pub const JAMMY_IMAGE_NAME_VHD: &str = "jammy-server-cloudimg-amd64-custom-20241017-0.vhd";
     pub const JAMMY_IMAGE_NAME_VHDX: &str = "jammy-server-cloudimg-amd64-custom-20241017-0.vhdx";
     pub const JAMMY_IMAGE_NAME_QCOW2: &str = "jammy-server-cloudimg-amd64-custom-20241017-0.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_ZLIB: &str =
-        "jammy-server-cloudimg-amd64-custom-20241017-0-zlib.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_ZSTD: &str =
-        "jammy-server-cloudimg-amd64-custom-20241017-0-zstd.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE: &str =
-        "jammy-server-cloudimg-amd64-custom-20241017-0-backing-zstd.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE: &str =
-        "jammy-server-cloudimg-amd64-custom-20241017-0-backing-uncompressed.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE: &str =
-        "jammy-server-cloudimg-amd64-custom-20241017-0-backing-raw.qcow2";
     pub const WINDOWS_IMAGE_NAME: &str = "windows-server-2025-amd64-1.raw";
     pub const OVMF_NAME: &str = "CLOUDHV.fd";
     pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'IO-APIC.*ttyS0' /proc/interrupts || true";
@@ -2840,16 +2830,6 @@ pub mod aarch64 {
     pub const JAMMY_IMAGE_NAME_VHD: &str = "jammy-server-cloudimg-arm64-custom-20220329-0.vhd";
     pub const JAMMY_IMAGE_NAME_VHDX: &str = "jammy-server-cloudimg-arm64-custom-20220329-0.vhdx";
     pub const JAMMY_IMAGE_NAME_QCOW2: &str = "jammy-server-cloudimg-arm64-custom-20220329-0.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_ZLIB: &str =
-        "jammy-server-cloudimg-arm64-custom-20220329-0-zlib.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_ZSTD: &str =
-        "jammy-server-cloudimg-arm64-custom-20220329-0-zstd.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE: &str =
-        "jammy-server-cloudimg-arm64-custom-20220329-0-backing-zstd.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE: &str =
-        "jammy-server-cloudimg-arm64-custom-20220329-0-backing-uncompressed.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE: &str =
-        "jammy-server-cloudimg-arm64-custom-20220329-0-backing-raw.qcow2";
     pub const WINDOWS_IMAGE_NAME: &str = "windows-11-iot-enterprise-aarch64.raw";
     pub const OVMF_NAME: &str = "CLOUDHV_EFI.fd";
     pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'GICv3.*uart-pl011' /proc/interrupts || true";

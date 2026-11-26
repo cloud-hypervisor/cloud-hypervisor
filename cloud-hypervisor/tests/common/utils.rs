@@ -932,6 +932,34 @@ pub(crate) fn make_virtio_block_guest(factory: &GuestFactory, image_name: &str) 
     factory.create_guest(Box::new(disk_config)).with_cpu(4)
 }
 
+/// Replace the guest's raw OS disk with a QCOW2 image of it compressed with
+/// `compression_type`.
+pub(crate) fn compress_os_disk(guest: &Guest, compression_type: &str) {
+    let os_disk = guest.disk_config.disk(DiskType::OperatingSystem).unwrap();
+    let compressed = format!("{os_disk}.qcow2");
+    QemuImgCommand::new()
+        .convert(
+            "raw",
+            "qcow2",
+            &format!("compression_type={compression_type}"),
+        )
+        .args(&["-c", &os_disk, &compressed])
+        .run("Failed to compress the OS disk");
+    fs::rename(&compressed, &os_disk).expect("Failed to replace the OS disk");
+}
+
+/// Replace the guest's OS disk with a QCOW2 overlay backed by it, where
+/// `backing_format` is the format of the original disk.
+pub(crate) fn overlay_os_disk(guest: &Guest, backing_format: &str) {
+    let os_disk = guest.disk_config.disk(DiskType::OperatingSystem).unwrap();
+    let backing = format!("{os_disk}.backing");
+    fs::rename(&os_disk, &backing).expect("Failed to move the OS disk");
+    QemuImgCommand::new()
+        .create("qcow2", "")
+        .args(&["-b", &backing, "-F", backing_format, &os_disk])
+        .run("Failed to create the OS disk overlay");
+}
+
 pub(crate) fn compute_backing_checksum(
     path_or_image_name: impl AsRef<Path>,
 ) -> Option<(PathBuf, String, u32)> {
