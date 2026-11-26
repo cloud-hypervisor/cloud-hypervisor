@@ -161,4 +161,5 @@ if ! [[ "${PARALLEL_INTEGRATION_TESTS_NUM:-}" =~ ^[1-9][0-9]*$ ]]; then
     PARALLEL_INTEGRATION_TESTS_NUM="${TEST_THREADS_DEFAULT}"
 fi
 echo "nproc:$(nproc), parallel_integration_tests:${PARALLEL_INTEGRATION_TESTS_NUM}"
+start_telemetry
 time cargo nextest run -p cloud-hypervisor $test_features --profile common_tests --no-tests=pass --test-threads="${PARALLEL_INTEGRATION_TESTS_NUM}" "$test_filter" -- ${test_binary_args[*]} "${skip_args[@]}"
