@@ -6329,7 +6329,8 @@ mod common_parallel {
                 .spawn()
                 .unwrap();
 
-            thread::sleep(Duration::new(20, 0));
+            // The initramfs prints the test string and powers the guest off.
+            let _ = child.wait_timeout(Duration::from_secs(20)).unwrap();
 
             kill_child(&mut child);
             let output = child.wait_with_output().unwrap();
