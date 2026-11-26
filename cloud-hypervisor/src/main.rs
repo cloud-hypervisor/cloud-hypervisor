@@ -952,15 +952,17 @@ fn start_vmm(
         (None, None) => Ok(None),
     }?;
 
-    if let Some(monitor) = event_monitor {
-        vmm::start_event_monitor_thread(
-            monitor,
-            &seccomp_action,
-            landlock_enable,
-            exit_evt.try_clone().unwrap(),
-        )
-        .map_err(Error::EventMonitorThread)?;
-    }
+    let _event_monitor_thread = event_monitor
+        .map(|monitor| {
+            vmm::start_event_monitor_thread(
+                monitor,
+                &seccomp_action,
+                landlock_enable,
+                exit_evt.try_clone().unwrap(),
+            )
+            .map_err(Error::EventMonitorThread)
+        })
+        .transpose()?;
 
     event!("vmm", "starting");
 
