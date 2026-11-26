@@ -86,6 +86,8 @@ pub mod console_devices;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 mod coredump;
 pub mod cpu;
+#[cfg(feature = "sev_snp")]
+mod cvm;
 pub mod device_manager;
 pub mod device_tree;
 pub mod external_fds;
@@ -103,8 +105,6 @@ mod pci_segment;
 mod prefault;
 pub mod seccomp_filters;
 mod serial_manager;
-#[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
-pub(crate) mod sev;
 mod sigwinch_listener;
 pub mod sparse;
 mod sync_utils;

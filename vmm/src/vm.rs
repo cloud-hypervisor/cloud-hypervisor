@@ -54,8 +54,6 @@ use hypervisor::kvm::{
 use hypervisor::{HypervisorVmConfig, HypervisorVmError, VmOps};
 #[cfg(feature = "igvm")]
 use igvm::IgvmFile;
-#[cfg(feature = "sev_snp")]
-use igvm_defs::SnpPolicy;
 use libc::{SIGWINCH, termios};
 use linux_loader::cmdline::Cmdline;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -89,7 +87,9 @@ use crate::coredump::{
     CpuElf64Writable, DumpState, Elf64Writable, GuestDebuggable, GuestDebuggableError, NoteDescType,
 };
 #[cfg(feature = "sev_snp")]
-use crate::cpu::CpuManager;
+use crate::cvm::sev_snp;
+#[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+use crate::cvm::sev_snp::MeasuredBootInfo;
 use crate::device_manager::{DeviceManager, DeviceManagerError};
 use crate::device_tree::DeviceTree;
 use crate::external_fds::UpdateFdsError;
@@ -104,8 +104,6 @@ use crate::memory_manager::{
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::migration::url_to_file;
 use crate::migration::{SNAPSHOT_CONFIG_FILE, SNAPSHOT_STATE_FILE, get_vm_snapshot, url_to_path};
-#[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
-use crate::sev::MeasuredBootInfo;
 use crate::util::flatten_error_chain_to_string;
 #[cfg(feature = "fw_cfg")]
 use crate::vm_config::FwCfgConfig;
@@ -526,53 +524,6 @@ impl Drop for Vm {
     }
 }
 
-#[cfg(feature = "sev_snp")]
-fn default_guest_policy() -> SnpPolicy {
-    SnpPolicy::new()
-        .with_abi_minor(0)
-        .with_abi_major(0)
-        // SMT permitted: allows the guest to run on an SMT-enabled host.
-        // This is the permissive default; future work can expose this as a
-        // configurable platform option.
-        .with_smt(1)
-        .with_reserved_must_be_one(1)
-        .with_migrate_ma(0)
-}
-
-#[cfg(feature = "sev_snp")]
-pub(crate) fn start_launch(
-    vm: &dyn hypervisor::Vm,
-    memory_manager: &Arc<Mutex<MemoryManager>>,
-    cpu_manager: &Arc<Mutex<CpuManager>>,
-    config: &Arc<Mutex<VmConfig>>,
-    snapshot: Option<&Snapshot>,
-    igvm_file: Option<IgvmFile>,
-) -> Result<Option<thread::JoinHandle<Result<EntryPoint>>>> {
-    // Create vCPUs before SEV-SNP initialization, including reserved
-    // hotplug vCPUs on KVM. Only boot_vcpus are started at boot.
-    cpu_manager
-        .lock()
-        .unwrap()
-        .create_boot_vcpus(snapshot_from_id(snapshot, CPU_MANAGER_SNAPSHOT_ID))
-        .map_err(Error::CpuManager)?;
-
-    // Extract guest policy from IGVM if available, otherwise use default.
-    let guest_policy = igvm_file
-        .as_ref()
-        .and_then(igvm_loader::extract_guest_policy)
-        .unwrap_or_else(default_guest_policy);
-
-    vm.sev_snp_init(guest_policy)
-        .map_err(Error::InitializeSevSnpVm)?;
-
-    // Load payload for SEV-SNP (IGVM parser needs cpu_manager for cpuid)
-    if snapshot.is_none() {
-        Vm::load_payload_async(memory_manager, config, cpu_manager, igvm_file)
-    } else {
-        Ok(None)
-    }
-}
-
 impl Vm {
     pub const HANDLED_SIGNALS: [i32; 1] = [SIGWINCH];
 
@@ -881,7 +832,7 @@ impl Vm {
         // SEV-SNP specific initialization
         #[cfg(feature = "sev_snp")]
         if sev_snp_enabled {
-            let payload = start_launch(
+            let payload = sev_snp::start_launch(
                 vm.as_ref(),
                 memory_manager,
                 cpu_manager,

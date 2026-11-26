@@ -48,11 +48,11 @@ use zerocopy::{FromBytes, FromZeros};
 
 use crate::cpu;
 use crate::cpu::CpuManager;
+#[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+use crate::cvm::sev_snp::{MeasuredBootInfo, SEV_HASH_BLOCK_ADDRESS, SEV_HASH_BLOCK_SIZE};
 use crate::igvm::loader::Loader;
 use crate::igvm::{BootPageAcceptance, HV_PAGE_SIZE, IgvmLoadedInfo, StartupMemoryType, loader};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
-#[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
-use crate::sev::{MeasuredBootInfo, SEV_HASH_BLOCK_ADDRESS, SEV_HASH_BLOCK_SIZE};
 
 #[cfg(feature = "sev_snp")]
 const ISOLATED_PAGE_SHIFT: u32 = 12;
