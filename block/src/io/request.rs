@@ -261,6 +261,11 @@ impl Request {
         Ok(len)
     }
 
+    /// Submits the request to `disk_image`.
+    ///
+    /// `discard` tells whether the device may deallocate disk space, i.e.
+    /// whether VIRTIO_BLK_F_DISCARD was negotiated. Without it, DISCARD is
+    /// rejected and WRITE_ZEROES ignores the unmap hint.
     pub fn execute_async<M: GuestMemoryBackend + Send + Sync + 'static>(
         &mut self,
         mem: Arc<M>,
@@ -268,6 +273,7 @@ impl Request {
         disk_image: &mut dyn AsyncIo,
         serial: &[u8],
         user_data: u64,
+        discard: bool,
     ) -> Result<ExecuteAsync, ExecuteError> {
         let sector = self.sector;
         let request_type = self.request_type;
@@ -316,6 +322,10 @@ impl Request {
                 return Ok(ret);
             }
             RequestType::Discard => {
+                if !discard {
+                    return Err(ExecuteError::Unsupported(VIRTIO_BLK_T_DISCARD));
+                }
+
                 let (data_addr, data_len) = if self.data_descriptors.len() == 1 {
                     (self.data_descriptors[0].0, self.data_descriptors[0].1)
                 } else {
@@ -434,7 +444,9 @@ impl Request {
 
                 let wz_length = (wz_num_sectors as u64) * SECTOR_SIZE;
 
-                if wz_flags & VIRTIO_BLK_WRITE_ZEROES_FLAG_UNMAP != 0 {
+                // Unmap is only a hint, so write the zeroes instead when the
+                // device may not deallocate.
+                if discard && wz_flags & VIRTIO_BLK_WRITE_ZEROES_FLAG_UNMAP != 0 {
                     disk_image
                         .punch_hole(wz_offset, wz_length, user_data)
                         .map_err(ExecuteError::AsyncPunchHole)?;
@@ -679,6 +691,8 @@ mod tests {
     struct RecordingAsyncIo {
         notifier: EventFd,
         submitted: Vec<AsyncIoOperation>,
+        punched: Vec<(u64, u64)>,
+        zeroed: Vec<(u64, u64)>,
     }
 
     impl RecordingAsyncIo {
@@ -686,6 +700,8 @@ mod tests {
             Self {
                 notifier: EventFd::new(0).unwrap(),
                 submitted: Vec::new(),
+                punched: Vec::new(),
+                zeroed: Vec::new(),
             }
         }
     }
@@ -701,11 +717,13 @@ mod tests {
         fn fsync(&mut self, _: Option<u64>) -> AsyncIoResult<()> {
             unreachable!()
         }
-        fn punch_hole(&mut self, _: u64, _: u64, _: u64) -> AsyncIoResult<()> {
-            unreachable!()
+        fn punch_hole(&mut self, offset: u64, length: u64, _: u64) -> AsyncIoResult<()> {
+            self.punched.push((offset, length));
+            Ok(())
         }
-        fn write_zeroes(&mut self, _: u64, _: u64, _: u64) -> AsyncIoResult<()> {
-            unreachable!()
+        fn write_zeroes(&mut self, offset: u64, length: u64, _: u64) -> AsyncIoResult<()> {
+            self.zeroed.push((offset, length));
+            Ok(())
         }
         fn next_completed_request(&mut self) -> Option<AsyncIoCompletion> {
             None
@@ -795,10 +813,67 @@ mod tests {
         let mut disk = RecordingAsyncIo::new();
 
         let Err(ExecuteError::BadRequest(Error::InvalidOffset)) =
-            request.execute_async(mem, 1024, &mut disk, &[], 0)
+            request.execute_async(mem, 1024, &mut disk, &[], 0, true)
         else {
             panic!("expected BadRequest(InvalidOffset)");
         };
+    }
+
+    /// Executes a DISCARD or WRITE_ZEROES request for sectors 8..16 with
+    /// `flags`, with deallocation allowed or not.
+    fn execute_discard_write_zeroes(
+        request_type: RequestType,
+        flags: u32,
+        discard: bool,
+    ) -> (Result<ExecuteAsync, ExecuteError>, RecordingAsyncIo) {
+        let mem = Arc::new(GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 4096)]).unwrap());
+        mem.write_slice(&8u64.to_le_bytes(), GuestAddress(DISCARD_WZ_SECTOR_OFFSET))
+            .unwrap();
+        mem.write_slice(
+            &8u32.to_le_bytes(),
+            GuestAddress(DISCARD_WZ_NUM_SECTORS_OFFSET),
+        )
+        .unwrap();
+        mem.write_slice(&flags.to_le_bytes(), GuestAddress(DISCARD_WZ_FLAGS_OFFSET))
+            .unwrap();
+
+        let mut request = Request {
+            request_type,
+            sector: 0,
+            data_descriptors: SmallVec::from_slice(&[(GuestAddress(0), DISCARD_WZ_SEG_SIZE)]),
+            writeback: true,
+            start: Instant::now(),
+        };
+        let mut disk = RecordingAsyncIo::new();
+        let result = request.execute_async(mem, 1024, &mut disk, &[], 0, discard);
+        (result, disk)
+    }
+
+    #[test]
+    fn deallocation_requires_discard() {
+        let unmap = VIRTIO_BLK_WRITE_ZEROES_FLAG_UNMAP;
+
+        let (result, disk) = execute_discard_write_zeroes(RequestType::Discard, 0, true);
+        result.unwrap();
+        assert_eq!(disk.punched, [(4096, 4096)]);
+
+        let (result, disk) = execute_discard_write_zeroes(RequestType::WriteZeroes, unmap, true);
+        result.unwrap();
+        assert_eq!(disk.punched, [(4096, 4096)]);
+
+        // Without DISCARD, nothing may be deallocated: DISCARD is rejected
+        // and the zeroes of WRITE_ZEROES are written despite the unmap hint.
+        let (result, disk) = execute_discard_write_zeroes(RequestType::Discard, 0, false);
+        assert!(matches!(
+            result,
+            Err(ExecuteError::Unsupported(VIRTIO_BLK_T_DISCARD))
+        ));
+        assert!(disk.punched.is_empty());
+
+        let (result, disk) = execute_discard_write_zeroes(RequestType::WriteZeroes, unmap, false);
+        result.unwrap();
+        assert!(disk.punched.is_empty());
+        assert_eq!(disk.zeroed, [(4096, 4096)]);
     }
 
     /// Drives the real submit path: page-aligned buffers are read straight
@@ -832,7 +907,7 @@ mod tests {
         };
         let mut disk = RecordingAsyncIo::new();
         request
-            .execute_async(Arc::clone(&mem), 1024, &mut disk, &[], 0)
+            .execute_async(Arc::clone(&mem), 1024, &mut disk, &[], 0, true)
             .unwrap();
         let op = disk.submitted.pop().unwrap();
         assert!(matches!(op, AsyncIoOperation::ReadToMemory { .. }));
