@@ -890,6 +890,9 @@ jobs:
         run: |
           set -eufo pipefail
           mkdir $HOME/workloads
+          # Keep the guest image in memory, as the runner's disk is slow to
+          # write it and to read it back in each test.
+          sudo mount -t tmpfs -o size=20G,uid="$(id -u)",gid="$(id -g)" tmpfs $HOME/workloads
           # Pull the dev container while the image downloads, and start it
           # once so that its layers are unpacked meanwhile too.
           image="ghcr.io/cloud-hypervisor/cloud-hypervisor:$(sed -n 's/^CTR_IMAGE_VERSION="\(.*\)"$/\1/p' scripts/dev_cli.sh)"
