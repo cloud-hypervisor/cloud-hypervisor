@@ -704,6 +704,22 @@ pub(crate) fn diag_dump_vcpus(api_socket: &str, snapshot_dir: &Path) {
             gprs.join(" "),
             u64_at(&sregs, 248)
         );
+        // A vCPU halted in the paravirtualised spinlock wait has the lock
+        // byte address in rdi: print the qspinlock word it waits on.
+        let rdi = u64_at(&regs, 5 * 8);
+        if (0xffff_8880_0000_0000..0xffff_c880_0000_0000).contains(&rdi) {
+            let word = rdi & !7;
+            match translate(file, ranges, cr3, word).and_then(|pa| read_phys(file, ranges, pa)) {
+                Some(w) => {
+                    let shift = (rdi - word) * 8;
+                    eprintln!(
+                        "DIAG lock {path}: rdi={rdi:#x} u32 at rdi={:#x} (word {w:#x})",
+                        (w >> shift) & 0xffff_ffff
+                    );
+                }
+                None => eprintln!("DIAG lock {path}: rdi={rdi:#x} not mapped"),
+            }
+        }
         let rsp = u64_at(&regs, 6 * 8);
         let mut text = Vec::new();
         let mut unmapped = 0;
