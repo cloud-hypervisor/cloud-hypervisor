@@ -508,7 +508,9 @@ pub(crate) fn setup_ovs_dpdk_guests(
             .unwrap();
 
         // Check the connection works properly between the two VMs
-        guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap();
+        guest2
+            .ssh_command("nc -vz -w 10 172.100.0.1 12345")
+            .unwrap();
     });
     if r.is_err() {
         cleanup_ovs_dpdk();
