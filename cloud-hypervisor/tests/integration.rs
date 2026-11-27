@@ -6138,7 +6138,17 @@ mod common_parallel {
             assert!(rss >= 1310720);
 
             // Stop stress and wait for free-page reporting to shrink RSS again.
-            guest.ssh_command("pkill -x stress").unwrap();
+            // Free page reporting only reports blocks of at least 2 MiB, so
+            // drop the page cache and compact the guest's memory once stress
+            // has exited, as other allocations can leave the pages it frees in
+            // smaller blocks.
+            guest
+                .ssh_command(
+                    "pkill -x stress && while pgrep -x stress > /dev/null; do sleep 0.1; done && \
+                     sync && echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null && \
+                     echo 1 | sudo tee /proc/sys/vm/compact_memory > /dev/null",
+                )
+                .unwrap();
             assert!(wait_until(Duration::from_secs(120), || process_rss_kib(
                 pid
             ) < 1310720));
