@@ -12,16 +12,18 @@ concurrency:
   cancel-in-progress: true
 jobs:
   hunt:
-    name: hunt (${{ matrix.runner }}, ${{ matrix.cmdline }})
-    timeout-minutes: 60
+    name: hunt (${{ matrix.runner }}, ${{ matrix.kvm }} KVM)
+    timeout-minutes: 75
     env:
       PARALLEL_INTEGRATION_TESTS_NUM: 16
     strategy:
       fail-fast: false
       matrix:
         include:
-          - {runner: garm-noble, cmdline: ''}
-          - {runner: garm-noble-amd, cmdline: ''}
+          - {runner: garm-noble, kvm: patched}
+          - {runner: garm-noble, kvm: rebuilt}
+          - {runner: garm-noble-amd, kvm: patched}
+          - {runner: garm-noble-amd, kvm: rebuilt}
     runs-on: ${{ format('{0}-16', matrix.runner) }}
     steps:
       - name: Code checkout
@@ -40,8 +42,49 @@ jobs:
           sudo apt install -y docker-ce docker-ce-cli
       - name: Install xfsprogs
         run: sudo apt-get -y install xfsprogs
-      - name: Set the guest kernel parameters of the experiment
-        run: echo "${{ matrix.cmdline }}" > hunt-cmdline
+      - name: Rebuild the KVM modules of the runner's kernel (${{ matrix.kvm }}) and load them
+        run: |
+          set -eufo pipefail
+          r=$(uname -r)
+          cat /proc/version
+          cat /proc/version_signature || true
+          cat /sys/kernel/security/lockdown || true
+          mokutil --sb-state || true
+          grep -E '^CONFIG_(KVM|KVM_X86|KVM_INTEL|KVM_AMD|MODVERSIONS|MODULE_SIG_FORCE)=' "/boot/config-$r" || true
+          lsmod | grep -E '^(kvm|irqbypass|ccp)' || true
+          src=$(dpkg-query -W -f='${source:Package}=${source:Version}' "linux-modules-$r")
+          gcc=$(sed -n 's/.*-gcc-\([0-9][0-9]*\) .*/gcc-\1/p' /proc/version)
+          echo "kernel source $src, built with $gcc"
+          sudo sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
+          sudo apt-get update -q
+          sudo apt-get -y -q install dpkg-dev build-essential bc bison flex libelf-dev libssl-dev libdw-dev dwarves "$gcc" "linux-headers-$r"
+          mkdir ~/kvm-src
+          cd ~/kvm-src
+          apt-get source -q --only-source "$src" > /dev/null
+          cd "$(find . -mindepth 1 -maxdepth 1 -type d)"
+          if [ "${{ matrix.kvm }}" = patched ]; then
+            patch -p1 < "$GITHUB_WORKSPACE/hunt-kvm-pv-unhalted.patch"
+          fi
+          cp "/boot/config-$r" .config
+          cp "/usr/src/linux-headers-$r/Module.symvers" .
+          k="CC=$gcc HOSTCC=$gcc KERNELRELEASE=$r"
+          make -s $k olddefconfig
+          make -s $k -j"$(nproc)" modules_prepare
+          make -s $k -j"$(nproc)" M=arch/x86/kvm modules
+          stock=$(modinfo -F vermagic kvm)
+          built=$(modinfo -F vermagic arch/x86/kvm/kvm.ko)
+          echo "vermagic: stock '$stock', built '$built'"
+          [ "$stock" = "$built" ]
+          if grep -q -w vmx /proc/cpuinfo; then v=intel; else v=amd; fi
+          for d in $(modinfo -F depends kvm | tr , ' ') $(modinfo -F depends "kvm_$v" | tr , ' '); do
+            [ "$d" = kvm ] || sudo modprobe "$d"
+          done
+          sudo rmmod "kvm_$v" kvm
+          sudo insmod arch/x86/kvm/kvm.ko
+          sudo insmod "arch/x86/kvm/kvm-$v.ko"
+          lsmod | grep -E '^kvm'
+          sudo dmesg | tail -n 5
+          ls -la /dev/kvm
       - name: Trace the KVM spinlock kicks and vCPU wakeups
         run: |
           set -eufo pipefail

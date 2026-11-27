@@ -1,0 +1,42 @@
+diff --git a/arch/x86/kvm/x86.c b/arch/x86/kvm/x86.c
+index 0549c0b48901..25cedb6210a2 100644
+--- a/arch/x86/kvm/x86.c
++++ b/arch/x86/kvm/x86.c
+@@ -8775,8 +8775,11 @@ static int __kvm_emulate_halt(struct kvm_vcpu *vcpu, int state, int reason)
+ 	 */
+ 	++vcpu->stat.halt_exits;
+ 	if (lapic_in_kernel(vcpu)) {
+-		if (kvm_vcpu_has_events(vcpu) || vcpu->arch.pv.pv_unhalted)
++		if (kvm_vcpu_has_events(vcpu) || vcpu->arch.pv.pv_unhalted) {
++			/* This HLT consumes the kick, the next one must not. */
++			vcpu->arch.pv.pv_unhalted = false;
+ 			state = KVM_MP_STATE_RUNNABLE;
++		}
+ 		kvm_set_mp_state(vcpu, state);
+ 		return 1;
+ 	} else {
+diff --git a/arch/x86/kvm/x86.h b/arch/x86/kvm/x86.h
+index cc9e28f32d1b..badeb914eb25 100644
+--- a/arch/x86/kvm/x86.h
++++ b/arch/x86/kvm/x86.h
+@@ -142,9 +142,18 @@ static inline void kvm_warn_on_nested_run_pending(struct kvm_vcpu *vcpu)
+ 
+ static inline void kvm_set_mp_state(struct kvm_vcpu *vcpu, int mp_state)
+ {
+-	vcpu->arch.mp_state = mp_state;
+-	if (mp_state == KVM_MP_STATE_RUNNABLE)
++	/*
++	 * Clear pv_unhalted when the vCPU leaves a halted state, as the kick
++	 * that set it has been consumed.  Don't clear it when the vCPU is
++	 * already RUNNABLE: the kick may be for a HLT the vCPU is about to
++	 * execute, e.g. when the vCPU is in the guest's PV spinlock wait with
++	 * IRQs disabled and an async #PF completion lands before the HLT.
++	 */
++	if (mp_state == KVM_MP_STATE_RUNNABLE &&
++	    vcpu->arch.mp_state != KVM_MP_STATE_RUNNABLE)
+ 		vcpu->arch.pv.pv_unhalted = false;
++
++	vcpu->arch.mp_state = mp_state;
+ }
+ 
+ static inline bool kvm_is_exception_pending(struct kvm_vcpu *vcpu)
