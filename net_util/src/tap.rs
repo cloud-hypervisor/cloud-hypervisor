@@ -11,6 +11,7 @@ use std::io::{Error as IoError, Read, Result as IoResult, Write};
 use std::net::{IpAddr, Ipv6Addr};
 use std::os::raw::*;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::sync::Mutex;
 use std::{result, str};
 
 use libc::{__c_anonymous_ifr_ifru, IFNAMSIZ, ifreq};
@@ -62,6 +63,8 @@ pub struct Tap {
     tap_file: File,
     /// The name does not exceed [`IFNAMSIZ`] bytes including the NUL byte.
     if_name: CString,
+    // Whether the queue is attached. Only `TapQueues::associate` changes it.
+    pub(crate) attached: bool,
 }
 
 impl PartialEq for Tap {
@@ -75,6 +78,7 @@ impl Clone for Tap {
         Tap {
             tap_file: self.tap_file.try_clone().unwrap(),
             if_name: self.if_name.clone(),
+            attached: self.attached,
         }
     }
 }
@@ -224,6 +228,7 @@ impl Tap {
         Ok(Tap {
             tap_file: tuntap,
             if_name,
+            attached: true,
         })
     }
 
@@ -280,7 +285,11 @@ impl Tap {
             return Err(Error::ConfigureTap(IoError::last_os_error()));
         }
 
-        let tap = Tap { tap_file, if_name };
+        let tap = Tap {
+            tap_file,
+            if_name,
+            attached: true,
+        };
         let vnet_hdr_size = vnet_hdr_len() as i32;
         tap.set_vnet_hdr_size(vnet_hdr_size)?;
 
@@ -537,23 +546,45 @@ impl Tap {
         let if_name = CString::new(if_name)
             .map_err(|_| Error::IfnameContainsNUL(if_name.to_string()))
             .unwrap();
-        Tap { tap_file, if_name }
+        Tap {
+            tap_file,
+            if_name,
+            attached: true,
+        }
     }
 }
 
-/// Attach the first `n` TAP queues and detach the rest, whatever state they
-/// are in, so the kernel only steers received frames to queues being read.
-pub fn associate_taps(taps: &[Tap], n: usize) -> Result<()> {
-    for (index, tap) in taps.iter().enumerate() {
-        let flag = if index < n {
-            libc::IFF_ATTACH_QUEUE
-        } else {
-            libc::IFF_DETACH_QUEUE
-        };
-        tap.set_queue(flag as c_short)?;
+/// The TAP queues of a device, one per queue pair.
+pub struct TapQueues {
+    // A queue pair's worker holds the lock of its queue for a whole TX batch,
+    // so the queue is not detached during the batch.
+    pub(crate) taps: Vec<Mutex<Tap>>,
+}
+
+impl TapQueues {
+    pub fn new(taps: Vec<Tap>) -> Self {
+        TapQueues {
+            taps: taps.into_iter().map(Mutex::new).collect(),
+        }
     }
 
-    Ok(())
+    /// Attach the first `n` TAP queues and detach the rest, whatever state
+    /// they are in, so the kernel only steers received frames to queues
+    /// being read.
+    pub fn associate(&self, n: usize) -> Result<()> {
+        for (index, tap) in self.taps.iter().enumerate() {
+            let mut tap = tap.lock().unwrap();
+            let flag = if index < n {
+                libc::IFF_ATTACH_QUEUE
+            } else {
+                libc::IFF_DETACH_QUEUE
+            };
+            tap.set_queue(flag as c_short)?;
+            tap.attached = index < n;
+        }
+
+        Ok(())
+    }
 }
 
 impl Read for Tap {
@@ -943,18 +974,20 @@ mod tests {
         let tap1 = Tap::open_named(tap0.if_name_as_str(), 3, None).unwrap();
         let tap2 = Tap::open_named(tap0.if_name_as_str(), 3, None).unwrap();
         let if_name = tap0.if_name_as_str().to_string();
-        let taps = [tap0, tap1, tap2];
+        let tap_queues = TapQueues::new(vec![tap0, tap1, tap2]);
 
-        associate_taps(&taps, 1).unwrap();
+        tap_queues.associate(1).unwrap();
         assert_eq!(rx_queues(&if_name), 1);
 
-        associate_taps(&taps, 1).unwrap();
+        tap_queues.associate(1).unwrap();
         assert_eq!(rx_queues(&if_name), 1);
 
-        associate_taps(&taps, 3).unwrap();
+        tap_queues.associate(3).unwrap();
         assert_eq!(rx_queues(&if_name), 3);
 
-        associate_taps(&taps, 2).unwrap();
+        tap_queues.associate(2).unwrap();
         assert_eq!(rx_queues(&if_name), 2);
+
+        assert!(!tap_queues.taps[2].lock().unwrap().attached);
     }
 }

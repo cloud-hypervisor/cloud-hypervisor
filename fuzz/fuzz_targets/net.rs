@@ -983,7 +983,7 @@ fn new_direct_ctrl_handler(
         kill_evt: EventFd::new(EFD_NONBLOCK).ok()?,
         pause_evt: EventFd::new(EFD_NONBLOCK).ok()?,
         ctrl_q: net_util::CtrlQueue::new(
-            Vec::new(),
+            Arc::new(net_util::TapQueues::new(Vec::new())),
             Arc::new(std::sync::atomic::AtomicBool::new(true)),
             MAX_VIRTQUEUE_PAIRS,
             Arc::new(std::sync::atomic::AtomicU16::new(MAX_VIRTQUEUE_PAIRS)),

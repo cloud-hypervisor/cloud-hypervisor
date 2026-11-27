@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 
 use log::{error, info};
-use net_util::{CtrlQueue, MacAddr, VirtioNetConfig};
+use net_util::{CtrlQueue, MacAddr, TapQueues, VirtioNetConfig};
 use seccompiler::SeccompAction;
 use vhost::vhost_user::message::{VhostUserConfigFlags, VhostUserProtocolFeatures};
 use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler};
@@ -402,7 +402,7 @@ impl VirtioDevice for Net {
                 kill_evt,
                 pause_evt,
                 ctrl_q: CtrlQueue::new(
-                    Vec::new(),
+                    Arc::new(TapQueues::new(Vec::new())),
                     Arc::clone(&self.announce.pending),
                     self.config.max_virtqueue_pairs,
                     Arc::new(AtomicU16::new(1)),
