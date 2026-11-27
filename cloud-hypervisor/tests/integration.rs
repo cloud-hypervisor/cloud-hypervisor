@@ -3322,9 +3322,15 @@ mod common_parallel {
 
         let r = panic::catch_unwind(|| {
             guest.ssh_command_l1("sudo systemctl start vfio").unwrap();
+            // The L2 guest has three interfaces on the same subnet, so its
+            // notification can come from any of their addresses.
             GuestNetworkConfig::wait_vm_boot_from(
                 guest.network.l2_tcp_listener_port,
-                &guest.network.l2_guest_ip2,
+                &[
+                    &guest.network.l2_guest_ip1,
+                    &guest.network.l2_guest_ip2,
+                    &guest.network.l2_guest_ip3,
+                ],
                 // Nested L2 guests can exceed the default 120s timeout on loaded
                 // hosts. The listener still returns immediately once the guest
                 // reports in.
