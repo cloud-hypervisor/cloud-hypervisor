@@ -550,6 +550,117 @@ pub(crate) fn fw_path(_fw_type: FwType) -> String {
 
 /// Parse the event_monitor file based on the format that each event
 /// is followed by a double newline
+/// Temporary diagnostics: pause the VM, snapshot it and print the vCPU state
+/// of a guest that has stopped making progress, then resume it.
+pub(crate) fn diag_dump_vcpus(api_socket: &str, snapshot_dir: &Path) {
+    fn bytes(v: &serde_json::Value) -> Vec<u8> {
+        let v = v.get("Kvm").unwrap_or(v);
+        let v = v.get("regs").unwrap_or(v);
+        v.as_array()
+            .map(|a| a.iter().map(|x| x.as_i64().unwrap_or(0) as u8).collect())
+            .unwrap_or_default()
+    }
+    fn u32_at(b: &[u8], off: usize) -> u32 {
+        b.get(off..off + 4)
+            .map_or(0, |x| u32::from_le_bytes(x.try_into().unwrap()))
+    }
+    fn u64_at(b: &[u8], off: usize) -> u64 {
+        b.get(off..off + 8)
+            .map_or(0, |x| u64::from_le_bytes(x.try_into().unwrap()))
+    }
+    fn print_vcpu(path: &str, state: &serde_json::Value) {
+        let s = state.get("Kvm").unwrap_or(state);
+        let regs = bytes(&s["regs"]);
+        let lapic = bytes(&s["lapic_state"]);
+        let vectors = |base: usize| -> Vec<u32> {
+            let mut v = Vec::new();
+            for i in 0..8 {
+                let r = u32_at(&lapic, base + 0x10 * i);
+                for b in 0..32 {
+                    if r & (1 << b) != 0 {
+                        v.push(i as u32 * 32 + b);
+                    }
+                }
+            }
+            v
+        };
+        let msr = |index: u64| -> String {
+            s["msrs"]
+                .as_array()
+                .and_then(|a| a.iter().find(|m| m["index"].as_u64() == Some(index)))
+                .map_or_else(
+                    || "-".to_string(),
+                    |m| format!("{:#x}", m["data"].as_u64().unwrap_or(0)),
+                )
+        };
+        let events: Vec<String> = bytes(&s["vcpu_events"])
+            .iter()
+            .take(24)
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        eprintln!(
+            "DIAG vcpu {path}: rip={:#x} rsp={:#x} rflags={:#x} mp_state={} tpr={:#x} \
+             ppr={:#x} isr={:?} irr={:?} tmr={:?} lvtt={:#x} tmict={:#x} tmcct={:#x} \
+             tsc_deadline={} tsc={} lstar={} kvmclock={} pv_eoi={} apf_en={} apf_int={} \
+             steal={} events={}",
+            u64_at(&regs, 16 * 8),
+            u64_at(&regs, 6 * 8),
+            u64_at(&regs, 17 * 8),
+            u32_at(&bytes(&s["mp_state"]), 0),
+            u32_at(&lapic, 0x80),
+            u32_at(&lapic, 0xa0),
+            vectors(0x100),
+            vectors(0x200),
+            vectors(0x180),
+            u32_at(&lapic, 0x320),
+            u32_at(&lapic, 0x380),
+            u32_at(&lapic, 0x390),
+            msr(0x6e0),
+            msr(0x10),
+            msr(0xc000_0082),
+            msr(0x4b56_4d01),
+            msr(0x4b56_4d04),
+            msr(0x4b56_4d02),
+            msr(0x4b56_4d06),
+            msr(0x4b56_4d03),
+            events.join("")
+        );
+    }
+    fn walk(path: &str, v: &serde_json::Value) {
+        if let Some(data) = v["snapshot_data"]["state"].as_str()
+            && data.contains("lapic_state")
+            && let Ok(state) = serde_json::from_str::<serde_json::Value>(data)
+        {
+            print_vcpu(path, &state);
+        }
+        if let Some(children) = v["snapshots"].as_object() {
+            for (k, child) in children {
+                walk(&format!("{path}/{k}"), child);
+            }
+        }
+    }
+
+    if !remote_command(api_socket, "pause", None) {
+        eprintln!("DIAG vcpus: pause failed");
+        return;
+    }
+    let url = format!("file://{}", snapshot_dir.display());
+    let _ = fs::create_dir_all(snapshot_dir);
+    if remote_command(api_socket, "snapshot", Some(&url)) {
+        match fs::read_to_string(snapshot_dir.join("state.json")) {
+            Ok(state) => match serde_json::from_str::<serde_json::Value>(&state) {
+                Ok(v) => walk("", &v),
+                Err(e) => eprintln!("DIAG vcpus: cannot parse state.json: {e}"),
+            },
+            Err(e) => eprintln!("DIAG vcpus: cannot read state.json: {e}"),
+        }
+    } else {
+        eprintln!("DIAG vcpus: snapshot failed");
+    }
+    let _ = fs::remove_dir_all(snapshot_dir);
+    remote_command(api_socket, "resume", None);
+}
+
 pub(crate) fn parse_event_file(event_file: &str) -> Vec<serde_json::Value> {
     let content = fs::read(event_file).unwrap();
     String::from_utf8_lossy(&content)

@@ -8474,7 +8474,13 @@ mod common_parallel {
     // demand-faulted across the network.
     fn _test_live_migration_tcp_postcopy() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
+        let mut guest = Guest::new(Box::new(disk_config));
+        // Temporary: also log the guest kernel to a serial port file, to see
+        // what happens to the guest after the migration.
+        let serial_log = guest.tmp_dir.as_path().join("serial.log");
+        guest.kernel_cmdline = guest
+            .kernel_cmdline
+            .map(|c| c.replace("console=hvc0", "console=ttyS0 console=hvc0"));
         let console_text = String::from("On a branch floating down river a cricket, singing.");
         let net_id = "netpc1";
         let net_params = format!(
@@ -8492,6 +8498,7 @@ mod common_parallel {
             .default_kernel_cmdline()
             .default_disks()
             .args(["--net", net_params.as_str()])
+            .args(["--serial", &format!("file={}", serial_log.display())])
             .args(["--api-socket", &src_api_socket])
             .capture_output()
             .spawn()
@@ -8558,7 +8565,94 @@ mod common_parallel {
             // Probing the destination forces page faults across most of
             // guest memory. If the source serve loop drops bytes, these
             // checks fail.
-            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+            let cpu_count = guest.get_cpu_count().unwrap_or_default();
+            // Temporary diagnostics for an unreachable destination guest.
+            if cpu_count != boot_vcpus {
+                for c in ["ip -br addr", "ip route", "ip neigh", "ip -s link"] {
+                    let o = Command::new("sh").args(["-c", c]).output().unwrap();
+                    eprintln!("POSTCOPY DIAG {c}:\n{}", String::from_utf8_lossy(&o.stdout));
+                }
+                let pid = dest_child.id();
+                // Sample the thread CPU times and trace the vCPU exits, to
+                // tell a spinning guest from a blocked one and find where.
+                let threads: Vec<(String, String)> = fs::read_dir(format!("/proc/{pid}/task"))
+                    .unwrap()
+                    .flatten()
+                    .map(|e| {
+                        (
+                            e.file_name().to_string_lossy().into_owned(),
+                            fs::read_to_string(e.path().join("comm"))
+                                .unwrap_or_default()
+                                .trim()
+                                .to_string(),
+                        )
+                    })
+                    .collect();
+                let cpu_times = || {
+                    threads
+                        .iter()
+                        .map(|(tid, comm)| {
+                            let stat = fs::read_to_string(format!("/proc/{pid}/task/{tid}/stat"))
+                                .unwrap_or_default();
+                            let f: Vec<&str> = stat
+                                .rsplit(')')
+                                .next()
+                                .unwrap_or("")
+                                .split_whitespace()
+                                .collect();
+                            format!(
+                                "{comm}:{}:u{}:s{}:g{}",
+                                f.first().unwrap_or(&"?"),
+                                f.get(11).unwrap_or(&"?"),
+                                f.get(12).unwrap_or(&"?"),
+                                f.get(40).unwrap_or(&"?")
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                };
+                eprintln!("DIAG cpu times: {}", cpu_times());
+                diag_dump_vcpus(
+                    &dest_api_socket,
+                    &guest.tmp_dir.as_path().join("diag-snapshot"),
+                );
+                eprintln!("DIAG cpu times 5 s later: {}", cpu_times());
+                let serial = fs::read_to_string(&serial_log).unwrap_or_default();
+                let lines: Vec<&str> = serial.lines().collect();
+                eprintln!(
+                    "DIAG serial log tail before the NMI ({} lines):\n{}",
+                    lines.len(),
+                    lines[lines.len().saturating_sub(60)..].join("\n")
+                );
+                let _ = remote_command(&dest_api_socket, "nmi", None);
+                thread::sleep(Duration::from_secs(2));
+                let serial = fs::read_to_string(&serial_log).unwrap_or_default();
+                eprintln!(
+                    "DIAG serial log after the NMI:\n{}",
+                    serial
+                        .lines()
+                        .skip(lines.len())
+                        .take(10)
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                );
+                for e in fs::read_dir(format!("/proc/{pid}/task")).unwrap().flatten() {
+                    let t = e.path();
+                    eprintln!(
+                        "POSTCOPY DIAG thread {} wchan {} stack {}",
+                        fs::read_to_string(t.join("comm"))
+                            .unwrap_or_default()
+                            .trim(),
+                        fs::read_to_string(t.join("wchan"))
+                            .unwrap_or_default()
+                            .trim(),
+                        fs::read_to_string(t.join("stack"))
+                            .unwrap_or_default()
+                            .replace('\n', " | ")
+                    );
+                }
+            }
+            assert_eq!(cpu_count, boot_vcpus);
             assert!(guest.get_total_memory().unwrap_or_default() > 400_000);
             guest.check_devices_common(None, Some(&console_text), None);
 
@@ -12587,7 +12681,13 @@ mod snapshot_restore_common {
     // endpoints, proving parity with `vm.snapshot`/`vm.restore`.
     pub(crate) fn _test_snapshot_restore_offload(virtio_mem: bool, ondemand: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
+        let mut guest = Guest::new(Box::new(disk_config));
+        // Temporary: also log the guest kernel to a serial port file, to see
+        // what happens to the guest after the restore.
+        let serial_log = guest.tmp_dir.as_path().join("serial.log");
+        guest.kernel_cmdline = guest
+            .kernel_cmdline
+            .map(|c| c.replace("console=hvc0", "console=ttyS0 console=hvc0"));
         let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
         let console_text = String::from("On a branch floating down river a cricket, singing.");
         let offload_dir = String::from(
@@ -12623,6 +12723,7 @@ mod snapshot_restore_common {
             .default_kernel_cmdline()
             .default_disks()
             .default_net()
+            .args(["--serial", &format!("file={}", serial_log.display())])
             .capture_output()
             .spawn()
             .unwrap();
@@ -12785,7 +12886,94 @@ mod snapshot_restore_common {
             );
 
             // Restored VM should be functional.
-            guest.wait_for_ssh(Duration::from_secs(30)).unwrap();
+            let ssh = guest.wait_for_ssh(Duration::from_secs(30));
+            // Temporary diagnostics for an unreachable restored guest.
+            if ssh.is_err() {
+                let pid = dest_child.id();
+                // Sample the thread CPU times and trace the vCPU exits, to
+                // tell a spinning guest from a blocked one and find where.
+                let threads: Vec<(String, String)> = fs::read_dir(format!("/proc/{pid}/task"))
+                    .unwrap()
+                    .flatten()
+                    .map(|e| {
+                        (
+                            e.file_name().to_string_lossy().into_owned(),
+                            fs::read_to_string(e.path().join("comm"))
+                                .unwrap_or_default()
+                                .trim()
+                                .to_string(),
+                        )
+                    })
+                    .collect();
+                let cpu_times = || {
+                    threads
+                        .iter()
+                        .map(|(tid, comm)| {
+                            let stat = fs::read_to_string(format!("/proc/{pid}/task/{tid}/stat"))
+                                .unwrap_or_default();
+                            let f: Vec<&str> = stat
+                                .rsplit(')')
+                                .next()
+                                .unwrap_or("")
+                                .split_whitespace()
+                                .collect();
+                            format!(
+                                "{comm}:{}:u{}:s{}:g{}",
+                                f.first().unwrap_or(&"?"),
+                                f.get(11).unwrap_or(&"?"),
+                                f.get(12).unwrap_or(&"?"),
+                                f.get(40).unwrap_or(&"?")
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                };
+                eprintln!("DIAG cpu times: {}", cpu_times());
+                diag_dump_vcpus(
+                    &api_socket_restored,
+                    &guest.tmp_dir.as_path().join("diag-snapshot"),
+                );
+                eprintln!("DIAG cpu times 5 s later: {}", cpu_times());
+                let serial = fs::read_to_string(&serial_log).unwrap_or_default();
+                let lines: Vec<&str> = serial.lines().collect();
+                eprintln!(
+                    "DIAG serial log tail before the NMI ({} lines):\n{}",
+                    lines.len(),
+                    lines[lines.len().saturating_sub(60)..].join("\n")
+                );
+                let _ = remote_command(&api_socket_restored, "nmi", None);
+                thread::sleep(Duration::from_secs(2));
+                let serial = fs::read_to_string(&serial_log).unwrap_or_default();
+                eprintln!(
+                    "DIAG serial log after the NMI:\n{}",
+                    serial
+                        .lines()
+                        .skip(lines.len())
+                        .take(10)
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                );
+                for e in fs::read_dir(format!("/proc/{pid}/task")).unwrap().flatten() {
+                    let t = e.path();
+                    eprintln!(
+                        "OFFLOAD DIAG thread {} wchan {} stack {}",
+                        fs::read_to_string(t.join("comm"))
+                            .unwrap_or_default()
+                            .trim(),
+                        fs::read_to_string(t.join("wchan"))
+                            .unwrap_or_default()
+                            .trim(),
+                        fs::read_to_string(t.join("stack"))
+                            .unwrap_or_default()
+                            .replace('\n', " | ")
+                    );
+                }
+                for c in ["ip -br addr", "ip neigh", "ip -s link"] {
+                    let o = Command::new("sh").args(["-c", c]).output().unwrap();
+                    eprintln!("OFFLOAD DIAG {c}:\n{}", String::from_utf8_lossy(&o.stdout));
+                }
+            }
+            ssh.unwrap();
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
             guest.check_devices_common(None, Some(&console_text), None);
 
