@@ -959,7 +959,7 @@ pub(crate) fn compress_os_disk(guest: &Guest, compression_type: &str) {
             "qcow2",
             &format!("compression_type={compression_type}"),
         )
-        .args(&["-c", &os_disk, &compressed])
+        .args(&["-c", "-m", "16", "-W", &os_disk, &compressed])
         .run("Failed to compress the OS disk");
     fs::rename(&compressed, &os_disk).expect("Failed to replace the OS disk");
 }
