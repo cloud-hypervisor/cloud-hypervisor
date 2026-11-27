@@ -1675,7 +1675,7 @@ mod common_parallel {
             "truncate failed"
         );
 
-        let loop_dev_path = create_loop_device(fs_img_path.to_str().unwrap(), 4096, 5);
+        let loop_dev_path = create_loop_device(fs_img_path.to_str().unwrap(), 4096, 20);
 
         assert!(
             exec_host_command_output(&format!("mkfs.ext4 -q {loop_dev_path}"))
@@ -1767,7 +1767,7 @@ mod common_parallel {
             "truncate failed"
         );
 
-        let loop_dev_path = create_loop_device(fs_img_path.to_str().unwrap(), 4096, 5);
+        let loop_dev_path = create_loop_device(fs_img_path.to_str().unwrap(), 4096, 20);
 
         assert!(
             exec_host_command_output(&format!("mkfs.ext4 -q {loop_dev_path}"))
@@ -4690,7 +4690,7 @@ mod common_parallel {
             .args(&[test_disk_path.to_str().unwrap(), "16M"])
             .run("qemu-img command failed");
 
-        let loop_dev = create_loop_device(test_disk_path.to_str().unwrap(), 4096, 5);
+        let loop_dev = create_loop_device(test_disk_path.to_str().unwrap(), 4096, 20);
         _test_virtio_block_topology(&guest, &loop_dev);
         Command::new("losetup")
             .args(["-d", &loop_dev])
@@ -4722,7 +4722,7 @@ mod common_parallel {
             "fallocate failed"
         );
 
-        let loop_dev = create_loop_device(test_disk_path.to_str().unwrap(), 4096, 5);
+        let loop_dev = create_loop_device(test_disk_path.to_str().unwrap(), 4096, 20);
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=1"])
@@ -4791,7 +4791,7 @@ mod common_parallel {
             "truncate failed"
         );
 
-        let loop_dev_path = create_loop_device(fs_img_path.to_str().unwrap(), 4096, 5);
+        let loop_dev_path = create_loop_device(fs_img_path.to_str().unwrap(), 4096, 20);
 
         assert!(
             exec_host_command_output(&format!("mkfs.ext4 -q {loop_dev_path}"))
@@ -5312,7 +5312,7 @@ mod common_parallel {
             String::from_utf8_lossy(&res.stderr)
         );
 
-        let loop_dev = create_loop_device(test_disk_path.to_str().unwrap(), 4096, 5);
+        let loop_dev = create_loop_device(test_disk_path.to_str().unwrap(), 4096, 20);
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=1"])
@@ -5419,8 +5419,8 @@ mod common_parallel {
             .expect("Expect truncating COW image to succeed");
 
         let origin_sectors: u64 = 128 * 1024 * 1024 / 512;
-        let origin_loop = create_loop_device(origin_path.to_str().unwrap(), 4096, 5);
-        let cow_loop = create_loop_device(cow_path.to_str().unwrap(), 512, 5);
+        let origin_loop = create_loop_device(origin_path.to_str().unwrap(), 4096, 20);
+        let cow_loop = create_loop_device(cow_path.to_str().unwrap(), 512, 20);
 
         let unique = format!(
             "ch-test-{}",
