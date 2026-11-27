@@ -2152,6 +2152,128 @@ mod tests {
         }
     }
 
+    #[test]
+    fn eject_unmaps_only_remaining_backend_ranges() {
+        let mut iommu = new_iommu();
+        iommu.mapping = Arc::new(iommu_mapping(&[]));
+        iommu.mapping.endpoints.write().unwrap().insert(7, 0);
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        for id in [0, 7] {
+            iommu
+                .add_external_mapping(
+                    id,
+                    Arc::new(UnmapRecorder {
+                        unmaps: Arc::clone(&calls),
+                        id,
+                    }),
+                )
+                .unwrap();
+        }
+
+        {
+            let mut backends = iommu.ext_mapping.lock().unwrap();
+            for virt_start in [0x1000, 0x3000] {
+                let request = VirtioIommuReqMap {
+                    domain: 0,
+                    virt_start,
+                    virt_end: virt_start + 0xfff,
+                    phys_start: virt_start + 0x4000,
+                    flags: Mapping::unrestricted_flags(),
+                };
+                let (len, status) = process_tracked_request(
+                    VIRTIO_IOMMU_T_MAP,
+                    request,
+                    &iommu.mapping,
+                    &mut backends,
+                );
+                len.unwrap();
+                assert_eq!(status, VIRTIO_IOMMU_S_OK);
+            }
+            let request = VirtioIommuReqUnmap {
+                domain: 0,
+                virt_start: 0x1000,
+                virt_end: 0x1fff,
+                ..Default::default()
+            };
+            let (len, status) = process_tracked_request(
+                VIRTIO_IOMMU_T_UNMAP,
+                request,
+                &iommu.mapping,
+                &mut backends,
+            );
+            len.unwrap();
+            assert_eq!(status, VIRTIO_IOMMU_S_OK);
+        }
+        assert!(iommu.remove_external_mapping(0).unwrap().is_some());
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec![
+                (0, 0x1000, 0x1000),
+                (7, 0x1000, 0x1000),
+                (0, 0x3000, 0x1000)
+            ]
+        );
+        assert_eq!(remaining_iovas(&iommu.mapping), vec![0x3000]);
+        assert_eq!(
+            *iommu.mapping.endpoints.read().unwrap(),
+            BTreeMap::from([(7, 0)])
+        );
+    }
+
+    #[test]
+    fn failed_eject_retains_only_ranges_still_mapped() {
+        struct RetryUnmap {
+            calls: Arc<Mutex<Vec<(u64, u64)>>>,
+        }
+
+        impl ExternalDmaMapping for RetryUnmap {
+            fn map(
+                &self,
+                _iova: u64,
+                _gpa: u64,
+                _size: u64,
+            ) -> Result<(), ExternalDmaMappingError> {
+                Ok(())
+            }
+
+            fn unmap(&self, iova: u64, size: u64) -> Result<(), ExternalDmaMappingError> {
+                let mut calls = self.calls.lock().unwrap();
+                calls.push((iova, size));
+                if calls.len() == 2 {
+                    FailingMapping.unmap(iova, size)
+                } else {
+                    Ok(())
+                }
+            }
+        }
+
+        let mut iommu = new_iommu();
+        iommu.mapping = Arc::new(iommu_mapping(&[]));
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        iommu
+            .add_external_mapping(
+                0,
+                Arc::new(RetryUnmap {
+                    calls: Arc::clone(&calls),
+                }),
+            )
+            .unwrap();
+        {
+            let mut backends = iommu.ext_mapping.lock().unwrap();
+            let backend = backends.get_mut(&0).unwrap();
+            backend.map(0x1000, 0x4000, 0x1000).unwrap();
+            backend.map(0x3000, 0x6000, 0x1000).unwrap();
+        }
+
+        assert!(iommu.remove_external_mapping(0).is_err());
+        assert_eq!(iommu.mapping.endpoints.read().unwrap().get(&0), Some(&0));
+        assert!(iommu.remove_external_mapping(0).unwrap().is_some());
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec![(0x1000, 0x1000), (0x3000, 0x1000), (0x3000, 0x1000)]
+        );
+    }
+
     fn run_unmap(
         virt_start: u64,
         virt_end: u64,
