@@ -18,7 +18,7 @@ use std::mem::zeroed;
 use std::os::unix::thread::JoinHandleExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex, OnceLock};
-use std::{any, cmp, hint, io, panic, result, thread, time};
+use std::{any, cmp, hint, io, panic, process, result, thread, time};
 
 #[cfg(target_arch = "aarch64")]
 use acpi_tables::pptt::{CacheNodeBuilder, CacheType, PPTT, ProcessorNode};
@@ -1280,7 +1280,9 @@ impl CpuManager {
 
         let handle = Some(
             thread::Builder::new()
-                .name(format!("vcpu{vcpu_id}"))
+                // Temporary: name the vCPU threads after the VMM process too,
+                // to find them in the host's trace.
+                .name(format!("vcpu{vcpu_id}-{}", process::id()))
                 .spawn(move || {
                     // Schedule the thread to run on the expected CPU set
                     if let Some(cpuset) = cpuset.as_ref() {

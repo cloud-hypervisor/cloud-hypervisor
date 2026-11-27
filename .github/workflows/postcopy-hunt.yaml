@@ -20,8 +20,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {runner: garm-noble, cmdline: 'unknown_nmi_panic panic_print=0x40'}
-          - {runner: garm-noble-amd, cmdline: 'unknown_nmi_panic panic_print=0x40'}
+          - {runner: garm-noble, cmdline: ''}
+          - {runner: garm-noble-amd, cmdline: ''}
     runs-on: ${{ format('{0}-16', matrix.runner) }}
     steps:
       - name: Code checkout
@@ -42,6 +42,24 @@ jobs:
         run: sudo apt-get -y install xfsprogs
       - name: Set the guest kernel parameters of the experiment
         run: echo "${{ matrix.cmdline }}" > hunt-cmdline
+      - name: Trace the KVM spinlock kicks and vCPU wakeups
+        run: |
+          set -eufo pipefail
+          uname -a
+          sudo sh -c '
+            t=/sys/kernel/tracing
+            echo 0 > $t/tracing_on
+            echo > $t/trace
+            echo 32768 > $t/buffer_size_kb
+            echo 8192 > $t/saved_cmdlines_size
+            echo mono > $t/trace_clock
+            echo "nr == 5" > $t/events/kvm/kvm_hypercall/filter
+            echo "dm == 768" > $t/events/kvm/kvm_apic_accept_irq/filter
+            for e in kvm_hypercall kvm_apic_accept_irq kvm_vcpu_wakeup kvm_async_pf_not_present kvm_async_pf_ready kvm_async_pf_completed kvm_async_pf_repeated_fault; do
+              echo 1 > $t/events/kvm/$e/enable
+            done
+            echo 1 > $t/tracing_on
+          '
       - name: Run the postcopy and on demand restore tests until one fails
         timeout-minutes: 50
         run: scripts/dev_cli.sh tests --integration --ci --libc gnu

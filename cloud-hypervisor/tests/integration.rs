@@ -8573,6 +8573,7 @@ mod common_parallel {
                     eprintln!("POSTCOPY DIAG {c}:\n{}", String::from_utf8_lossy(&o.stdout));
                 }
                 let pid = dest_child.id();
+                diag_kvm_trace(pid);
                 // Sample the thread CPU times and trace the vCPU exits, to
                 // tell a spinning guest from a blocked one and find where.
                 let threads: Vec<(String, String)> = fs::read_dir(format!("/proc/{pid}/task"))
@@ -8635,6 +8636,11 @@ mod common_parallel {
                         .take(10)
                         .collect::<Vec<_>>()
                         .join("\n")
+                );
+                // An NMI takes a vCPU out of HLT: see if that unwedges it.
+                eprintln!(
+                    "DIAG ssh after the NMI: {}",
+                    guest.wait_for_ssh(Duration::from_secs(20)).is_ok()
                 );
                 for e in fs::read_dir(format!("/proc/{pid}/task")).unwrap().flatten() {
                     let t = e.path();
@@ -12890,6 +12896,7 @@ mod snapshot_restore_common {
             // Temporary diagnostics for an unreachable restored guest.
             if ssh.is_err() {
                 let pid = dest_child.id();
+                diag_kvm_trace(pid);
                 // Sample the thread CPU times and trace the vCPU exits, to
                 // tell a spinning guest from a blocked one and find where.
                 let threads: Vec<(String, String)> = fs::read_dir(format!("/proc/{pid}/task"))
@@ -12952,6 +12959,11 @@ mod snapshot_restore_common {
                         .take(10)
                         .collect::<Vec<_>>()
                         .join("\n")
+                );
+                // An NMI takes a vCPU out of HLT: see if that unwedges it.
+                eprintln!(
+                    "DIAG ssh after the NMI: {}",
+                    guest.wait_for_ssh(Duration::from_secs(20)).is_ok()
                 );
                 for e in fs::read_dir(format!("/proc/{pid}/task")).unwrap().flatten() {
                     let t = e.path();

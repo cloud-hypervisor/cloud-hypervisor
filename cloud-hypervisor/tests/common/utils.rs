@@ -552,6 +552,48 @@ pub(crate) fn fw_path(_fw_type: FwType) -> String {
 /// is followed by a double newline
 /// Temporary diagnostics: pause the VM, snapshot it and print the vCPU state
 /// of a guest that has stopped making progress, then resume it.
+/// Temporary: stop the host's KVM tracing, set up by the postcopy hunt
+/// workflow, and print the trace events of the vCPU threads of the VMM.
+pub(crate) fn diag_kvm_trace(vmm_pid: u32) {
+    let tracing = Path::new("/sys/kernel/tracing");
+    if !tracing.join("trace").exists() {
+        let _ = Command::new("mount")
+            .args(["-t", "tracefs", "nodev", "/sys/kernel/tracing"])
+            .status();
+    }
+    if fs::write(tracing.join("tracing_on"), "0").is_err() {
+        eprintln!("DIAG trace: no tracefs");
+        return;
+    }
+    // The hunt names the vCPU threads vcpu<id>-<VMM pid>, so the trace shows
+    // them as vcpu<id>-<VMM pid>-<host thread id>.
+    let pattern = format!("vcpu[0-9]+-{vmm_pid}-");
+    eprintln!("DIAG trace threads: {pattern}");
+    match Command::new("sh")
+        .args([
+            "-c",
+            &format!(
+                "t=/sys/kernel/tracing/trace; v=/tmp/vm-trace-{vmm_pid}.txt; \
+                 echo \"first: $(grep -m 1 -v '^#' $t)\"; grep -E -e '{pattern}' $t > $v; \
+                 for th in $(grep -oE '{pattern}[0-9]+' $v | sort -u); do \
+                 echo \"== $th: $(grep -F -- \"$th \" $v | grep -oE 'kvm_[a-z_]+:' | sort | \
+                 uniq -c | tr -s ' \\n' ' ')\"; \
+                 echo \"== $th kicks and accepted interrupts:\"; \
+                 grep -F -- \"$th \" $v | grep -E 'kvm_hypercall|kvm_apic_accept_irq' | tail -n 20; \
+                 echo \"== $th last events:\"; grep -F -- \"$th \" $v | tail -n 40; done; rm -f $v"
+            ),
+        ])
+        .output()
+    {
+        Ok(o) => {
+            for l in String::from_utf8_lossy(&o.stdout).lines() {
+                eprintln!("DIAG trace {l}");
+            }
+        }
+        Err(e) => eprintln!("DIAG trace: {e}"),
+    }
+}
+
 pub(crate) fn diag_dump_vcpus(api_socket: &str, snapshot_dir: &Path) {
     fn bytes(v: &serde_json::Value) -> Vec<u8> {
         let v = v.get("Kvm").unwrap_or(v);
