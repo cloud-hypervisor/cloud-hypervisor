@@ -11065,6 +11065,32 @@ mod common_parallel {
     fn test_live_upgrade_numa_memfds() {
         _test_live_migration_numa(true, true);
     }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_restore_uffd_hugepage_zone() {
+        if !exec_host_command_status(
+            "grep -q '^Hugepagesize:[[:space:]]*2048 kB' /proc/meminfo && test $(awk '/HugePages_Free/ {print $2}' /proc/meminfo) -ge 256",
+        )
+        .success()
+        {
+            println!("SKIPPED: not enough free 2MiB hugepages for UFFD restore test");
+            return;
+        }
+
+        // reserve=on opts the hugepage-backed zone out of MAP_NORESERVE, so
+        // the 2MiB pages are reserved from the pool at mmap time. Hugepages
+        // are the most likely place to want this, and exercising it here keeps
+        // the reserve path covered across both the source boot and the
+        // demand-paged UFFD restore. The skip guard above already requires the
+        // 256 free pages this zone needs, and the source VM is killed before
+        // restore, so the pool only ever has to back one VM at a time.
+        snapshot_restore_common::_test_snapshot_restore_uffd(
+            "size=0",
+            &["id=mem0,size=512M,hugepages=on,hugepage_size=2M,reserve=on"],
+            480_000,
+        );
+    }
 }
 
 mod dbus_api {
@@ -12950,32 +12976,6 @@ mod common_sequential {
     use std::net::{IpAddr, Ipv4Addr};
 
     use crate::*;
-
-    #[test]
-    #[cfg(not(feature = "mshv"))]
-    fn test_snapshot_restore_uffd_hugepage_zone() {
-        if !exec_host_command_status(
-            "grep -q '^Hugepagesize:[[:space:]]*2048 kB' /proc/meminfo && test $(awk '/HugePages_Free/ {print $2}' /proc/meminfo) -ge 256",
-        )
-        .success()
-        {
-            println!("SKIPPED: not enough free 2MiB hugepages for UFFD restore test");
-            return;
-        }
-
-        // reserve=on opts the hugepage-backed zone out of MAP_NORESERVE, so
-        // the 2MiB pages are reserved from the pool at mmap time. Hugepages
-        // are the most likely place to want this, and exercising it here keeps
-        // the reserve path covered across both the source boot and the
-        // demand-paged UFFD restore. The skip guard above already requires the
-        // 256 free pages this zone needs, and the source VM is killed before
-        // restore, so the pool only ever has to back one VM at a time.
-        snapshot_restore_common::_test_snapshot_restore_uffd(
-            "size=0",
-            &["id=mem0,size=512M,hugepages=on,hugepage_size=2M,reserve=on"],
-            480_000,
-        );
-    }
 
     #[test]
     #[ignore = "See #6970"]
