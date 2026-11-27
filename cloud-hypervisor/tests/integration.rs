@@ -6545,7 +6545,9 @@ mod common_parallel {
             assert!(exec_host_command_status("ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient1").success());
 
             // And finally check the connection is functional again
-            guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap();
+            guest2
+                .ssh_command("nc -vz -w 10 172.100.0.1 12345")
+                .unwrap();
 
             // Pause the VM
             assert!(remote_command(&api_socket_source, "pause", None));
@@ -6624,7 +6626,9 @@ mod common_parallel {
                 .unwrap();
 
             // And check the connection is still functional after restore
-            guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap();
+            guest2
+                .ssh_command("nc -vz -w 10 172.100.0.1 12345")
+                .unwrap();
         });
 
         kill_child(&mut child1);
@@ -13312,7 +13316,7 @@ mod common_sequential {
 
             // And check the connection is still functional after live-migration
             migration_guest
-                .ssh_command("nc -vz 172.100.0.1 12345")
+                .ssh_command("nc -vz -w 10 172.100.0.1 12345")
                 .unwrap();
         });
 
