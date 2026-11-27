@@ -281,7 +281,7 @@ pub enum WaitForBootError {
 impl GuestNetworkConfig {
     pub fn wait_vm_boot_from(
         port: u16,
-        expected_guest_addr: &str,
+        expected_guest_addrs: &[&str],
         custom_timeout: u32,
     ) -> Result<(), WaitForBootError> {
         let start = Instant::now();
@@ -328,11 +328,14 @@ impl GuestNetworkConfig {
 
             match listener.accept() {
                 Ok((_, addr)) => {
-                    // Make sure the connection is from the expected 'guest_addr'
-                    if addr.ip() != IpAddr::from_str(expected_guest_addr).unwrap() {
+                    // Make sure the connection is from one of the guest's addresses
+                    if !expected_guest_addrs
+                        .iter()
+                        .any(|a| addr.ip() == IpAddr::from_str(a).unwrap())
+                    {
                         s = format!(
-                            "Expecting the guest ip '{}' while being connected with ip '{}'",
-                            expected_guest_addr,
+                            "Expecting a guest ip in {:?} while being connected with ip '{}'",
+                            expected_guest_addrs,
                             addr.ip()
                         );
                         return Err(WaitForBootError::WrongGuestAddr);
@@ -354,7 +357,7 @@ impl GuestNetworkConfig {
                     "\n\n==== Start 'wait_vm_boot' (FAILED) ==== \
                     \n\nduration =\"{duration:?}, timeout = {custom_timeout}s\" \
                     \nlisten_addr=\"{listen_addr}\" \
-                    \nexpected_guest_addr=\"{expected_guest_addr}\" \
+                    \nexpected_guest_addrs=\"{expected_guest_addrs:?}\" \
                     \nmessage=\"{s}\" \
                     \nerror=\"{e:?}\" \
                     \n\n==== End 'wait_vm_boot' outout ====\n\n"
@@ -367,7 +370,7 @@ impl GuestNetworkConfig {
     }
 
     pub fn wait_vm_boot(&self, custom_timeout: u32) -> Result<(), WaitForBootError> {
-        Self::wait_vm_boot_from(self.tcp_listener_port, &self.guest_ip0, custom_timeout)
+        Self::wait_vm_boot_from(self.tcp_listener_port, &[&self.guest_ip0], custom_timeout)
     }
 }
 
