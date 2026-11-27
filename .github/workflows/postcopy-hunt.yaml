@@ -20,8 +20,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {runner: garm-noble, cmdline: ''}
-          - {runner: garm-noble-amd, cmdline: ''}
+          - {runner: garm-noble, cmdline: 'unknown_nmi_panic panic_print=0x40'}
+          - {runner: garm-noble-amd, cmdline: 'unknown_nmi_panic panic_print=0x40'}
     runs-on: ${{ format('{0}-16', matrix.runner) }}
     steps:
       - name: Code checkout
