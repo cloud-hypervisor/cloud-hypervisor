@@ -648,11 +648,11 @@ mod tests {
             let mut bytes = Vec::new();
             slot.to_aml_bytes(&mut bytes);
 
-            assert!(bytes.windows(4).any(|w| w == b"S003"));
-            assert!(bytes.windows(4).any(|w| w == b"_SUN"));
-            assert!(bytes.windows(4).any(|w| w == b"_ADR"));
-            assert_eq!(bytes.windows(4).any(|w| w == b"_EJ0"), ejectable);
-            assert_eq!(bytes.windows(4).any(|w| w == b"PCEJ"), ejectable);
+            assert!(bytes.array_windows().any(|w| w == b"S003"));
+            assert!(bytes.array_windows().any(|w| w == b"_SUN"));
+            assert!(bytes.array_windows().any(|w| w == b"_ADR"));
+            assert_eq!(bytes.array_windows().any(|w| w == b"_EJ0"), ejectable);
+            assert_eq!(bytes.array_windows().any(|w| w == b"PCEJ"), ejectable);
         }
     }
 
