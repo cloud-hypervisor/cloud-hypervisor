@@ -1793,7 +1793,7 @@ fn date() -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
-#[derive(Clone, Copy, ValueEnum)]
+#[derive(Clone, Copy, Debug, ValueEnum)]
 enum CliVmType {
     /// Non-confidential VM
     Regular,
@@ -1958,6 +1958,8 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use clap::CommandFactory;
 
     use super::*;
@@ -1987,7 +1989,7 @@ mod tests {
             Some(vec!["boot".to_owned(), "restore".to_owned()])
         );
         assert!(cli.list_tests);
-        assert!(matches!(cli.vm_type, CliVmType::Regular));
+        assert_matches!(cli.vm_type, CliVmType::Regular);
         assert!(
             Cli::try_parse_from([
                 "performance-metrics",
