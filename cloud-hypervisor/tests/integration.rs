@@ -7997,6 +7997,7 @@ mod common_parallel {
 
     impl BlkIntegrityReader {
         const DEVICE: &str = "/dev/disk/by-id/virtio-integrity";
+        const STARTED_FILE: &str = "/tmp/integrity-started";
         const STOP_FILE: &str = "/tmp/stop-integrity";
         const CHUNKS: usize = 32;
     }
@@ -8034,6 +8035,7 @@ mod common_parallel {
                 "sudo sh -c '
                     while [ ! -e {stop} ]; do
                         echo 3 > /proc/sys/vm/drop_caches
+                        touch {started}
                         cat {dev} | for i in $(seq {mib}); do
                             dd bs=1M count=1 iflag=fullblock status=none
                             sleep 0.01
@@ -8041,6 +8043,7 @@ mod common_parallel {
                     done
                 '",
                 dev = Self::DEVICE,
+                started = Self::STARTED_FILE,
                 stop = Self::STOP_FILE,
                 mib = (Self::CHUNKS * INTEGRITY_CHUNK_SIZE).div_ceil(1 << 20),
             );
@@ -8048,6 +8051,17 @@ mod common_parallel {
             let reader = thread::spawn(move || {
                 ssh_command_ip(&script, &guest_ip, DEFAULT_SSH_RETRIES, DEFAULT_SSH_TIMEOUT)
             });
+
+            // Wait for reader to start
+            assert!(
+                wait_until(Duration::from_secs(30), || guest
+                    .ssh_command(&format!(
+                        "test -f {} && echo started || true",
+                        Self::STARTED_FILE
+                    ))
+                    .is_ok_and(|out| out.trim() == "started")),
+                "integrity reader did not start"
+            );
 
             Self { reader }
         }
