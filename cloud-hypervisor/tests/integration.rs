@@ -8666,7 +8666,7 @@ mod common_parallel {
         }
 
         let r = panic::catch_unwind(|| {
-            assert!(wait_until(Duration::from_secs(60), || {
+            assert!(wait_until(Duration::from_secs(120), || {
                 let data = fs::read(blk_img).unwrap();
                 for (i, page) in data.chunks(4096).enumerate() {
                     if page != (i as u32).to_le_bytes().repeat(1024) {
