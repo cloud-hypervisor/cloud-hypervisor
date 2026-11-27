@@ -862,11 +862,8 @@ pub fn generate_common_cpuid(
     config: &CpuidConfig,
     cpu_profile: Option<&CpuProfile>,
 ) -> super::Result<Vec<CpuIdEntry>> {
-    #[allow(unused_unsafe)]
-    // SAFETY: cpuid called with valid leaves
-    if unsafe { x86_64::__cpuid(1) }.ecx & (1 << HYPERVISOR_ECX_BIT) == 1 << HYPERVISOR_ECX_BIT {
-        // SAFETY: cpuid called with valid leaves
-        let hypervisor_cpuid = unsafe { x86_64::__cpuid(0x4000_0000) };
+    if x86_64::__cpuid(1).ecx & (1 << HYPERVISOR_ECX_BIT) == 1 << HYPERVISOR_ECX_BIT {
+        let hypervisor_cpuid = x86_64::__cpuid(0x4000_0000);
 
         let mut identifier: [u8; 12] = [0; 12];
         identifier[0..4].copy_from_slice(&hypervisor_cpuid.ebx.to_le_bytes()[..]);
@@ -897,9 +894,7 @@ pub fn generate_common_cpuid(
     // Copy CPU identification string
     for i in 0x8000_0002..=0x8000_0004 {
         cpuid.retain(|c| c.function != i);
-        // SAFETY: call cpuid with valid leaves
-        #[allow(unused_unsafe)]
-        let leaf = unsafe { x86_64::__cpuid(i) };
+        let leaf = x86_64::__cpuid(i);
         cpuid.push(CpuIdEntry {
             function: i,
             eax: leaf.eax,
@@ -1055,7 +1050,6 @@ fn required_common_cpuid_updates(
 
     // Update some existing CPUID
     for entry in cpuid.iter_mut() {
-        #[allow(unused_unsafe)]
         match entry.function {
             // Clear AMX related bits if the AMX feature is not enabled
             0x7 if !config.amx => {
@@ -1088,11 +1082,9 @@ fn required_common_cpuid_updates(
                     && entry.ebx == 0
                     && entry.ecx == 0
                     && entry.edx == 0
-                    // SAFETY: cpuid called with valid leaves
-                    && unsafe { x86_64::__cpuid(0x8000_0000).eax } >= 0x8000_0005 =>
+                    && x86_64::__cpuid(0x8000_0000).eax >= 0x8000_0005 =>
             {
-                // SAFETY: cpuid called with valid leaves
-                let leaf = unsafe { x86_64::__cpuid(0x8000_0005) };
+                let leaf = x86_64::__cpuid(0x8000_0005);
                 entry.eax = leaf.eax;
                 entry.ebx = leaf.ebx;
                 entry.ecx = leaf.ecx;
@@ -1104,11 +1096,9 @@ fn required_common_cpuid_updates(
                     && entry.ebx == 0
                     && entry.ecx == 0
                     && entry.edx == 0
-                    // SAFETY: cpuid called with valid leaves
-                    && unsafe { x86_64::__cpuid(0x8000_0000).eax } >= 0x8000_0006 =>
+                    && x86_64::__cpuid(0x8000_0000).eax >= 0x8000_0006 =>
             {
-                // SAFETY: cpuid called with valid leaves
-                let leaf = unsafe { x86_64::__cpuid(0x8000_0006) };
+                let leaf = x86_64::__cpuid(0x8000_0006);
                 entry.eax = leaf.eax;
                 entry.ebx = leaf.ebx;
                 entry.ecx = leaf.ecx;
@@ -1253,9 +1243,7 @@ pub fn configure_vcpu(
     // The TSC frequency CPUID leaf should not be included when running with HyperV emulation
     if !kvm_hyperv && let Some(tsc_khz) = vcpu.tsc_khz().map_err(Error::GetTscFrequency)? {
         // Need to check that the TSC doesn't vary with dynamic frequency
-        #[allow(unused_unsafe)]
-        // SAFETY: cpuid called with valid leaves
-        if unsafe { x86_64::__cpuid(0x8000_0007) }.edx & (1u32 << INVARIANT_TSC_EDX_BIT) > 0 {
+        if x86_64::__cpuid(0x8000_0007).edx & (1u32 << INVARIANT_TSC_EDX_BIT) > 0 {
             CpuidPatch::set_cpuid_reg(&mut cpuid, 0x4000_0000, None, CpuidReg::EAX, 0x4000_0010);
             cpuid.retain(|c| c.function != 0x4000_0010);
             cpuid.push(CpuIdEntry {
@@ -1686,17 +1674,13 @@ pub fn initramfs_load_addr<M: GuestMemoryBackend>(
 }
 
 pub fn get_host_cpu_phys_bits(_hypervisor: &dyn hypervisor::Hypervisor) -> u8 {
-    // SAFETY: call cpuid with valid leaves
-    #[allow(unused_unsafe)]
-    unsafe {
-        let leaf = x86_64::__cpuid(0x8000_0000);
+    let leaf = x86_64::__cpuid(0x8000_0000);
 
-        if leaf.eax >= 0x8000_0008 {
-            let leaf = x86_64::__cpuid(0x8000_0008);
-            (leaf.eax & 0xff) as u8
-        } else {
-            36
-        }
+    if leaf.eax >= 0x8000_0008 {
+        let leaf = x86_64::__cpuid(0x8000_0008);
+        (leaf.eax & 0xff) as u8
+    } else {
+        36
     }
 }
 
