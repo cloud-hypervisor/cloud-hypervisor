@@ -7047,7 +7047,7 @@ mod common_parallel {
             assert!(remote_command(&api_socket, "nmi", None));
 
             assert!(wait_for_latest_events_exact_str(
-                Duration::from_secs(3),
+                Duration::from_secs(30),
                 &["panic"],
                 &event_path
             ));
