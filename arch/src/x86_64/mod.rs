@@ -716,9 +716,11 @@ impl CpuidFeatureEntry {
         const EQ_MASK: u32 = NULL_SELECT_CLEARS_BASE | OPCODE_RECLAIM | RESERVED_MASK;
 
         // These should be ignored
+        const VERW_CLEAR: u32 = 1 << 5;
         const L2_TLB_SIZE_X32: u32 = 1 << 14;
+        const IGNORED_MASK: u32 = VERW_CLEAR | L2_TLB_SIZE_X32;
 
-        const SUBSET_EQ_MASK: u32 = !(SUPERSET_EQ_MASK | EQ_MASK | L2_TLB_SIZE_X32);
+        const SUBSET_EQ_MASK: u32 = !(SUPERSET_EQ_MASK | EQ_MASK | IGNORED_MASK);
 
         let find_value = |entry: &CpuIdEntry| {
             (entry.function == EXTENDED_FEATURE_IDENTIFICATION2_LEAF && entry.index == 0)
@@ -2010,6 +2012,29 @@ mod tests {
                 "Zen 4 dest",
             );
         assert!(!zen5_to_4_compatibility);
+    }
+
+    #[test]
+    fn extended_feature_identification2_ignores_verw_clear() {
+        let with_verw_clear = &[CpuIdEntry {
+            function: EXTENDED_FEATURE_IDENTIFICATION2_LEAF,
+            eax: 0x18000367,
+            ..Default::default()
+        }];
+        let without_verw_clear = &[CpuIdEntry {
+            function: EXTENDED_FEATURE_IDENTIFICATION2_LEAF,
+            eax: 0x18000347,
+            ..Default::default()
+        }];
+
+        assert!(
+            CpuidFeatureEntry::extended_feature_identification2_eax_compatible(
+                with_verw_clear,
+                "src",
+                without_verw_clear,
+                "dest",
+            )
+        );
     }
 
     #[test]
