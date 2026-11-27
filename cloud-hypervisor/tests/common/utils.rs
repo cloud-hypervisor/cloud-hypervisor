@@ -720,11 +720,11 @@ pub(super) fn get_msi_interrupt_pattern() -> String {
 pub(super) type PrepareNetDaemon =
     dyn Fn(&TempDir, &str, Option<&str>, Option<&str>, Option<u16>, u16, bool) -> (Command, String);
 
-pub(super) fn get_ksm_pages_shared() -> u32 {
-    fs::read_to_string("/sys/kernel/mm/ksm/pages_shared")
+pub(super) fn process_ksm_merging_pages(pid: u32) -> u64 {
+    fs::read_to_string(format!("/proc/{pid}/ksm_merging_pages"))
         .unwrap()
         .trim()
-        .parse::<u32>()
+        .parse::<u64>()
         .unwrap()
 }
 
