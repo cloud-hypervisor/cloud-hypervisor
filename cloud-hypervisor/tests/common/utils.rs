@@ -626,18 +626,101 @@ pub(crate) fn diag_dump_vcpus(api_socket: &str, snapshot_dir: &Path) {
             events.join("")
         );
     }
-    fn walk(path: &str, v: &serde_json::Value) {
+    fn walk(
+        path: &str,
+        v: &serde_json::Value,
+        vcpus: &mut Vec<(String, serde_json::Value)>,
+        ranges: &mut Vec<(u64, u64)>,
+    ) {
         if let Some(data) = v["snapshot_data"]["state"].as_str()
-            && data.contains("lapic_state")
             && let Ok(state) = serde_json::from_str::<serde_json::Value>(data)
         {
-            print_vcpu(path, &state);
+            if data.contains("lapic_state") {
+                print_vcpu(path, &state);
+                vcpus.push((path.to_string(), state));
+            } else if let Some(table) = state["memory_ranges"]["data"].as_array() {
+                for r in table {
+                    ranges.push((
+                        r["gpa"].as_u64().unwrap_or(0),
+                        r["length"].as_u64().unwrap_or(0),
+                    ));
+                }
+            }
         }
         if let Some(children) = v["snapshots"].as_object() {
             for (k, child) in children {
-                walk(&format!("{path}/{k}"), child);
+                walk(&format!("{path}/{k}"), child, vcpus, ranges);
             }
         }
+    }
+    // Read a guest physical u64 from the snapshot's memory-ranges file, which
+    // holds the memory ranges back to back.
+    fn read_phys(file: &File, ranges: &[(u64, u64)], gpa: u64) -> Option<u64> {
+        use std::os::unix::fs::FileExt;
+        let mut off = 0;
+        for &(start, len) in ranges {
+            if gpa >= start && gpa + 8 <= start + len {
+                let mut b = [0u8; 8];
+                file.read_exact_at(&mut b, off + gpa - start).ok()?;
+                return Some(u64::from_le_bytes(b));
+            }
+            off += len;
+        }
+        None
+    }
+    // Walk the guest's 4-level page tables.
+    fn translate(file: &File, ranges: &[(u64, u64)], cr3: u64, va: u64) -> Option<u64> {
+        let mask = 0x000f_ffff_ffff_f000u64;
+        let mut table = cr3 & mask;
+        for shift in [39u32, 30, 21, 12] {
+            let e = read_phys(file, ranges, table + ((va >> shift) & 0x1ff) * 8)?;
+            if e & 1 == 0 {
+                return None;
+            }
+            if (shift == 30 || shift == 21) && e & 0x80 != 0 {
+                let page_mask = (1u64 << shift) - 1;
+                return Some((e & mask & !page_mask) | (va & page_mask));
+            }
+            table = e & mask;
+        }
+        Some(table | (va & 0xfff))
+    }
+    fn dump_stack(path: &str, state: &serde_json::Value, file: &File, ranges: &[(u64, u64)]) {
+        let s = state.get("Kvm").unwrap_or(state);
+        let regs = bytes(&s["regs"]);
+        let sregs = bytes(&s["sregs"]);
+        let cr3 = u64_at(&sregs, 240);
+        let names = [
+            "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rsp", "rbp", "r8", "r9", "r10", "r11",
+            "r12", "r13", "r14", "r15",
+        ];
+        let gprs: Vec<String> = names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| format!("{n}={:#x}", u64_at(&regs, i * 8)))
+            .collect();
+        eprintln!(
+            "DIAG regs {path}: {} cr3={cr3:#x} cr4={:#x}",
+            gprs.join(" "),
+            u64_at(&sregs, 248)
+        );
+        let rsp = u64_at(&regs, 6 * 8);
+        let mut text = Vec::new();
+        let mut unmapped = 0;
+        for i in 0..1024u64 {
+            let va = rsp + i * 8;
+            match translate(file, ranges, cr3, va).and_then(|pa| read_phys(file, ranges, pa)) {
+                Some(w) if (0xffff_ffff_8100_0000..0xffff_ffff_8400_0000).contains(&w) => {
+                    text.push(format!("+{:#x}:{w:#x}", i * 8));
+                }
+                Some(_) => {}
+                None => unmapped += 1,
+            }
+        }
+        eprintln!(
+            "DIAG stack {path} ({unmapped} unmapped words): {}",
+            text.join(" ")
+        );
     }
 
     if !remote_command(api_socket, "pause", None) {
@@ -649,7 +732,19 @@ pub(crate) fn diag_dump_vcpus(api_socket: &str, snapshot_dir: &Path) {
     if remote_command(api_socket, "snapshot", Some(&url)) {
         match fs::read_to_string(snapshot_dir.join("state.json")) {
             Ok(state) => match serde_json::from_str::<serde_json::Value>(&state) {
-                Ok(v) => walk("", &v),
+                Ok(v) => {
+                    let mut vcpus = Vec::new();
+                    let mut ranges = Vec::new();
+                    walk("", &v, &mut vcpus, &mut ranges);
+                    match File::open(snapshot_dir.join("memory-ranges")) {
+                        Ok(file) => {
+                            for (path, state) in &vcpus {
+                                dump_stack(path, state, &file, &ranges);
+                            }
+                        }
+                        Err(e) => eprintln!("DIAG vcpus: cannot open memory-ranges: {e}"),
+                    }
+                }
                 Err(e) => eprintln!("DIAG vcpus: cannot parse state.json: {e}"),
             },
             Err(e) => eprintln!("DIAG vcpus: cannot read state.json: {e}"),

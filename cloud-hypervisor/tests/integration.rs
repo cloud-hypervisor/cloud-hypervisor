@@ -8625,7 +8625,7 @@ mod common_parallel {
                     lines[lines.len().saturating_sub(60)..].join("\n")
                 );
                 let _ = remote_command(&dest_api_socket, "nmi", None);
-                thread::sleep(Duration::from_secs(2));
+                thread::sleep(Duration::from_secs(15));
                 let serial = fs::read_to_string(&serial_log).unwrap_or_default();
                 eprintln!(
                     "DIAG serial log after the NMI:\n{}",
@@ -12942,7 +12942,7 @@ mod snapshot_restore_common {
                     lines[lines.len().saturating_sub(60)..].join("\n")
                 );
                 let _ = remote_command(&api_socket_restored, "nmi", None);
-                thread::sleep(Duration::from_secs(2));
+                thread::sleep(Duration::from_secs(15));
                 let serial = fs::read_to_string(&serial_log).unwrap_or_default();
                 eprintln!(
                     "DIAG serial log after the NMI:\n{}",
