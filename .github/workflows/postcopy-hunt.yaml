@@ -12,14 +12,16 @@ concurrency:
   cancel-in-progress: true
 jobs:
   hunt:
-    name: hunt (${{ matrix.runner }})
+    name: hunt (${{ matrix.runner }}, ${{ matrix.cmdline }})
     timeout-minutes: 60
     env:
       PARALLEL_INTEGRATION_TESTS_NUM: 16
     strategy:
       fail-fast: false
       matrix:
-        runner: [garm-noble, garm-noble-amd]
+        include:
+          - {runner: garm-noble, cmdline: nopvspin}
+          - {runner: garm-noble-amd, cmdline: no-kvmapf}
     runs-on: ${{ format('{0}-16', matrix.runner) }}
     steps:
       - name: Code checkout
@@ -38,6 +40,8 @@ jobs:
           sudo apt install -y docker-ce docker-ce-cli
       - name: Install xfsprogs
         run: sudo apt-get -y install xfsprogs
+      - name: Set the guest kernel parameters of the experiment
+        run: echo "${{ matrix.cmdline }}" > hunt-cmdline
       - name: Run the postcopy and on demand restore tests until one fails
         timeout-minutes: 50
         run: scripts/dev_cli.sh tests --integration --ci --libc gnu

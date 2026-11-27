@@ -1287,7 +1287,16 @@ impl Guest {
             vm_type: GuestVmType::Regular,
             boot_timeout: DEFAULT_TCP_LISTENER_TIMEOUT,
             kernel_path: direct_kernel_boot_path().to_str().map(String::from),
-            kernel_cmdline: Some(DIRECT_KERNEL_BOOT_CMDLINE.to_string()),
+            // Temporary: append the guest kernel parameters of a postcopy hunt
+            // experiment.
+            kernel_cmdline: Some(
+                format!(
+                    "{DIRECT_KERNEL_BOOT_CMDLINE} {}",
+                    fs::read_to_string("/cloud-hypervisor/hunt-cmdline").unwrap_or_default()
+                )
+                .trim()
+                .to_string(),
+            ),
             console_type: None,
             num_cpu: 1u32,
             nested: false,
