@@ -146,11 +146,11 @@ RUN git clone https://github.com/spdk/spdk \
         && cp -rf ./python /usr/local/bin \
         && cd .. && rm -rf spdk
 
-# Build virtiofsd at a pinned commit
+# Build virtiofsd at a pinned commit for latest release
 # hadolint ignore=DL3003
 RUN git clone https://gitlab.com/virtio-fs/virtiofsd.git /tmp/virtiofsd \
         && cd /tmp/virtiofsd \
-        && git checkout 0f5865629dc995a3e9d5a73b4eb45bb91740bccb \
+        && git checkout v1.15.0 \
         && cargo build --release \
         && cp target/release/virtiofsd /usr/local/bin/virtiofsd \
         && cd / && rm -rf /tmp/virtiofsd
