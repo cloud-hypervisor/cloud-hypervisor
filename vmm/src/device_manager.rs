@@ -362,6 +362,10 @@ pub enum DeviceManagerError {
     #[error("Cannot find a memory range for persistent memory")]
     PmemRangeAllocation,
 
+    /// Cannot find a memory range for shared memory
+    #[error("Cannot find a memory range for shared memory")]
+    ShmemRangeAllocation,
+
     /// Cannot create iommufd
     #[cfg(feature = "kvm")]
     #[error("Cannot create iommufd")]
@@ -3449,24 +3453,100 @@ impl DeviceManager {
         let mut node = device_node!(id);
 
         if let Some(generic_vhost_user_socket) = generic_vhost_user_cfg.socket.to_str() {
-            let generic_vhost_user_device = Arc::new(Mutex::new(
-                vhost_user::GenericVhostUser::new(
-                    id.clone(),
-                    generic_vhost_user_socket,
-                    generic_vhost_user_cfg.queue_sizes.clone(),
-                    generic_vhost_user_cfg.device_type,
-                    None,
-                    self.seccomp_action.clone(),
-                    self.exit_evt
-                        .try_clone()
-                        .map_err(DeviceManagerError::EventFd)?,
-                    self.force_access_platform,
-                    state_from_id(snapshot, id.as_str())
-                        .map_err(DeviceManagerError::RestoreGetState)?,
-                    self.postcopy_handler(),
-                )
-                .map_err(DeviceManagerError::CreateGenericVhostUser)?,
-            ));
+            let (mut vhost_user_device, shmem_sizes) = vhost_user::GenericVhostUser::new(
+                id.clone(),
+                generic_vhost_user_socket,
+                generic_vhost_user_cfg.queue_sizes.clone(),
+                generic_vhost_user_cfg.device_type,
+                self.seccomp_action.clone(),
+                self.exit_evt
+                    .try_clone()
+                    .map_err(DeviceManagerError::EventFd)?,
+                self.force_access_platform,
+                state_from_id(snapshot, id.as_str())
+                    .map_err(DeviceManagerError::RestoreGetState)?,
+                self.postcopy_handler(),
+            )
+            .map_err(DeviceManagerError::CreateGenericVhostUser)?;
+
+            let page_size = get_page_size();
+            let mut total_size = 0u64;
+            let mut region_list = Vec::with_capacity(shmem_sizes.len());
+            for len in shmem_sizes {
+                let offset = if len == 0 {
+                    total_size
+                } else {
+                    let aligned_len = len
+                        .checked_next_multiple_of(page_size)
+                        .ok_or(DeviceManagerError::ShmemRangeAllocation)?;
+                    let offset = total_size;
+                    total_size = total_size
+                        .checked_add(aligned_len)
+                        .ok_or(DeviceManagerError::ShmemRangeAllocation)?;
+                    offset
+                };
+                region_list.push(virtio_devices::VirtioSharedMemory { offset, len });
+            }
+
+            if total_size > 0 {
+                let bar_size = total_size
+                    .checked_next_power_of_two()
+                    .ok_or(DeviceManagerError::ShmemRangeAllocation)?;
+                let restored_addr = if let Some(existing_node) =
+                    self.device_tree.lock().unwrap().get(&id)
+                {
+                    let addr = existing_node
+                        .resources
+                        .iter()
+                        .find_map(|resource| match resource {
+                            Resource::MmioAddressRange { base, size } if *size == bar_size => {
+                                Some(GuestAddress(*base))
+                            }
+                            _ => None,
+                        });
+                    if addr.is_none() {
+                        return Err(DeviceManagerError::ShmemRangeAllocation);
+                    }
+                    addr
+                } else {
+                    None
+                };
+                let mem64_allocator = &self.pci_segments
+                    [generic_vhost_user_cfg.pci_common.pci_segment as usize]
+                    .mem64_allocator;
+                let addr = mem64_allocator
+                    .lock()
+                    .unwrap()
+                    .allocate(restored_addr, bar_size, Some(bar_size))
+                    .ok_or(DeviceManagerError::ShmemRangeAllocation)?;
+
+                let slot_allocator =
+                    Arc::clone(self.memory_manager.lock().unwrap().memory_slot_allocator());
+                let shm_list = match virtio_devices::VirtioSharedMemoryList::new(
+                    addr,
+                    bar_size,
+                    region_list,
+                    Arc::clone(&self.address_manager.vm),
+                    slot_allocator,
+                ) {
+                    Ok(shm_list) => shm_list,
+                    Err(_) => {
+                        mem64_allocator.lock().unwrap().free(addr, bar_size);
+                        return Err(DeviceManagerError::ShmemRangeAllocation);
+                    }
+                };
+
+                // Update the node with correct resource information.
+                node.resources.push(Resource::MmioAddressRange {
+                    base: addr.raw_value(),
+                    size: bar_size,
+                });
+
+                virtio_devices::VirtioDevice::set_shm_regions(&mut vhost_user_device, shm_list)
+                    .unwrap();
+            }
+
+            let generic_vhost_user_device = Arc::new(Mutex::new(vhost_user_device));
 
             // Update the device tree with the migratable device.
             node.migratable =

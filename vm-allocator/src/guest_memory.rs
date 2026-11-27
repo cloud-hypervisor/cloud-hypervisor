@@ -297,7 +297,7 @@ impl GuestRegion {
                 self.region.start_addr().raw_value(),
                 self.region.size(),
                 self.region.as_ptr(),
-                false,
+                self.readonly,
             )
         }
         .map_err(Error::RemoveRegion)?;
@@ -400,7 +400,7 @@ impl Drop for GuestRegion {
                     guest_phys_addr,
                     memory_size,
                     userspace_addr,
-                    false, // Read-only flags are ignored when removing a region.
+                    self.readonly,
                 )
             } {
                 error!("Error releasing memory region: {e}");

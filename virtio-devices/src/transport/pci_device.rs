@@ -30,7 +30,7 @@ use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
 use vm_device::{BusDevice, PciBarType, Resource};
-use vm_memory::{Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemoryRegion, Le32};
+use vm_memory::{Address, ByteValued, GuestAddress, GuestAddressSpace, Le32};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
@@ -1148,22 +1148,25 @@ impl PciDevice for VirtioPciDevice {
 
         // Allocate a dedicated BAR if there are some shared memory regions.
         if let Some(shm_list) = device.get_shm_regions() {
-            let mapping = shm_list.mapping.lock().unwrap();
+            let shm_addr = shm_list.addr().raw_value();
             let bar = PciBarConfiguration::default()
                 .set_index(VIRTIO_SHM_BAR_INDEX)
-                .set_address(mapping.start_addr().raw_value())
-                .set_size(mapping.len());
+                .set_address(shm_addr)
+                .set_size(shm_list.len());
 
             // The creation of the PCI BAR and its associated capabilities must
             // happen only during the creation of a brand new VM. When a VM is
             // restored from a known state, the BARs are already created with the
             // right content, therefore we don't need to go through this codepath.
             if !restoring {
-                self.configuration.add_pci_bar(&bar).map_err(|e| {
-                    PciDeviceError::IoRegistrationFailed(mapping.start_addr().raw_value(), e)
-                })?;
+                self.configuration
+                    .add_pci_bar(&bar)
+                    .map_err(|e| PciDeviceError::IoRegistrationFailed(shm_addr, e))?;
 
-                for (idx, shm) in shm_list.region_list.iter().enumerate() {
+                for (idx, shm) in shm_list.region_list().iter().enumerate() {
+                    if shm.len == 0 {
+                        continue;
+                    }
                     let shm_cap = VirtioPciCap64::new(
                         PciCapabilityType::SharedMemory,
                         VIRTIO_SHM_BAR_INDEX as u8,
@@ -1209,12 +1212,7 @@ impl PciDevice for VirtioPciDevice {
         if bar_idx == VIRTIO_SHM_BAR_INDEX
             && let Some(shm_list) = self.device.lock().unwrap().get_shm_regions()
         {
-            shm_list
-                .mapping
-                .lock()
-                .unwrap()
-                .move_guest_address(GuestAddress(new_base))
-                .map_err(io::Error::other)?;
+            shm_list.move_bar(GuestAddress(new_base))?;
         }
 
         for bar in self.bar_regions.iter_mut() {

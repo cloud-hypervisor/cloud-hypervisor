@@ -9,7 +9,7 @@ version = "0.1.0"
 default = []
 kvm = ["pci/kvm"]
 mshv = ["pci/mshv"]
-sev_snp = ["mshv-ioctls"]
+sev_snp = ["hypervisor/sev_snp", "mshv-ioctls"]
 
 [dependencies]
 anyhow = { workspace = true, features = ["std"] }
@@ -52,6 +52,8 @@ vmm-sys-util = { workspace = true }
 zerocopy = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
+igvm_defs = { workspace = true }
+vfio-ioctls = { workspace = true }
 vhost-user-backend = { workspace = true }
 
 [lints]
