@@ -9507,13 +9507,18 @@ mod common_parallel {
 
             start_stress_in_vm(&guest);
 
+            // Keep precopy from converging while stress runs, so that the
+            // migration is still ongoing when it is cancelled.
             receive_migration = Some(
                 dispatch_live_migration_tcp_with_flags(
                     &src_api_socket,
                     &dest_api_socket,
                     &dest_event_path,
                     connections,
-                    &SendMigrationOptions::default(),
+                    &SendMigrationOptions {
+                        downtime_ms: Some(1),
+                        ..Default::default()
+                    },
                 )
                 .expect("Unsuccessful command: 'send-migration'."),
             );
