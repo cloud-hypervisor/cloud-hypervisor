@@ -3621,6 +3621,12 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_memory_mergeable_on() {
+        test_memory_mergeable(true);
+    }
+
+    #[test]
     fn test_memory_mergeable_off() {
         test_memory_mergeable(false);
     }
@@ -12944,12 +12950,6 @@ mod common_sequential {
     use std::net::{IpAddr, Ipv4Addr};
 
     use crate::*;
-
-    #[test]
-    #[cfg(not(feature = "mshv"))]
-    fn test_memory_mergeable_on() {
-        test_memory_mergeable(true);
-    }
 
     #[test]
     #[cfg(not(feature = "mshv"))]

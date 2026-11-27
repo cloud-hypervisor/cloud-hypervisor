@@ -1317,9 +1317,6 @@ pub(crate) fn test_memory_mergeable(mergeable: bool) {
         "mergeable=off"
     };
 
-    // We assume the number of shared pages in the rest of the system to be constant
-    let ksm_ps_init = get_ksm_pages_shared();
-
     let disk_config1 = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
     let guest1 = Guest::new(Box::new(disk_config1));
     let mut child1 = GuestCommand::new(&guest1)
@@ -1343,8 +1340,6 @@ pub(crate) fn test_memory_mergeable(mergeable: bool) {
         panic!("Test should already be failed/panicked"); // To explicitly mark this block never return
     }
 
-    let ksm_ps_guest1 = get_ksm_pages_shared();
-
     let disk_config2 = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
     let guest2 = Guest::new(Box::new(disk_config2));
     let mut child2 = GuestCommand::new(&guest2)
@@ -1358,19 +1353,20 @@ pub(crate) fn test_memory_mergeable(mergeable: bool) {
         .spawn()
         .unwrap();
 
+    // Look at the pages KSM has merged for these VMMs only, as the system
+    // wide count includes any other processes using KSM.
+    let pids = [child1.id(), child2.id()];
     let r = panic::catch_unwind(|| {
         guest2.wait_vm_boot().unwrap();
-        let ksm_ps_guest2 = get_ksm_pages_shared();
 
         if mergeable {
-            println!(
-                "ksm pages_shared after vm1 booted '{ksm_ps_guest1}', ksm pages_shared after vm2 booted '{ksm_ps_guest2}'"
-            );
-            // We are expecting the number of shared pages to increase as the number of VM increases
-            assert!(ksm_ps_guest1 < ksm_ps_guest2);
+            assert!(wait_until(Duration::from_secs(30), || pids
+                .iter()
+                .all(|pid| process_ksm_merging_pages(*pid) > 0)));
         } else {
-            assert!(ksm_ps_guest1 == ksm_ps_init);
-            assert!(ksm_ps_guest2 == ksm_ps_init);
+            for pid in pids {
+                assert_eq!(process_ksm_merging_pages(pid), 0);
+            }
         }
     });
 
