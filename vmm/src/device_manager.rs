@@ -4553,10 +4553,14 @@ impl DeviceManager {
             let vfio_context = self.create_vfio_context()?;
 
             if let Some(iommu) = &self.iommu_device {
-                iommu.lock().unwrap().add_external_mapping(
-                    pci_device_bdf.into(),
-                    Arc::clone(&vfio_context.dma_mapping),
-                );
+                iommu
+                    .lock()
+                    .unwrap()
+                    .add_external_mapping(
+                        pci_device_bdf.into(),
+                        Arc::clone(&vfio_context.dma_mapping),
+                    )
+                    .map_err(DeviceManagerError::VirtioDmaMap)?;
             } else {
                 return Err(DeviceManagerError::MissingVirtualIommu);
             }
@@ -5129,7 +5133,8 @@ impl DeviceManager {
                     iommu
                         .lock()
                         .unwrap()
-                        .add_external_mapping(pci_device_bdf.into(), Arc::clone(dma_handler));
+                        .add_external_mapping(pci_device_bdf.into(), Arc::clone(dma_handler))
+                        .map_err(DeviceManagerError::VirtioDmaMap)?;
                 } else {
                     return Err(DeviceManagerError::MissingVirtualIommu);
                 }
@@ -5756,7 +5761,8 @@ impl DeviceManager {
                 iommu
                     .lock()
                     .unwrap()
-                    .remove_external_mapping(pci_device_bdf.into());
+                    .remove_external_mapping(pci_device_bdf.into())
+                    .map_err(DeviceManagerError::VirtioDmaUnmap)?;
             }
 
             self.msi_interrupt_manager

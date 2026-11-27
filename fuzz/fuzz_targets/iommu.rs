@@ -367,9 +367,8 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
             let _ = restored.snapshot();
         }
     }
-    let removed = iommu.remove_external_mapping(41);
-    if let Some(ext_map) = removed {
-        iommu.add_external_mapping(41, ext_map);
+    if let Ok(Some(ext_map)) = iommu.remove_external_mapping(41) {
+        iommu.add_external_mapping(41, ext_map).unwrap();
     }
     let _ = iommu.remove_external_mapping(u32::MAX);
     iommu.reset();
@@ -1097,38 +1096,29 @@ fn write_u16<M: GuestMemoryBackend>(mem: &M, addr: u64, value: u16) -> Result<()
 }
 
 fn install_external_mappings(iommu: &mut virtio_devices::Iommu, plan: &FuzzPlan) {
-    iommu.add_external_mapping(1, Arc::new(FuzzExternalMapping::new(false, false)));
-    iommu.add_external_mapping(4, Arc::new(FuzzExternalMapping::new(false, false)));
-    iommu.add_external_mapping(20, Arc::new(FuzzExternalMapping::new(false, false)));
-    iommu.add_external_mapping(21, Arc::new(FuzzExternalMapping::new(false, false)));
-    iommu.add_external_mapping(30, Arc::new(FuzzExternalMapping::new(true, false)));
-    iommu.add_external_mapping(31, Arc::new(FuzzExternalMapping::new(false, true)));
-    iommu.add_external_mapping(40, Arc::new(FuzzExternalMapping::new(false, false)));
-    iommu.add_external_mapping(41, Arc::new(FuzzExternalMapping::new(true, false)));
-    iommu.add_external_mapping(
-        plan.ext_success_ep_a,
-        Arc::new(FuzzExternalMapping::new(false, false)),
-    );
-    iommu.add_external_mapping(
-        plan.ext_success_ep_b,
-        Arc::new(FuzzExternalMapping::new(false, false)),
-    );
-    iommu.add_external_mapping(
-        plan.rollback_success_ep,
-        Arc::new(FuzzExternalMapping::new(false, false)),
-    );
-    iommu.add_external_mapping(
-        plan.ext_fail_map_ep,
-        Arc::new(FuzzExternalMapping::new(true, false)),
-    );
-    iommu.add_external_mapping(
-        plan.ext_fail_unmap_ep,
-        Arc::new(FuzzExternalMapping::new(false, true)),
-    );
-    iommu.add_external_mapping(
-        plan.detach_ext_ep,
-        Arc::new(FuzzExternalMapping::new(false, false)),
-    );
+    for (endpoint, fail_map, fail_unmap) in [
+        (1, false, false),
+        (4, false, false),
+        (20, false, false),
+        (21, false, false),
+        (30, true, false),
+        (31, false, true),
+        (40, false, false),
+        (41, true, false),
+        (plan.ext_success_ep_a, false, false),
+        (plan.ext_success_ep_b, false, false),
+        (plan.rollback_success_ep, false, false),
+        (plan.ext_fail_map_ep, true, false),
+        (plan.ext_fail_unmap_ep, false, true),
+        (plan.detach_ext_ep, false, false),
+    ] {
+        iommu
+            .add_external_mapping(
+                endpoint,
+                Arc::new(FuzzExternalMapping::new(fail_map, fail_unmap)),
+            )
+            .unwrap();
+    }
 }
 
 fn exercise_translation_paths(mapping: &Arc<virtio_devices::IommuMapping>, plan: &FuzzPlan) {

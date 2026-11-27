@@ -9,6 +9,9 @@ use thiserror::Error;
 /// A DMA mapping failure with its address context and original error source.
 #[derive(Debug, Error)]
 pub enum ExternalDmaMappingError {
+    /// An endpoint already has a registered DMA backend.
+    #[error("DMA backend already registered for endpoint {endpoint:#x}")]
+    BackendAlreadyRegistered { endpoint: u32 },
     /// No guest memory region contains the address.
     #[error("Guest memory region not found: gpa={gpa:#x}")]
     RegionNotFound { gpa: u64 },
