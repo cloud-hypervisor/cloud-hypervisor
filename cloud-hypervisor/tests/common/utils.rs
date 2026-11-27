@@ -340,9 +340,11 @@ pub(crate) fn resize_command(
                 device_id: None,
             },
         ];
-        // See: #5938
-        thread::sleep(Duration::new(1, 0));
-        assert!(check_latest_events_exact(&latest_events, event_path));
+        assert!(wait_for_latest_events_exact(
+            Duration::from_secs(30),
+            &latest_events,
+            event_path
+        ));
     }
 
     ret

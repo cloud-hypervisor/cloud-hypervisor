@@ -10348,7 +10348,8 @@ mod common_parallel {
             event: "restored".to_string(),
             device_id: None,
         }];
-        assert!(check_latest_events_exact(
+        assert!(wait_for_latest_events_exact(
+            Duration::from_secs(30),
             &latest_events,
             &event_path_restored
         ));
