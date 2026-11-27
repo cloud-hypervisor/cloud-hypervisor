@@ -890,8 +890,10 @@ jobs:
         run: |
           set -eufo pipefail
           mkdir $HOME/workloads
-          # Pull the dev container while the image downloads.
-          docker pull -q "ghcr.io/cloud-hypervisor/cloud-hypervisor:$(sed -n 's/^CTR_IMAGE_VERSION="\(.*\)"$/\1/p' scripts/dev_cli.sh)" &
+          # Pull the dev container while the image downloads, and start it
+          # once so that its layers are unpacked meanwhile too.
+          image="ghcr.io/cloud-hypervisor/cloud-hypervisor:$(sed -n 's/^CTR_IMAGE_VERSION="\(.*\)"$/\1/p' scripts/dev_cli.sh)"
+          { docker pull -q "$image" && docker run --rm "$image" true; } &
           sudo apt-get -y install zstd
           az storage blob download --max-connections 16 --no-progress --container-name private-images --file /dev/shm/windows-server-2025-amd64-1.raw.zst --name windows-server-2025-amd64-1.raw.zst --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
           zstd -d -q --sparse --rm /dev/shm/windows-server-2025-amd64-1.raw.zst -o "$HOME/workloads/windows-server-2025-amd64-1.raw"
