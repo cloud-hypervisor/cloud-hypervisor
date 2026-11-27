@@ -20,8 +20,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {runner: garm-noble, cmdline: nopvspin}
-          - {runner: garm-noble-amd, cmdline: no-kvmapf}
+          - {runner: garm-noble, cmdline: ''}
+          - {runner: garm-noble-amd, cmdline: ''}
     runs-on: ${{ format('{0}-16', matrix.runner) }}
     steps:
       - name: Code checkout
