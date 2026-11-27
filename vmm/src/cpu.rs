@@ -16,8 +16,8 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::mem::zeroed;
 use std::os::unix::thread::JoinHandleExt;
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Barrier, Mutex, OnceLock};
 use std::{any, cmp, hint, io, panic, result, thread, time};
 
 #[cfg(target_arch = "aarch64")]
@@ -803,40 +803,10 @@ pub struct CpuManager {
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     #[cfg(feature = "sev_snp")]
     sev_snp_enabled: bool,
-    // State of the core scheduling group leader election (VM mode).
-    core_scheduling_group_leader: Arc<AtomicI32>,
+    // TID of the core scheduling group leader or error from vCPU0
+    core_scheduling_group_leader: Arc<OnceLock<result::Result<i32, ()>>>,
     #[cfg(feature = "igvm")]
     igvm_enabled: bool,
-}
-
-/// State of the core scheduling group leader election for VM-wide cookie
-/// sharing.
-///
-/// The value will be in an `AtomicI32`. Positive values represent a leader
-/// TID (cookie ready).
-#[repr(i32)]
-enum CoreSchedulingLeader {
-    /// No leader elected yet.
-    Initial = 0,
-    /// A leader has been elected and is creating the cookie.
-    Elected = -1,
-    /// The leader failed to create the cookie.
-    Error = -2,
-}
-
-impl TryFrom<i32> for CoreSchedulingLeader {
-    type Error = ();
-    /// Convert from the raw `i32` (from the `AtomicI32`) value.
-    /// Quirky: Returns `Ok(state)` for known sentinel values, or `Err(())` for
-    /// a positive TID (cookie ready).
-    fn try_from(value: i32) -> result::Result<Self, ()> {
-        match value {
-            0 => Ok(Self::Initial),
-            -1 => Ok(Self::Elected),
-            -2 => Ok(Self::Error),
-            _ => Err(()),
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1054,9 +1024,7 @@ impl CpuManager {
             hypervisor,
             #[cfg(feature = "sev_snp")]
             sev_snp_enabled,
-            core_scheduling_group_leader: Arc::new(AtomicI32::new(
-                CoreSchedulingLeader::Initial as i32,
-            )),
+            core_scheduling_group_leader: Arc::new(OnceLock::new()),
             #[cfg(feature = "igvm")]
             igvm_enabled,
         })))
@@ -1344,41 +1312,27 @@ impl CpuManager {
                             }
                         }
                         CoreScheduling::Vm => {
-                            // First vCPU creates a cookie; all others share from it.
-                            // SAFETY: gettid() is always safe to call.
-                            let my_tid = unsafe { libc::gettid() };
-                            if core_scheduling_group_leader
-                                .compare_exchange(
-                                    CoreSchedulingLeader::Initial as i32,
-                                    CoreSchedulingLeader::Elected as i32,
-                                    Ordering::AcqRel,
-                                    Ordering::Acquire,
-                                )
-                                .is_ok()
-                            {
-                                // We are the group leader — create the cookie
+                            // vCPU 0 creates a cookie and all others share it.
+                            // vCPU 0 cannot be removed, so it is still there to
+                            // share from when more vCPUs are hotplugged.
+                            if vcpu_id == 0 {
                                 if let Err(e) = core_scheduling_create() {
                                     error!("Failed to create core scheduling cookie: {e:?}");
                                     // This will force the loop in the other threads to break out
-                                    core_scheduling_group_leader.store(
-                                        CoreSchedulingLeader::Error as i32,
-                                        Ordering::Release,
-                                    );
+                                    let _ = core_scheduling_group_leader.set(Err(()));
                                     return;
                                 }
                                 // Signal that the cookie is ready by storing real TID
-                                core_scheduling_group_leader.store(my_tid, Ordering::Release);
+                                // SAFETY: gettid() is always safe to call.
+                                let _ =
+                                    core_scheduling_group_leader.set(Ok(unsafe { libc::gettid() }));
                             } else {
                                 // Wait for the leader to finish creating the cookie
                                 let leader_tid = loop {
-                                    let v = core_scheduling_group_leader.load(Ordering::Acquire);
-                                    match CoreSchedulingLeader::try_from(v) {
-                                        Ok(CoreSchedulingLeader::Error) => return,
-                                        Ok(
-                                            CoreSchedulingLeader::Initial
-                                            | CoreSchedulingLeader::Elected,
-                                        ) => hint::spin_loop(),
-                                        Err(()) => break v,
+                                    match core_scheduling_group_leader.get() {
+                                        None => hint::spin_loop(),
+                                        Some(Err(())) => return,
+                                        Some(Ok(tid)) => break *tid,
                                     }
                                 };
                                 if let Err(e) = core_scheduling_share_from(leader_tid) {
