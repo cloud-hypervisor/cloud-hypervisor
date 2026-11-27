@@ -1,0 +1,52 @@
+# Temporary: run the postcopy and on demand restore tests on the garm runners
+# until one fails, to catch the restored guest hanging.
+name: Postcopy hunt
+on:
+  push:
+    branches:
+      - 'dev/rbradford/postcopy-hunt'
+permissions:
+  contents: read
+concurrency:
+  group: postcopy-hunt
+  cancel-in-progress: true
+jobs:
+  hunt:
+    name: hunt (${{ matrix.runner }})
+    timeout-minutes: 60
+    env:
+      PARALLEL_INTEGRATION_TESTS_NUM: 16
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [garm-noble, garm-noble-amd]
+    runs-on: ${{ format('{0}-16', matrix.runner) }}
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install Docker
+        run: |
+          set -eufo pipefail
+          sudo apt-get update
+          sudo apt-get -y install ca-certificates curl gnupg
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+          sudo chmod a+r /usr/share/keyrings/docker-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+          sudo apt-get update
+          sudo apt install -y docker-ce docker-ce-cli
+      - name: Install xfsprogs
+        run: sudo apt-get -y install xfsprogs
+      - name: Run the postcopy and on demand restore tests until one fails
+        timeout-minutes: 50
+        run: scripts/dev_cli.sh tests --integration --ci --libc gnu
+      - name: Upload integration test telemetry
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: telemetry-${{ matrix.runner }}
+          path: |
+            ~/workloads/telemetry
+            ~/workloads/junit
+          if-no-files-found: ignore

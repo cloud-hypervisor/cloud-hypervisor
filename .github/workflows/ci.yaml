@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - 'dev/*/*'
+      - '!dev/rbradford/postcopy-hunt'
   # Only this run saves Rust caches. It runs after the rustc nightly release.
   schedule:
     - cron: '0 3 * * *'
