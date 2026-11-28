@@ -32,52 +32,6 @@ update_workloads() {
         cp /usr/local/bin/virtiofsd "$WORKLOADS_DIR/virtiofsd"
     fi
 
-    JAMMY_OS_QCOW2_ZLIB_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-zlib.qcow2"
-    JAMMY_OS_QCOW2_ZLIB_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW2_ZLIB_FILE_IMAGE_NAME"
-    if [ ! -f "$JAMMY_OS_QCOW2_ZLIB_FILE_IMAGE" ]; then
-        pushd "$WORKLOADS_DIR" || exit
-        time qemu-img convert -c -f raw -O qcow2 -o compression_type=zlib \
-            "$JAMMY_OS_RAW_IMAGE" $JAMMY_OS_QCOW2_ZLIB_FILE_IMAGE_NAME
-        popd || exit
-    fi
-
-    JAMMY_OS_QCOW2_ZSTD_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-zstd.qcow2"
-    JAMMY_OS_QCOW2_ZSTD_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW2_ZSTD_FILE_IMAGE_NAME"
-    if [ ! -f "$JAMMY_OS_QCOW2_ZSTD_FILE_IMAGE" ]; then
-        pushd "$WORKLOADS_DIR" || exit
-        time qemu-img convert -c -f raw -O qcow2 -o compression_type=zstd \
-            "$JAMMY_OS_RAW_IMAGE" $JAMMY_OS_QCOW2_ZSTD_FILE_IMAGE_NAME
-        popd || exit
-    fi
-
-    JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-backing-zstd.qcow2"
-    JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME"
-    if [ ! -f "$JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE" ]; then
-        pushd "$WORKLOADS_DIR" || exit
-        time qemu-img create -f qcow2 -b "$JAMMY_OS_QCOW2_ZSTD_FILE_IMAGE" -F qcow2 $JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME
-        popd || exit
-    fi
-
-    JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-backing-uncompressed.qcow2"
-    JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE_NAME"
-    if [ ! -f "$JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE" ]; then
-        pushd "$WORKLOADS_DIR" || exit
-        time qemu-img create -f qcow2 \
-            -b "$JAMMY_OS_QCOW2_UNCOMPRESSED_IMAGE" \
-            -F qcow2 $JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE_NAME
-        popd || exit
-    fi
-
-    JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-backing-raw.qcow2"
-    JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME"
-    if [ ! -f "$JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE" ]; then
-        pushd "$WORKLOADS_DIR" || exit
-        time qemu-img create -f qcow2 \
-            -b "$JAMMY_OS_RAW_IMAGE" \
-            -F raw $JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME
-        popd || exit
-    fi
-
     ALPINE_MINIROOTFS_TARBALL="$WORKLOADS_DIR/alpine-minirootfs-aarch64.tar.gz"
 
     ALPINE_INITRAMFS_IMAGE="$WORKLOADS_DIR/alpine_initramfs.img"
@@ -118,6 +72,15 @@ update_workloads() {
         echo "foo" >"$SHARED_DIR/file1"
         echo "bar" >"$SHARED_DIR/file3" || exit 1
     fi
+
+    # Tests take guest images from /tmp/workloads in preference to the
+    # workloads directory. When /tmp is the XFS filesystem set up by
+    # dev_cli.sh --ci, their copies of the images there are reflinks rather
+    # than full copies in memory.
+    if [ "$(stat -f -c %T /tmp)" = xfs ]; then
+        mkdir -p /tmp/workloads
+        cp "$JAMMY_OS_RAW_IMAGE" "$JAMMY_OS_QCOW2_UNCOMPRESSED_IMAGE" /tmp/workloads || exit 1
+    fi
 }
 
 process_common_args "$@"
@@ -149,7 +112,7 @@ ulimit -n 4096
 export RUST_BACKTRACE=1
 export RUSTFLAGS="$RUSTFLAGS"
 
-cargo build --features mshv --all --release --target "$BUILD_TARGET"
+cargo build --features "mshv,dbus_api,fw_cfg,ivshmem" --all --release --target "$BUILD_TARGET"
 
 # Enable KSM with some reasonable parameters so that it won't take too long
 # for the memory to be merged between two processes.
@@ -168,39 +131,10 @@ if ! [[ "${PARALLEL_INTEGRATION_TESTS_NUM:-}" =~ ^[1-9][0-9]*$ ]]; then
     PARALLEL_INTEGRATION_TESTS_NUM="${TEST_THREADS_DEFAULT}"
 fi
 echo "nproc:$(nproc), parallel_integration_tests:${PARALLEL_INTEGRATION_TESTS_NUM}"
+start_telemetry
 # Run all direct kernel boot (Device Tree) test cases in mod `parallel`,
-# `sequential`, and ACPI cases. The `common_tests` profile filter covers
-# all three sets, and the per-mod `threads-required = 'num-test-threads'`
-# override on `common_sequential` enforces serial scheduling within the run.
+# `sequential`, ACPI cases and the tests of the optional features. The
+# `common_tests` profile filter covers all of these, and the per-mod
+# `threads-required = 'num-test-threads'` override on `common_sequential`
+# enforces serial scheduling within the run.
 time cargo nextest run -p cloud-hypervisor $test_features --profile common_tests --no-tests=pass --test-threads="${PARALLEL_INTEGRATION_TESTS_NUM}" "$test_filter" -- ${test_binary_args[*]}
-RES=$?
-if [ $RES -ne 0 ]; then
-    exit $RES
-fi
-
-# Run tests on dbus_api
-if [ $RES -eq 0 ]; then
-    cargo build --features "mshv,dbus_api" --all --release --target "$BUILD_TARGET"
-    export RUST_BACKTRACE=1
-    # integration tests now do not reply on build feature "dbus_api"
-    time cargo nextest run -p cloud-hypervisor $test_features --profile dbus --no-tests=pass --test-threads="${PARALLEL_INTEGRATION_TESTS_NUM}" "$test_filter" -- ${test_binary_args[*]}
-    RES=$?
-fi
-
-# Run tests on fw_cfg
-if [ $RES -eq 0 ]; then
-    cargo build --features "mshv,fw_cfg" --all --release --target "$BUILD_TARGET"
-    export RUST_BACKTRACE=1
-    time cargo nextest run -p cloud-hypervisor $test_features --profile fw_cfg --no-tests=pass --test-threads="${PARALLEL_INTEGRATION_TESTS_NUM}" "$test_filter" -- ${test_binary_args[*]}
-    RES=$?
-fi
-
-if [ $RES -eq 0 ]; then
-    cargo build --features "mshv,ivshmem" --all --release --target "$BUILD_TARGET"
-    export RUST_BACKTRACE=1
-    time cargo nextest run -p cloud-hypervisor $test_features --profile ivshmem --no-tests=pass --test-threads="${PARALLEL_INTEGRATION_TESTS_NUM}" "$test_filter" -- ${test_binary_args[*]}
-
-    RES=$?
-fi
-
-exit $RES

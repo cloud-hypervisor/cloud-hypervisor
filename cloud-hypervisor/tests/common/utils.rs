@@ -164,7 +164,9 @@ pub(crate) fn prepare_vubd(
         .spawn()
         .unwrap();
 
-    thread::sleep(Duration::new(10, 0));
+    assert!(wait_until(Duration::from_secs(10), || {
+        Path::new(&vubd_socket_path).exists()
+    }));
 
     (child, vubd_socket_path)
 }
@@ -338,9 +340,11 @@ pub(crate) fn resize_command(
                 device_id: None,
             },
         ];
-        // See: #5938
-        thread::sleep(Duration::new(1, 0));
-        assert!(check_latest_events_exact(&latest_events, event_path));
+        assert!(wait_for_latest_events_exact(
+            Duration::from_secs(30),
+            &latest_events,
+            event_path
+        ));
     }
 
     ret
@@ -504,7 +508,9 @@ pub(crate) fn setup_ovs_dpdk_guests(
             .unwrap();
 
         // Check the connection works properly between the two VMs
-        guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap();
+        guest2
+            .ssh_command("nc -vz -w 10 172.100.0.1 12345")
+            .unwrap();
     });
     if r.is_err() {
         cleanup_ovs_dpdk();
@@ -718,11 +724,11 @@ pub(super) fn get_msi_interrupt_pattern() -> String {
 pub(super) type PrepareNetDaemon =
     dyn Fn(&TempDir, &str, Option<&str>, Option<&str>, Option<u16>, u16, bool) -> (Command, String);
 
-pub(super) fn get_ksm_pages_shared() -> u32 {
-    fs::read_to_string("/sys/kernel/mm/ksm/pages_shared")
+pub(super) fn process_ksm_merging_pages(pid: u32) -> u64 {
+    fs::read_to_string(format!("/proc/{pid}/ksm_merging_pages"))
         .unwrap()
         .trim()
-        .parse::<u32>()
+        .parse::<u64>()
         .unwrap()
 }
 
@@ -927,9 +933,51 @@ pub(crate) fn vm_state(api_socket: &str) -> String {
     state.to_string()
 }
 
+/// Return the arguments adding a virtio-pmem device backed by `file`, or none
+/// under MSHV, where virtio-pmem devices backed by files on the XFS /tmp of
+/// the CI runners do not work.
+pub(crate) fn pmem_args(file: &Path) -> Vec<String> {
+    if cfg!(feature = "mshv") {
+        Vec::new()
+    } else {
+        vec![
+            "--pmem".to_string(),
+            format!("file={}", file.to_str().unwrap()),
+        ]
+    }
+}
+
 pub(crate) fn make_virtio_block_guest(factory: &GuestFactory, image_name: &str) -> Guest {
     let disk_config = UbuntuDiskConfig::new(image_name.to_string());
     factory.create_guest(Box::new(disk_config)).with_cpu(4)
+}
+
+/// Replace the guest's raw OS disk with a QCOW2 image of it compressed with
+/// `compression_type`.
+pub(crate) fn compress_os_disk(guest: &Guest, compression_type: &str) {
+    let os_disk = guest.disk_config.disk(DiskType::OperatingSystem).unwrap();
+    let compressed = format!("{os_disk}.qcow2");
+    QemuImgCommand::new()
+        .convert(
+            "raw",
+            "qcow2",
+            &format!("compression_type={compression_type}"),
+        )
+        .args(&["-c", "-m", "16", "-W", &os_disk, &compressed])
+        .run("Failed to compress the OS disk");
+    fs::rename(&compressed, &os_disk).expect("Failed to replace the OS disk");
+}
+
+/// Replace the guest's OS disk with a QCOW2 overlay backed by it, where
+/// `backing_format` is the format of the original disk.
+pub(crate) fn overlay_os_disk(guest: &Guest, backing_format: &str) {
+    let os_disk = guest.disk_config.disk(DiskType::OperatingSystem).unwrap();
+    let backing = format!("{os_disk}.backing");
+    fs::rename(&os_disk, &backing).expect("Failed to move the OS disk");
+    QemuImgCommand::new()
+        .create("qcow2", "")
+        .args(&["-b", &backing, "-F", backing_format, &os_disk])
+        .run("Failed to create the OS disk overlay");
 }
 
 pub(crate) fn compute_backing_checksum(

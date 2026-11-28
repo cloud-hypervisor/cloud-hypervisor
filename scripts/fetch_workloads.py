@@ -122,7 +122,7 @@ def _log_err(msg: str) -> None:
 
 
 def download(url: str, dest: Path, auth_token: str | None = None,
-             retries: int = 3, delay: float = 5.0,
+             retries: int = 5, delay: float = 5.0,
              show_progress: bool = True) -> bool:
     """Download *url* to *dest* with retries.  Returns True on success."""
     tmp = dest.parent / (dest.name + ".part")
@@ -166,7 +166,7 @@ def download(url: str, dest: Path, auth_token: str | None = None,
             _log_err(f"  Attempt {attempt} failed: {e}")
             tmp.unlink(missing_ok=True)
             if attempt < retries:
-                time.sleep(delay)
+                time.sleep(delay * 2 ** (attempt - 1))
             continue
 
         tmp.rename(dest)

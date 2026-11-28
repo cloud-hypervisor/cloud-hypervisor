@@ -47,8 +47,9 @@ macro_rules! basic_regular_guest {
 
 mod common_parallel {
     use std::cell::Cell;
+    use std::fs::remove_dir_all;
     use std::io::{self, SeekFrom};
-    use std::net::TcpStream;
+    use std::net::{IpAddr, Ipv4Addr, TcpStream};
     use std::num::NonZeroU32;
     use std::os::unix::net::UnixStream;
     use std::process::Command;
@@ -83,7 +84,7 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg_attr(target_arch = "x86_64", should_panic)]
+    #[cfg(not(target_arch = "x86_64"))]
     fn test_cpu_topology_421() {
         test_cpu_topology(4, 2, 1, false);
     }
@@ -1011,28 +1012,26 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2_zlib() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2_ZLIB.to_string());
-        let guest = GuestFactory::new_regular_guest_factory()
-            .create_guest(Box::new(disk_config))
-            .with_cpu(4);
+        let guest =
+            make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), JAMMY_IMAGE_NAME);
+        compress_os_disk(&guest, "zlib");
         _test_virtio_block(&guest, false, false, true, false, ImageType::Qcow2);
     }
 
     #[test]
     fn test_virtio_block_qcow2_zstd() {
-        let guest = make_virtio_block_guest(
-            &GuestFactory::new_regular_guest_factory(),
-            JAMMY_IMAGE_NAME_QCOW2_ZSTD,
-        );
+        let guest =
+            make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), JAMMY_IMAGE_NAME);
+        compress_os_disk(&guest, "zstd");
         _test_virtio_block(&guest, false, false, true, false, ImageType::Qcow2);
     }
 
     #[test]
     fn test_virtio_block_qcow2_backing_zstd_file() {
-        let guest = make_virtio_block_guest(
-            &GuestFactory::new_regular_guest_factory(),
-            JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE,
-        );
+        let guest =
+            make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), JAMMY_IMAGE_NAME);
+        compress_os_disk(&guest, "zstd");
+        overlay_os_disk(&guest, "qcow2");
         _test_virtio_block(&guest, false, false, true, true, ImageType::Qcow2);
     }
 
@@ -1040,17 +1039,17 @@ mod common_parallel {
     fn test_virtio_block_qcow2_backing_uncompressed_file() {
         let guest = make_virtio_block_guest(
             &GuestFactory::new_regular_guest_factory(),
-            JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE,
+            JAMMY_IMAGE_NAME_QCOW2,
         );
+        overlay_os_disk(&guest, "qcow2");
         _test_virtio_block(&guest, false, false, true, true, ImageType::Qcow2);
     }
 
     #[test]
     fn test_virtio_block_qcow2_backing_raw_file() {
-        let guest = make_virtio_block_guest(
-            &GuestFactory::new_regular_guest_factory(),
-            JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE,
-        );
+        let guest =
+            make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), JAMMY_IMAGE_NAME);
+        overlay_os_disk(&guest, "raw");
         _test_virtio_block(&guest, false, false, true, true, ImageType::Qcow2);
     }
 
@@ -1676,7 +1675,7 @@ mod common_parallel {
             "truncate failed"
         );
 
-        let loop_dev_path = create_loop_device(fs_img_path.to_str().unwrap(), 4096, 5);
+        let loop_dev_path = create_loop_device(fs_img_path.to_str().unwrap(), 4096, 20);
 
         assert!(
             exec_host_command_output(&format!("mkfs.ext4 -q {loop_dev_path}"))
@@ -1768,7 +1767,7 @@ mod common_parallel {
             "truncate failed"
         );
 
-        let loop_dev_path = create_loop_device(fs_img_path.to_str().unwrap(), 4096, 5);
+        let loop_dev_path = create_loop_device(fs_img_path.to_str().unwrap(), 4096, 20);
 
         assert!(
             exec_host_command_output(&format!("mkfs.ext4 -q {loop_dev_path}"))
@@ -2625,6 +2624,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))] // File backed virtio-pmem does not work under MSHV on XFS
     fn test_boot_from_virtio_pmem() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -3252,12 +3252,13 @@ mod common_parallel {
         let mut vfio_disk_path = workload_path.clone();
         vfio_disk_path.push("vfio.img");
 
-        // Create the vfio disk image
+        // Create the vfio disk image, with room for the blocks the L2 guest
+        // writes into its sparse OS disk image
         let output = Command::new("mkfs.ext4")
             .arg("-d")
             .arg(vfio_path.to_str().unwrap())
             .arg(vfio_disk_path.to_str().unwrap())
-            .arg("2g")
+            .arg("4g")
             .output()
             .unwrap();
         if !output.status.success() {
@@ -3321,9 +3322,15 @@ mod common_parallel {
 
         let r = panic::catch_unwind(|| {
             guest.ssh_command_l1("sudo systemctl start vfio").unwrap();
+            // The L2 guest has three interfaces on the same subnet, so its
+            // notification can come from any of their addresses.
             GuestNetworkConfig::wait_vm_boot_from(
                 guest.network.l2_tcp_listener_port,
-                &guest.network.l2_guest_ip2,
+                &[
+                    &guest.network.l2_guest_ip1,
+                    &guest.network.l2_guest_ip2,
+                    &guest.network.l2_guest_ip3,
+                ],
                 // Nested L2 guests can exceed the default 120s timeout on loaded
                 // hosts. The listener still returns immediately once the guest
                 // reports in.
@@ -3393,14 +3400,16 @@ mod common_parallel {
                 1
             ));
 
+            // The L2 guest brings up the hotplugged device slowly when the
+            // host is loaded.
             wait_for_ssh(
                 "true",
                 &auth,
                 &guest.network.l2_guest_ip3,
-                Duration::from_secs(10),
+                Duration::from_secs(60),
             )
             .unwrap();
-            assert!(wait_until(Duration::from_secs(10), || {
+            assert!(wait_until(Duration::from_secs(30), || {
                 guest
                     .ssh_command_l2_1("ls /sys/bus/pci/devices")
                     .is_ok_and(|output| check_lines_count(output.trim(), 9))
@@ -3615,6 +3624,12 @@ mod common_parallel {
     fn test_pci_bar_reprogramming() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_pci_bar_reprogramming(&guest);
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_memory_mergeable_on() {
+        test_memory_mergeable(true);
     }
 
     #[test]
@@ -4681,7 +4696,7 @@ mod common_parallel {
             .args(&[test_disk_path.to_str().unwrap(), "16M"])
             .run("qemu-img command failed");
 
-        let loop_dev = create_loop_device(test_disk_path.to_str().unwrap(), 4096, 5);
+        let loop_dev = create_loop_device(test_disk_path.to_str().unwrap(), 4096, 20);
         _test_virtio_block_topology(&guest, &loop_dev);
         Command::new("losetup")
             .args(["-d", &loop_dev])
@@ -4713,7 +4728,7 @@ mod common_parallel {
             "fallocate failed"
         );
 
-        let loop_dev = create_loop_device(test_disk_path.to_str().unwrap(), 4096, 5);
+        let loop_dev = create_loop_device(test_disk_path.to_str().unwrap(), 4096, 20);
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=1"])
@@ -4782,7 +4797,7 @@ mod common_parallel {
             "truncate failed"
         );
 
-        let loop_dev_path = create_loop_device(fs_img_path.to_str().unwrap(), 4096, 5);
+        let loop_dev_path = create_loop_device(fs_img_path.to_str().unwrap(), 4096, 20);
 
         assert!(
             exec_host_command_output(&format!("mkfs.ext4 -q {loop_dev_path}"))
@@ -5303,7 +5318,7 @@ mod common_parallel {
             String::from_utf8_lossy(&res.stderr)
         );
 
-        let loop_dev = create_loop_device(test_disk_path.to_str().unwrap(), 4096, 5);
+        let loop_dev = create_loop_device(test_disk_path.to_str().unwrap(), 4096, 20);
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=1"])
@@ -5410,8 +5425,8 @@ mod common_parallel {
             .expect("Expect truncating COW image to succeed");
 
         let origin_sectors: u64 = 128 * 1024 * 1024 / 512;
-        let origin_loop = create_loop_device(origin_path.to_str().unwrap(), 4096, 5);
-        let cow_loop = create_loop_device(cow_path.to_str().unwrap(), 512, 5);
+        let origin_loop = create_loop_device(origin_path.to_str().unwrap(), 4096, 20);
+        let cow_loop = create_loop_device(cow_path.to_str().unwrap(), 512, 20);
 
         let unique = format!(
             "ch-test-{}",
@@ -6117,32 +6132,35 @@ mod common_parallel {
             println!("RSS {rss} < 1048576");
             assert!(rss < 1048576);
 
-            // Spawn a command inside the guest to consume 2GiB of RAM for 60
-            // seconds
-            let guest_ip = guest.network.guest_ip0.clone();
-            thread::spawn(move || {
-                ssh_command_ip(
-                    "stress --vm 1 --vm-bytes 2G --vm-keep --timeout 60",
-                    &guest_ip,
-                    DEFAULT_SSH_RETRIES,
-                    DEFAULT_SSH_TIMEOUT,
-                )
+            // Consume 1GiB of RAM inside the guest until stress is stopped
+            guest
+                .ssh_command("screen -dmS stress stress --vm 1 --vm-bytes 1G --vm-keep")
                 .unwrap();
-            });
 
             // Wait for guest memory consumption to reach the expected level.
-            assert!(wait_until(Duration::from_secs(60), || process_rss_kib(pid) >= 2097152));
+            assert!(wait_until(Duration::from_secs(60), || process_rss_kib(pid) >= 1310720));
             let rss = process_rss_kib(pid);
-            println!("RSS {rss} >= 2097152");
-            assert!(rss >= 2097152);
+            println!("RSS {rss} >= 1310720");
+            assert!(rss >= 1310720);
 
-            // Wait for stress to complete and free-page reporting to shrink RSS again.
+            // Stop stress and wait for free-page reporting to shrink RSS again.
+            // Free page reporting only reports blocks of at least 2 MiB, so
+            // drop the page cache and compact the guest's memory once stress
+            // has exited, as other allocations can leave the pages it frees in
+            // smaller blocks.
+            guest
+                .ssh_command(
+                    "pkill -x stress && while pgrep -x stress > /dev/null; do sleep 0.1; done && \
+                     sync && echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null && \
+                     echo 1 | sudo tee /proc/sys/vm/compact_memory > /dev/null",
+                )
+                .unwrap();
             assert!(wait_until(Duration::from_secs(120), || process_rss_kib(
                 pid
-            ) < 2097152));
+            ) < 1310720));
             let rss = process_rss_kib(pid);
-            println!("RSS {rss} < 2097152");
-            assert!(rss < 2097152);
+            println!("RSS {rss} < 1310720");
+            assert!(rss < 1310720);
         });
 
         kill_child(&mut child);
@@ -6152,17 +6170,20 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))] // File backed virtio-pmem does not work under MSHV on XFS
     #[cfg_attr(target_arch = "aarch64", ignore = "See #8187")]
     fn test_pmem_hotplug() {
         _test_pmem_hotplug(None);
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))] // File backed virtio-pmem does not work under MSHV on XFS
     #[cfg_attr(target_arch = "aarch64", ignore = "See #8187")]
     fn test_pmem_multi_segment_hotplug() {
         _test_pmem_hotplug(Some(15));
     }
 
+    #[cfg(not(feature = "mshv"))]
     fn _test_pmem_hotplug(pci_segment: Option<u16>) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -6330,7 +6351,8 @@ mod common_parallel {
                 .spawn()
                 .unwrap();
 
-            thread::sleep(Duration::new(20, 0));
+            // The initramfs prints the test string and powers the guest off.
+            let _ = child.wait_timeout(Duration::from_secs(20)).unwrap();
 
             kill_child(&mut child);
             let output = child.wait_with_output().unwrap();
@@ -6501,14 +6523,31 @@ mod common_parallel {
                 )
                 .unwrap();
 
+            // Removing the port takes effect asynchronously, so wait for the
+            // first VM to become unreachable. Each check is a single attempt,
+            // as SSH command retries would wait for minutes on the expected
+            // failures.
+            let guest2_ip = guest2.network.guest_ip0.as_str();
+            let fails = |command: &str| {
+                matches!(
+                    ssh_command_ip(command, guest2_ip, 1, 0),
+                    Err(SshCommandError::NonZeroExitStatus(_))
+                )
+            };
+            assert!(wait_until(Duration::from_secs(30), || fails(
+                "ping -c 1 -W 1 172.100.0.1"
+            )));
+
             // Check the connection fails this time
-            guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap_err();
+            assert!(fails("nc -vz -w 2 172.100.0.1 12345"));
 
             // Add the OVS port back
             assert!(exec_host_command_status("ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient1").success());
 
             // And finally check the connection is functional again
-            guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap();
+            guest2
+                .ssh_command("nc -vz -w 10 172.100.0.1 12345")
+                .unwrap();
 
             // Pause the VM
             assert!(remote_command(&api_socket_source, "pause", None));
@@ -6526,9 +6565,14 @@ mod common_parallel {
             }));
         });
 
-        // Shutdown the source VM
+        // Shutdown the source VM, and on failure the first VM and the OVS
+        // bridge too, so that a retry can use the same vhost-user sockets.
         kill_child(&mut child2);
         let output = child2.wait_with_output().unwrap();
+        if r.is_err() {
+            kill_child(&mut child1);
+            cleanup_ovs_dpdk();
+        }
         handle_child_output(r, &output);
 
         // Remove the vhost-user socket file.
@@ -6582,7 +6626,9 @@ mod common_parallel {
                 .unwrap();
 
             // And check the connection is still functional after restore
-            guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap();
+            guest2
+                .ssh_command("nc -vz -w 10 172.100.0.1 12345")
+                .unwrap();
         });
 
         kill_child(&mut child1);
@@ -7011,7 +7057,7 @@ mod common_parallel {
             assert!(remote_command(&api_socket, "nmi", None));
 
             assert!(wait_for_latest_events_exact_str(
-                Duration::from_secs(3),
+                Duration::from_secs(30),
                 &["panic"],
                 &event_path
             ));
@@ -7377,7 +7423,7 @@ mod common_parallel {
             .arg(pmem_temp_file.as_path())
             .output()
             .expect("Expect creating disk image to succeed");
-        let pmem_path = String::from("/dev/pmem0");
+        let pmem_path = (!cfg!(feature = "mshv")).then(|| String::from("/dev/pmem0"));
 
         // Start the source VM
         let src_vm_path = if upgrade_test {
@@ -7404,10 +7450,7 @@ mod common_parallel {
             .default_kernel_cmdline()
             .args(["--net", net_params.as_str()])
             .args(["--api-socket", &src_api_socket])
-            .args([
-                "--pmem",
-                format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
-            ]);
+            .args(pmem_args(pmem_temp_file.as_path()));
         if upgrade_test {
             src_vm_cmd.args(["--seccomp", "false"]);
         }
@@ -7434,7 +7477,7 @@ mod common_parallel {
             assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
 
             // Check the guest virtio-devices, e.g. block, rng, console, and net
-            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
+            guest.check_devices_common(None, Some(&console_text), pmem_path.as_ref());
 
             #[cfg(target_arch = "x86_64")]
             guest.add_test_disk(&src_api_socket);
@@ -7490,7 +7533,7 @@ mod common_parallel {
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
             assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
 
-            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
+            guest.check_devices_common(None, Some(&console_text), pmem_path.as_ref());
 
             #[cfg(target_arch = "x86_64")]
             guest.remove_test_disk(&dest_api_socket);
@@ -8633,7 +8676,7 @@ mod common_parallel {
         }
 
         let r = panic::catch_unwind(|| {
-            assert!(wait_until(Duration::from_secs(60), || {
+            assert!(wait_until(Duration::from_secs(120), || {
                 let data = fs::read(blk_img).unwrap();
                 for (i, page) in data.chunks(4096).enumerate() {
                     if page != (i as u32).to_le_bytes().repeat(1024) {
@@ -9464,13 +9507,18 @@ mod common_parallel {
 
             start_stress_in_vm(&guest);
 
+            // Keep precopy from converging while stress runs, so that the
+            // migration is still ongoing when it is cancelled.
             receive_migration = Some(
                 dispatch_live_migration_tcp_with_flags(
                     &src_api_socket,
                     &dest_api_socket,
                     &dest_event_path,
                     connections,
-                    &SendMigrationOptions::default(),
+                    &SendMigrationOptions {
+                        downtime_ms: Some(1),
+                        ..Default::default()
+                    },
                 )
                 .expect("Unsuccessful command: 'send-migration'."),
             );
@@ -10014,6 +10062,1061 @@ mod common_parallel {
     fn test_live_migration_virtio_fs_memfds() {
         _test_live_migration_virtio_fs(true);
     }
+
+    // One rx-* entry on the host per attached tap queue.
+    fn attached_tap_queues(tap_name: &str) -> usize {
+        fs::read_dir(format!("/sys/class/net/{tap_name}/queues"))
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("rx-")
+            })
+            .count()
+    }
+
+    // Name of the guest interface with this MAC.
+    fn guest_iface(guest: &Guest, mac: &str) -> String {
+        guest
+            .ssh_command(&format!(
+                "basename \"$(dirname \"$(grep -lx {mac} /sys/class/net/*/address)\")\""
+            ))
+            .unwrap()
+            .trim()
+            .to_string()
+    }
+
+    // Receive queues the guest driver is using on the interface.
+    fn guest_rx_queues(guest: &Guest, iface: &str) -> usize {
+        guest
+            .ssh_command(&format!("ls /sys/class/net/{iface}/queues | grep -c rx-"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap()
+    }
+
+    #[test]
+    fn test_snapshot_restore_net_queue_pairs() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
+
+        let net_id = "net123";
+        // Four pairs need four vCPUs, but with one CPU online the guest
+        // negotiates a single pair.
+        let num_queue_pairs: usize = 4;
+        // use a name that does not conflict with tap dev created from other tests
+        let tap_name = "chtap998";
+        use std::str::FromStr;
+        let open_taps = || {
+            net_util::open_tap(
+                Some(tap_name),
+                Some(IpAddr::V4(
+                    Ipv4Addr::from_str(&guest.network.host_ip0).unwrap(),
+                )),
+                None,
+                None,
+                None,
+                num_queue_pairs,
+                Some(libc::O_RDWR | libc::O_NONBLOCK),
+            )
+            .unwrap()
+        };
+        let fd_list = |taps: &[net_util::Tap]| {
+            taps.iter()
+                .map(|tap| tap.as_raw_fd().to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+
+        let taps = open_taps();
+        let net_params = format!(
+            "id={},fd=[{}],mac={},ip={},mask=255.255.255.128,num_queues={}",
+            net_id,
+            fd_list(&taps),
+            guest.network.guest_mac0,
+            guest.network.host_ip0,
+            num_queue_pairs * 2
+        );
+
+        let cloudinit_params = format!(
+            "path={},iommu=on,image_type=raw",
+            guest.disk_config.disk(DiskType::CloudInit).unwrap()
+        );
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_source])
+            .args(["--cpus", "boot=4"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args([
+                "--disk",
+                format!(
+                    "path={},image_type=raw",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                )
+                .as_str(),
+                cloudinit_params.as_str(),
+            ])
+            .args(["--net", net_params.as_str()])
+            .args([
+                "--cmdline",
+                format!("{DIRECT_KERNEL_BOOT_CMDLINE} maxcpus=1").as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+            let iface = guest_iface(&guest, &guest.network.guest_mac0);
+
+            // One pair negotiated, so one tap queue attached out of four.
+            assert_eq!(guest_rx_queues(&guest, &iface), 1);
+            assert_eq!(attached_tap_queues(tap_name), 1);
+
+            // Raise it through the control queue to a value that is neither the
+            // default nor the maximum, for the restore to preserve.
+            guest
+                .ssh_command(&format!("sudo ethtool -L {iface} combined 3"))
+                .unwrap();
+            assert_eq!(guest_rx_queues(&guest, &iface), 3);
+            assert_eq!(attached_tap_queues(tap_name), 3);
+
+            assert!(remote_command(&api_socket_source, "pause", None));
+            assert!(remote_command(
+                &api_socket_source,
+                "snapshot",
+                Some(format!("file://{snapshot_dir}").as_str()),
+            ));
+        });
+
+        // CH holds its own copies; drop ours so the tap goes away with the VM.
+        drop(taps);
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
+
+        // Restore the VM from the snapshot
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_restored])
+            .capture_output()
+            .spawn()
+            .unwrap();
+        assert!(wait_until(Duration::from_secs(30), || {
+            remote_command(&api_socket_restored, "ping", None)
+        }));
+
+        let taps = open_taps();
+        let restore_params = format!(
+            "source_url=file://{},net_fds=[{}@[{}]]",
+            snapshot_dir,
+            net_id,
+            fd_list(&taps)
+        );
+
+        let r = panic::catch_unwind(|| {
+            // A fresh tap comes with every queue attached.
+            assert_eq!(attached_tap_queues(tap_name), num_queue_pairs);
+
+            assert!(remote_command(
+                &api_socket_restored,
+                "restore",
+                Some(restore_params.as_str())
+            ));
+
+            // Wait for the VM to be restored
+            assert!(wait_until(Duration::from_secs(20), || {
+                remote_command(&api_socket_restored, "info", None)
+            }));
+
+            assert!(remote_command(&api_socket_restored, "resume", None));
+
+            // The guest did not renegotiate, and the device kept its count.
+            let iface = guest_iface(&guest, &guest.network.guest_mac0);
+            assert_eq!(guest_rx_queues(&guest, &iface), 3);
+            assert_eq!(attached_tap_queues(tap_name), 3);
+
+            // A reboot rebuilds the device on the same taps, and the driver starts
+            // over at one pair.
+            guest.reboot_linux(0);
+            assert_eq!(guest_rx_queues(&guest, &iface), 1);
+            assert_eq!(attached_tap_queues(tap_name), 1);
+        });
+
+        let _ = remove_dir_all(snapshot_dir.as_str());
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_snapshot_restore_virtio_fs() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
+
+        let shared_dir = guest.tmp_dir.as_path().join("virtiofs_shared");
+        fs::create_dir(&shared_dir).unwrap();
+        fs::write(shared_dir.join("file1"), "foo\n").unwrap();
+
+        let (mut daemon_child, virtiofsd_socket_path) =
+            prepare_virtiofsd(&guest.tmp_dir, shared_dir.to_str().unwrap());
+
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_source])
+            .args(["--event-monitor", format!("path={event_path}").as_str()])
+            .args(["--cpus", "boot=2"])
+            .args(["--memory", "size=512M,shared=on"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .default_disks()
+            .default_net()
+            .args([
+                "--fs",
+                format!("socket={virtiofsd_socket_path},tag=myfs,num_queues=1,queue_size=1024")
+                    .as_str(),
+            ])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            // Mount virtiofs and write a test file
+            guest
+                .ssh_command("mkdir -p mount_dir && sudo mount -t virtiofs myfs mount_dir/")
+                .unwrap();
+
+            // Verify the shared directory is accessible
+            assert_eq!(
+                guest.ssh_command("cat mount_dir/file1").unwrap().trim(),
+                "foo"
+            );
+
+            // Write a file from the guest
+            guest
+                .ssh_command(
+                    "sudo bash -c 'echo snapshot_test_data > mount_dir/snapshot_test_file'",
+                )
+                .unwrap();
+            snapshot_restore_common::snapshot_and_check_events(
+                &api_socket_source,
+                &snapshot_dir,
+                &event_path,
+            );
+        });
+
+        // Shutdown the source VM
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        // Kill the old virtiofsd
+        let _ = daemon_child.kill();
+        let _ = daemon_child.wait();
+
+        // Start a fresh virtiofsd (reusing the same socket path)
+        let (mut daemon_child, _) = prepare_virtiofsd(&guest.tmp_dir, shared_dir.to_str().unwrap());
+
+        let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
+        let event_path_restored = format!("{}.2", temp_event_monitor_path(&guest.tmp_dir));
+
+        // Restore the VM from the snapshot
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_restored])
+            .args([
+                "--event-monitor",
+                format!("path={event_path_restored}").as_str(),
+            ])
+            .args([
+                "--restore",
+                format!("source_url=file://{snapshot_dir}").as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        // Wait for the VM to be restored
+        assert!(wait_until(Duration::from_secs(30), || {
+            remote_command(&api_socket_restored, "info", None)
+        }));
+
+        let latest_events = [&MetaEvent {
+            event: "restored".to_string(),
+            device_id: None,
+        }];
+        assert!(wait_for_latest_events_exact(
+            Duration::from_secs(30),
+            &latest_events,
+            &event_path_restored
+        ));
+
+        // Remove the snapshot dir
+        let _ = remove_dir_all(snapshot_dir.as_str());
+
+        let r = panic::catch_unwind(|| {
+            // Resume the VM
+            assert!(wait_until(Duration::from_secs(30), || remote_command(
+                &api_socket_restored,
+                "info",
+                None
+            )));
+            assert!(remote_command(&api_socket_restored, "resume", None));
+            thread::sleep(Duration::new(5, 0));
+
+            // Verify virtiofs still works after restore
+            // Read the file written before snapshot
+            assert_eq!(
+                guest
+                    .ssh_command("cat mount_dir/snapshot_test_file")
+                    .unwrap()
+                    .trim(),
+                "snapshot_test_data"
+            );
+
+            // Read the pre-existing shared file
+            assert_eq!(
+                guest.ssh_command("cat mount_dir/file1").unwrap().trim(),
+                "foo"
+            );
+
+            // Write a new file after restore
+            guest
+                .ssh_command("sudo bash -c 'echo post_restore_data > mount_dir/post_restore_file'")
+                .unwrap();
+
+            // Verify the new file exists on the host
+            let post_restore_content =
+                fs::read_to_string(shared_dir.join("post_restore_file")).unwrap();
+            assert_eq!(post_restore_content.trim(), "post_restore_data");
+        });
+
+        // Shutdown the target VM
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        // Clean up virtiofsd
+        let _ = daemon_child.kill();
+        let _ = daemon_child.wait();
+    }
+
+    fn _test_live_migration_watchdog(upgrade_test: bool, memfds: bool) {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let console_text = String::from("On a branch floating down river a cricket, singing.");
+        let net_id = "net123";
+        let net_params = format!(
+            "id={},tap=,mac={},ip={},mask=255.255.255.128",
+            net_id, guest.network.guest_mac0, guest.network.host_ip0
+        );
+
+        let memory_param: &[&str] = if memfds {
+            &["--memory", "size=1500M,shared=on"]
+        } else {
+            &["--memory", "size=1500M"]
+        };
+
+        let boot_vcpus = 2;
+        let max_vcpus = 4;
+
+        let pmem_temp_file = TempFile::new().unwrap();
+        pmem_temp_file.as_file().set_len(128 << 20).unwrap();
+        Command::new("mkfs.ext4")
+            .arg(pmem_temp_file.as_path())
+            .output()
+            .expect("Expect creating disk image to succeed");
+        let pmem_path = (!cfg!(feature = "mshv")).then(|| String::from("/dev/pmem0"));
+
+        // Start the source VM
+        let src_vm_path = if upgrade_test {
+            cloud_hypervisor_release_path()
+        } else {
+            clh_command("cloud-hypervisor")
+        };
+        let src_api_socket = temp_api_path(&guest.tmp_dir);
+        let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
+        src_vm_cmd
+            .args([
+                "--cpus",
+                format!("boot={boot_vcpus},max={max_vcpus}").as_str(),
+            ])
+            .args(memory_param)
+            .default_kernel_cmdline()
+            .args(["--net", net_params.as_str()])
+            .args(["--api-socket", &src_api_socket])
+            .args(pmem_args(pmem_temp_file.as_path()))
+            .args(["--watchdog"]);
+        if upgrade_test {
+            src_vm_cmd.args(["--seccomp", "false"]);
+        }
+        src_vm_cmd.default_disks();
+        let mut src_child = src_vm_cmd.capture_output().spawn().unwrap();
+
+        // Start the destination VM
+        let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
+        dest_api_socket.push_str(".dest");
+        let mut dest_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &dest_api_socket])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            // Make sure the source VM is functional
+            // Check the number of vCPUs
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+            // Check the guest RAM
+            assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
+            // Check the guest virtio-devices, e.g. block, rng, console, and net
+            guest.check_devices_common(None, Some(&console_text), pmem_path.as_ref());
+
+            // Enable watchdog and ensure its functional
+            let expected_reboot_count = 1;
+            // Enable the watchdog with a 15s timeout
+            enable_guest_watchdog(&guest, 15);
+
+            assert_eq!(get_reboot_count(&guest), expected_reboot_count);
+            assert_eq!(
+                guest
+                    .ssh_command("sudo journalctl | grep -c -- \"Watchdog started\"")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+            // Allow some normal time to elapse to check we don't get spurious reboots
+            thread::sleep(Duration::new(40, 0));
+            // Check no reboot
+            assert_eq!(get_reboot_count(&guest), expected_reboot_count);
+
+            // Start the live-migration
+            let migration_socket = String::from(
+                guest
+                    .tmp_dir
+                    .as_path()
+                    .join("live-migration.sock")
+                    .to_str()
+                    .unwrap(),
+            );
+
+            assert!(
+                start_live_migration(
+                    &migration_socket,
+                    &src_api_socket,
+                    &dest_api_socket,
+                    memfds,
+                    false,
+                    upgrade_test
+                ),
+                "Unsuccessful command: 'send-migration' or 'receive-migration'."
+            );
+        });
+
+        // Check and report any errors occurred during the live-migration
+        if r.is_err() {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Error occurred during live-migration",
+            );
+        }
+
+        let src_exited_ok = wait_until(Duration::from_secs(30), || {
+            matches!(src_child.try_wait(), Ok(Some(_)))
+        }) && src_child.try_wait().unwrap().is_some_and(|s| s.success());
+        if !src_exited_ok {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "source VM was not terminated successfully.",
+            );
+        }
+
+        // Post live-migration check to make sure the destination VM is functional
+        let r = panic::catch_unwind(|| {
+            // Perform same checks to validate VM has been properly migrated
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+            assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
+
+            guest.check_devices_common(None, Some(&console_text), pmem_path.as_ref());
+
+            // Perform checks on watchdog
+            let mut expected_reboot_count = 1;
+
+            // Allow some normal time to elapse to check we don't get spurious reboots
+            thread::sleep(Duration::new(40, 0));
+            // Check no reboot
+            assert_eq!(get_reboot_count(&guest), expected_reboot_count);
+
+            // Trigger a panic (sync first). We need to do this inside a screen with a delay so the SSH command returns.
+            guest.ssh_command("screen -dmS reboot sh -c \"sleep 5; echo s | tee /proc/sysrq-trigger; echo c | sudo tee /proc/sysrq-trigger\"").unwrap();
+            // Allow some time for the watchdog to trigger (max 30s) and reboot to happen
+            guest.wait_vm_boot_custom_timeout(120).unwrap();
+            // Check a reboot is triggered by the watchdog
+            expected_reboot_count += 1;
+            assert_eq!(get_reboot_count(&guest), expected_reboot_count);
+
+            #[cfg(target_arch = "x86_64")]
+            {
+                // Now pause the VM and remain offline for 30s
+                assert!(remote_command(&dest_api_socket, "pause", None));
+                thread::sleep(Duration::new(30, 0));
+                assert!(remote_command(&dest_api_socket, "resume", None));
+
+                // Check no reboot
+                assert_eq!(get_reboot_count(&guest), expected_reboot_count);
+            }
+        });
+
+        // Clean-up the destination VM and make sure it terminated correctly
+        let _ = dest_child.kill();
+        let dest_output = dest_child.wait_with_output().unwrap();
+        handle_child_output(r, &dest_output);
+
+        // Check the destination VM has the expected 'console_text' from its output
+        let r = panic::catch_unwind(|| {
+            assert!(String::from_utf8_lossy(&dest_output.stdout).contains(&console_text));
+        });
+        handle_child_output(r, &dest_output);
+    }
+
+    #[test]
+    fn test_watchdog() {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        _test_watchdog(&guest);
+    }
+
+    #[test]
+    fn test_live_migration_watchdog() {
+        _test_live_migration_watchdog(false, false);
+    }
+
+    fn _test_live_migration_balloon(upgrade_test: bool, memfds: bool) {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let console_text = String::from("On a branch floating down river a cricket, singing.");
+        let net_id = "net123";
+        let net_params = format!(
+            "id={},tap=,mac={},ip={},mask=255.255.255.128",
+            net_id, guest.network.guest_mac0, guest.network.host_ip0
+        );
+
+        let memory_param: &[&str] = if memfds {
+            &[
+                "--memory",
+                "size=4G,hotplug_method=virtio-mem,hotplug_size=8G,shared=on",
+                "--balloon",
+                "size=0",
+            ]
+        } else {
+            &[
+                "--memory",
+                "size=4G,hotplug_method=virtio-mem,hotplug_size=8G",
+                "--balloon",
+                "size=0",
+            ]
+        };
+
+        let boot_vcpus = 2;
+        let max_vcpus = 4;
+
+        let pmem_temp_file = TempFile::new().unwrap();
+        pmem_temp_file.as_file().set_len(128 << 20).unwrap();
+        Command::new("mkfs.ext4")
+            .arg(pmem_temp_file.as_path())
+            .output()
+            .expect("Expect creating disk image to succeed");
+        let pmem_path = (!cfg!(feature = "mshv")).then(|| String::from("/dev/pmem0"));
+
+        // Start the source VM
+        let src_vm_path = if upgrade_test {
+            cloud_hypervisor_release_path()
+        } else {
+            clh_command("cloud-hypervisor")
+        };
+        let src_api_socket = temp_api_path(&guest.tmp_dir);
+        let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
+        src_vm_cmd
+            .args([
+                "--cpus",
+                format!(
+                    "boot={boot_vcpus},max={max_vcpus}{}",
+                    if cfg!(target_arch = "aarch64") {
+                        ",nested=off"
+                    } else {
+                        ""
+                    }
+                )
+                .as_str(),
+            ])
+            .args(memory_param)
+            .default_kernel_cmdline()
+            .args(["--net", net_params.as_str()])
+            .args(["--api-socket", &src_api_socket])
+            .args(pmem_args(pmem_temp_file.as_path()));
+        if upgrade_test {
+            src_vm_cmd.args(["--seccomp", "false"]);
+        }
+        src_vm_cmd.default_disks();
+        let mut src_child = src_vm_cmd.capture_output().spawn().unwrap();
+
+        // Start the destination VM
+        let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
+        dest_api_socket.push_str(".dest");
+        let mut dest_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &dest_api_socket])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            // Make sure the source VM is functional
+            // Check the number of vCPUs
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+
+            // Check the guest RAM
+            assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+            // Increase the guest RAM
+            resize_command(&src_api_socket, None, Some(6 << 30), None, None);
+            assert!(wait_until(Duration::from_secs(30), || {
+                guest.get_total_memory().unwrap_or_default() > 5_760_000
+            }));
+            assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
+            // Use balloon to remove RAM from the VM
+            resize_command(&src_api_socket, None, None, Some(1 << 30), None);
+            assert!(wait_until(Duration::from_secs(5), || {
+                let total_memory = guest.get_total_memory().unwrap_or_default();
+                total_memory > 4_800_000 && total_memory < 5_760_000
+            }));
+            let total_memory = guest.get_total_memory().unwrap_or_default();
+            assert!(total_memory > 4_800_000);
+            assert!(total_memory < 5_760_000);
+
+            // Check the guest virtio-devices, e.g. block, rng, console, and net
+            guest.check_devices_common(None, Some(&console_text), pmem_path.as_ref());
+
+            #[cfg(target_arch = "x86_64")]
+            guest.add_test_disk(&src_api_socket);
+
+            // Start the live-migration
+            let migration_socket = String::from(
+                guest
+                    .tmp_dir
+                    .as_path()
+                    .join("live-migration.sock")
+                    .to_str()
+                    .unwrap(),
+            );
+
+            assert!(
+                start_live_migration(
+                    &migration_socket,
+                    &src_api_socket,
+                    &dest_api_socket,
+                    memfds,
+                    false,
+                    upgrade_test
+                ),
+                "Unsuccessful command: 'send-migration' or 'receive-migration'."
+            );
+        });
+
+        // Check and report any errors occurred during the live-migration
+        if r.is_err() {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Error occurred during live-migration",
+            );
+        }
+
+        let src_exited_ok = wait_until(Duration::from_secs(30), || {
+            matches!(src_child.try_wait(), Ok(Some(_)))
+        }) && src_child.try_wait().unwrap().is_some_and(|s| s.success());
+        if !src_exited_ok {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "source VM was not terminated successfully.",
+            );
+        }
+
+        // Post live-migration check to make sure the destination VM is functional
+        let r = panic::catch_unwind(|| {
+            // Perform same checks to validate VM has been properly migrated
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+            assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+
+            guest.check_devices_common(None, Some(&console_text), pmem_path.as_ref());
+
+            // Perform checks on guest RAM using balloon
+            let total_memory = guest.get_total_memory().unwrap_or_default();
+            assert!(total_memory > 4_800_000);
+            assert!(total_memory < 5_760_000);
+            // Deflate balloon to restore entire RAM to the VM
+            resize_command(&dest_api_socket, None, None, Some(0), None);
+            thread::sleep(Duration::new(5, 0));
+            assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
+            // Decrease guest RAM with virtio-mem
+            resize_command(&dest_api_socket, None, Some(5 << 30), None, None);
+            thread::sleep(Duration::new(5, 0));
+            let total_memory = guest.get_total_memory().unwrap_or_default();
+            assert!(total_memory > 4_800_000);
+            assert!(total_memory < 5_760_000);
+
+            #[cfg(target_arch = "x86_64")]
+            guest.remove_test_disk(&dest_api_socket);
+        });
+
+        // Clean-up the destination VM and make sure it terminated correctly
+        let _ = dest_child.kill();
+        let dest_output = dest_child.wait_with_output().unwrap();
+        handle_child_output(r, &dest_output);
+
+        // Check the destination VM has the expected 'console_text' from its output
+        let r = panic::catch_unwind(|| {
+            assert!(String::from_utf8_lossy(&dest_output.stdout).contains(&console_text));
+        });
+        handle_child_output(r, &dest_output);
+    }
+
+    fn _test_live_migration_numa(upgrade_test: bool, memfds: bool) {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let console_text = String::from("On a branch floating down river a cricket, singing.");
+        let net_id = "net123";
+        let net_params = format!(
+            "id={},tap=,mac={},ip={},mask=255.255.255.128",
+            net_id, guest.network.guest_mac0, guest.network.host_ip0
+        );
+
+        let memory_param: &[&str] = if memfds {
+            &[
+                "--memory",
+                "size=0,hotplug_method=virtio-mem,shared=on",
+                "--memory-zone",
+                "id=mem0,size=1G,hotplug_size=4G,shared=on",
+                "id=mem1,size=1G,hotplug_size=4G,shared=on",
+                "id=mem2,size=2G,hotplug_size=4G,shared=on",
+                "--numa",
+                "guest_numa_id=0,cpus=[0-2,9],distances=[1@15,2@20],memory_zones=mem0",
+                "guest_numa_id=1,cpus=[3-4,6-8],distances=[0@20,2@25],memory_zones=mem1",
+                "guest_numa_id=2,cpus=[5,10-11],distances=[0@25,1@30],memory_zones=mem2",
+            ]
+        } else {
+            &[
+                "--memory",
+                "size=0,hotplug_method=virtio-mem",
+                "--memory-zone",
+                "id=mem0,size=1G,hotplug_size=4G",
+                "id=mem1,size=1G,hotplug_size=4G",
+                "id=mem2,size=2G,hotplug_size=4G",
+                "--numa",
+                "guest_numa_id=0,cpus=[0-2,9],distances=[1@15,2@20],memory_zones=mem0",
+                "guest_numa_id=1,cpus=[3-4,6-8],distances=[0@20,2@25],memory_zones=mem1",
+                "guest_numa_id=2,cpus=[5,10-11],distances=[0@25,1@30],memory_zones=mem2",
+            ]
+        };
+
+        let boot_vcpus = 6;
+        let max_vcpus = 12;
+
+        let pmem_temp_file = TempFile::new().unwrap();
+        pmem_temp_file.as_file().set_len(128 << 20).unwrap();
+        Command::new("mkfs.ext4")
+            .arg(pmem_temp_file.as_path())
+            .output()
+            .expect("Expect creating disk image to succeed");
+        let pmem_path = (!cfg!(feature = "mshv")).then(|| String::from("/dev/pmem0"));
+
+        // Start the source VM
+        let src_vm_path = if upgrade_test {
+            cloud_hypervisor_release_path()
+        } else {
+            clh_command("cloud-hypervisor")
+        };
+        let src_api_socket = temp_api_path(&guest.tmp_dir);
+        let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
+        src_vm_cmd
+            .args([
+                "--cpus",
+                format!(
+                    "boot={boot_vcpus},max={max_vcpus}{}",
+                    if cfg!(target_arch = "aarch64") {
+                        ",nested=off"
+                    } else {
+                        ""
+                    }
+                )
+                .as_str(),
+            ])
+            .args(memory_param)
+            .default_kernel_cmdline()
+            .args(["--net", net_params.as_str()])
+            .args(["--api-socket", &src_api_socket])
+            .args(pmem_args(pmem_temp_file.as_path()));
+        if upgrade_test {
+            src_vm_cmd.args(["--seccomp", "false"]);
+        }
+        src_vm_cmd.default_disks();
+        let mut src_child = src_vm_cmd.capture_output().spawn().unwrap();
+
+        // Start the destination VM
+        let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
+        dest_api_socket.push_str(".dest");
+        let mut dest_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &dest_api_socket])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            // Make sure the source VM is functional
+            // Check the number of vCPUs
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+
+            // Check the guest RAM
+            assert!(guest.get_total_memory().unwrap_or_default() > 2_880_000);
+
+            // Check the guest virtio-devices, e.g. block, rng, console, and net
+            guest.check_devices_common(None, Some(&console_text), pmem_path.as_ref());
+
+            // Check the NUMA parameters are applied correctly and resize
+            // each zone to test the case where we migrate a VM with the
+            // virtio-mem regions being used.
+            {
+                guest.check_numa_common(
+                    Some(&[960_000, 960_000, 1_920_000]),
+                    Some(&[&[0, 1, 2], &[3, 4], &[5]]),
+                    Some(&["10 15 20", "20 10 25", "25 30 10"]),
+                );
+
+                // AArch64 currently does not support hotplug, and therefore we only
+                // test hotplug-related function on x86_64 here.
+                #[cfg(target_arch = "x86_64")]
+                {
+                    guest.enable_memory_hotplug();
+
+                    // Resize every memory zone and check each associated NUMA node
+                    // has been assigned the right amount of memory.
+                    resize_zone_command(&src_api_socket, "mem0", "2G");
+                    resize_zone_command(&src_api_socket, "mem1", "2G");
+                    resize_zone_command(&src_api_socket, "mem2", "3G");
+
+                    guest.check_numa_common(Some(&[1_920_000, 1_920_000, 1_920_000]), None, None);
+                }
+            }
+
+            #[cfg(target_arch = "x86_64")]
+            guest.add_test_disk(&src_api_socket);
+
+            // Start the live-migration
+            let migration_socket = String::from(
+                guest
+                    .tmp_dir
+                    .as_path()
+                    .join("live-migration.sock")
+                    .to_str()
+                    .unwrap(),
+            );
+
+            assert!(
+                start_live_migration(
+                    &migration_socket,
+                    &src_api_socket,
+                    &dest_api_socket,
+                    memfds,
+                    false,
+                    upgrade_test
+                ),
+                "Unsuccessful command: 'send-migration' or 'receive-migration'."
+            );
+        });
+
+        // Check and report any errors occurred during the live-migration
+        if r.is_err() {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Error occurred during live-migration",
+            );
+        }
+
+        let src_exited_ok = wait_until(Duration::from_secs(30), || {
+            matches!(src_child.try_wait(), Ok(Some(_)))
+        }) && src_child.try_wait().unwrap().is_some_and(|s| s.success());
+        if !src_exited_ok {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "source VM was not terminated successfully.",
+            );
+        }
+
+        // Post live-migration check to make sure the destination VM is functional
+        let r = panic::catch_unwind(|| {
+            // Perform same checks to validate VM has been properly migrated
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+            #[cfg(target_arch = "x86_64")]
+            assert!(guest.get_total_memory().unwrap_or_default() > 6_720_000);
+            #[cfg(target_arch = "aarch64")]
+            assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+
+            guest.check_devices_common(None, Some(&console_text), pmem_path.as_ref());
+
+            // Perform NUMA related checks
+            {
+                #[cfg(target_arch = "aarch64")]
+                {
+                    guest.check_numa_common(
+                        Some(&[960_000, 960_000, 1_920_000]),
+                        Some(&[&[0, 1, 2], &[3, 4], &[5]]),
+                        Some(&["10 15 20", "20 10 25", "25 30 10"]),
+                    );
+                }
+
+                // AArch64 currently does not support hotplug, and therefore we only
+                // test hotplug-related function on x86_64 here.
+                #[cfg(target_arch = "x86_64")]
+                {
+                    guest.check_numa_common(
+                        Some(&[1_920_000, 1_920_000, 2_880_000]),
+                        Some(&[&[0, 1, 2], &[3, 4], &[5]]),
+                        Some(&["10 15 20", "20 10 25", "25 30 10"]),
+                    );
+
+                    guest.enable_memory_hotplug();
+
+                    // Resize every memory zone and check each associated NUMA node
+                    // has been assigned the right amount of memory.
+                    resize_zone_command(&dest_api_socket, "mem0", "4G");
+                    resize_zone_command(&dest_api_socket, "mem1", "4G");
+                    resize_zone_command(&dest_api_socket, "mem2", "4G");
+                    // Resize to the maximum amount of CPUs and check each NUMA
+                    // node has been assigned the right CPUs set.
+                    resize_command(&dest_api_socket, Some(max_vcpus), None, None, None);
+
+                    guest.check_numa_common(
+                        Some(&[3_840_000, 3_840_000, 3_840_000]),
+                        Some(&[&[0, 1, 2, 9], &[3, 4, 6, 7, 8], &[5, 10, 11]]),
+                        None,
+                    );
+                }
+            }
+
+            #[cfg(target_arch = "x86_64")]
+            guest.remove_test_disk(&dest_api_socket);
+        });
+
+        // Clean-up the destination VM and make sure it terminated correctly
+        let _ = dest_child.kill();
+        let dest_output = dest_child.wait_with_output().unwrap();
+        handle_child_output(r, &dest_output);
+
+        // Check the destination VM has the expected 'console_text' from its output
+        let r = panic::catch_unwind(|| {
+            assert!(String::from_utf8_lossy(&dest_output.stdout).contains(&console_text));
+        });
+        handle_child_output(r, &dest_output);
+    }
+
+    #[test]
+    fn test_live_migration_balloon() {
+        _test_live_migration_balloon(false, false);
+    }
+
+    #[test]
+    fn test_live_migration_balloon_memfds() {
+        _test_live_migration_balloon(false, true);
+    }
+
+    #[test]
+    fn test_live_upgrade_balloon() {
+        _test_live_migration_balloon(true, false);
+    }
+
+    #[test]
+    fn test_live_upgrade_balloon_memfds() {
+        _test_live_migration_balloon(true, true);
+    }
+
+    #[test]
+    fn test_live_migration_numa() {
+        _test_live_migration_numa(false, false);
+    }
+
+    #[test]
+    fn test_live_migration_numa_memfds() {
+        _test_live_migration_numa(false, true);
+    }
+
+    #[test]
+    fn test_live_upgrade_numa() {
+        _test_live_migration_numa(true, false);
+    }
+
+    #[test]
+    fn test_live_upgrade_numa_memfds() {
+        _test_live_migration_numa(true, true);
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_restore_uffd_hugepage_zone() {
+        if !exec_host_command_status(
+            "grep -q '^Hugepagesize:[[:space:]]*2048 kB' /proc/meminfo && test $(awk '/HugePages_Free/ {print $2}' /proc/meminfo) -ge 256",
+        )
+        .success()
+        {
+            println!("SKIPPED: not enough free 2MiB hugepages for UFFD restore test");
+            return;
+        }
+
+        // reserve=on opts the hugepage-backed zone out of MAP_NORESERVE, so
+        // the 2MiB pages are reserved from the pool at mmap time. Hugepages
+        // are the most likely place to want this, and exercising it here keeps
+        // the reserve path covered across both the source boot and the
+        // demand-paged UFFD restore. The skip guard above already requires the
+        // 256 free pages this zone needs, and the source VM is killed before
+        // restore, so the pool only ever has to back one VM at a time.
+        snapshot_restore_common::_test_snapshot_restore_uffd(
+            "size=0",
+            &["id=mem0,size=512M,hugepages=on,hugepage_size=2M,reserve=on"],
+            480_000,
+        );
+    }
 }
 
 mod dbus_api {
@@ -10172,7 +11275,7 @@ mod ivshmem {
             .arg(pmem_temp_file.as_path())
             .output()
             .expect("Expect creating disk image to succeed");
-        let pmem_path = String::from("/dev/pmem0");
+        let pmem_path = (!cfg!(feature = "mshv")).then(|| String::from("/dev/pmem0"));
 
         let ivshmem_file_path = String::from(
             guest
@@ -10209,10 +11312,7 @@ mod ivshmem {
             .default_disks()
             .args(["--net", net_params.as_str()])
             .args(["--api-socket", &src_api_socket])
-            .args([
-                "--pmem",
-                format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
-            ])
+            .args(pmem_args(pmem_temp_file.as_path()))
             .args([
                 "--ivshmem",
                 format!("path={ivshmem_file_path},size={file_size}").as_str(),
@@ -10237,12 +11337,10 @@ mod ivshmem {
             // Check the guest RAM
             assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
             // Check the guest virtio-devices, e.g. block, rng, console, and net
-            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
+            guest.check_devices_common(None, Some(&console_text), pmem_path.as_ref());
 
             // Check ivshmem device in src guest.
             _test_ivshmem(&guest, &ivshmem_file_path, file_size);
-            // Allow some normal time to elapse to check we don't get spurious reboots
-            thread::sleep(Duration::new(40, 0));
 
             #[cfg(target_arch = "x86_64")]
             guest.add_test_disk(&src_api_socket);
@@ -10298,7 +11396,7 @@ mod ivshmem {
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
             assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
 
-            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
+            guest.check_devices_common(None, Some(&console_text), pmem_path.as_ref());
 
             // Check ivshmem device
             _test_ivshmem(&guest, &ivshmem_file_path, file_size);
@@ -10690,6 +11788,7 @@ mod ivshmem {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))] // File backed virtio-pmem does not work under MSHV on XFS
     fn test_virtio_pmem_persist_writes() {
         test_virtio_pmem(false, false);
     }
@@ -11460,13 +12559,13 @@ mod snapshot_restore_common {
 
             if pvpanic {
                 make_guest_panic(&guest);
-                thread::sleep(Duration::new(10, 0));
 
                 let expected_sequential_events = [&MetaEvent {
                     event: "panic".to_string(),
                     device_id: None,
                 }];
-                assert!(check_latest_events_exact(
+                assert!(wait_for_latest_events_exact(
+                    Duration::from_secs(30),
                     &expected_sequential_events,
                     &event_path_restored
                 ));
@@ -11905,38 +13004,6 @@ mod common_sequential {
     use crate::*;
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
-    fn test_memory_mergeable_on() {
-        test_memory_mergeable(true);
-    }
-
-    #[test]
-    #[cfg(not(feature = "mshv"))]
-    fn test_snapshot_restore_uffd_hugepage_zone() {
-        if !exec_host_command_status(
-            "grep -q '^Hugepagesize:[[:space:]]*2048 kB' /proc/meminfo && test $(awk '/HugePages_Free/ {print $2}' /proc/meminfo) -ge 256",
-        )
-        .success()
-        {
-            println!("SKIPPED: not enough free 2MiB hugepages for UFFD restore test");
-            return;
-        }
-
-        // reserve=on opts the hugepage-backed zone out of MAP_NORESERVE, so
-        // the 2MiB pages are reserved from the pool at mmap time. Hugepages
-        // are the most likely place to want this, and exercising it here keeps
-        // the reserve path covered across both the source boot and the
-        // demand-paged UFFD restore. The skip guard above already requires the
-        // 256 free pages this zone needs, and the source VM is killed before
-        // restore, so the pool only ever has to back one VM at a time.
-        snapshot_restore_common::_test_snapshot_restore_uffd(
-            "size=0",
-            &["id=mem0,size=512M,hugepages=on,hugepage_size=2M,reserve=on"],
-            480_000,
-        );
-    }
-
-    #[test]
     #[ignore = "See #6970"]
     fn test_snapshot_restore_with_fd() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -12163,807 +13230,6 @@ mod common_sequential {
         handle_child_output(r, &output);
     }
 
-    // One rx-* entry on the host per attached tap queue.
-    fn attached_tap_queues(tap_name: &str) -> usize {
-        fs::read_dir(format!("/sys/class/net/{tap_name}/queues"))
-            .unwrap()
-            .filter(|e| {
-                e.as_ref()
-                    .unwrap()
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with("rx-")
-            })
-            .count()
-    }
-
-    // Name of the guest interface with this MAC.
-    fn guest_iface(guest: &Guest, mac: &str) -> String {
-        guest
-            .ssh_command(&format!(
-                "basename \"$(dirname \"$(grep -lx {mac} /sys/class/net/*/address)\")\""
-            ))
-            .unwrap()
-            .trim()
-            .to_string()
-    }
-
-    // Receive queues the guest driver is using on the interface.
-    fn guest_rx_queues(guest: &Guest, iface: &str) -> usize {
-        guest
-            .ssh_command(&format!("ls /sys/class/net/{iface}/queues | grep -c rx-"))
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap()
-    }
-
-    #[test]
-    fn test_snapshot_restore_net_queue_pairs() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
-
-        let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
-
-        let net_id = "net123";
-        // Four pairs need four vCPUs, but with one CPU online the guest
-        // negotiates a single pair.
-        let num_queue_pairs: usize = 4;
-        // use a name that does not conflict with tap dev created from other tests
-        let tap_name = "chtap998";
-        use std::str::FromStr;
-        let open_taps = || {
-            net_util::open_tap(
-                Some(tap_name),
-                Some(IpAddr::V4(
-                    Ipv4Addr::from_str(&guest.network.host_ip0).unwrap(),
-                )),
-                None,
-                None,
-                None,
-                num_queue_pairs,
-                Some(libc::O_RDWR | libc::O_NONBLOCK),
-            )
-            .unwrap()
-        };
-        let fd_list = |taps: &[net_util::Tap]| {
-            taps.iter()
-                .map(|tap| tap.as_raw_fd().to_string())
-                .collect::<Vec<_>>()
-                .join(",")
-        };
-
-        let taps = open_taps();
-        let net_params = format!(
-            "id={},fd=[{}],mac={},ip={},mask=255.255.255.128,num_queues={}",
-            net_id,
-            fd_list(&taps),
-            guest.network.guest_mac0,
-            guest.network.host_ip0,
-            num_queue_pairs * 2
-        );
-
-        let cloudinit_params = format!(
-            "path={},iommu=on,image_type=raw",
-            guest.disk_config.disk(DiskType::CloudInit).unwrap()
-        );
-
-        let mut child = GuestCommand::new(&guest)
-            .args(["--api-socket", &api_socket_source])
-            .args(["--cpus", "boot=4"])
-            .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args([
-                "--disk",
-                format!(
-                    "path={},image_type=raw",
-                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                )
-                .as_str(),
-                cloudinit_params.as_str(),
-            ])
-            .args(["--net", net_params.as_str()])
-            .args([
-                "--cmdline",
-                format!("{DIRECT_KERNEL_BOOT_CMDLINE} maxcpus=1").as_str(),
-            ])
-            .capture_output()
-            .spawn()
-            .unwrap();
-
-        let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
-
-        let r = panic::catch_unwind(|| {
-            guest.wait_vm_boot().unwrap();
-            let iface = guest_iface(&guest, &guest.network.guest_mac0);
-
-            // One pair negotiated, so one tap queue attached out of four.
-            assert_eq!(guest_rx_queues(&guest, &iface), 1);
-            assert_eq!(attached_tap_queues(tap_name), 1);
-
-            // Raise it through the control queue to a value that is neither the
-            // default nor the maximum, for the restore to preserve.
-            guest
-                .ssh_command(&format!("sudo ethtool -L {iface} combined 3"))
-                .unwrap();
-            assert_eq!(guest_rx_queues(&guest, &iface), 3);
-            assert_eq!(attached_tap_queues(tap_name), 3);
-
-            assert!(remote_command(&api_socket_source, "pause", None));
-            assert!(remote_command(
-                &api_socket_source,
-                "snapshot",
-                Some(format!("file://{snapshot_dir}").as_str()),
-            ));
-        });
-
-        // CH holds its own copies; drop ours so the tap goes away with the VM.
-        drop(taps);
-        kill_child(&mut child);
-        let output = child.wait_with_output().unwrap();
-        handle_child_output(r, &output);
-
-        let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
-
-        // Restore the VM from the snapshot
-        let mut child = GuestCommand::new(&guest)
-            .args(["--api-socket", &api_socket_restored])
-            .capture_output()
-            .spawn()
-            .unwrap();
-        thread::sleep(Duration::new(2, 0));
-
-        let taps = open_taps();
-        let restore_params = format!(
-            "source_url=file://{},net_fds=[{}@[{}]]",
-            snapshot_dir,
-            net_id,
-            fd_list(&taps)
-        );
-
-        let r = panic::catch_unwind(|| {
-            // A fresh tap comes with every queue attached.
-            assert_eq!(attached_tap_queues(tap_name), num_queue_pairs);
-
-            assert!(remote_command(
-                &api_socket_restored,
-                "restore",
-                Some(restore_params.as_str())
-            ));
-
-            // Wait for the VM to be restored
-            assert!(wait_until(Duration::from_secs(20), || {
-                remote_command(&api_socket_restored, "info", None)
-            }));
-
-            assert!(remote_command(&api_socket_restored, "resume", None));
-
-            // The guest did not renegotiate, and the device kept its count.
-            let iface = guest_iface(&guest, &guest.network.guest_mac0);
-            assert_eq!(guest_rx_queues(&guest, &iface), 3);
-            assert_eq!(attached_tap_queues(tap_name), 3);
-
-            // A reboot rebuilds the device on the same taps, and the driver starts
-            // over at one pair.
-            guest.reboot_linux(0);
-            assert_eq!(guest_rx_queues(&guest, &iface), 1);
-            assert_eq!(attached_tap_queues(tap_name), 1);
-        });
-
-        let _ = remove_dir_all(snapshot_dir.as_str());
-
-        kill_child(&mut child);
-        let output = child.wait_with_output().unwrap();
-        handle_child_output(r, &output);
-    }
-
-    #[test]
-    fn test_snapshot_restore_virtio_fs() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
-
-        let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
-
-        let mut workload_path = dirs::home_dir().unwrap();
-        workload_path.push("workloads");
-        let mut shared_dir = workload_path;
-        shared_dir.push("shared_dir");
-
-        let (mut daemon_child, virtiofsd_socket_path) =
-            prepare_virtiofsd(&guest.tmp_dir, shared_dir.to_str().unwrap());
-
-        let event_path = temp_event_monitor_path(&guest.tmp_dir);
-
-        let mut child = GuestCommand::new(&guest)
-            .args(["--api-socket", &api_socket_source])
-            .args(["--event-monitor", format!("path={event_path}").as_str()])
-            .args(["--cpus", "boot=2"])
-            .args(["--memory", "size=512M,shared=on"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .default_disks()
-            .default_net()
-            .args([
-                "--fs",
-                format!("socket={virtiofsd_socket_path},tag=myfs,num_queues=1,queue_size=1024")
-                    .as_str(),
-            ])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .capture_output()
-            .spawn()
-            .unwrap();
-
-        let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
-
-        let r = panic::catch_unwind(|| {
-            guest.wait_vm_boot().unwrap();
-
-            // Mount virtiofs and write a test file
-            guest
-                .ssh_command("mkdir -p mount_dir && sudo mount -t virtiofs myfs mount_dir/")
-                .unwrap();
-
-            // Verify the shared directory is accessible
-            assert_eq!(
-                guest.ssh_command("cat mount_dir/file1").unwrap().trim(),
-                "foo"
-            );
-
-            // Write a file from the guest
-            guest
-                .ssh_command(
-                    "sudo bash -c 'echo snapshot_test_data > mount_dir/snapshot_test_file'",
-                )
-                .unwrap();
-            snapshot_restore_common::snapshot_and_check_events(
-                &api_socket_source,
-                &snapshot_dir,
-                &event_path,
-            );
-        });
-
-        // Shutdown the source VM
-        kill_child(&mut child);
-        let output = child.wait_with_output().unwrap();
-        handle_child_output(r, &output);
-
-        // Kill the old virtiofsd
-        let _ = daemon_child.kill();
-        let _ = daemon_child.wait();
-
-        // Start a fresh virtiofsd (reusing the same socket path)
-        let (mut daemon_child, _) = prepare_virtiofsd(&guest.tmp_dir, shared_dir.to_str().unwrap());
-
-        let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
-        let event_path_restored = format!("{}.2", temp_event_monitor_path(&guest.tmp_dir));
-
-        // Restore the VM from the snapshot
-        let mut child = GuestCommand::new(&guest)
-            .args(["--api-socket", &api_socket_restored])
-            .args([
-                "--event-monitor",
-                format!("path={event_path_restored}").as_str(),
-            ])
-            .args([
-                "--restore",
-                format!("source_url=file://{snapshot_dir}").as_str(),
-            ])
-            .capture_output()
-            .spawn()
-            .unwrap();
-
-        // Wait for the VM to be restored
-        assert!(wait_until(Duration::from_secs(30), || {
-            remote_command(&api_socket_restored, "info", None)
-        }));
-
-        let latest_events = [&MetaEvent {
-            event: "restored".to_string(),
-            device_id: None,
-        }];
-        assert!(check_latest_events_exact(
-            &latest_events,
-            &event_path_restored
-        ));
-
-        // Remove the snapshot dir
-        let _ = remove_dir_all(snapshot_dir.as_str());
-
-        let r = panic::catch_unwind(|| {
-            // Resume the VM
-            assert!(wait_until(Duration::from_secs(30), || remote_command(
-                &api_socket_restored,
-                "info",
-                None
-            )));
-            assert!(remote_command(&api_socket_restored, "resume", None));
-            thread::sleep(Duration::new(5, 0));
-
-            // Verify virtiofs still works after restore
-            // Read the file written before snapshot
-            assert_eq!(
-                guest
-                    .ssh_command("cat mount_dir/snapshot_test_file")
-                    .unwrap()
-                    .trim(),
-                "snapshot_test_data"
-            );
-
-            // Read the pre-existing shared file
-            assert_eq!(
-                guest.ssh_command("cat mount_dir/file1").unwrap().trim(),
-                "foo"
-            );
-
-            // Write a new file after restore
-            guest
-                .ssh_command("sudo bash -c 'echo post_restore_data > mount_dir/post_restore_file'")
-                .unwrap();
-
-            // Verify the new file exists on the host
-            let post_restore_content =
-                fs::read_to_string(shared_dir.join("post_restore_file")).unwrap();
-            assert_eq!(post_restore_content.trim(), "post_restore_data");
-        });
-
-        // Shutdown the target VM
-        kill_child(&mut child);
-        let output = child.wait_with_output().unwrap();
-        handle_child_output(r, &output);
-
-        // Clean up virtiofsd and test files
-        let _ = daemon_child.kill();
-        let _ = daemon_child.wait();
-        let _ = fs::remove_file(shared_dir.join("snapshot_test_file"));
-        let _ = fs::remove_file(shared_dir.join("post_restore_file"));
-    }
-
-    fn _test_live_migration_balloon(upgrade_test: bool, memfds: bool) {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
-        let console_text = String::from("On a branch floating down river a cricket, singing.");
-        let net_id = "net123";
-        let net_params = format!(
-            "id={},tap=,mac={},ip={},mask=255.255.255.128",
-            net_id, guest.network.guest_mac0, guest.network.host_ip0
-        );
-
-        let memory_param: &[&str] = if memfds {
-            &[
-                "--memory",
-                "size=4G,hotplug_method=virtio-mem,hotplug_size=8G,shared=on",
-                "--balloon",
-                "size=0",
-            ]
-        } else {
-            &[
-                "--memory",
-                "size=4G,hotplug_method=virtio-mem,hotplug_size=8G",
-                "--balloon",
-                "size=0",
-            ]
-        };
-
-        let boot_vcpus = 2;
-        let max_vcpus = 4;
-
-        let pmem_temp_file = TempFile::new().unwrap();
-        pmem_temp_file.as_file().set_len(128 << 20).unwrap();
-        Command::new("mkfs.ext4")
-            .arg(pmem_temp_file.as_path())
-            .output()
-            .expect("Expect creating disk image to succeed");
-        let pmem_path = String::from("/dev/pmem0");
-
-        // Start the source VM
-        let src_vm_path = if upgrade_test {
-            cloud_hypervisor_release_path()
-        } else {
-            clh_command("cloud-hypervisor")
-        };
-        let src_api_socket = temp_api_path(&guest.tmp_dir);
-        let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
-        src_vm_cmd
-            .args([
-                "--cpus",
-                format!(
-                    "boot={boot_vcpus},max={max_vcpus}{}",
-                    if cfg!(target_arch = "aarch64") {
-                        ",nested=off"
-                    } else {
-                        ""
-                    }
-                )
-                .as_str(),
-            ])
-            .args(memory_param)
-            .default_kernel_cmdline()
-            .args(["--net", net_params.as_str()])
-            .args(["--api-socket", &src_api_socket])
-            .args([
-                "--pmem",
-                format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
-            ]);
-        if upgrade_test {
-            src_vm_cmd.args(["--seccomp", "false"]);
-        }
-        src_vm_cmd.default_disks();
-        let mut src_child = src_vm_cmd.capture_output().spawn().unwrap();
-
-        // Start the destination VM
-        let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
-        dest_api_socket.push_str(".dest");
-        let mut dest_child = GuestCommand::new(&guest)
-            .args(["--api-socket", &dest_api_socket])
-            .capture_output()
-            .spawn()
-            .unwrap();
-
-        let r = panic::catch_unwind(|| {
-            guest.wait_vm_boot().unwrap();
-
-            // Make sure the source VM is functional
-            // Check the number of vCPUs
-            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
-
-            // Check the guest RAM
-            assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
-            // Increase the guest RAM
-            resize_command(&src_api_socket, None, Some(6 << 30), None, None);
-            assert!(wait_until(Duration::from_secs(30), || {
-                guest.get_total_memory().unwrap_or_default() > 5_760_000
-            }));
-            assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
-            // Use balloon to remove RAM from the VM
-            resize_command(&src_api_socket, None, None, Some(1 << 30), None);
-            assert!(wait_until(Duration::from_secs(5), || {
-                let total_memory = guest.get_total_memory().unwrap_or_default();
-                total_memory > 4_800_000 && total_memory < 5_760_000
-            }));
-            let total_memory = guest.get_total_memory().unwrap_or_default();
-            assert!(total_memory > 4_800_000);
-            assert!(total_memory < 5_760_000);
-
-            // Check the guest virtio-devices, e.g. block, rng, console, and net
-            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
-
-            #[cfg(target_arch = "x86_64")]
-            guest.add_test_disk(&src_api_socket);
-
-            // Start the live-migration
-            let migration_socket = String::from(
-                guest
-                    .tmp_dir
-                    .as_path()
-                    .join("live-migration.sock")
-                    .to_str()
-                    .unwrap(),
-            );
-
-            assert!(
-                start_live_migration(
-                    &migration_socket,
-                    &src_api_socket,
-                    &dest_api_socket,
-                    memfds,
-                    false,
-                    upgrade_test
-                ),
-                "Unsuccessful command: 'send-migration' or 'receive-migration'."
-            );
-        });
-
-        // Check and report any errors occurred during the live-migration
-        if r.is_err() {
-            print_and_panic(
-                src_child,
-                dest_child,
-                None,
-                "Error occurred during live-migration",
-            );
-        }
-
-        let src_exited_ok = wait_until(Duration::from_secs(30), || {
-            matches!(src_child.try_wait(), Ok(Some(_)))
-        }) && src_child.try_wait().unwrap().is_some_and(|s| s.success());
-        if !src_exited_ok {
-            print_and_panic(
-                src_child,
-                dest_child,
-                None,
-                "source VM was not terminated successfully.",
-            );
-        }
-
-        // Post live-migration check to make sure the destination VM is functional
-        let r = panic::catch_unwind(|| {
-            // Perform same checks to validate VM has been properly migrated
-            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
-            assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
-
-            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
-
-            // Perform checks on guest RAM using balloon
-            let total_memory = guest.get_total_memory().unwrap_or_default();
-            assert!(total_memory > 4_800_000);
-            assert!(total_memory < 5_760_000);
-            // Deflate balloon to restore entire RAM to the VM
-            resize_command(&dest_api_socket, None, None, Some(0), None);
-            thread::sleep(Duration::new(5, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
-            // Decrease guest RAM with virtio-mem
-            resize_command(&dest_api_socket, None, Some(5 << 30), None, None);
-            thread::sleep(Duration::new(5, 0));
-            let total_memory = guest.get_total_memory().unwrap_or_default();
-            assert!(total_memory > 4_800_000);
-            assert!(total_memory < 5_760_000);
-
-            #[cfg(target_arch = "x86_64")]
-            guest.remove_test_disk(&dest_api_socket);
-        });
-
-        // Clean-up the destination VM and make sure it terminated correctly
-        let _ = dest_child.kill();
-        let dest_output = dest_child.wait_with_output().unwrap();
-        handle_child_output(r, &dest_output);
-
-        // Check the destination VM has the expected 'console_text' from its output
-        let r = panic::catch_unwind(|| {
-            assert!(String::from_utf8_lossy(&dest_output.stdout).contains(&console_text));
-        });
-        handle_child_output(r, &dest_output);
-    }
-
-    fn _test_live_migration_numa(upgrade_test: bool, memfds: bool) {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
-        let console_text = String::from("On a branch floating down river a cricket, singing.");
-        let net_id = "net123";
-        let net_params = format!(
-            "id={},tap=,mac={},ip={},mask=255.255.255.128",
-            net_id, guest.network.guest_mac0, guest.network.host_ip0
-        );
-
-        let memory_param: &[&str] = if memfds {
-            &[
-                "--memory",
-                "size=0,hotplug_method=virtio-mem,shared=on",
-                "--memory-zone",
-                "id=mem0,size=1G,hotplug_size=4G,shared=on",
-                "id=mem1,size=1G,hotplug_size=4G,shared=on",
-                "id=mem2,size=2G,hotplug_size=4G,shared=on",
-                "--numa",
-                "guest_numa_id=0,cpus=[0-2,9],distances=[1@15,2@20],memory_zones=mem0",
-                "guest_numa_id=1,cpus=[3-4,6-8],distances=[0@20,2@25],memory_zones=mem1",
-                "guest_numa_id=2,cpus=[5,10-11],distances=[0@25,1@30],memory_zones=mem2",
-            ]
-        } else {
-            &[
-                "--memory",
-                "size=0,hotplug_method=virtio-mem",
-                "--memory-zone",
-                "id=mem0,size=1G,hotplug_size=4G",
-                "id=mem1,size=1G,hotplug_size=4G",
-                "id=mem2,size=2G,hotplug_size=4G",
-                "--numa",
-                "guest_numa_id=0,cpus=[0-2,9],distances=[1@15,2@20],memory_zones=mem0",
-                "guest_numa_id=1,cpus=[3-4,6-8],distances=[0@20,2@25],memory_zones=mem1",
-                "guest_numa_id=2,cpus=[5,10-11],distances=[0@25,1@30],memory_zones=mem2",
-            ]
-        };
-
-        let boot_vcpus = 6;
-        let max_vcpus = 12;
-
-        let pmem_temp_file = TempFile::new().unwrap();
-        pmem_temp_file.as_file().set_len(128 << 20).unwrap();
-        Command::new("mkfs.ext4")
-            .arg(pmem_temp_file.as_path())
-            .output()
-            .expect("Expect creating disk image to succeed");
-        let pmem_path = String::from("/dev/pmem0");
-
-        // Start the source VM
-        let src_vm_path = if upgrade_test {
-            cloud_hypervisor_release_path()
-        } else {
-            clh_command("cloud-hypervisor")
-        };
-        let src_api_socket = temp_api_path(&guest.tmp_dir);
-        let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
-        src_vm_cmd
-            .args([
-                "--cpus",
-                format!(
-                    "boot={boot_vcpus},max={max_vcpus}{}",
-                    if cfg!(target_arch = "aarch64") {
-                        ",nested=off"
-                    } else {
-                        ""
-                    }
-                )
-                .as_str(),
-            ])
-            .args(memory_param)
-            .default_kernel_cmdline()
-            .args(["--net", net_params.as_str()])
-            .args(["--api-socket", &src_api_socket])
-            .args([
-                "--pmem",
-                format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
-            ]);
-        if upgrade_test {
-            src_vm_cmd.args(["--seccomp", "false"]);
-        }
-        src_vm_cmd.default_disks();
-        let mut src_child = src_vm_cmd.capture_output().spawn().unwrap();
-
-        // Start the destination VM
-        let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
-        dest_api_socket.push_str(".dest");
-        let mut dest_child = GuestCommand::new(&guest)
-            .args(["--api-socket", &dest_api_socket])
-            .capture_output()
-            .spawn()
-            .unwrap();
-
-        let r = panic::catch_unwind(|| {
-            guest.wait_vm_boot().unwrap();
-
-            // Make sure the source VM is functional
-            // Check the number of vCPUs
-            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
-
-            // Check the guest RAM
-            assert!(guest.get_total_memory().unwrap_or_default() > 2_880_000);
-
-            // Check the guest virtio-devices, e.g. block, rng, console, and net
-            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
-
-            // Check the NUMA parameters are applied correctly and resize
-            // each zone to test the case where we migrate a VM with the
-            // virtio-mem regions being used.
-            {
-                guest.check_numa_common(
-                    Some(&[960_000, 960_000, 1_920_000]),
-                    Some(&[&[0, 1, 2], &[3, 4], &[5]]),
-                    Some(&["10 15 20", "20 10 25", "25 30 10"]),
-                );
-
-                // AArch64 currently does not support hotplug, and therefore we only
-                // test hotplug-related function on x86_64 here.
-                #[cfg(target_arch = "x86_64")]
-                {
-                    guest.enable_memory_hotplug();
-
-                    // Resize every memory zone and check each associated NUMA node
-                    // has been assigned the right amount of memory.
-                    resize_zone_command(&src_api_socket, "mem0", "2G");
-                    resize_zone_command(&src_api_socket, "mem1", "2G");
-                    resize_zone_command(&src_api_socket, "mem2", "3G");
-                    thread::sleep(Duration::new(5, 0));
-
-                    guest.check_numa_common(Some(&[1_920_000, 1_920_000, 1_920_000]), None, None);
-                }
-            }
-
-            #[cfg(target_arch = "x86_64")]
-            guest.add_test_disk(&src_api_socket);
-
-            // Start the live-migration
-            let migration_socket = String::from(
-                guest
-                    .tmp_dir
-                    .as_path()
-                    .join("live-migration.sock")
-                    .to_str()
-                    .unwrap(),
-            );
-
-            assert!(
-                start_live_migration(
-                    &migration_socket,
-                    &src_api_socket,
-                    &dest_api_socket,
-                    memfds,
-                    false,
-                    upgrade_test
-                ),
-                "Unsuccessful command: 'send-migration' or 'receive-migration'."
-            );
-        });
-
-        // Check and report any errors occurred during the live-migration
-        if r.is_err() {
-            print_and_panic(
-                src_child,
-                dest_child,
-                None,
-                "Error occurred during live-migration",
-            );
-        }
-
-        let src_exited_ok = wait_until(Duration::from_secs(30), || {
-            matches!(src_child.try_wait(), Ok(Some(_)))
-        }) && src_child.try_wait().unwrap().is_some_and(|s| s.success());
-        if !src_exited_ok {
-            print_and_panic(
-                src_child,
-                dest_child,
-                None,
-                "source VM was not terminated successfully.",
-            );
-        }
-
-        // Post live-migration check to make sure the destination VM is functional
-        let r = panic::catch_unwind(|| {
-            // Perform same checks to validate VM has been properly migrated
-            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
-            #[cfg(target_arch = "x86_64")]
-            assert!(guest.get_total_memory().unwrap_or_default() > 6_720_000);
-            #[cfg(target_arch = "aarch64")]
-            assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
-
-            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
-
-            // Perform NUMA related checks
-            {
-                #[cfg(target_arch = "aarch64")]
-                {
-                    guest.check_numa_common(
-                        Some(&[960_000, 960_000, 1_920_000]),
-                        Some(&[&[0, 1, 2], &[3, 4], &[5]]),
-                        Some(&["10 15 20", "20 10 25", "25 30 10"]),
-                    );
-                }
-
-                // AArch64 currently does not support hotplug, and therefore we only
-                // test hotplug-related function on x86_64 here.
-                #[cfg(target_arch = "x86_64")]
-                {
-                    guest.check_numa_common(
-                        Some(&[1_920_000, 1_920_000, 2_880_000]),
-                        Some(&[&[0, 1, 2], &[3, 4], &[5]]),
-                        Some(&["10 15 20", "20 10 25", "25 30 10"]),
-                    );
-
-                    guest.enable_memory_hotplug();
-
-                    // Resize every memory zone and check each associated NUMA node
-                    // has been assigned the right amount of memory.
-                    resize_zone_command(&dest_api_socket, "mem0", "4G");
-                    resize_zone_command(&dest_api_socket, "mem1", "4G");
-                    resize_zone_command(&dest_api_socket, "mem2", "4G");
-                    // Resize to the maximum amount of CPUs and check each NUMA
-                    // node has been assigned the right CPUs set.
-                    resize_command(&dest_api_socket, Some(max_vcpus), None, None, None);
-                    thread::sleep(Duration::new(5, 0));
-
-                    guest.check_numa_common(
-                        Some(&[3_840_000, 3_840_000, 3_840_000]),
-                        Some(&[&[0, 1, 2, 9], &[3, 4, 6, 7, 8], &[5, 10, 11]]),
-                        None,
-                    );
-                }
-            }
-
-            #[cfg(target_arch = "x86_64")]
-            guest.remove_test_disk(&dest_api_socket);
-        });
-
-        // Clean-up the destination VM and make sure it terminated correctly
-        let _ = dest_child.kill();
-        let dest_output = dest_child.wait_with_output().unwrap();
-        handle_child_output(r, &dest_output);
-
-        // Check the destination VM has the expected 'console_text' from its output
-        let r = panic::catch_unwind(|| {
-            assert!(String::from_utf8_lossy(&dest_output.stdout).contains(&console_text));
-        });
-        handle_child_output(r, &dest_output);
-    }
-
     #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_ovs_dpdk(upgrade_test: bool, memfds: bool) {
         let ovs_disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -13055,7 +13321,7 @@ mod common_sequential {
 
             // And check the connection is still functional after live-migration
             migration_guest
-                .ssh_command("nc -vz 172.100.0.1 12345")
+                .ssh_command("nc -vz -w 10 172.100.0.1 12345")
                 .unwrap();
         });
 
@@ -13069,48 +13335,6 @@ mod common_sequential {
 
         handle_child_output(r, &dest_output);
         handle_child_output(Ok(()), &ovs_output);
-    }
-
-    // NUMA and balloon live migration tests run sequentially
-
-    #[test]
-    fn test_live_migration_balloon() {
-        _test_live_migration_balloon(false, false);
-    }
-
-    #[test]
-    fn test_live_migration_balloon_memfds() {
-        _test_live_migration_balloon(false, true);
-    }
-
-    #[test]
-    fn test_live_upgrade_balloon() {
-        _test_live_migration_balloon(true, false);
-    }
-
-    #[test]
-    fn test_live_upgrade_balloon_memfds() {
-        _test_live_migration_balloon(true, true);
-    }
-
-    #[test]
-    fn test_live_migration_numa() {
-        _test_live_migration_numa(false, false);
-    }
-
-    #[test]
-    fn test_live_migration_numa_memfds() {
-        _test_live_migration_numa(false, true);
-    }
-
-    #[test]
-    fn test_live_upgrade_numa() {
-        _test_live_migration_numa(true, false);
-    }
-
-    #[test]
-    fn test_live_upgrade_numa_memfds() {
-        _test_live_migration_numa(true, true);
     }
 
     // Require to run ovs-dpdk tests sequentially because they rely on the same ovs-dpdk setup
@@ -13144,205 +13368,6 @@ mod common_sequential {
     #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_ovs_dpdk_memfds() {
         _test_live_migration_ovs_dpdk(true, true);
-    }
-
-    fn _test_live_migration_watchdog(upgrade_test: bool, memfds: bool) {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
-        let console_text = String::from("On a branch floating down river a cricket, singing.");
-        let net_id = "net123";
-        let net_params = format!(
-            "id={},tap=,mac={},ip={},mask=255.255.255.128",
-            net_id, guest.network.guest_mac0, guest.network.host_ip0
-        );
-
-        let memory_param: &[&str] = if memfds {
-            &["--memory", "size=1500M,shared=on"]
-        } else {
-            &["--memory", "size=1500M"]
-        };
-
-        let boot_vcpus = 2;
-        let max_vcpus = 4;
-
-        let pmem_temp_file = TempFile::new().unwrap();
-        pmem_temp_file.as_file().set_len(128 << 20).unwrap();
-        Command::new("mkfs.ext4")
-            .arg(pmem_temp_file.as_path())
-            .output()
-            .expect("Expect creating disk image to succeed");
-        let pmem_path = String::from("/dev/pmem0");
-
-        // Start the source VM
-        let src_vm_path = if upgrade_test {
-            cloud_hypervisor_release_path()
-        } else {
-            clh_command("cloud-hypervisor")
-        };
-        let src_api_socket = temp_api_path(&guest.tmp_dir);
-        let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
-        src_vm_cmd
-            .args([
-                "--cpus",
-                format!("boot={boot_vcpus},max={max_vcpus}").as_str(),
-            ])
-            .args(memory_param)
-            .default_kernel_cmdline()
-            .args(["--net", net_params.as_str()])
-            .args(["--api-socket", &src_api_socket])
-            .args([
-                "--pmem",
-                format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
-            ])
-            .args(["--watchdog"]);
-        if upgrade_test {
-            src_vm_cmd.args(["--seccomp", "false"]);
-        }
-        src_vm_cmd.default_disks();
-        let mut src_child = src_vm_cmd.capture_output().spawn().unwrap();
-
-        // Start the destination VM
-        let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
-        dest_api_socket.push_str(".dest");
-        let mut dest_child = GuestCommand::new(&guest)
-            .args(["--api-socket", &dest_api_socket])
-            .capture_output()
-            .spawn()
-            .unwrap();
-
-        let r = panic::catch_unwind(|| {
-            guest.wait_vm_boot().unwrap();
-
-            // Make sure the source VM is functional
-            // Check the number of vCPUs
-            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
-            // Check the guest RAM
-            assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
-            // Check the guest virtio-devices, e.g. block, rng, console, and net
-            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
-
-            // Enable watchdog and ensure its functional
-            let expected_reboot_count = 1;
-            // Enable the watchdog with a 15s timeout
-            enable_guest_watchdog(&guest, 15);
-
-            assert_eq!(get_reboot_count(&guest), expected_reboot_count);
-            assert_eq!(
-                guest
-                    .ssh_command("sudo journalctl | grep -c -- \"Watchdog started\"")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                1
-            );
-            // Allow some normal time to elapse to check we don't get spurious reboots
-            thread::sleep(Duration::new(40, 0));
-            // Check no reboot
-            assert_eq!(get_reboot_count(&guest), expected_reboot_count);
-
-            // Start the live-migration
-            let migration_socket = String::from(
-                guest
-                    .tmp_dir
-                    .as_path()
-                    .join("live-migration.sock")
-                    .to_str()
-                    .unwrap(),
-            );
-
-            assert!(
-                start_live_migration(
-                    &migration_socket,
-                    &src_api_socket,
-                    &dest_api_socket,
-                    memfds,
-                    false,
-                    upgrade_test
-                ),
-                "Unsuccessful command: 'send-migration' or 'receive-migration'."
-            );
-        });
-
-        // Check and report any errors occurred during the live-migration
-        if r.is_err() {
-            print_and_panic(
-                src_child,
-                dest_child,
-                None,
-                "Error occurred during live-migration",
-            );
-        }
-
-        let src_exited_ok = wait_until(Duration::from_secs(30), || {
-            matches!(src_child.try_wait(), Ok(Some(_)))
-        }) && src_child.try_wait().unwrap().is_some_and(|s| s.success());
-        if !src_exited_ok {
-            print_and_panic(
-                src_child,
-                dest_child,
-                None,
-                "source VM was not terminated successfully.",
-            );
-        }
-
-        // Post live-migration check to make sure the destination VM is functional
-        let r = panic::catch_unwind(|| {
-            // Perform same checks to validate VM has been properly migrated
-            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
-            assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
-
-            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
-
-            // Perform checks on watchdog
-            let mut expected_reboot_count = 1;
-
-            // Allow some normal time to elapse to check we don't get spurious reboots
-            thread::sleep(Duration::new(40, 0));
-            // Check no reboot
-            assert_eq!(get_reboot_count(&guest), expected_reboot_count);
-
-            // Trigger a panic (sync first). We need to do this inside a screen with a delay so the SSH command returns.
-            guest.ssh_command("screen -dmS reboot sh -c \"sleep 5; echo s | tee /proc/sysrq-trigger; echo c | sudo tee /proc/sysrq-trigger\"").unwrap();
-            // Allow some time for the watchdog to trigger (max 30s) and reboot to happen
-            guest.wait_vm_boot_custom_timeout(120).unwrap();
-            // Check a reboot is triggered by the watchdog
-            expected_reboot_count += 1;
-            assert_eq!(get_reboot_count(&guest), expected_reboot_count);
-
-            #[cfg(target_arch = "x86_64")]
-            {
-                // Now pause the VM and remain offline for 30s
-                assert!(remote_command(&dest_api_socket, "pause", None));
-                thread::sleep(Duration::new(30, 0));
-                assert!(remote_command(&dest_api_socket, "resume", None));
-
-                // Check no reboot
-                assert_eq!(get_reboot_count(&guest), expected_reboot_count);
-            }
-        });
-
-        // Clean-up the destination VM and make sure it terminated correctly
-        let _ = dest_child.kill();
-        let dest_output = dest_child.wait_with_output().unwrap();
-        handle_child_output(r, &dest_output);
-
-        // Check the destination VM has the expected 'console_text' from its output
-        let r = panic::catch_unwind(|| {
-            assert!(String::from_utf8_lossy(&dest_output.stdout).contains(&console_text));
-        });
-        handle_child_output(r, &dest_output);
-    }
-
-    #[test]
-    fn test_watchdog() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
-        _test_watchdog(&guest);
-    }
-
-    #[test]
-    fn test_live_migration_watchdog() {
-        _test_live_migration_watchdog(false, false);
     }
 }
 

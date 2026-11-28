@@ -238,13 +238,7 @@ pub(crate) fn _test_api_pause_resume(target_api: &TargetApi, guest: &Guest) {
         thread::sleep(Duration::new(2, 0));
 
         // SSH into the VM should fail
-        ssh_command_ip(
-            "grep -c processor /proc/cpuinfo",
-            &guest.network.guest_ip0,
-            2,
-            5,
-        )
-        .unwrap_err();
+        assert!(guest.wait_for_ssh_unresponsive(Duration::from_secs(10)));
 
         // Resume the VM
         assert!(target_api.remote_command("resume", None));
@@ -489,7 +483,6 @@ pub(crate) fn _test_guest_numa_nodes(use_fw: bool) {
             // Resize to the maximum amount of CPUs and check each NUMA
             // node has been assigned the right CPUs set.
             resize_command(&api_socket, Some(12), None, None, None);
-            thread::sleep(Duration::new(5, 0));
 
             guest.check_numa_common(
                 Some(&[3_840_000, 3_840_000, 3_840_000]),
@@ -1324,9 +1317,6 @@ pub(crate) fn test_memory_mergeable(mergeable: bool) {
         "mergeable=off"
     };
 
-    // We assume the number of shared pages in the rest of the system to be constant
-    let ksm_ps_init = get_ksm_pages_shared();
-
     let disk_config1 = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
     let guest1 = Guest::new(Box::new(disk_config1));
     let mut child1 = GuestCommand::new(&guest1)
@@ -1350,8 +1340,6 @@ pub(crate) fn test_memory_mergeable(mergeable: bool) {
         panic!("Test should already be failed/panicked"); // To explicitly mark this block never return
     }
 
-    let ksm_ps_guest1 = get_ksm_pages_shared();
-
     let disk_config2 = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
     let guest2 = Guest::new(Box::new(disk_config2));
     let mut child2 = GuestCommand::new(&guest2)
@@ -1365,19 +1353,20 @@ pub(crate) fn test_memory_mergeable(mergeable: bool) {
         .spawn()
         .unwrap();
 
+    // Look at the pages KSM has merged for these VMMs only, as the system
+    // wide count includes any other processes using KSM.
+    let pids = [child1.id(), child2.id()];
     let r = panic::catch_unwind(|| {
         guest2.wait_vm_boot().unwrap();
-        let ksm_ps_guest2 = get_ksm_pages_shared();
 
         if mergeable {
-            println!(
-                "ksm pages_shared after vm1 booted '{ksm_ps_guest1}', ksm pages_shared after vm2 booted '{ksm_ps_guest2}'"
-            );
-            // We are expecting the number of shared pages to increase as the number of VM increases
-            assert!(ksm_ps_guest1 < ksm_ps_guest2);
+            assert!(wait_until(Duration::from_secs(30), || pids
+                .iter()
+                .all(|pid| process_ksm_merging_pages(*pid) > 0)));
         } else {
-            assert!(ksm_ps_guest1 == ksm_ps_init);
-            assert!(ksm_ps_guest2 == ksm_ps_init);
+            for pid in pids {
+                assert_eq!(process_ksm_merging_pages(pid), 0);
+            }
         }
     });
 
@@ -1650,13 +1639,11 @@ pub(crate) fn _test_simple_launch(guest: &Guest, use_fw: bool) {
             &event_path
         ));
 
-        // It's been observed on the Bionic image that udev and snapd
-        // services can cause some delay in the VM's shutdown. Disabling
-        // them improves the reliability of this test.
+        // It's been observed on the Bionic image that the udev service can
+        // cause some delay in the VM's shutdown. Disabling it improves the
+        // reliability of this test.
         let _ = guest.ssh_command("sudo systemctl disable udev");
         let _ = guest.ssh_command("sudo systemctl stop udev");
-        let _ = guest.ssh_command("sudo systemctl disable snapd");
-        let _ = guest.ssh_command("sudo systemctl stop snapd");
 
         guest.ssh_command("sudo poweroff").unwrap();
         assert!(wait_for_latest_events_exact_str(
@@ -3445,7 +3432,11 @@ pub(crate) fn _test_watchdog(guest: &Guest) {
                     device_id: None,
                 },
             ];
-            assert!(check_latest_events_exact(&latest_events, &event_path));
+            assert!(wait_for_latest_events_exact(
+                Duration::from_secs(10),
+                &latest_events,
+                &event_path
+            ));
             assert!(remote_command(&api_socket, "resume", None));
 
             // Check no reboot

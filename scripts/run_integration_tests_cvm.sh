@@ -56,54 +56,6 @@ if [ ! -f "$JAMMY_OS_RAW_IMAGE" ]; then
     popd || exit
 fi
 
-JAMMY_OS_QCOW_ZLIB_FILE_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0-zlib.qcow2"
-JAMMY_OS_QCOW_ZLIB_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_ZLIB_FILE_IMAGE_NAME"
-if [ ! -f "$JAMMY_OS_QCOW_ZLIB_FILE_IMAGE" ]; then
-    pushd "$WORKLOADS_DIR" || exit
-    time qemu-img convert -c -f raw -O qcow2 -o compression_type=zlib \
-        "$JAMMY_OS_RAW_IMAGE" $JAMMY_OS_QCOW_ZLIB_FILE_IMAGE_NAME
-    popd || exit
-fi
-
-JAMMY_OS_QCOW_ZSTD_FILE_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0-zstd.qcow2"
-JAMMY_OS_QCOW_ZSTD_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_ZSTD_FILE_IMAGE_NAME"
-if [ ! -f "$JAMMY_OS_QCOW_ZSTD_FILE_IMAGE" ]; then
-    pushd "$WORKLOADS_DIR" || exit
-    time qemu-img convert -c -f raw -O qcow2 -o compression_type=zstd \
-        "$JAMMY_OS_RAW_IMAGE" $JAMMY_OS_QCOW_ZSTD_FILE_IMAGE_NAME
-    popd || exit
-fi
-
-JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0-backing-zstd.qcow2"
-JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME"
-if [ ! -f "$JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE" ]; then
-    pushd "$WORKLOADS_DIR" || exit
-    time qemu-img create -f qcow2 \
-        -b "$JAMMY_OS_QCOW_ZSTD_FILE_IMAGE" \
-        -F qcow2 $JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME
-    popd || exit
-fi
-
-JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0-backing-uncompressed.qcow2"
-JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE_NAME"
-if [ ! -f "$JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE" ]; then
-    pushd "$WORKLOADS_DIR" || exit
-    time qemu-img create -f qcow2 \
-        -b "$JAMMY_OS_IMAGE" \
-        -F qcow2 $JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE_NAME
-    popd || exit
-fi
-
-JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0-backing-raw.qcow2"
-JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME"
-if [ ! -f "$JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE" ]; then
-    pushd "$WORKLOADS_DIR" || exit
-    time qemu-img create -f qcow2 \
-        -b "$JAMMY_OS_RAW_IMAGE" \
-        -F raw $JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME
-    popd || exit
-fi
-
 BLK_IMAGE="$WORKLOADS_DIR/blk.img"
 MNT_DIR="mount_image"
 if [ ! -f "$BLK_IMAGE" ]; then

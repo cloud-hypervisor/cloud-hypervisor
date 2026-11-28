@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::str::FromStr;
 use std::sync::{LazyLock, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{env, fmt, fs, io, mem, num, panic, thread};
 
 use rand::Rng;
@@ -281,7 +281,7 @@ pub enum WaitForBootError {
 impl GuestNetworkConfig {
     pub fn wait_vm_boot_from(
         port: u16,
-        expected_guest_addr: &str,
+        expected_guest_addrs: &[&str],
         custom_timeout: u32,
     ) -> Result<(), WaitForBootError> {
         let start = Instant::now();
@@ -328,11 +328,14 @@ impl GuestNetworkConfig {
 
             match listener.accept() {
                 Ok((_, addr)) => {
-                    // Make sure the connection is from the expected 'guest_addr'
-                    if addr.ip() != IpAddr::from_str(expected_guest_addr).unwrap() {
+                    // Make sure the connection is from one of the guest's addresses
+                    if !expected_guest_addrs
+                        .iter()
+                        .any(|a| addr.ip() == IpAddr::from_str(a).unwrap())
+                    {
                         s = format!(
-                            "Expecting the guest ip '{}' while being connected with ip '{}'",
-                            expected_guest_addr,
+                            "Expecting a guest ip in {:?} while being connected with ip '{}'",
+                            expected_guest_addrs,
                             addr.ip()
                         );
                         return Err(WaitForBootError::WrongGuestAddr);
@@ -354,7 +357,7 @@ impl GuestNetworkConfig {
                     "\n\n==== Start 'wait_vm_boot' (FAILED) ==== \
                     \n\nduration =\"{duration:?}, timeout = {custom_timeout}s\" \
                     \nlisten_addr=\"{listen_addr}\" \
-                    \nexpected_guest_addr=\"{expected_guest_addr}\" \
+                    \nexpected_guest_addrs=\"{expected_guest_addrs:?}\" \
                     \nmessage=\"{s}\" \
                     \nerror=\"{e:?}\" \
                     \n\n==== End 'wait_vm_boot' outout ====\n\n"
@@ -367,7 +370,7 @@ impl GuestNetworkConfig {
     }
 
     pub fn wait_vm_boot(&self, custom_timeout: u32) -> Result<(), WaitForBootError> {
-        Self::wait_vm_boot_from(self.tcp_listener_port, &self.guest_ip0, custom_timeout)
+        Self::wait_vm_boot_from(self.tcp_listener_port, &[&self.guest_ip0], custom_timeout)
     }
 }
 
@@ -583,6 +586,13 @@ impl DiskConfig for UbuntuDiskConfig {
 
         let mut osdisk_base_path = workload_path;
         osdisk_base_path.push(&self.image_name);
+
+        // The integration test scripts copy guest images into /tmp/workloads
+        // when /tmp supports reflinks, so the copy below shares its blocks.
+        let tmp_osdisk_base_path = Path::new("/tmp/workloads").join(&self.image_name);
+        if tmp_osdisk_base_path.exists() {
+            osdisk_base_path = tmp_osdisk_base_path;
+        }
 
         let osdisk_path = String::from(tmp_dir.as_path().join("osdisk.img").to_str().unwrap());
         let cloudinit_path = self.prepare_cloudinit(tmp_dir, network);
@@ -1204,6 +1214,8 @@ pub struct Guest {
     pub mem_size_str: String,
     /// Test name, set from the current thread name at construction.
     pub test_name: Option<String>,
+    created: Instant,
+    disk_prepare_time: Duration,
 }
 
 // Return the next id that can be used for this guest. This is stored in a
@@ -1264,7 +1276,9 @@ impl Guest {
             notify_ip: format!("{class}.{id}.1"),
         };
 
+        let created = Instant::now();
         disk_config.prepare_files(&tmp_dir, &network);
+        let disk_prepare_time = created.elapsed();
 
         Guest {
             tmp_dir,
@@ -1279,6 +1293,8 @@ impl Guest {
             nested: false,
             mem_size_str: "512M".to_string(),
             test_name: thread::current().name().map(String::from),
+            created,
+            disk_prepare_time,
         }
     }
 
@@ -1523,15 +1539,43 @@ impl Guest {
     }
 
     pub fn wait_vm_boot(&self) -> Result<(), Error> {
-        self.network
-            .wait_vm_boot(self.default_boot_timeout())
-            .map_err(Error::WaitForBoot)
+        self.wait_vm_boot_custom_timeout(self.default_boot_timeout())
     }
 
     pub fn wait_vm_boot_custom_timeout(&self, custom_timeout: u32) -> Result<(), Error> {
-        self.network
+        let start = Instant::now();
+        let result = self
+            .network
             .wait_vm_boot(custom_timeout)
-            .map_err(Error::WaitForBoot)
+            .map_err(Error::WaitForBoot);
+        self.record_boot(start.elapsed(), result.is_ok());
+        result
+    }
+
+    // Append the time taken to prepare this guest's disks and to boot it to
+    // the telemetry that the integration test scripts collect, when they have
+    // created its file.
+    fn record_boot(&self, boot_wait: Duration, booted: bool) {
+        let path = dirs::home_dir()
+            .unwrap()
+            .join("workloads/telemetry/boots.csv");
+        let Ok(mut file) = OpenOptions::new().append(true).open(path) else {
+            return;
+        };
+        let time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
+        // Write each line at once, as several tests append to the file.
+        let line = format!(
+            "{},{},{},{:.3},{:.3},{:.3},{booted}\n",
+            time.as_secs(),
+            self.test_name.as_deref().unwrap_or_default(),
+            env::var("NEXTEST_ATTEMPT").unwrap_or_default(),
+            self.disk_prepare_time.as_secs_f64(),
+            boot_wait.as_secs_f64(),
+            self.created.elapsed().as_secs_f64(),
+        );
+        let _ = file.write_all(line.as_bytes());
     }
 
     pub fn prepare_l2_cloudinit(&self) -> (TempDir, String) {
@@ -1574,9 +1618,13 @@ impl Guest {
     ) {
         if let Some(mem_ref) = mem_ref {
             // Check each NUMA node has been assigned the right amount of
-            // memory.
+            // memory. Memory that has just been hotplugged takes a moment to
+            // come online.
             for (i, &m) in mem_ref.iter().enumerate() {
-                assert!(self.get_numa_node_memory(i).unwrap_or_default() > m);
+                assert!(wait_until(Duration::from_secs(30), || self
+                    .get_numa_node_memory(i)
+                    .unwrap_or_default()
+                    > m));
             }
         }
 
@@ -2809,16 +2857,6 @@ pub mod x86_64 {
     pub const JAMMY_IMAGE_NAME_VHD: &str = "jammy-server-cloudimg-amd64-custom-20241017-0.vhd";
     pub const JAMMY_IMAGE_NAME_VHDX: &str = "jammy-server-cloudimg-amd64-custom-20241017-0.vhdx";
     pub const JAMMY_IMAGE_NAME_QCOW2: &str = "jammy-server-cloudimg-amd64-custom-20241017-0.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_ZLIB: &str =
-        "jammy-server-cloudimg-amd64-custom-20241017-0-zlib.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_ZSTD: &str =
-        "jammy-server-cloudimg-amd64-custom-20241017-0-zstd.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE: &str =
-        "jammy-server-cloudimg-amd64-custom-20241017-0-backing-zstd.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE: &str =
-        "jammy-server-cloudimg-amd64-custom-20241017-0-backing-uncompressed.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE: &str =
-        "jammy-server-cloudimg-amd64-custom-20241017-0-backing-raw.qcow2";
     pub const WINDOWS_IMAGE_NAME: &str = "windows-server-2025-amd64-1.raw";
     pub const OVMF_NAME: &str = "CLOUDHV.fd";
     pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'IO-APIC.*ttyS0' /proc/interrupts || true";
@@ -2833,16 +2871,6 @@ pub mod aarch64 {
     pub const JAMMY_IMAGE_NAME_VHD: &str = "jammy-server-cloudimg-arm64-custom-20220329-0.vhd";
     pub const JAMMY_IMAGE_NAME_VHDX: &str = "jammy-server-cloudimg-arm64-custom-20220329-0.vhdx";
     pub const JAMMY_IMAGE_NAME_QCOW2: &str = "jammy-server-cloudimg-arm64-custom-20220329-0.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_ZLIB: &str =
-        "jammy-server-cloudimg-arm64-custom-20220329-0-zlib.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_ZSTD: &str =
-        "jammy-server-cloudimg-arm64-custom-20220329-0-zstd.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE: &str =
-        "jammy-server-cloudimg-arm64-custom-20220329-0-backing-zstd.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE: &str =
-        "jammy-server-cloudimg-arm64-custom-20220329-0-backing-uncompressed.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE: &str =
-        "jammy-server-cloudimg-arm64-custom-20220329-0-backing-raw.qcow2";
     pub const WINDOWS_IMAGE_NAME: &str = "windows-11-iot-enterprise-aarch64.raw";
     pub const OVMF_NAME: &str = "CLOUDHV_EFI.fd";
     pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'GICv3.*uart-pl011' /proc/interrupts || true";

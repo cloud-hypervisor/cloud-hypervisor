@@ -77,6 +77,59 @@ process_common_args() {
     test_binary_args=("$@")
 }
 
+# Print one sample of host load, memory and /tmp usage as a line of the
+# load.csv telemetry file. The pressure values are percentages of time
+# stalled over the last 10 seconds.
+sample_load() {
+    awk -v time="$(date +%s)" \
+        -v vms="$(cat /proc/[0-9]*/comm 2>/dev/null | grep -c '^cloud-hyperviso')" \
+        -v tmp_used="$(df -m --output=used /tmp | tail -1 | tr -d ' ')" '
+        function pressure(file, kind,    line, fields, value) {
+            while ((getline line <file) > 0) {
+                split(line, fields, "[ =]")
+                if (fields[1] == kind)
+                    value = fields[3]
+            }
+            close(file)
+            return value
+        }
+        BEGIN {
+            getline line <"/proc/loadavg"
+            split(line, load, " ")
+            while ((getline line <"/proc/meminfo") > 0) {
+                split(line, fields, "[: ]+")
+                mem[fields[1]] = fields[2]
+            }
+            printf "%s,%s,%s,%d,%d,%d,%s,%s,%s,%s,%s\n", time, load[1], vms,
+                mem["MemAvailable"] / 1024, mem["Shmem"] / 1024,
+                (mem["SwapTotal"] - mem["SwapFree"]) / 1024, tmp_used,
+                pressure("/proc/pressure/cpu", "some"),
+                pressure("/proc/pressure/memory", "some"),
+                pressure("/proc/pressure/memory", "full"),
+                pressure("/proc/pressure/io", "some")
+        }'
+}
+
+# Collect telemetry for the integration tests in $WORKLOADS_DIR/telemetry
+# until the calling script exits: a sample of host load every 10 seconds in
+# load.csv, and the guest boot timings that test_infra appends to boots.csv.
+start_telemetry() {
+    local dir="$WORKLOADS_DIR/telemetry"
+
+    mkdir -p "$dir"
+    echo "time,load1,vms,mem_available_mib,shmem_mib,swap_used_mib,tmp_used_mib,cpu_some,memory_some,memory_full,io_some" >"$dir/load.csv"
+    echo "time,test,attempt,disk_prepare_s,boot_wait_s,since_created_s,booted" >"$dir/boots.csv"
+    (
+        set +x
+        while true; do
+            sample_load >>"$dir/load.csv"
+            sleep 10
+        done
+    ) &
+    # shellcheck disable=SC2064
+    trap "kill $!" EXIT
+}
+
 setup_hugepages_pool() {
     local HUGEPAGE_SIZE="$1"
     local PAGE_NUM="$2"

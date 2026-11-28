@@ -673,10 +673,8 @@ jobs:
       github.event_name == 'pull_request' && needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
     timeout-minutes: 80
     env:
-      # Our runner has 16 cores (nproc).
-      # We limit parallelism only to avoid exhausting disk space and memory
-      # resources, not to save CPU resources.
-      PARALLEL_INTEGRATION_TESTS_NUM: 12
+      # Our runner has 16 cores (nproc). Run one test per core.
+      PARALLEL_INTEGRATION_TESTS_NUM: 16
     strategy:
       fail-fast: false
       matrix:
@@ -699,13 +697,24 @@ jobs:
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
           sudo apt-get update
           sudo apt install -y docker-ce docker-ce-cli
+      - name: Install xfsprogs
+        run: sudo apt-get -y install xfsprogs
       - name: Prepare for VDPA
         run: scripts/prepare_vdpa.sh
       - name: Load openvswitch module
         run: sudo modprobe openvswitch
       - name: Run integration tests
         timeout-minutes: 60
-        run: scripts/dev_cli.sh tests --integration --libc ${{ matrix.libc }}
+        run: scripts/dev_cli.sh tests --integration --ci --libc ${{ matrix.libc }}
+      - name: Upload integration test telemetry
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: telemetry-${{ github.job }}-${{ matrix.runner }}-${{ matrix.libc }}
+          path: |
+            ~/workloads/telemetry
+            ~/workloads/junit
+          if-no-files-found: ignore
   # MQ and dev branch pushes start all four matrix entries after preflight, in
   # parallel with the build and quality jobs. The PR job keeps existing gates.
   integration-x86-64-mq:
@@ -715,10 +724,8 @@ jobs:
       (github.event_name == 'merge_group' || github.event_name == 'push') && needs.preflight.outputs.full == 'true'
     timeout-minutes: 80
     env:
-      # Our runner has 16 cores (nproc).
-      # We limit parallelism only to avoid exhausting disk space and memory
-      # resources, not to save CPU resources.
-      PARALLEL_INTEGRATION_TESTS_NUM: 12
+      # Our runner has 16 cores (nproc). Run one test per core.
+      PARALLEL_INTEGRATION_TESTS_NUM: 16
     strategy:
       fail-fast: false
       matrix:
@@ -807,11 +814,22 @@ jobs:
           fetch-depth: 0
       - name: Run unit tests (musl)
         run: scripts/dev_cli.sh tests --unit --libc musl
+      - name: Install xfsprogs
+        run: sudo apt-get update && sudo apt-get -y install xfsprogs
       - name: Load openvswitch module
         run: sudo modprobe openvswitch
       - name: Run integration tests (musl)
         timeout-minutes: 60
-        run: scripts/dev_cli.sh tests --integration --libc musl
+        run: scripts/dev_cli.sh tests --integration --ci --libc musl
+      - name: Upload integration test telemetry
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: telemetry-${{ github.job }}
+          path: |
+            ~/workloads/telemetry
+            ~/workloads/junit
+          if-no-files-found: ignore
   # integration-vfio:
   #   name: integration-vfio
   #   needs: [preflight]
@@ -872,7 +890,17 @@ jobs:
         run: |
           set -eufo pipefail
           mkdir $HOME/workloads
-          az storage blob download --container-name private-images --file "$HOME/workloads/windows-server-2025-amd64-1.raw" --name windows-server-2025-amd64-1.raw --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
+          # Keep the guest image in memory, as the runner's disk is slow to
+          # write it and to read it back in each test.
+          sudo mount -t tmpfs -o size=20G,uid="$(id -u)",gid="$(id -g)" tmpfs $HOME/workloads
+          # Pull the dev container while the image downloads, and start it
+          # once so that its layers are unpacked meanwhile too.
+          image="ghcr.io/cloud-hypervisor/cloud-hypervisor:$(sed -n 's/^CTR_IMAGE_VERSION="\(.*\)"$/\1/p' scripts/dev_cli.sh)"
+          { docker pull -q "$image" && docker run --rm "$image" true; } &
+          sudo apt-get -y install zstd
+          az storage blob download --max-connections 16 --no-progress --container-name private-images --file /dev/shm/windows-server-2025-amd64-1.raw.zst --name windows-server-2025-amd64-1.raw.zst --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
+          zstd -d -q --sparse --rm /dev/shm/windows-server-2025-amd64-1.raw.zst -o "$HOME/workloads/windows-server-2025-amd64-1.raw"
+          wait
       - name: Run Windows guest integration tests
         timeout-minutes: 30
         run: scripts/dev_cli.sh tests --integration-windows --libc ${{ matrix.libc }}
@@ -882,6 +910,9 @@ jobs:
   #   needs: [preflight]
   #   if: *mq-if
   #   timeout-minutes: 50
+  #   env:
+  #     # Our runner has 16 cores (nproc).
+  #     PARALLEL_INTEGRATION_TESTS_NUM: 12
   #   runs-on: mshv
   #   steps:
   #     # mshv runner user is "lsgunner"
@@ -895,9 +926,21 @@ jobs:
   #         fetch-depth: 0
   #     - name: Prepare for VDPA
   #       run: scripts/prepare_vdpa.sh
+  #     # The MSHV runner runs Azure Linux.
+  #     - name: Install xfsprogs
+  #       run: sudo tdnf -y install xfsprogs
   #     - name: Run integration tests
   #       timeout-minutes: 45
-  #       run: scripts/dev_cli.sh tests --integration
+  #       run: scripts/dev_cli.sh tests --integration --ci
+  #     - name: Upload integration test telemetry
+  #       if: always()
+  #       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+  #       with:
+  #         name: telemetry-${{ github.job }}
+  #         path: |
+  #           ~/workloads/telemetry
+  #           ~/workloads/junit
+  #         if-no-files-found: ignore
   # Rate-limiter host is not available
   # integration-rate-limiter:
   #   name: integration-rate-limiter
