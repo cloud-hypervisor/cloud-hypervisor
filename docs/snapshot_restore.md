@@ -217,6 +217,63 @@ Current constraints for `memory_restore_mode=copyonwrite`:
   page-cache sharing is lost for that VM and host memory use grows to the
   eager-copy level. The same applies to `ondemand` restores.
 
+### Delta snapshots
+
+A snapshot of a VM restored with `memory_restore_mode=copyonwrite` normally
+writes a self-contained memory file. A VM restored from that file maps a
+different file, so it no longer shares page cache with the other VMs that use
+the same restore source. A delta snapshot keeps that sharing.
+
+```shell
+ch-remote --api-socket=/tmp/cloud-hypervisor.sock snapshot --mode delta file:///home/foo/snapshot
+```
+
+Through the API, set `"mode": "Delta"` in the `vm.snapshot` request.
+
+Cloud Hypervisor writes these files to a delta snapshot directory:
+
+- `memory-ranges-delta`, the guest pages that changed since the restore: a
+  header that lists the guest physical address and length of each changed
+  range, followed by their contents.
+- `config.json` and `state.json`. The memory manager state records that the
+  snapshot is a delta.
+
+It has no `memory-ranges` file, so a release without delta snapshots fails to
+restore it.
+
+The snapshot does not hold its base. Before the restore, the caller must add
+the memory file that the VM was restored from to the snapshot directory as
+`memory-ranges-base`, for example with a hard link:
+
+```shell
+ln /home/foo/template/memory-ranges /home/foo/snapshot/memory-ranges-base
+```
+
+For a VM that was itself restored from a delta snapshot, that file is the
+base of that snapshot. Restore fails if the base is missing.
+
+Restore needs no extra parameter. With `memory_restore_mode=copyonwrite`, Cloud
+Hypervisor maps the base like any copy-on-write restore, then writes the delta
+over guest memory before the vCPUs run. Only the changed pages become private,
+and clean pages keep coming from the page cache of the restore source. The base
+stays the restore source of the new VM, so its next delta snapshot has the
+same base and writes one new delta. `memory_restore_mode=copy` also works,
+without the sharing. Restore rejects `memory_restore_mode=ondemand` and
+`memory_restore_mode=ondemand_no_background_fetch_pages`.
+
+Constraints:
+
+- The base must be the memory file that the VM was restored from. Cloud
+  Hypervisor cannot check this, and a different file gives the restored VM
+  wrong memory.
+- The base must not change while a delta snapshot uses it.
+- To share page cache, the base must be the same file as the restore source,
+  which a hard link or a symbolic link gives. A copy restores correctly, but
+  shares no page cache.
+- A delta snapshot fails if the VM was not restored with
+  `memory_restore_mode=copyonwrite`, or if its memory layout changed since the
+  restore.
+
 ## Restore a VM with new external FDs
 
 For a VM created with FDs explicitly passed to `NetConfig`, replacement FDs

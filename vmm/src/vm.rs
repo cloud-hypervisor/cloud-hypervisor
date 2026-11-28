@@ -2760,6 +2760,14 @@ impl Vm {
         self.memory_manager.lock().unwrap().snapshot_data()
     }
 
+    pub fn prepare_delta_snapshot(&self) -> anyhow::Result<()> {
+        self.memory_manager.lock().unwrap().prepare_delta_snapshot()
+    }
+
+    pub fn clear_snapshot_mode(&self) {
+        self.memory_manager.lock().unwrap().clear_snapshot_mode();
+    }
+
     #[cfg(feature = "guest_debug")]
     pub fn debug_request(
         &mut self,

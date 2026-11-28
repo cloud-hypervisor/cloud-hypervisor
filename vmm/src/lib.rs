@@ -51,9 +51,11 @@ use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
 use crate::api::{
     ApiRequest, ApiResponse, BalloonStatsResponse, MigrationMode, RequestHandler, TimeoutStrategy,
-    VmInfoResponse, VmReceiveMigrationData, VmSendMigrationData, VmmPingResponse,
+    VmInfoResponse, VmReceiveMigrationData, VmSendMigrationData, VmSnapshotConfig, VmmPingResponse,
 };
-use crate::config::{MemoryRestoreMode, RestoreConfig, VmMemoryZoneUpdateData, add_to_config};
+use crate::config::{
+    MemoryRestoreMode, RestoreConfig, SnapshotMode, VmMemoryZoneUpdateData, add_to_config,
+};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::GuestDebuggable;
 use crate::device_manager::DeviceManager;
@@ -91,6 +93,7 @@ pub mod device_tree;
 pub mod external_fds;
 #[cfg(feature = "guest_debug")]
 mod gdb;
+pub mod guest_memory_delta;
 #[cfg(feature = "igvm")]
 mod igvm;
 pub mod interrupt;
@@ -2612,20 +2615,27 @@ impl RequestHandler for Vmm {
         }
     }
 
-    fn vm_snapshot(&mut self, destination_url: &str) -> result::Result<(), VmError> {
+    fn vm_snapshot(&mut self, config: &VmSnapshotConfig) -> result::Result<(), VmError> {
         match self.vm {
             VmOwnership::Owned(ref mut vm) => {
                 if vm.restoring() {
                     return Err(VmError::VmRestoring);
                 }
+                if config.mode == SnapshotMode::Delta {
+                    vm.prepare_delta_snapshot()
+                        .map_err(|e| VmError::Snapshot(MigratableError::Snapshot(e)))?;
+                }
                 // Drain console_info so that FDs are not reused
                 let _ = self.console_info.take();
-                vm.snapshot()
+                let result = vm
+                    .snapshot()
                     .map_err(VmError::Snapshot)
                     .and_then(|snapshot| {
-                        vm.send(&snapshot, destination_url)
+                        vm.send(&snapshot, &config.destination_url)
                             .map_err(VmError::SnapshotSend)
-                    })
+                    });
+                vm.clear_snapshot_mode();
+                result
             }
             VmOwnership::Migration { .. } => Err(VmError::VmMigrating),
             VmOwnership::None => Err(VmError::VmNotRunning),

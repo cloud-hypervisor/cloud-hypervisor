@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
-use std::io::{self, Seek, SeekFrom};
+use std::io::{self, Seek, SeekFrom, Write};
 use std::mem::{self, MaybeUninit, zeroed};
 use std::num::NonZeroUsize;
 use std::ops::{BitAnd, Deref, Not, Range, Sub};
@@ -50,11 +50,12 @@ use vm_migration::{
 };
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::config::MemoryRestoreMode;
+use crate::config::{MemoryRestoreMode, SnapshotMode};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::{
     CoredumpMemoryRegion, CoredumpMemoryRegions, DumpState, GuestDebuggableError,
 };
+use crate::guest_memory_delta::{DeltaError, GuestMemoryDeltaHeader};
 use crate::migration::transport::SocketStream;
 use crate::migration::url_to_path;
 use crate::pagemap::PageMap;
@@ -190,6 +191,13 @@ const VMM_UFFD_ID: &str = "__vmm";
 
 /// Filename used to store guest RAM in snapshot directories.
 pub const SNAPSHOT_FILENAME: &str = "memory-ranges";
+/// Filename used to store the changed guest pages in delta snapshot directories.
+pub const SNAPSHOT_DELTA_FILENAME: &str = "memory-ranges-delta";
+/// Filename of the restore source that the caller adds to delta snapshot directories.
+pub const SNAPSHOT_BASE_FILENAME: &str = "memory-ranges-base";
+// A copy-on-write snapshot also writes runs of unchanged pages this short
+// between changed pages, to cut down on the number of writes.
+const COW_SNAPSHOT_GAP_PAGES: u64 = 8;
 
 #[cfg(target_arch = "x86_64")]
 const X86_64_IRQ_BASE: u32 = 5;
@@ -401,6 +409,7 @@ pub struct MemoryManager {
     thp: bool,
     user_provided_zones: bool,
     snapshot_memory_ranges: MemoryRangeTable,
+    snapshot_mode: SnapshotMode,
     cow_source: Option<CowSource>,
     memory_zones: MemoryZones,
     log_dirty: bool, // Enable dirty logging for created RAM regions
@@ -558,6 +567,18 @@ pub enum Error {
     /// Error reading from snapshot file
     #[error("Error reading from snapshot file")]
     SnapshotRead(#[source] io::Error),
+
+    /// Invalid memory delta file
+    #[error("Invalid memory delta file")]
+    SnapshotDelta(#[source] DeltaError),
+
+    /// Delta snapshot with on-demand restore
+    #[error("A delta snapshot cannot be restored with an on-demand memory_restore_mode")]
+    SnapshotDeltaOnDemand,
+
+    /// Missing base of a delta snapshot
+    #[error("Delta snapshot has no base: the caller must provide {0:?} before the restore")]
+    SnapshotBaseMissing(PathBuf),
 
     // Error copying snapshot into region
     #[error("Error copying snapshot into region")]
@@ -2505,6 +2526,7 @@ impl MemoryManager {
             reserve: config.reserve,
             user_provided_zones,
             snapshot_memory_ranges: MemoryRangeTable::default(),
+            snapshot_mode: SnapshotMode::Full,
             cow_source: None,
             memory_zones,
             guest_ram_regions: Vec::new(),
@@ -2535,11 +2557,30 @@ impl MemoryManager {
         #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         if let Some(source_url) = source_url {
-            let mut memory_file_path = url_to_path(source_url).map_err(Error::Restore)?;
-            memory_file_path.push(String::from(SNAPSHOT_FILENAME));
+            let dir = url_to_path(source_url).map_err(Error::Restore)?;
 
             let mem_snapshot: MemoryManagerSnapshotData =
                 snapshot.to_state().map_err(Error::Restore)?;
+
+            let memory_file_path = match mem_snapshot.snapshot_mode {
+                SnapshotMode::Full => dir.join(SNAPSHOT_FILENAME),
+                SnapshotMode::Delta
+                    if matches!(
+                        memory_restore_mode,
+                        MemoryRestoreMode::OnDemand
+                            | MemoryRestoreMode::OnDemandNoBackgroundFetchPages
+                    ) =>
+                {
+                    return Err(Error::SnapshotDeltaOnDemand);
+                }
+                SnapshotMode::Delta => {
+                    let base = dir.join(SNAPSHOT_BASE_FILENAME);
+                    if !base.exists() {
+                        return Err(Error::SnapshotBaseMissing(base));
+                    }
+                    base
+                }
+            };
 
             let mm = MemoryManager::new(
                 vm,
@@ -2573,6 +2614,14 @@ impl MemoryManager {
                         .lock()
                         .unwrap()
                         .fill_saved_regions(memory_file_path, &mem_snapshot.memory_ranges)?,
+                }
+
+                if mem_snapshot.snapshot_mode == SnapshotMode::Delta {
+                    apply_memory_delta(
+                        &*mm.lock().unwrap().guest_memory.memory(),
+                        &dir.join(SNAPSHOT_DELTA_FILENAME),
+                        &mem_snapshot.memory_ranges,
+                    )?;
                 }
             }
 
@@ -3261,6 +3310,28 @@ impl MemoryManager {
         Some(ranges)
     }
 
+    /// Makes the next snapshot a delta one. Fails unless guest memory still
+    /// maps the copy-on-write restore source with the layout it was restored with.
+    pub fn prepare_delta_snapshot(&mut self) -> anyhow::Result<()> {
+        let Some(source) = &self.cow_source else {
+            return Err(anyhow!(
+                "The VM was not restored with memory_restore_mode=copyonwrite"
+            ));
+        };
+        let ranges = self.memory_range_table(MemoryRangePolicy::SkipPersisted)?;
+        if ranges != source.ranges {
+            return Err(anyhow!("The guest memory layout changed since the restore"));
+        }
+        self.snapshot_mode = SnapshotMode::Delta;
+
+        Ok(())
+    }
+
+    /// Makes the next snapshot a full one again.
+    pub fn clear_snapshot_mode(&mut self) {
+        self.snapshot_mode = SnapshotMode::Full;
+    }
+
     pub fn snapshot_data(&self) -> MemoryManagerSnapshotData {
         MemoryManagerSnapshotData {
             memory_ranges: self.snapshot_memory_ranges.clone(),
@@ -3277,6 +3348,7 @@ impl MemoryManager {
             next_memory_slot: self.next_memory_slot.load(Ordering::SeqCst),
             selected_slot: self.selected_slot,
             next_hotplug_slot: self.next_hotplug_slot,
+            snapshot_mode: self.snapshot_mode,
         }
     }
 
@@ -3779,6 +3851,8 @@ pub struct MemoryManagerSnapshotData {
     next_memory_slot: u32,
     selected_slot: usize,
     next_hotplug_slot: usize,
+    #[serde(default)]
+    snapshot_mode: SnapshotMode,
 }
 
 impl Snapshottable for MemoryManager {
@@ -3813,6 +3887,16 @@ impl Transportable for MemoryManager {
     ) -> result::Result<(), MigratableError> {
         if self.snapshot_memory_ranges.is_empty() {
             return Ok(());
+        }
+
+        if self.snapshot_mode == SnapshotMode::Delta {
+            let source = self
+                .cow_source
+                .as_ref()
+                .context("Delta snapshot without a copy-on-write restore source")
+                .map_err(MigratableError::MigrateSend)?;
+            let dir = url_to_path(destination_url)?;
+            return write_memory_delta(&*self.guest_memory.memory(), source, &dir);
         }
 
         let mut memory_file_path = url_to_path(destination_url)?;
@@ -3997,13 +4081,15 @@ fn write_guest_range<M: GuestMemoryBackend>(
     Ok(())
 }
 
-// Writes the guest pages that no longer read from the restore source over
-// the clone of that source in `file`.
-fn write_private_pages<M: GuestMemoryBackend>(
+// Returns the guest ranges that no longer read from the restore source,
+// each with its offset in the memory file of that source. Runs of unchanged
+// pages of `gap_pages` pages or less between them are joined in.
+fn private_guest_ranges<M: GuestMemoryBackend>(
     guest_memory: &M,
     source: &CowSource,
-    file: &mut File,
-) -> result::Result<(), MigratableError> {
+    gap_pages: u64,
+) -> result::Result<Vec<(u64, MemoryRange)>, MigratableError> {
+    let mut ranges = Vec::new();
     let mut file_offset: u64 = 0;
     for range in source.ranges.ranges() {
         let host_addr = guest_memory
@@ -4012,19 +4098,108 @@ fn write_private_pages<M: GuestMemoryBackend>(
             .map_err(MigratableError::MigrateSend)?;
         let private_ranges = source
             .pagemap
-            .private_ranges(host_addr as u64, range.length)
+            .private_ranges(host_addr as u64, range.length, gap_pages)
             .context("Error reading the pagemap")
             .map_err(MigratableError::MigrateSend)?;
         for private in private_ranges {
-            write_guest_range(
-                guest_memory,
-                file,
+            ranges.push((
                 file_offset + private.start,
-                range.gpa + private.start,
-                private.end - private.start,
-            )?;
+                MemoryRange {
+                    gpa: range.gpa + private.start,
+                    length: private.end - private.start,
+                },
+            ));
         }
         file_offset += range.length;
+    }
+    Ok(ranges)
+}
+
+// Writes the guest pages that no longer read from the restore source over
+// the clone of that source in `file`.
+fn write_private_pages<M: GuestMemoryBackend>(
+    guest_memory: &M,
+    source: &CowSource,
+    file: &mut File,
+) -> result::Result<(), MigratableError> {
+    for (file_offset, range) in private_guest_ranges(guest_memory, source, COW_SNAPSHOT_GAP_PAGES)?
+    {
+        write_guest_range(guest_memory, file, file_offset, range.gpa, range.length)?;
+    }
+    Ok(())
+}
+
+// Writes the guest pages that no longer read from the restore source to
+// the memory delta file of a snapshot in `dir`.
+fn write_memory_delta<M: GuestMemoryBackend>(
+    guest_memory: &M,
+    source: &CowSource,
+    dir: &Path,
+) -> result::Result<(), MigratableError> {
+    // No gap, so a restore doesn't copy unchanged base pages into private
+    // memory
+    let entries: Vec<MemoryRange> = private_guest_ranges(guest_memory, source, 0)?
+        .into_iter()
+        .map(|(_, range)| range)
+        .collect();
+
+    let path = dir.join(SNAPSHOT_DELTA_FILENAME);
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .with_context(|| format!("Error creating memory delta file {path:?}"))
+        .map_err(MigratableError::MigrateSend)?;
+    let header = GuestMemoryDeltaHeader::new(entries);
+    let header_bytes = header.to_bytes();
+    file.write_all(&header_bytes)
+        .context("Error writing memory delta header")
+        .map_err(MigratableError::MigrateSend)?;
+    let mut file_offset = header_bytes.len() as u64;
+    for entry in header.entries() {
+        write_guest_range(
+            guest_memory,
+            &mut file,
+            file_offset,
+            entry.gpa,
+            entry.length,
+        )?;
+        file_offset += entry.length;
+    }
+    file.sync_all()
+        .context("Error syncing memory delta file")
+        .map_err(MigratableError::MigrateSend)?;
+    Ok(())
+}
+
+// Writes the pages of a memory delta file over restored guest memory, after
+// checking its header against the snapshot memory layout.
+fn apply_memory_delta<M: GuestMemoryBackend>(
+    guest_memory: &M,
+    path: &Path,
+    layout: &MemoryRangeTable,
+) -> Result<(), Error> {
+    let mut file = File::open(path).map_err(Error::SnapshotOpen)?;
+    let file_len = file.metadata().map_err(Error::SnapshotOpen)?.len();
+    let header =
+        GuestMemoryDeltaHeader::read(&mut file, file_len, layout).map_err(Error::SnapshotDelta)?;
+    for entry in header.entries() {
+        let mut offset = 0;
+        while offset < entry.length {
+            let n = guest_memory
+                .read_volatile_from(
+                    GuestAddress(entry.gpa + offset),
+                    &mut file,
+                    (entry.length - offset) as usize,
+                )
+                .map_err(Error::SnapshotCopy)?;
+            if n == 0 {
+                return Err(Error::SnapshotRead(io::Error::from(
+                    io::ErrorKind::UnexpectedEof,
+                )));
+            }
+            offset += n as u64;
+        }
     }
     Ok(())
 }
@@ -4442,6 +4617,65 @@ mod tests {
     }
 
     #[test]
+    fn memory_delta_restores_private_pages_over_the_base() {
+        let page = get_page_size();
+        let mut file = tempfile::tempfile().unwrap();
+        for i in 0..16u8 {
+            file.write_all(&vec![i + 1; page as usize]).unwrap();
+        }
+        let mut ranges = MemoryRangeTable::default();
+        ranges.push(MemoryRange {
+            gpa: 0,
+            length: 16 * page,
+        });
+
+        // The VM that is snapshotted
+        let before = GuestMemory::from_ranges(&[(GuestAddress(0), (16 * page) as usize)])
+            .unwrap()
+            .memory();
+        do_mmap_cow_saved_regions(&*before, &file, &ranges, false).unwrap();
+        let source = CowSource {
+            file,
+            ranges,
+            pagemap: PageMap::open().unwrap(),
+        };
+        before.write_obj::<u8>(0x55, GuestAddress(page)).unwrap();
+        before
+            .write_obj::<u8>(0x77, GuestAddress(12 * page + 9))
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        write_memory_delta(&*before, &source, dir.path()).unwrap();
+
+        // The VM restored from the base and the delta
+        let after = GuestMemory::from_ranges(&[(GuestAddress(0), (16 * page) as usize)])
+            .unwrap()
+            .memory();
+        do_mmap_cow_saved_regions(&*after, &source.file, &source.ranges, false).unwrap();
+        apply_memory_delta(
+            &*after,
+            &dir.path().join(SNAPSHOT_DELTA_FILENAME),
+            &source.ranges,
+        )
+        .unwrap();
+
+        let mut want = vec![0u8; (16 * page) as usize];
+        before.read_slice(&mut want, GuestAddress(0)).unwrap();
+        let mut got = vec![0u8; (16 * page) as usize];
+        after.read_slice(&mut got, GuestAddress(0)).unwrap();
+        assert!(got == want);
+
+        // Only the delta pages are private, the rest still read from the base
+        let host_addr = after.get_host_address(GuestAddress(0)).unwrap() as u64;
+        assert_eq!(
+            source
+                .pagemap
+                .private_ranges(host_addr, 16 * page, 0)
+                .unwrap(),
+            vec![page..2 * page, 12 * page..13 * page]
+        );
+    }
+
+    #[test]
     fn cow_restore_rejects_file_backed_region() {
         let page = get_page_size();
         let backing = tempfile::tempfile().unwrap();
@@ -4499,5 +4733,29 @@ mod tests {
             do_mmap_cow_saved_regions(&*gm, &file, &table, true).unwrap();
             assert_eq!(gm.read_obj::<u8>(GuestAddress(0)).unwrap(), 0xcd);
         }
+    }
+
+    #[test]
+    fn snapshot_state_without_mode_reads_as_full() {
+        let data = MemoryManagerSnapshotData {
+            memory_ranges: MemoryRangeTable::default(),
+            guest_ram_mappings: Vec::new(),
+            start_of_device_area: 0,
+            boot_ram: 0,
+            current_ram: 0,
+            arch_mem_regions: Vec::new(),
+            hotplug_slots: Vec::new(),
+            next_memory_slot: 0,
+            selected_slot: 0,
+            next_hotplug_slot: 0,
+            snapshot_mode: SnapshotMode::Delta,
+        };
+        let mut json = serde_json::to_value(&data).unwrap();
+        assert_eq!(json["snapshot_mode"], "Delta");
+
+        // A snapshot from a release without the field
+        json.as_object_mut().unwrap().remove("snapshot_mode");
+        let old: MemoryManagerSnapshotData = serde_json::from_value(json).unwrap();
+        assert_eq!(old.snapshot_mode, SnapshotMode::Full);
     }
 }

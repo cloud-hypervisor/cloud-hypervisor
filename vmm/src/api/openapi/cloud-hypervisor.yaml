@@ -1843,6 +1843,13 @@ components:
       properties:
         destination_url:
           type: string
+        mode:
+          $ref: "#/components/schemas/SnapshotMode"
+
+    SnapshotMode:
+      type: string
+      enum: [Full, Delta]
+      default: Full
 
     VmCoredumpData:
       required:
