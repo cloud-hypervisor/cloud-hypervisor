@@ -4567,10 +4567,14 @@ impl DeviceManager {
             let vfio_context = self.create_vfio_context()?;
 
             if let Some(iommu) = &self.iommu_device {
-                iommu.lock().unwrap().add_external_mapping(
-                    pci_device_bdf.into(),
-                    Arc::clone(&vfio_context.dma_mapping),
-                );
+                iommu
+                    .lock()
+                    .unwrap()
+                    .add_external_mapping(
+                        pci_device_bdf.into(),
+                        Arc::clone(&vfio_context.dma_mapping),
+                    )
+                    .map_err(DeviceManagerError::VirtioDmaMap)?;
             } else {
                 return Err(DeviceManagerError::MissingVirtualIommu);
             }
@@ -5143,7 +5147,8 @@ impl DeviceManager {
                     iommu
                         .lock()
                         .unwrap()
-                        .add_external_mapping(pci_device_bdf.into(), Arc::clone(dma_handler));
+                        .add_external_mapping(pci_device_bdf.into(), Arc::clone(dma_handler))
+                        .map_err(DeviceManagerError::VirtioDmaMap)?;
                 } else {
                     return Err(DeviceManagerError::MissingVirtualIommu);
                 }
@@ -5658,6 +5663,21 @@ impl DeviceManager {
             (pci_device_handle, id, pci_device_node.resources)
         };
 
+        if let PciDeviceHandle::Virtio(device) = &pci_device_handle {
+            let dev = device.lock().unwrap();
+            if !dev.is_removable() {
+                let device_type = dev.virtio_device().lock().unwrap().device_type();
+                return Err(DeviceManagerError::RemovalNotAllowed(device_type.into()));
+            }
+        }
+        if let Some(iommu) = &self.iommu_device {
+            iommu
+                .lock()
+                .unwrap()
+                .remove_external_mapping(pci_device_bdf.into())
+                .map_err(DeviceManagerError::VirtioDmaUnmap)?;
+        }
+
         let mut iommu_attached = false;
         if let Some((_, iommu_attached_devices)) = &self.iommu_attached_devices
             && iommu_attached_devices.contains(&pci_device_bdf)
@@ -5692,10 +5712,6 @@ impl DeviceManager {
                     }
                     PciDeviceHandle::Virtio(virtio_pci_device) => {
                         let dev = virtio_pci_device.lock().unwrap();
-                        if !dev.is_removable() {
-                            let device_type = dev.virtio_device().lock().unwrap().device_type();
-                            return Err(DeviceManagerError::RemovalNotAllowed(device_type.into()));
-                        }
                         let config_bar_idx = VIRTIO_CONFIG_BAR_INDEX;
                         let bar_addr = pci_bar_resources.iter().find_map(|r| match r {
                             Resource::PciBar { index, base, .. } if *index == config_bar_idx => {
@@ -5765,13 +5781,6 @@ impl DeviceManager {
                         )
                     }
                 };
-
-            if let Some(iommu) = &self.iommu_device {
-                iommu
-                    .lock()
-                    .unwrap()
-                    .remove_external_mapping(pci_device_bdf.into());
-            }
 
             self.msi_interrupt_manager
                 .unregister_remapping(pci_device_bdf.into());
