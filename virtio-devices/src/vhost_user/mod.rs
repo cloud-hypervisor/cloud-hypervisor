@@ -444,14 +444,19 @@ impl<S: VhostUserFrontendReqHandler> EpollHelperHandler for VhostUserEpollHandle
             }
             BACKEND_REQ_EVENT => {
                 if let Some(backend_req_handler) = self.backend_req_handler.as_mut() {
-                    backend_req_handler
-                        .handle_request()
-                        .map(|_| ())
-                        .map_err(|e| {
-                            EpollHelperError::HandleEvent(anyhow!(
-                                "Failed to handle request from vhost-user backend: {e:?}"
-                            ))
-                        })
+                    match backend_req_handler.handle_request() {
+                        Ok(_) => Ok(()),
+                        Err(VhostUserError::ReqHandlerError(e)) => {
+                            warn!(
+                                "Backend request handler returned error for socket {}: {e}",
+                                self.socket_path
+                            );
+                            Ok(())
+                        }
+                        Err(e) => Err(EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to handle request from vhost-user backend: {e:?}"
+                        ))),
+                    }
                 } else {
                     Ok(())
                 }
@@ -962,10 +967,12 @@ impl VhostUserCommon {
 #[cfg(test)]
 mod tests {
     use std::io::{Read, Write};
+    use std::os::unix::io::BorrowedFd;
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::{assert_matches, thread};
 
-    use vhost::vhost_user::message::{FrontendReq, VhostUserHeaderFlag};
+    use vhost::vhost_user::Backend;
+    use vhost::vhost_user::message::{FrontendReq, VhostUserHeaderFlag, VhostUserMMap};
     use vm_memory::{FileOffset, GuestAddress};
     use vm_migration::Snapshottable;
     use vmm_sys_util::tempdir::TempDir;
@@ -1291,5 +1298,81 @@ mod tests {
         );
         notifier.region_added(&region);
         notifier.region_removed(&region);
+    }
+
+    #[test]
+    fn backend_req_handler_error_keeps_channel_open() {
+        struct RejectFirstUnmapHandler;
+        impl VhostUserFrontendReqHandler for RejectFirstUnmapHandler {
+            fn shmem_unmap(&self, req: &VhostUserMMap) -> io::Result<u64> {
+                if req.shm_offset == 0x1000 {
+                    return Err(io::Error::from_raw_os_error(libc::EEXIST));
+                }
+                Ok(0)
+            }
+        }
+
+        let (vu, _backend) = connect_handle(VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits());
+
+        let mut req_handler = FrontendReqHandler::new(Arc::new(RejectFirstUnmapHandler)).unwrap();
+        req_handler.set_reply_ack_flag(true);
+        // SAFETY: `get_tx_raw_fd()` returns a valid open fd owned by `req_handler`.
+        let mut raw_tx = UnixStream::from(
+            unsafe { BorrowedFd::borrow_raw(req_handler.get_tx_raw_fd()) }
+                .try_clone_to_owned()
+                .unwrap(),
+        );
+        let backend_client = Backend::from_stream(raw_tx.try_clone().unwrap());
+        backend_client.set_reply_ack_flag(true);
+        backend_client.set_shmem_flag(true);
+
+        let kill_evt = EventFd::new(libc::EFD_NONBLOCK).unwrap();
+        let pause_evt = EventFd::new(libc::EFD_NONBLOCK).unwrap();
+        let mut helper = EpollHelper::new(&kill_evt, &pause_evt).unwrap();
+        let disconnected = Arc::new(AtomicBool::new(false));
+        let mut epoll_handler = VhostUserEpollHandler {
+            vu: Arc::new(Mutex::new(vu)),
+            mem: GuestMemoryAtomic::new(GuestMemory::default()),
+            kill_evt,
+            pause_evt,
+            queues: Vec::new(),
+            virtio_interrupt: Arc::new(NoopVirtioInterrupt {}),
+            acked_features: 0,
+            acked_protocol_features: 0,
+            socket_path: "test.sock".to_string(),
+            server: false,
+            backend_req_handler: Some(req_handler),
+            inflight: None,
+            disconnected: Arc::clone(&disconnected),
+            resume_evt: EventFd::new(libc::EFD_NONBLOCK).unwrap(),
+        };
+
+        let event = epoll::Event::new(epoll::Events::EPOLLIN, u64::from(BACKEND_REQ_EVENT));
+        let client_thread = thread::spawn(move || {
+            let unmap = |shm_offset| VhostUserMMap {
+                shm_offset,
+                len: 0x1000,
+                ..Default::default()
+            };
+            backend_client.shmem_unmap(&unmap(0x1000)).unwrap_err();
+            backend_client.shmem_unmap(&unmap(0x2000)).unwrap();
+
+            // Send a malformed vhost-user header to verify protocol framing errors remain fatal.
+            raw_tx.write_all(&[0xffu8; 12]).unwrap();
+        });
+
+        // Application-level ReqHandlerError (-EEXIST) must return the ACK without disconnecting.
+        epoll_handler.handle_event(&mut helper, &event).unwrap();
+        assert!(!disconnected.load(Ordering::Relaxed));
+
+        // Subsequent requests on the same backend channel must still succeed.
+        epoll_handler.handle_event(&mut helper, &event).unwrap();
+        assert!(!disconnected.load(Ordering::Relaxed));
+
+        client_thread.join().unwrap();
+
+        // Malformed protocol framing must still fail and mark disconnected.
+        epoll_handler.handle_event(&mut helper, &event).unwrap_err();
+        assert!(disconnected.load(Ordering::Relaxed));
     }
 }
