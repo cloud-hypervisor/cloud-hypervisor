@@ -48,11 +48,11 @@ use zerocopy::{FromBytes, FromZeros};
 
 use crate::cpu;
 use crate::cpu::CpuManager;
+#[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+use crate::cvm::sev_snp::{MeasuredBootInfo, SEV_HASH_BLOCK_ADDRESS, SEV_HASH_BLOCK_SIZE};
 use crate::igvm::loader::Loader;
 use crate::igvm::{BootPageAcceptance, HV_PAGE_SIZE, IgvmLoadedInfo, StartupMemoryType, loader};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
-#[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
-use crate::sev::{MeasuredBootInfo, SEV_HASH_BLOCK_ADDRESS, SEV_HASH_BLOCK_SIZE};
 
 #[cfg(feature = "sev_snp")]
 const ISOLATED_PAGE_SHIFT: u32 = 12;
@@ -231,19 +231,6 @@ pub(crate) fn extract_guest_policy(igvm_file: &IgvmFile) -> Option<igvm_defs::Sn
         }
     }
     None
-}
-
-/// Extract sev_features from the boot CPU (vp_index 0) VMSA.
-#[cfg(feature = "sev_snp")]
-pub(crate) fn extract_sev_features(igvm_file: &IgvmFile) -> u64 {
-    for header in igvm_file.directives() {
-        if let IgvmDirectiveHeader::SnpVpContext { vp_index, vmsa, .. } = header
-            && *vp_index == 0
-        {
-            return vmsa.sev_features.into();
-        }
-    }
-    0
 }
 
 /// Load the given IGVM file to guest memory.

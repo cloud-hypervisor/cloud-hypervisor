@@ -85,6 +85,8 @@ pub use x86_64::{CpuId, ExtendedControlRegisters, MsrEntries, VcpuKvmState};
 
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
+#[cfg(all(target_arch = "x86_64", feature = "sev_snp"))]
+use crate::CvmConfig;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{
     CpuIdEntry, FpuState, LapicState, MTRR_ENABLE, MTRR_MEM_TYPE_WB, MTRR_MSR_INDICES, MsrEntry,
@@ -1449,12 +1451,11 @@ impl hypervisor::Hypervisor for KvmHypervisor {
 
         #[cfg(target_arch = "x86_64")]
         {
-            vm_type = KVM_X86_DEFAULT_VM.into();
-
-            #[cfg(feature = "sev_snp")]
-            if _config.sev_snp_enabled {
-                vm_type = KVM_X86_SNP_VM.into();
-            }
+            vm_type = match _config.cvm {
+                None => KVM_X86_DEFAULT_VM.into(),
+                #[cfg(feature = "sev_snp")]
+                Some(CvmConfig::SevSnp { .. }) => KVM_X86_SNP_VM.into(),
+            };
         }
 
         loop {
@@ -1513,7 +1514,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             #[allow(unused_mut)]
             let mut memory_slots = None;
             #[cfg(feature = "sev_snp")]
-            if _config.sev_snp_enabled {
+            if matches!(_config.cvm, Some(CvmConfig::SevSnp { .. })) {
                 check_required_sev_snp_extensions(&fd)
                     .map_err(|e| hypervisor::HypervisorError::CheckExtensions(e.into()))?;
                 memory_slots = Some(Arc::new(RwLock::new(HashMap::new())));
@@ -1521,8 +1522,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
 
             #[cfg(feature = "sev_snp")]
             let sev_fd = {
-                let sev_snp_enabled = vm_type == KVM_X86_SNP_VM as u64;
-                if sev_snp_enabled {
+                if let Some(CvmConfig::SevSnp { vmsa_features }) = _config.cvm {
                     let mask = self.kvm.check_extension_int(Cap::ExitHypercall);
                     if mask < 0 {
                         return Err(hypervisor::HypervisorError::CheckExitHypercall(
@@ -1539,7 +1539,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                     let sev_dev = x86_64::sev::SevFd::new("/dev/sev")
                         .map_err(|e| hypervisor::HypervisorError::SevSnpCapabilities(e.into()))?;
                     sev_dev
-                        .init2(&fd, _config.vmsa_features)
+                        .init2(&fd, vmsa_features)
                         .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
                     Some(sev_dev)
                 } else {

@@ -86,6 +86,8 @@ pub mod console_devices;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 mod coredump;
 pub mod cpu;
+#[cfg(feature = "sev_snp")]
+mod cvm;
 pub mod device_manager;
 pub mod device_tree;
 pub mod external_fds;
@@ -103,8 +105,6 @@ mod pci_segment;
 mod prefault;
 pub mod seccomp_filters;
 mod serial_manager;
-#[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
-pub(crate) mod sev;
 mod sigwinch_listener;
 pub mod sparse;
 mod sync_utils;
@@ -254,11 +254,13 @@ impl From<&VmConfig> for hypervisor::HypervisorVmConfig {
     fn from(_value: &VmConfig) -> Self {
         hypervisor::HypervisorVmConfig {
             #[cfg(feature = "sev_snp")]
-            sev_snp_enabled: _value.is_sev_snp_enabled(),
+            cvm: _value
+                .vm_type()
+                .and_then(|vm_type| hypervisor::CvmConfig::new(vm_type, None)),
+            #[cfg(not(feature = "sev_snp"))]
+            cvm: None,
             #[cfg(feature = "sev_snp")]
             mem_size: _value.memory.total_size(),
-            #[cfg(feature = "sev_snp")]
-            vmsa_features: 0,
             nested: _value.cpus.nested,
             smt_enabled: _value
                 .cpus

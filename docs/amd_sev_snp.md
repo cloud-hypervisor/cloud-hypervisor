@@ -36,7 +36,7 @@ You can run a SEV-SNP VM using the following command:
 
 ```bash
 ./cloud-hypervisor \
-     --platform sev_snp=on \
+     --platform vm_type=sev_snp \
      --cpus boot=1 \
      --memory size=1G \
      --disk path=ubuntu.img,image_type=raw

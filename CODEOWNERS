@@ -22,7 +22,7 @@
 
 # Confidential computing
 /hypervisor/src/kvm/x86_64/sev.rs @rhakobyan @russell-islam @cloud-hypervisor/cloud-hypervisor-reviewers
-/vmm/src/sev.rs @rhakobyan @russell-islam @cloud-hypervisor/cloud-hypervisor-reviewers
+/vmm/src/cvm/sev_snp/ @rhakobyan @russell-islam @cloud-hypervisor/cloud-hypervisor-reviewers
 
 # Live migration
 /vm-migration/ @phip1611 @likebreath @cloud-hypervisor/cloud-hypervisor-reviewers
